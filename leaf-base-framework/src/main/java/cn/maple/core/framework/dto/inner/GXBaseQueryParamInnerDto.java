@@ -117,5 +117,5 @@ public class GXBaseQueryParamInnerDto extends GXBaseDto {
      * Mybatis Plus是否使用count(*)查询
      * 如果Mybatis Plus提供的count(*)有性能问题， 可以将其设置为False, 业务自己对count(*)进行优化
      */
-    private boolean searchCount = Boolean.TRUE;
+    private boolean paginateCount = Boolean.TRUE;
 }

@@ -184,7 +184,7 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
             return GXCommonUtils.convertSourceToTarget(dict, genericClassType, queryParamReqDto.getMethodName(), copyOptions, extraData);
         }).collect(Collectors.toList());
         long total = paginate.getTotal();
-        if (!queryParamReqDto.isSearchCount() && !lst.isEmpty() && total == 0) {
+        if (!queryParamReqDto.isPaginateCount() && !lst.isEmpty() && total == 0) {
             total = getPaginateCount(queryParamReqDto);
         }
         return new GXPaginationResDto<>(lst, total, paginate.getPageSize(), paginate.getCurrentPage());
@@ -219,7 +219,7 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
             return GXCommonUtils.convertSourceToTarget(dict, genericClassType, masterQueryParamInnerDto.getMethodName(), copyOptions, extraData);
         }).collect(Collectors.toList());
         long total = paginate.getTotal();
-        if (!masterQueryParamInnerDto.isSearchCount() && !lst.isEmpty() && total == 0) {
+        if (!masterQueryParamInnerDto.isPaginateCount() && !lst.isEmpty() && total == 0) {
             total = getUnionPaginateCount(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
         }
         return new GXPaginationResDto<>(lst, total, paginate.getPageSize(), paginate.getCurrentPage());
