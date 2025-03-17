@@ -12,7 +12,7 @@
     <artifactId>leaf-base-rocketmq</artifactId>
 
     <properties>
-        <rocketmq-spring-boot-starter.version>2.3.2</rocketmq-spring-boot-starter.version>
+        <rocketmq-spring-boot-starter.version>2.3.3</rocketmq-spring-boot-starter.version>
     </properties>
 
     <dependencies>
