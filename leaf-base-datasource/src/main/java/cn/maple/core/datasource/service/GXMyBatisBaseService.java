@@ -586,4 +586,26 @@ public interface GXMyBatisBaseService<P extends GXMyBatisRepository<M, T, D, ID>
     default CopyOptions getCopyOptions(GXBaseQueryParamInnerDto queryParamInnerDto) {
         return ObjectUtil.defaultIfNull(queryParamInnerDto.getCopyOptions(), GXCommonUtils::getDefaultCopyOptions);
     }
+
+    /**
+     * 获取分页列表中的count(*)数量
+     *
+     * @param masterQueryParamInnerDto   外层的主查询条件
+     * @param unionQueryParamInnerDtoLst union查询条件
+     * @param unionTypeEnums             union的类型
+     * @return Long 满足条件的总数
+     */
+    default long getUnionPaginateCount(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
+        return 0L;
+    }
+
+    /**
+     * 获取分页列表中的count(*)数量
+     *
+     * @param queryParamReqDto 参数
+     * @return GXPaginationResDto
+     */
+    default long getPaginateCount(GXBaseQueryParamInnerDto queryParamReqDto) {
+        return 0L;
+    }
 }

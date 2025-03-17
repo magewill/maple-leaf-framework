@@ -226,6 +226,18 @@ public class GXDBCommonUtils {
      * @return 分页对象
      */
     public static <R> IPage<R> constructPageObject(Integer page, Integer pageSize) {
+        return constructPageObject(page, pageSize, true);
+    }
+
+    /**
+     * 构造分页对象
+     *
+     * @param page        当前页
+     * @param pageSize    每页大小
+     * @param searchCount 是否使用MyBatis Plus提供的count(*)
+     * @return 分页对象
+     */
+    public static <R> IPage<R> constructPageObject(Integer page, Integer pageSize, boolean searchCount) {
         int defaultCurrentPage = GXCommonConstant.DEFAULT_CURRENT_PAGE;
         int defaultPageSize = GXCommonConstant.DEFAULT_PAGE_SIZE;
         int defaultMaxPageSize = GXCommonConstant.DEFAULT_MAX_PAGE_SIZE;
@@ -235,7 +247,7 @@ public class GXDBCommonUtils {
         if (Objects.isNull(pageSize) || pageSize > defaultMaxPageSize || pageSize <= 0) {
             pageSize = defaultPageSize;
         }
-        return new Page<>(page, pageSize);
+        return new Page<>(page, pageSize, searchCount);
     }
 
     /**
