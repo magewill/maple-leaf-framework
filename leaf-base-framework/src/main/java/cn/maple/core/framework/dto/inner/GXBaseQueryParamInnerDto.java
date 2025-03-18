@@ -111,11 +111,13 @@ public class GXBaseQueryParamInnerDto extends GXBaseDto {
      * 忽略数据权限
      * 设置为TRUE的话 就忽略掉数据权限处理
      */
+    @Builder.Default
     private boolean ignoreDataFilter = Boolean.FALSE;
 
     /**
      * Mybatis Plus是否使用count(*)查询
      * 如果Mybatis Plus提供的count(*)有性能问题， 可以将其设置为False, 业务自己对count(*)进行优化
      */
+    @Builder.Default
     private boolean paginateCount = Boolean.TRUE;
 }
