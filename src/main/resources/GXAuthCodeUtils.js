@@ -151,15 +151,14 @@ class GXAuthCodeUtils {
     }
 
     static base64EncodeUnicode(str) {
-      const utf8Bytes = new TextEncoder().encode(str);
-      const base64Encoded = btoa(String.fromCharCode(...utf8Bytes));
-      return base64Encoded;
+        const utf8Bytes = new TextEncoder().encode(str);
+        return btoa(String.fromCharCode(...utf8Bytes)); // 使用 TextEncoder 进行编码
     }
 
     static base64DecodeUnicode(base64Encoded) {
-      const utf8Bytes = Uint8Array.from(atob(base64Encoded), c => c.charCodeAt(0));
-      const decodedStr = new TextDecoder().decode(utf8Bytes);
-      return decodedStr;
+        const decodedStr = atob(base64Encoded); // 使用 atob 解码
+        const utf8Bytes = Uint8Array.from(decodedStr, c => c.charCodeAt(0));
+        return new TextDecoder().decode(utf8Bytes); // 使用 TextDecoder 进行解码
     }
 }
 
