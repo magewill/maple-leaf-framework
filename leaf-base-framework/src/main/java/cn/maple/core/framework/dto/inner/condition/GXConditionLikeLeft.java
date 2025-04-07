@@ -16,14 +16,26 @@ public class GXConditionLikeLeft extends GXCondition<String> {
 
     @Override
     public String getFieldValue() {
-        if (GXDBStringEscapeUtils.check(value.toString())) {
+        if (value == null) {
+            return "NULL";
+        }
+        
+        String strValue = value.toString();
+        // 首先检查是否存在SQL注入风险
+        if (GXDBStringEscapeUtils.check(strValue)) {
             throw new GXSqlInjectionException("SQL注入异常");
         }
-        String str = GXDBStringEscapeUtils.escapeRawString(value.toString());
-        String format = "'%{}'";
-        if (CharSequenceUtil.contains(str, "\\'")) {
-            format = "\"%{}\"";
+        
+        // 使用escapeSqlForLike方法进行更全面的SQL转义，特别适合LIKE查询
+        String escapedValue = GXDBStringEscapeUtils.escapeSqlForLike(strValue);
+        
+        // 根据内容选择合适的引号包裹方式
+        if (CharSequenceUtil.contains(escapedValue, "''")) {
+            // 如果包含已转义的单引号，使用双引号包裹
+            return CharSequenceUtil.format("\"%{}\"", escapedValue);
+        } else {
+            // 否则使用单引号包裹
+            return CharSequenceUtil.format("'%{}'", escapedValue);
         }
-        return CharSequenceUtil.format(format, str);
     }
 }

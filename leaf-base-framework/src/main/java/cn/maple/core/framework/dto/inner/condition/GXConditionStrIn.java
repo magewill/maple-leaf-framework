@@ -34,15 +34,13 @@ public class GXConditionStrIn extends GXCondition<String> {
             throw new GXBusinessException(CharSequenceUtil.format("IN查询条件不能超过{}条数据!", limitCnt));
         }
         String str = ((Set<String>) value).stream().map(v -> {
-            if (GXDBStringEscapeUtils.check(value.toString())) {
+            if (GXDBStringEscapeUtils.check(v)) {
                 throw new GXSqlInjectionException("SQL注入异常");
             }
-            String val = GXDBStringEscapeUtils.escapeRawString(v);
-            String format = "'{}'";
-            if (CharSequenceUtil.contains(val, "\\'")) {
-                format = "\"{}\"";
-            }
-            return CharSequenceUtil.format(format, val);
+            // 使用escapeSql方法进行更全面的SQL转义
+            String escapedValue = GXDBStringEscapeUtils.escapeSql(v);
+            // 使用SQL标准的单引号转义
+            return CharSequenceUtil.format("'{}'", escapedValue);
         }).collect(Collectors.joining(","));
         return CharSequenceUtil.format("({})", str);
     }

@@ -1,6 +1,8 @@
 package cn.maple.core.framework.dto.inner.condition.func;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.exception.GXSqlInjectionException;
+import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -32,19 +34,43 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
         } else {
             jsonPath = CharSequenceUtil.format("$.{}", jsonPath);
         }
-        // TODO 需要兼容  JSON_CONTAINS(ext, JSON_OBJECT("name", "塵子曦", "father", "塵渊")) 表达式
-        String format = "`{}`.`{}`->'" + jsonPath + "', CAST('[{}]' AS JSON)";
-        return CharSequenceUtil.format(format, tableNameAlias);
+        // 构建JSON_CONTAINS函数的第一个参数
+        String format;
+        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
+            format = "`{}`->'" + jsonPath + "'";
+            return CharSequenceUtil.format(format, fieldExpression);
+        } else {
+            format = "`{}`.`{}`->'" + jsonPath + "'";
+            return CharSequenceUtil.format(format, tableNameAlias, fieldExpression);
+        }
     }
 
     @Override
     public String getFieldValue() {
+        if (values == null || values.isEmpty()) {
+            return "[]";
+        }
+        
         return values.stream().map(s -> {
+            // 检查是否存在SQL注入风险
+            if (s != null && GXDBStringEscapeUtils.check(s.toString())) {
+                throw new GXSqlInjectionException("SQL注入异常");
+            }
+            
             String format = "\"{}\"";
-            if (s.getClass().isAssignableFrom(Integer.class) || s.getClass().isAssignableFrom(Long.class) || s.getClass().isAssignableFrom(Short.class)) {
+            if (s == null) {
+                return "null";
+            } else if (s instanceof Number) {
                 format = "{}";
             }
-            return CharSequenceUtil.format(format, s);
+            
+            // 根据类型选择合适的转义方法
+            if (s instanceof String) {
+                String escapedValue = GXDBStringEscapeUtils.escapeSql(s.toString());
+                return CharSequenceUtil.format(format, escapedValue);
+            } else {
+                return CharSequenceUtil.format(format, s);
+            }
         }).collect(Collectors.joining(","));
     }
 
@@ -55,7 +81,17 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
 
     @Override
     public String whereString() {
-        String format = CharSequenceUtil.format("{}({})", getFunctionName(), getFieldExpression());
-        return CharSequenceUtil.format(format, getOp(), getFieldValue());
+        // 构建完整的JSON_CONTAINS函数调用
+        String jsonArray = "[" + getFieldValue() + "]";
+        // 使用CAST确保JSON格式正确
+        String castJson = "CAST('" + jsonArray + "' AS JSON)";
+        
+        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
+            return CharSequenceUtil.format("{}(`{}` -> '{}', {})", 
+                getFunctionName(), fieldExpression, jsonPath, castJson);
+        } else {
+            return CharSequenceUtil.format("{}(`{}`.`{}` -> '{}', {})", 
+                getFunctionName(), tableNameAlias, fieldExpression, jsonPath, castJson);
+        }
     }
 }

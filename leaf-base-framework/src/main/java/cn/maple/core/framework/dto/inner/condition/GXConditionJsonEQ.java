@@ -20,18 +20,37 @@ public class GXConditionJsonEQ extends GXCondition<String> {
 
     @Override
     public String getFieldValue() {
-        if (GXDBStringEscapeUtils.check(value.toString())) {
+        if (value == null) {
+            return "NULL";
+        }
+        
+        String strValue = value.toString();
+        
+        // 检查是否存在SQL注入风险
+        if (GXDBStringEscapeUtils.check(strValue)) {
             throw new GXSqlInjectionException("SQL注入异常");
         }
-        if (NumberUtil.isNumber(value.toString())) {
-            return CharSequenceUtil.format("{}", value);
+        
+        if (NumberUtil.isNumber(strValue)) {
+            return CharSequenceUtil.format("{}", strValue);
         }
-        return CharSequenceUtil.format("'{}'", value);
+        
+        // 使用escapeSql方法进行更全面的SQL转义
+        String escapedValue = GXDBStringEscapeUtils.escapeSql(strValue);
+        return CharSequenceUtil.format("'{}'", escapedValue);
     }
 
     @Override
     public String getFieldExpression() {
-        String format = "`{}`->'" + jsonPath + "'";
-        return CharSequenceUtil.format(format, fieldExpression);
+        // 转义JSON路径，防止SQL注入
+        String escapedPath = GXDBStringEscapeUtils.escapeJsonPath(jsonPath);
+        
+        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
+            String format = "`{}`->'" + escapedPath + "'";
+            return CharSequenceUtil.format(format, fieldExpression);
+        } else {
+            String format = "`{}`.`{}`->'" + escapedPath + "'";
+            return CharSequenceUtil.format(format, tableNameAlias, fieldExpression);
+        }
     }
 }
