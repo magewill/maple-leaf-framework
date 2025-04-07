@@ -34,15 +34,9 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
         } else {
             jsonPath = CharSequenceUtil.format("$.{}", jsonPath);
         }
-        // 构建JSON_CONTAINS函数的第一个参数
-        String format;
-        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            format = "`{}`->'" + jsonPath + "'";
-            return CharSequenceUtil.format(format, fieldExpression);
-        } else {
-            format = "`{}`.`{}`->'" + jsonPath + "'";
-            return CharSequenceUtil.format(format, tableNameAlias, fieldExpression);
-        }
+        // TODO 需要兼容  JSON_CONTAINS(ext, JSON_OBJECT("name", "塵子曦", "father", "塵渊")) 表达式
+        String format = "`{}`.`{}`->'" + jsonPath + "', CAST('[{}]' AS JSON)";
+        return CharSequenceUtil.format(format, tableNameAlias);
     }
 
     @Override
@@ -81,17 +75,7 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
 
     @Override
     public String whereString() {
-        // 构建完整的JSON_CONTAINS函数调用
-        String jsonArray = "[" + getFieldValue() + "]";
-        // 使用CAST确保JSON格式正确
-        String castJson = "CAST('" + jsonArray + "' AS JSON)";
-        
-        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{}(`{}` -> '{}', {})", 
-                getFunctionName(), fieldExpression, jsonPath, castJson);
-        } else {
-            return CharSequenceUtil.format("{}(`{}`.`{}` -> '{}', {})", 
-                getFunctionName(), tableNameAlias, fieldExpression, jsonPath, castJson);
-        }
+        String format = CharSequenceUtil.format("{}({})", getFunctionName(), getFieldExpression());
+        return CharSequenceUtil.format(format, getOp(), getFieldValue());
     }
 }

@@ -27,9 +27,8 @@ public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
 
     @Override
     public String getFieldExpression() {
-        // 此方法在当前实现中不再被whereString使用
-        // 但为了保持一致性和可能的未来使用，提供正确实现
-        return fieldExpression;
+        String format = "{}.{},{},{}";
+        return CharSequenceUtil.format(format, tableNameAlias);
     }
 
     @Override
@@ -55,11 +54,7 @@ public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
 
     @Override
     public String whereString() {
-        // 正确构建JSON_SEARCH函数调用
-        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{}({}, '{}', {})", getFunctionName(), fieldExpression, oneOrAll, getFieldValue());
-        } else {
-            return CharSequenceUtil.format("{}({}.{}, '{}', {})", getFunctionName(), tableNameAlias, fieldExpression, oneOrAll, getFieldValue());
-        }
+        String format = CharSequenceUtil.format("{}({})", getFunctionName(), getFieldExpression());
+        return CharSequenceUtil.format(format, getOp(), CharSequenceUtil.format("'{}'", oneOrAll), getFieldValue());
     }
 }
