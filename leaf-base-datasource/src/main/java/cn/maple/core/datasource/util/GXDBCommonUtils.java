@@ -13,7 +13,9 @@ import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionExclusionDeletedField;
 import cn.maple.core.framework.dto.res.GXPaginationResDto;
 import cn.maple.core.framework.exception.GXBusinessException;
+import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXCommonUtils;
+import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.metadata.TableInfo;
@@ -40,18 +42,38 @@ public class GXDBCommonUtils {
 
     /**
      * 给现有查询条件新增查询条件
+     * <p>
+     * 该方法对key和value参数进行安全检查，防止SQL注入攻击。
+     * 如果检测到潜在的SQL注入，将抛出GXSqlInjectionException异常。
+     * </p>
      *
      * @param requestParam       请求参数
      * @param key                添加的key
      * @param value              添加的value
      * @param returnRequestParam 是否返回requestParam
      * @return Dict
+     * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     public static Dict addSearchCondition(Dict requestParam, String key, Object value, boolean returnRequestParam) {
         final Object obj = requestParam.getObj(GXBuilderConstant.SEARCH_CONDITION_NAME);
         if (null == obj) {
             return requestParam;
         }
+
+        // 检查key是否存在SQL注入风险
+        if (CharSequenceUtil.isNotEmpty(key) && GXDBStringEscapeUtils.check(key)) {
+            String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: addSearchCondition.key)", key);
+            LOG.error(message);
+            throw new GXSqlInjectionException(message);
+        }
+
+        // 检查value是否存在SQL注入风险（如果是字符串类型）
+        if (value instanceof String && GXDBStringEscapeUtils.check((String) value)) {
+            String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: addSearchCondition.value)", value);
+            LOG.error(message);
+            throw new GXSqlInjectionException(message);
+        }
+
         final Dict data = Convert.convert(Dict.class, obj);
         data.set(key, value);
         if (returnRequestParam) {
@@ -63,17 +85,42 @@ public class GXDBCommonUtils {
 
     /**
      * 给现有查询条件新增查询条件
+     * <p>
+     * 该方法对sourceData中的键值对进行安全检查，防止SQL注入攻击。
+     * 如果检测到潜在的SQL注入，将抛出GXSqlInjectionException异常。
+     * </p>
      *
      * @param requestParam       请求参数
      * @param sourceData         需要添加的map
      * @param returnRequestParam 是否返回requestParam
      * @return Dict
+     * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     public static Dict addSearchCondition(Dict requestParam, Dict sourceData, boolean returnRequestParam) {
         final Object obj = requestParam.getObj(GXBuilderConstant.SEARCH_CONDITION_NAME);
         if (null == obj) {
             return requestParam;
         }
+
+        // 检查sourceData中的键值对是否存在SQL注入风险
+        if (Objects.nonNull(sourceData)) {
+            sourceData.forEach((k, v) -> {
+                // 检查key是否存在SQL注入风险
+                if (CharSequenceUtil.isNotEmpty(k) && GXDBStringEscapeUtils.check(k)) {
+                    String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: addSearchCondition.sourceData.key)", k);
+                    LOG.error(message);
+                    throw new GXSqlInjectionException(message);
+                }
+
+                // 检查value是否存在SQL注入风险（如果是字符串类型）
+                if (v instanceof String && GXDBStringEscapeUtils.check((String) v)) {
+                    String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: addSearchCondition.sourceData.value)", v);
+                    LOG.error(message);
+                    throw new GXSqlInjectionException(message);
+                }
+            });
+        }
+
         final Dict data = Convert.convert(Dict.class, obj);
         data.putAll(sourceData);
         if (returnRequestParam) {
@@ -125,6 +172,11 @@ public class GXDBCommonUtils {
 
     /**
      * 组合JSON搜索条件
+     * <p>
+     * 该方法对searchField和searchExpression参数进行安全检查，防止SQL注入攻击。
+     * 同时对searchValue中的字符串值进行安全处理。
+     * 如果检测到潜在的SQL注入，将抛出GXSqlInjectionException异常。
+     * </p>
      * <pre>
      *     {@code
      *     compositeJSONSearchExpression("custer_info" , "emp[*].name" , CollUtil.newHashSet("jack"));
@@ -136,6 +188,8 @@ public class GXDBCommonUtils {
      * @param searchExpression 表达式
      * @param searchValue      搜索的值
      * @return 搜索表达式
+     * @throws GXBusinessException     如果参数为空
+     * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     public static String generateJSONSearchExpression(String searchField, String searchExpression, Set<Object> searchValue) {
         if (CharSequenceUtil.isEmpty(searchField)) {
@@ -144,19 +198,47 @@ public class GXDBCommonUtils {
         if (CollUtil.isEmpty(searchValue)) {
             throw new GXBusinessException("请传递搜索的值");
         }
+
+        // 检查searchField是否存在SQL注入风险
+        if (GXDBStringEscapeUtils.check(searchField)) {
+            String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: generateJSONSearchExpression.searchField)", searchField);
+            LOG.error(message);
+            throw new GXSqlInjectionException(message);
+        }
+
+        // 安全处理searchField
+        String safeSearchField = GXDBStringEscapeUtils.escapeJsonPath(searchField);
+
+        // 处理searchExpression
         if (CharSequenceUtil.isEmpty(searchExpression)) {
             searchExpression = "$";
         } else {
-            searchExpression = CharSequenceUtil.format("$.{}", searchExpression);
+            // 检查searchExpression是否存在SQL注入风险
+            if (GXDBStringEscapeUtils.check(searchExpression)) {
+                String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: generateJSONSearchExpression.searchExpression)", searchExpression);
+                LOG.error(message);
+                throw new GXSqlInjectionException(message);
+            }
+            // 安全处理searchExpression
+            searchExpression = CharSequenceUtil.format("$.{}", GXDBStringEscapeUtils.escapeJsonPath(searchExpression));
         }
+
         String expressionTemplate = GXBuilderConstant.JSON_SEARCH_EXPRESSION_TEMPLATE;
         String searchStr = searchValue.stream().map(o -> {
             if (o instanceof Number) {
                 return CharSequenceUtil.format("{}", o.toString());
             }
-            return CharSequenceUtil.format("\"{}\"", o.toString());
+            // 对字符串值进行安全处理
+            String strValue = o.toString();
+            if (GXDBStringEscapeUtils.check(strValue)) {
+                String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: generateJSONSearchExpression.searchValue)", strValue);
+                LOG.error(message);
+                throw new GXSqlInjectionException(message);
+            }
+            return CharSequenceUtil.format("\"{}\"", GXDBStringEscapeUtils.escapeJson(strValue));
         }).collect(Collectors.joining(","));
-        return CharSequenceUtil.format(expressionTemplate, searchField, searchExpression, searchStr);
+
+        return CharSequenceUtil.format(expressionTemplate, safeSearchField, searchExpression, searchStr);
     }
 
     /**
@@ -252,18 +334,58 @@ public class GXDBCommonUtils {
 
     /**
      * 拼装SQL对象的条件
+     * <p>
+     * 该方法对condition中的键值对进行安全检查，防止SQL注入攻击。
+     * 对列名和值进行适当的转义处理，确保生成的SQL语句安全可靠。
+     * 如果检测到潜在的SQL注入，将抛出GXSqlInjectionException异常。
+     * </p>
      *
      * @param sql       SQL对象
      * @param condition 条件
+     * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     public static void assemblySqlObjectCondition(SQL sql, Dict condition) {
+        if (Objects.isNull(condition) || condition.isEmpty()) {
+            return;
+        }
+
         condition.forEach((column, val) -> {
-            final String value = Convert.toStr(val);
-            String template = "{} = '{}'";
-            if (ReUtil.isMatch("^[+-]?(0|([1-9]\\d*))(\\.\\d+)?$", value)) {
-                template = "{} = {}";
+            // 检查列名是否存在SQL注入风险
+            if (CharSequenceUtil.isNotEmpty(column) && GXDBStringEscapeUtils.check(column)) {
+                String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: assemblySqlObjectCondition.column)", column);
+                LOG.error(message);
+                throw new GXSqlInjectionException(message);
             }
-            sql.WHERE(CharSequenceUtil.format(template, column, value));
+
+            // 安全处理列名
+            String safeColumn = GXBaseBuilder.safeColumnName(column);
+
+            // 处理值
+            final String value = Convert.toStr(val);
+
+            // 检查值是否存在SQL注入风险
+            if (CharSequenceUtil.isNotEmpty(value) && GXDBStringEscapeUtils.check(value)) {
+                String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: assemblySqlObjectCondition.value)", value);
+                LOG.error(message);
+                throw new GXSqlInjectionException(message);
+            }
+
+            // 根据值的类型选择不同的模板
+            String template;
+            String safeValue;
+
+            if (ReUtil.isMatch("^[+-]?(0|([1-9]\\d*))(\\.\\d+)?$", value)) {
+                // 数值类型，不需要单引号
+                template = "{} = {}";
+                safeValue = value;
+            } else {
+                // 字符串类型，需要单引号并进行转义
+                template = "{} = '{}'";
+                safeValue = GXDBStringEscapeUtils.escapeSql(value);
+            }
+
+            // 构建安全的WHERE子句
+            sql.WHERE(CharSequenceUtil.format(template, safeColumn, safeValue));
         });
     }
 }

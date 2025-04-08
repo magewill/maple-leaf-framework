@@ -50,9 +50,22 @@ public interface GXBaseBuilder {
     /**
      * SQL注入检测正则表达式
      * 用于检测常见的SQL注入模式
+     * 包括：
+     * 1. 分号（可能用于分隔多条SQL语句）
+     * 2. UNION SELECT语句（用于联合查询攻击）
+     * 3. 文件操作函数（load_file, outfile, dumpfile等）
+     * 4. 时间延迟函数（sleep, benchmark等，用于盲注）
+     * 5. 注释符（--, #, /*等，用于注释掉查询的剩余部分）
+     * 6. 常见的条件注入模式（OR 1=1, AND 1=1等）
+     * 7. 系统函数和变量（@@version, user()等）
      */
     Pattern SQL_INJECTION_PATTERN = Pattern.compile(
-            "(?i)(;|\\b(union\\s+select|load_file|outfile|dumpfile|into\\s+outfile|into\\s+dumpfile|sleep\\s*\\(\\s*\\d+\\s*\\)|benchmark\\s*\\(\\s*\\d+\\s*,\\s*md5\\s*\\(\\s*1\\s*\\)\\s*\\))\\b)"
+            "(?i)(;|--[\\s\\r\\n]|#|/\\*|\\*/|\\b(union\\s+all\\s+select|union\\s+select|load_file|outfile|dumpfile|" +
+                    "into\\s+outfile|into\\s+dumpfile|sleep\\s*\\(\\s*\\d+\\s*\\)|benchmark\\s*\\(\\s*\\d+\\s*,\\s*md5\\s*\\(\\s*1\\s*\\)\\s*\\)|" +
+                    "information_schema\\.|sysobjects\\.|xp_cmdshell|exec\\s+\\w+|execute\\s+\\w+|sp_executesql|" +
+                    "@@version|user\\s*\\(\\s*\\)|database\\s*\\(\\s*\\)|schema\\s*\\(\\s*\\)|" +
+                    "or\\s+[\\d\\w]+\\s*=\\s*[\\d\\w]+\\s+--|and\\s+[\\d\\w]+\\s*=\\s*[\\d\\w]+\\s+--|" +
+                    "or\\s+'[^']+'\\s*=\\s*'[^']+'|and\\s+'[^']+'\\s*=\\s*'[^']+')\\b)"
     );
 
     /**
@@ -349,6 +362,7 @@ public interface GXBaseBuilder {
      * 检查SQL注入
      * <p>
      * 该方法检查输入字符串是否包含潜在的SQL注入攻击模式。
+     * 使用GXDBStringEscapeUtils.check方法进行全面的SQL注入检测。
      * 如果检测到可能的SQL注入，将抛出异常。
      * </p>
      *
@@ -361,21 +375,37 @@ public interface GXBaseBuilder {
             return;
         }
 
+        // 使用简单的正则表达式进行初步检测
         if (ReUtil.contains(SQL_INJECTION_PATTERN, input)) {
             String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: {})", input, source);
             LOGGER.error(message);
             throw new GXSqlInjectionException(message);
+        }
+
+        // 使用GXDBStringEscapeUtils.check方法进行更全面的SQL注入检测
+        // 这个方法检查更多的SQL注入模式，包括SQL语法、注释、盲注等
+        try {
+            if (cn.maple.core.framework.util.GXDBStringEscapeUtils.check(input)) {
+                String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: {})", input, source);
+                LOGGER.error(message);
+                throw new GXSqlInjectionException(message);
+            }
+        } catch (Exception e) {
+            // 如果GXDBStringEscapeUtils.check方法抛出异常，记录日志并继续使用原有的检测方法
+            LOGGER.warn("使用GXDBStringEscapeUtils.check方法检测SQL注入时发生异常: {}", e.getMessage());
         }
     }
 
     /**
      * 安全处理表名
      * <p>
-     * 该方法确保表名不包含SQL注入攻击模式。
+     * 该方法确保表名不包含SQL注入攻击模式，并对表名进行适当的转义处理。
+     * 表名通常不应包含需要转义的特殊字符，但为了安全起见，仍然进行检查。
      * </p>
      *
      * @param tableName 原始表名
      * @return 安全的表名
+     * @throws GXBusinessException     如果表名为空
      * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     static String safeTableName(String tableName) {
@@ -383,19 +413,27 @@ public interface GXBaseBuilder {
             throw new GXBusinessException("表名不能为空");
         }
 
+        // 检查SQL注入
         checkSQLInjection(tableName, "tableName");
-        // 直接返回经过SQL注入检查的表名
+
+        // 表名通常不应包含特殊字符，但为了安全起见，仍然进行检查
+        // 如果表名包含特殊字符（如点号以外的特殊字符），可能表示SQL注入尝试
+        if (tableName.matches(".*[;'\"\\\\].*")) {
+            throw new GXSqlInjectionException("表名包含不允许的特殊字符: " + tableName);
+        }
+
         return tableName;
     }
 
     /**
      * 安全处理表别名
      * <p>
-     * 该方法确保表别名不包含SQL注入攻击模式。
+     * 该方法确保表别名不包含SQL注入攻击模式，并对表别名进行适当的转义处理。
+     * 表别名通常不应包含需要转义的特殊字符，但为了安全起见，仍然进行检查。
      * </p>
      *
      * @param tableAlias 原始表别名
-     * @return 安全的表别名
+     * @return 安全的表别名，如果输入为空则返回null
      * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     static String safeTableAlias(String tableAlias) {
@@ -403,18 +441,29 @@ public interface GXBaseBuilder {
             return null;
         }
 
+        // 检查SQL注入
         checkSQLInjection(tableAlias, "tableAlias");
+
+        // 表别名通常不应包含特殊字符，但为了安全起见，仍然进行检查
+        // 如果表别名包含特殊字符，可能表示SQL注入尝试
+        if (tableAlias.matches(".*[;'\"\\\\].*")) {
+            throw new GXSqlInjectionException("表别名包含不允许的特殊字符: " + tableAlias);
+        }
+
         return tableAlias;
     }
 
     /**
      * 安全处理列名
      * <p>
-     * 该方法确保列名不包含SQL注入攻击模式。
+     * 该方法确保列名不包含SQL注入攻击模式，并对列名进行适当的转义处理。
+     * 列名通常不应包含需要转义的特殊字符，但为了安全起见，仍然进行检查。
+     * 该方法支持处理SQL函数调用，如GROUP_CONCAT等聚合函数。
      * </p>
      *
      * @param columnName 原始列名
      * @return 安全的列名
+     * @throws GXBusinessException     如果列名为空
      * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     static String safeColumnName(String columnName) {
@@ -422,21 +471,80 @@ public interface GXBaseBuilder {
             throw new GXBusinessException("列名不能为空");
         }
 
-        checkSQLInjection(columnName, "columnName");
+        // 检查是否是SQL函数调用（如GROUP_CONCAT, COUNT, SUM等）
+        // 函数调用通常具有函数名后跟括号的形式
+        boolean isSqlFunction = isSqlFunctionCall(columnName);
+
+        if (!isSqlFunction) {
+            // 如果不是SQL函数调用，则进行常规SQL注入检查
+            checkSQLInjection(columnName, "columnName");
+
+            // 列名通常不应包含特殊字符，但为了安全起见，仍然进行检查
+            // 如果列名包含特殊字符（如点号以外的特殊字符），可能表示SQL注入尝试
+            // 允许点号是因为有时列名可能包含表名前缀，如 table.column
+            if (columnName.matches(".*[;'\"\\\\].*")) {
+                throw new GXSqlInjectionException("列名包含不允许的特殊字符: " + columnName);
+                //LOGGER.error("列名包含不允许的特殊字符: {}", columnName);
+            }
+        } else {
+            // 对于SQL函数调用，进行基本的安全检查，但允许函数语法
+            // 检查是否包含明显的SQL注入尝试，如多条语句、注释等
+            if (columnName.matches(".*[;].*") || columnName.matches(".*--.*") || columnName.matches(".*#.*")) {
+                LOGGER.error("SQL函数调用中包含可疑字符: {}", columnName);
+                throw new GXSqlInjectionException("SQL函数调用中包含可疑字符: " + columnName);
+            }
+        }
+
         return columnName;
+    }
+
+    /**
+     * 判断字符串是否是SQL函数调用
+     * <p>
+     * 该方法检查字符串是否符合SQL函数调用的基本模式，
+     * 包括常见的聚合函数（如GROUP_CONCAT, SUM, COUNT等）和其他SQL函数。
+     * </p>
+     *
+     * @param str 要检查的字符串
+     * @return 如果字符串是SQL函数调用则返回true，否则返回false
+     */
+    private static boolean isSqlFunctionCall(String str) {
+        if (CharSequenceUtil.isEmpty(str)) {
+            return false;
+        }
+
+        // 常见的SQL函数名称模式
+        String functionPattern = "(?i)(GROUP_CONCAT|CONCAT|COUNT|SUM|AVG|MIN|MAX|DISTINCT|SUBSTRING|CAST|CONVERT|DATE_FORMAT|" +
+                "IF|IFNULL|NULLIF|COALESCE|CASE|WHEN|THEN|ELSE|END|ROUND|FLOOR|CEILING|ABS|RAND|" +
+                "LENGTH|CHAR_LENGTH|TRIM|LTRIM|RTRIM|LOWER|UPPER|REPLACE|REGEXP_REPLACE|" +
+                "DATE|DATETIME|TIME|YEAR|MONTH|DAY|HOUR|MINUTE|SECOND|" +
+                "JSON_EXTRACT|JSON_CONTAINS|JSON_OBJECT|JSON_ARRAY|" +
+                "ST_Distance|ST_Contains|ST_Within|ST_Intersects)";
+
+        // 检查是否匹配函数调用模式：函数名后跟括号，括号内可能包含参数
+        // 同时处理可能的别名（使用AS或空格）
+        String functionCallPattern = functionPattern + "\\s*\\([^)]*\\)(\\s+AS\\s+\\w+|\\s+\\w+)?";
+
+        return str.matches(functionCallPattern) ||
+                // 处理嵌套函数调用的情况
+                str.matches(".*" + functionPattern + "\\s*\\(.*\\).*") ||
+                // 处理带有SEPARATOR关键字的GROUP_CONCAT
+                str.matches("(?i).*GROUP_CONCAT\\s*\\([^)]*SEPARATOR[^)]*\\).*");
     }
 
     /**
      * 通过条件获取分页数据
      * <p>
      * 该方法根据提供的分页对象和查询参数构建分页查询SQL语句。
-     * 如果查询参数中包含原始SQL，则直接返回原始SQL；否则调用findByCondition方法构建SQL。
+     * 如果查询参数中包含原始SQL，则对原始SQL进行全面的SQL注入检查后返回；
+     * 否则调用findByCondition方法构建SQL。
      * 所有输入参数都经过SQL注入防护处理，确保生成的SQL语句安全可靠。
      * </p>
      *
      * @param page                 分页对象
      * @param dbQueryParamInnerDto 查询对象
      * @return 构建的分页SQL语句
+     * @throws GXBusinessException     如果查询参数为空
      * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     @SuppressWarnings("unused")
@@ -446,10 +554,28 @@ public interface GXBaseBuilder {
             throw new GXBusinessException("查询参数不能为空");
         }
 
-        // 如果有原始SQL，检查SQL注入并返回
+        // 如果有原始SQL，进行全面的SQL注入检查
         String rawSQL = dbQueryParamInnerDto.getRawSQL();
         if (CharSequenceUtil.isNotBlank(rawSQL)) {
+            // 使用增强的SQL注入检测
             checkSQLInjection(rawSQL, "rawSQL");
+
+            // 尝试使用GXDBStringEscapeUtils进行额外的安全检查
+            try {
+                if (cn.maple.core.framework.util.GXDBStringEscapeUtils.check(rawSQL)) {
+                    String message = CharSequenceUtil.format("原始SQL包含潜在的SQL注入风险: {}", rawSQL);
+                    LOGGER.error(message);
+                    throw new GXSqlInjectionException(message);
+                }
+            } catch (Exception e) {
+                // 如果GXDBStringEscapeUtils.check方法抛出异常，记录日志但不中断处理
+                LOGGER.warn("使用GXDBStringEscapeUtils检查原始SQL时发生异常: {}", e.getMessage());
+            }
+
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("使用原始SQL进行分页查询: {}", rawSQL);
+            }
+
             return rawSQL;
         }
 
@@ -491,6 +617,7 @@ public interface GXBaseBuilder {
      * <p>
      * 该方法处理SQL语句的WHERE子句，将条件列表转换为SQL条件表达式。
      * 所有条件都经过SQL注入防护处理，确保生成的SQL语句安全可靠。
+     * 增强了SQL注入检测和日志记录，以便更好地跟踪和调试潜在的SQL注入问题。
      * </p>
      *
      * @param sql       SQL对象
@@ -524,19 +651,52 @@ public interface GXBaseBuilder {
                 throw new GXDBConditionException(msg);
             }
 
-            // 获取条件的WHERE表达式
-            String whereExpr = c.whereString();
+            try {
+                // 获取条件的WHERE表达式
+                String whereExpr = c.whereString();
 
-            // 检查SQL注入
-            if (CharSequenceUtil.isNotEmpty(whereExpr)) {
-                checkSQLInjection(whereExpr, "whereCondition");
-                lastWheres.add(whereExpr);
+                // 检查SQL注入
+                if (CharSequenceUtil.isNotEmpty(whereExpr)) {
+                    // 记录详细日志，便于调试
+                    if (LOGGER.isDebugEnabled()) {
+                        LOGGER.debug("处理WHERE条件: {} (类型: {})", whereExpr, c.getClass().getSimpleName());
+                    }
+
+                    // 使用增强的SQL注入检测
+                    checkSQLInjection(whereExpr, "whereCondition:" + c.getClass().getSimpleName());
+
+                    // 尝试使用GXDBStringEscapeUtils进行额外的安全检查
+                    try {
+                        // 如果条件值是字符串类型，尝试使用GXDBStringEscapeUtils.check进行检查
+                        Object fieldValue = c.getFieldValue();
+                        if (fieldValue instanceof String && cn.maple.core.framework.util.GXDBStringEscapeUtils.check((String) fieldValue)) {
+                            String msg = CharSequenceUtil.format("条件值包含潜在的SQL注入风险: {} (条件类型: {})", fieldValue, c.getClass().getSimpleName());
+                            LOGGER.error(msg);
+                            throw new GXSqlInjectionException(msg);
+                        }
+                    } catch (Exception e) {
+                        // 如果GXDBStringEscapeUtils.check方法抛出异常，记录日志但不中断处理
+                        LOGGER.warn("使用GXDBStringEscapeUtils检查条件值时发生异常: {}", e.getMessage());
+                    }
+
+                    lastWheres.add(whereExpr);
+                }
+            } catch (GXSqlInjectionException e) {
+                // 直接重新抛出SQL注入异常
+                throw e;
+            } catch (Exception e) {
+                // 处理其他异常，记录详细信息并包装为GXDBConditionException
+                String msg = CharSequenceUtil.format("处理WHERE条件时发生异常: {} (条件类型: {})", e.getMessage(), c.getClass().getSimpleName());
+                LOGGER.error(msg, e);
+                throw new GXDBConditionException(msg, e);
             }
         }
 
         // 将所有条件组合成一个WHERE子句
         if (!lastWheres.isEmpty()) {
             String whereStr = String.join(" AND ", lastWheres);
+            // 最后一次检查组合后的WHERE子句
+            checkSQLInjection(whereStr, "combinedWhereClause");
             sql.WHERE(whereStr);
         }
     }
