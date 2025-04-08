@@ -61,7 +61,12 @@ public class GXRedissonSpringDataConfig {
             v.setPassword(GXCommonUtils.decodeConnectStr(v.getPassword(), String.class));
             v.setUsername(GXCommonUtils.decodeConnectStr(v.getUsername(), String.class));
         });
-        return JSONUtil.toBean(JSONUtil.toJsonStr(redissonConfig.getConfig()), Config.class);
+        Config config = JSONUtil.toBean(JSONUtil.toJsonStr(redissonConfig.getConfig()), Config.class);
+        // 设置 Netty 线程数 推荐：CPU 核心数 * 2
+        config.setNettyThreads(Runtime.getRuntime().availableProcessors() * 2);
+        // 或者设置一个固定的数量
+        // config.setNettyThreads(16);
+        return config;
     }
 
     @Bean("mqConfig")
@@ -71,6 +76,11 @@ public class GXRedissonSpringDataConfig {
             v.setPassword(GXCommonUtils.decodeConnectStr(v.getPassword(), String.class));
             v.setUsername(GXCommonUtils.decodeConnectStr(v.getUsername(), String.class));
         });
-        return JSONUtil.toBean(JSONUtil.toJsonStr(redissonMQConfig.getConfig()), Config.class);
+        Config config = JSONUtil.toBean(JSONUtil.toJsonStr(redissonMQConfig.getConfig()), Config.class);
+        // 设置 Netty 线程数 推荐：CPU 核心数 * 2
+        config.setNettyThreads(Runtime.getRuntime().availableProcessors() * 2);
+        // 或者设置一个固定的数量
+        // config.setNettyThreads(16);
+        return config;
     }
 }
