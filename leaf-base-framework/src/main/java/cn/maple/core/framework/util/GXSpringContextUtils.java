@@ -3,7 +3,6 @@ package cn.maple.core.framework.util;
 import cn.maple.core.framework.config.aware.GXApplicationContextSingleton;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.support.AbstractApplicationContext;
 import org.springframework.core.env.Environment;
