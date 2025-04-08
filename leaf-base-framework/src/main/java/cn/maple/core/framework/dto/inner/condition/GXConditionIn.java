@@ -22,6 +22,22 @@ public class GXConditionIn extends GXCondition<String> {
         return "in";
     }
 
+    /**
+     * 获取IN条件的字段值
+     * <p>
+     * 该方法实现了多层次的SQL注入防护措施：
+     * 1. 检查值集合的大小，防止过大的IN条件导致性能问题
+     * 2. 对每个数值进行SQL注入风险检测
+     * 3. 构建安全的IN子句
+     * </p>
+     * <p>
+     * 注意：即使是数字类型，也需要进行SQL注入检测，因为某些数据库可能允许在数字中嵌入SQL注入
+     * </p>
+     *
+     * @return 安全的IN条件字符串表示
+     * @throws GXBusinessException 如果IN条件包含的数据过多
+     * @throws GXSqlInjectionException 如果检测到SQL注入风险
+     */
     @Override
     public String getFieldValue() {
         String activeProfile = GXCommonUtils.getActiveProfile();
@@ -42,7 +58,7 @@ public class GXConditionIn extends GXCondition<String> {
             // 即使是数字，也需要检查是否有SQL注入风险
             // 例如，某些数据库可能允许在数字中嵌入SQL注入
             if (GXDBStringEscapeUtils.check(numStr)) {
-                throw new GXSqlInjectionException("SQL注入异常");
+                throw new GXSqlInjectionException("IN条件中的数值存在SQL注入风险: " + numStr);
             }
             return numStr;
         }).collect(Collectors.joining(","));

@@ -1,6 +1,8 @@
 package cn.maple.core.framework.dto.inner.field;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.exception.GXSqlInjectionException;
+import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 import lombok.Getter;
 
 import java.io.Serializable;
@@ -37,8 +39,8 @@ public abstract class GXUpdateField<T> implements Serializable {
      * 构造函数
      *
      * @param tableNameAlias 表名别名，可以为空
-     * @param fieldName 字段名，会自动转换为下划线格式
-     * @param value 字段值
+     * @param fieldName      字段名，会自动转换为下划线格式
+     * @param value          字段值
      */
     protected GXUpdateField(String tableNameAlias, String fieldName, Object value) {
         this.tableNameAlias = tableNameAlias;
@@ -53,14 +55,47 @@ public abstract class GXUpdateField<T> implements Serializable {
      * - 有表名别名：table_alias.field_name = value
      * - 无表名别名：field_name = value
      * </p>
+     * <p>
+     * 该方法实现了多层次的SQL注入防护措施：
+     * 1. 检查表名别名的安全性
+     * 2. 检查字段名的安全性
+     * 3. 字段值的安全性由各子类的getFieldValue方法负责
+     * 4. 构建更新表达式后进行最终的安全验证
+     * </p>
      *
      * @return 格式化的字段更新表达式
+     * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     public String updateString() {
-        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{} = {}", fieldName, getFieldValue());
+        // 安全检查1：验证表名别名
+        if (CharSequenceUtil.isNotEmpty(tableNameAlias)) {
+            if (GXDBStringEscapeUtils.check(tableNameAlias)) {
+                throw new GXSqlInjectionException("表名别名中包含SQL注入风险: " + tableNameAlias);
+            }
         }
-        return CharSequenceUtil.format("{}.{} = {}", tableNameAlias, fieldName, getFieldValue());
+
+        // 安全检查2：验证字段名
+        if (GXDBStringEscapeUtils.check(fieldName)) {
+            throw new GXSqlInjectionException("字段名中包含SQL注入风险: " + fieldName);
+        }
+
+        // 获取字段值（由子类实现，应当包含安全检查）
+        Object fieldVal = getFieldValue();
+
+        // 构建更新表达式
+        String updateExpr;
+        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
+            updateExpr = CharSequenceUtil.format("{} = {}", fieldName, fieldVal);
+        } else {
+            updateExpr = CharSequenceUtil.format("{}.{} = {}", tableNameAlias, fieldName, fieldVal);
+        }
+
+        // 安全检查3：最终验证生成的完整更新表达式
+        if (updateExpr != null && GXDBStringEscapeUtils.check(updateExpr)) {
+            throw new GXSqlInjectionException("生成的更新表达式中包含SQL注入风险: " + updateExpr);
+        }
+
+        return updateExpr;
     }
 
     /**
