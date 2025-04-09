@@ -19,12 +19,30 @@ public class GXDBStringEscapeUtils {
     /**
      * SQL语法检测模式 - 检测常见SQL语句结构
      */
-    private static final Pattern SQL_SYNTAX_PATTERN = Pattern.compile("(insert|delete|update|select|create|drop|truncate|grant|alter|deny|revoke|call|execute|exec|declare|show|rename|set)\\s+.*(into|from|set|where|table|database|view|index|on|cursor|procedure|trigger|for|password|union|and|or)|(select\\s*\\*\\s*from\\s+)|(and|or)\\s+.*", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SQL_SYNTAX_PATTERN = Pattern.compile(
+            "(?i)" +
+                    "(" +
+                    "\\b(insert|delete|update|select|create|drop|truncate|grant|alter|deny|revoke|call|execute|exec|declare|show|rename|set)\\s+.*\\b(into|from|set|where|table|database|view|index|on|cursor|procedure|trigger|for|password|union)\\b" +
+                    "|" +
+                    "\\bselect\\s*\\*\\s*from\\s+" +
+                    "|" +
+                    "\\b(and|or)\\s+(?:" +
+                    "\\d+\\s*=\\s*\\d+" +
+                    "|\\d+\\s*=\\s*\\d+\\s*(?:--[\\s\\r\\n]*|#)" +
+                    "|'[^']+'\\s*=\\s*'[^']+'" +
+                    "|'[^']+'\\s*=\\s*'[^']+'\\s*(?:--[\\s\\r\\n]*|#)" +
+                    ")\\b" +
+                    ")",
+            Pattern.CASE_INSENSITIVE
+    );
 
     /**
      * SQL注释检测模式 - 检测SQL注释和常见注入手段
      */
-    private static final Pattern SQL_COMMENT_PATTERN = Pattern.compile("'.*(or|union|--|#|/\\*|;)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SQL_COMMENT_PATTERN = Pattern.compile(
+            "'[^']*'\\s*(?:--|#|/\\*|;)|\\s+(?:or|union)\\s+",
+            Pattern.CASE_INSENSITIVE
+    );
 
     /**
      * 检测常见的SQL注入攻击模式

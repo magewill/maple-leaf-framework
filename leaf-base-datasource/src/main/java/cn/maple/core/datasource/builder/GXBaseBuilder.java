@@ -19,6 +19,7 @@ import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXDBConditionException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
+import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.metadata.TableFieldInfo;
 import com.baomidou.mybatisplus.core.metadata.TableInfo;
@@ -60,12 +61,34 @@ public interface GXBaseBuilder {
      * 7. 系统函数和变量（@@version, user()等）
      */
     Pattern SQL_INJECTION_PATTERN = Pattern.compile(
-            "(?i)(;|--[\\s\\r\\n]|#|/\\*|\\*/|\\b(union\\s+all\\s+select|union\\s+select|load_file|outfile|dumpfile|" +
-                    "into\\s+outfile|into\\s+dumpfile|sleep\\s*\\(\\s*\\d+\\s*\\)|benchmark\\s*\\(\\s*\\d+\\s*,\\s*md5\\s*\\(\\s*1\\s*\\)\\s*\\)|" +
-                    "information_schema\\.|sysobjects\\.|xp_cmdshell|exec\\s+\\w+|execute\\s+\\w+|sp_executesql|" +
-                    "@@version|user\\s*\\(\\s*\\)|database\\s*\\(\\s*\\)|schema\\s*\\(\\s*\\)|" +
-                    "or\\s+[\\d\\w]+\\s*=\\s*[\\d\\w]+\\s+--|and\\s+[\\d\\w]+\\s*=\\s*[\\d\\w]+\\s+--|" +
-                    "or\\s+'[^']+'\\s*=\\s*'[^']+'|and\\s+'[^']+'\\s*=\\s*'[^']+')\\b)"
+            "(?i)" + // 忽略大小写
+                    "(" +
+                    // 模式 1：SQL 注释和语句分隔符
+                    "(?:--[\\s\\r\\n]*|#|/\\*|\\*/|;)" +
+                    "|" +
+                    // 模式 2：单引号后的注释或分隔符（'value' -- 或 'value';）
+                    "'[^'\\\\]*(?:\\\\.[^'\\\\]*)*'\\s*(?:--[\\s\\r\\n]*|#|/\\*|\\*/|;)" +
+                    "|" +
+                    // 模式 3：SQL 关键字（union select, drop, alter 等）
+                    "\\b(?:union\\s+(?:all\\s+)?select|select\\s+.*\\s+from|insert\\s+into|update\\s+.*\\s+set|delete\\s+from|drop\\s+(?:table|database)|alter\\s+(?:table|database)|truncate\\s+table|create\\s+(?:table|database))\\b" +
+                    "|" +
+                    // 模式 4：系统表和函数（information_schema, xp_cmdshell 等）
+                    "\\b(?:information_schema\\.|sys\\.|sysobjects\\.|xp_cmdshell|sp_executesql|@@version|user\\s*\\(\\s*\\)|database\\s*\\(\\s*\\)|schema\\s*\\(\\s*\\))\\b" +
+                    "|" +
+                    // 模式 5：文件操作和延迟函数（load_file, outfile, sleep 等）
+                    "\\b(?:load_file\\s*\\(|outfile\\s*\\(|dumpfile\\s*\\(|into\\s+(?:outfile|dumpfile)|sleep\\s*\\(\\s*\\d+\\s*\\)|benchmark\\s*\\(\\s*\\d+\\s*,\\s*[^)]+\\))\\b" +
+                    "|" +
+                    // 模式 6：逻辑操作符注入（or 1=1, and 'a'='a' 等）
+                    "\\b(?:or|and)\\s+(?:" +
+                    "\\d+\\s*=\\s*\\d+" + // 1=1
+                    "|\\d+\\s*=\\s*\\d+\\s*(?:--[\\s\\r\\n]*|#)" + // 1=1 --
+                    "|'[^']+'\\s*=\\s*'[^']+'" + // 'a'='a'
+                    "|'[^']+'\\s*=\\s*'[^']+'\\s*(?:--[\\s\\r\\n]*|#)" + // 'a'='a' --
+                    ")\\b" +
+                    "|" +
+                    // 模式 7：其他常见注入模式（exec, execute 等）
+                    "\\b(?:exec\\s+\\w+|execute\\s+\\w+)\\b" +
+                    ")"
     );
 
     /**
@@ -377,7 +400,7 @@ public interface GXBaseBuilder {
 
         // 使用简单的正则表达式进行初步检测
         if (ReUtil.contains(SQL_INJECTION_PATTERN, input)) {
-            String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: {})", input, source);
+            String message = CharSequenceUtil.format("第一步检测到潜在的SQL注入攻击: {} (来源: {})", input, source);
             LOGGER.error(message);
             throw new GXSqlInjectionException(message);
         }
@@ -385,8 +408,8 @@ public interface GXBaseBuilder {
         // 使用GXDBStringEscapeUtils.check方法进行更全面的SQL注入检测
         // 这个方法检查更多的SQL注入模式，包括SQL语法、注释、盲注等
         try {
-            if (cn.maple.core.framework.util.GXDBStringEscapeUtils.check(input)) {
-                String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: {})", input, source);
+            if (GXDBStringEscapeUtils.check(input)) {
+                String message = CharSequenceUtil.format("第二步检测到潜在的SQL注入攻击: {} (来源: {})", input, source);
                 LOGGER.error(message);
                 throw new GXSqlInjectionException(message);
             }
