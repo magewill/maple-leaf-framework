@@ -30,7 +30,7 @@ public class GXFrameworkConfig {
                 if (CharSequenceUtil.isNotEmpty(fieldName)) {
                     try {
                         // 反射获取字段类型
-                        Field field = jsonGenerator.getCurrentValue().getClass().getDeclaredField(fieldName);
+                        Field field = jsonGenerator.currentValue().getClass().getDeclaredField(fieldName);
                         if (CharSequence.class.isAssignableFrom(field.getType())) {
                             // 字符串型空值""
                             jsonGenerator.writeString("");
