@@ -1,19 +1,17 @@
 package cn.maple.core.framework.config.support;
 
+import jakarta.annotation.Resource;
+import jakarta.validation.constraints.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CachingConfigurer;
-import org.springframework.cache.annotation.CachingConfigurerSupport;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.cache.interceptor.CacheErrorHandler;
 import org.springframework.cache.interceptor.SimpleCacheErrorHandler;
 import org.springframework.stereotype.Component;
-
-import jakarta.annotation.Resource;
-import jakarta.validation.constraints.NotNull;
 
 /**
  * 解决多CacheManager配置
