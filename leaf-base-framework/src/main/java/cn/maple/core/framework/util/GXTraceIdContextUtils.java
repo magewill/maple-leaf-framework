@@ -16,6 +16,22 @@ import java.util.Objects;
  * 注意：由于MDC基于ThreadLocal实现，在多线程环境下需要特别处理，
  * 请结合GXMdcThreadUtils使用以确保子线程能够正确继承父线程的TraceId。
  * </p>
+ * <p>
+ * 使用示例：
+ * <pre>
+ * {@code
+ * // 在请求开始时设置TraceId
+ * String traceId = GXTraceIdContextUtils.generateTraceId();
+ * GXTraceIdContextUtils.setTraceId(traceId);
+ * 
+ * // 在请求处理过程中获取TraceId
+ * String currentTraceId = GXTraceIdContextUtils.getTraceId();
+ * 
+ * // 在请求结束时清理TraceId
+ * GXTraceIdContextUtils.removeTraceId();
+ * }
+ * </pre>
+ * </p>
  *
  * @author gapleaf@163.com
  */
@@ -66,6 +82,7 @@ public class GXTraceIdContextUtils {
     public static void setTraceId(String traceId) {
         if (CharSequenceUtil.isNotEmpty(traceId) && CharSequenceUtil.isEmpty(MDC.get(TRACE_ID_KEY))) {
             MDC.put(TRACE_ID_KEY, traceId);
+            LOG.debug("线程 {} 设置的TraceId : {}", Thread.currentThread().getName(), traceId);
         }
     }
 
@@ -95,6 +112,7 @@ public class GXTraceIdContextUtils {
      */
     public static void clearTraceId() {
         MDC.clear();
+        LOG.debug("线程 {} 清空了MDC", Thread.currentThread().getName());
     }
 
     /**

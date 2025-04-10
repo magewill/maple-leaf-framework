@@ -8,23 +8,52 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 
+/**
+ * 日志工具类
+ * 封装了SLF4J的日志功能，统一业务代码的日志记录方式
+ * <p>
+ * 使用示例：
+ * <pre>
+ * {@code
+ * // 获取日志对象
+ * private static final Logger LOG = LoggerFactory.getLogger(MyClass.class);
+ * 
+ * // 记录info级别日志
+ * GXLoggerUtils.logInfo(LOG, "用户登录成功", userId, userName);
+ * 
+ * // 记录error级别日志
+ * GXLoggerUtils.logError(LOG, "用户登录失败", userId, errorMessage);
+ * 
+ * // 记录异常信息
+ * GXLoggerUtils.logError(LOG, exception);
+ * }
+ * </pre>
+ * </p>
+ *
+ * @author britton
+ * @since 2021-10-19 17:40
+ */
 public class GXLoggerUtils {
     /**
      * 日志对象
      */
     private static final Logger LOG = LoggerFactory.getLogger(GXLoggerUtils.class);
 
+    /**
+     * 私有构造函数，防止实例化
+     */
     private GXLoggerUtils() {
     }
 
     /**
-     * 记录日志
+     * 记录INFO级别日志
+     * <p>
+     * 日志格式：traceId : [traceId] --> 线程 : [threadName] --> [desc] --> 日志详细 : [data]
+     * </p>
      *
      * @param logger 日志对象
-     * @param desc   格式
-     * @param data   记录数据
-     * @author britton
-     * @since 2021-10-19 17:40
+     * @param desc   日志描述
+     * @param data   日志数据
      */
     public static void logInfo(Logger logger, String desc, Object... data) {
         if (data.length == 0) {
@@ -35,13 +64,14 @@ public class GXLoggerUtils {
     }
 
     /**
-     * 记录日志
+     * 记录DEBUG级别日志
+     * <p>
+     * 日志格式：traceId : [traceId] --> 线程 : [threadName] --> [desc] --> 日志详细 : [data]
+     * </p>
      *
      * @param logger 日志对象
-     * @param desc   格式
-     * @param data   记录数据
-     * @author britton
-     * @since 2021-10-19 17:40
+     * @param desc   日志描述
+     * @param data   日志数据
      */
     public static void logDebug(Logger logger, String desc, Object... data) {
         if (data.length == 0) {
@@ -52,13 +82,14 @@ public class GXLoggerUtils {
     }
 
     /**
-     * 记录日志
+     * 记录ERROR级别日志
+     * <p>
+     * 日志格式：traceId : [traceId] --> 线程 : [threadName] --> [desc] --> 日志详细 : [data]
+     * </p>
      *
      * @param logger 日志对象
-     * @param desc   格式
-     * @param data   记录数据
-     * @author britton
-     * @since 2021-10-19 17:40
+     * @param desc   日志描述
+     * @param data   日志数据
      */
     public static void logError(Logger logger, String desc, Object... data) {
         if (data.length == 0) {
@@ -69,13 +100,14 @@ public class GXLoggerUtils {
     }
 
     /**
-     * 记录日志
+     * 记录WARN级别日志
+     * <p>
+     * 日志格式：traceId : [traceId] --> 线程 : [threadName] --> [desc] --> 日志详细 : [data]
+     * </p>
      *
      * @param logger 日志对象
-     * @param desc   日志格式描述
-     * @param data   记录数据
-     * @author britton
-     * @since 2021-10-19 17:40
+     * @param desc   日志描述
+     * @param data   日志数据
      */
     public static void logWarn(Logger logger, String desc, Object... data) {
         if (data.length == 0) {
@@ -86,12 +118,13 @@ public class GXLoggerUtils {
     }
 
     /**
-     * 记录日志
+     * 记录ERROR级别日志（带异常信息）
+     * <p>
+     * 日志格式：线程 : [threadName]
+     * </p>
      *
      * @param logger 日志对象
      * @param t      异常信息
-     * @author britton
-     * @since 2021-10-19 17:40
      */
     public static void logError(Logger logger, Throwable t) {
         String threadName = Thread.currentThread().getName();
@@ -101,6 +134,9 @@ public class GXLoggerUtils {
 
     /**
      * 生成日志的格式化字符串
+     * <p>
+     * 格式：traceId : [traceId] --> 线程 : [threadName] --> [desc] --> 日志详细 : [data]
+     * </p>
      *
      * @param desc 日志描述信息
      * @param data 需要记录的数据
