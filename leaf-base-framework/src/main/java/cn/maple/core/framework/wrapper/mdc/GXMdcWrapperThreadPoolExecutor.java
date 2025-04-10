@@ -23,6 +23,12 @@ import java.util.concurrent.*;
  * 在需要使用Java标准线程池的时候, 使用GXMdcWrapperThreadPoolExecutor类创建线程池去执行相关逻辑，
  * 这样可以确保在异步执行过程中正确传递MDC上下文，保持日志中的traceId一致性。
  *
+ * <p>
+ * 工作原理:
+ * 本类继承自Java标准库的ThreadPoolExecutor，重写了所有任务提交和执行方法。
+ * 在每个方法中，通过GXMdcThreadUtils工具类包装原始任务，确保在任务执行前复制当前线程的MDC上下文到执行线程，
+ * 并在任务执行后清理MDC，防止内存泄漏。这样，无论任务在哪个线程执行，都能保持日志中traceId的一致性。
+ *
  * @author gapleaf@163.com
  */
 @SuppressWarnings("all")

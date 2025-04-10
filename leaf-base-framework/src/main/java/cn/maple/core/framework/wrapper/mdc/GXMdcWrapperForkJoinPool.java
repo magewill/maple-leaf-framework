@@ -25,6 +25,12 @@ import java.util.concurrent.ForkJoinTask;
  * 在需要使用ForkJoinPool线程池的时候, 使用GXMdcWrapperForkJoinPool类创建线程池去执行相关逻辑，
  * 这样可以确保在并行计算过程中正确传递MDC上下文，保持日志中的traceId一致性。
  *
+ * <p>
+ * 工作原理:
+ * 本类继承自Java标准库的ForkJoinPool，重写了所有任务提交和执行方法。
+ * 在每个方法中，通过GXMdcThreadUtils工具类包装原始任务，确保在任务执行前复制当前线程的MDC上下文到执行线程，
+ * 并在任务执行后清理MDC，防止内存泄漏。这样，无论任务在哪个线程执行，都能保持日志中traceId的一致性。
+ *
  * @author gapleaf@163.com
  */
 @SuppressWarnings("all")
@@ -108,6 +114,21 @@ public class GXMdcWrapperForkJoinPool extends ForkJoinPool {
      */
     @Override
     public <T> ForkJoinTask<T> submit(Callable<T> task) {
+        return super.submit(GXMdcThreadUtils.wrap(task, MDC.getCopyOfContextMap()));
+    }
+
+    /**
+     * 提交一个Runnable任务用于执行，返回表示任务的ForkJoinTask
+     * <p>
+     * 在提交任务前，使用GXMdcThreadUtils包装任务，确保MDC上下文（包括traceId）能够传递到ForkJoin线程中。
+     * 这个方法是对ForkJoinPool.submit(Runnable)的包装，确保在并行执行时MDC上下文的正确传递。
+     * </p>
+     *
+     * @param task 需要提交的任务
+     * @return 表示任务的ForkJoinTask
+     */
+    @Override
+    public ForkJoinTask<?> submit(Runnable task) {
         return super.submit(GXMdcThreadUtils.wrap(task, MDC.getCopyOfContextMap()));
     }
 }
