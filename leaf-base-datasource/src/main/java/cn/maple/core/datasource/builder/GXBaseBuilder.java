@@ -48,6 +48,9 @@ public interface GXBaseBuilder {
      */
     Logger LOGGER = LoggerFactory.getLogger(GXBaseBuilder.class);
 
+    // 最大输入长度，防止超长输入导致性能问题
+    int MAX_INPUT_LENGTH = 1024 * 1024; // 1MB
+
     /**
      * SQL注入检测正则表达式
      * 用于检测常见的SQL注入模式
@@ -63,14 +66,15 @@ public interface GXBaseBuilder {
     Pattern SQL_INJECTION_PATTERN = Pattern.compile(
             "(?i)" + // 忽略大小写
                     "(" +
-                    // 模式 1：SQL 注释和语句分隔符
+                    // 模式 1：SQL 注释和语句分隔符（独立出现）
                     "(?:--[\\s\\r\\n]*|#|/\\*|\\*/|;)" +
                     "|" +
                     // 模式 2：单引号后的注释或分隔符（'value' -- 或 'value';）
                     "'[^'\\\\]*(?:\\\\.[^'\\\\]*)*'\\s*(?:--[\\s\\r\\n]*|#|/\\*|\\*/|;)" +
                     "|" +
-                    // 模式 3：SQL 关键字（union select, drop, alter 等）
+                    // 模式 3：SQL 关键字（union select, drop, alter 等），但需后跟注入模式
                     "\\b(?:union\\s+(?:all\\s+)?select|select\\s+.*\\s+from|insert\\s+into|update\\s+.*\\s+set|delete\\s+from|drop\\s+(?:table|database)|alter\\s+(?:table|database)|truncate\\s+table|create\\s+(?:table|database))\\b" +
+                    "\\s*(?:--[\\s\\r\\n]*|#|/\\*|\\*/|;|\\b(?:or|and)\\s+(?:\\d+\\s*=\\s*\\d+|'[^']+'\\s*=\\s*'[^']+'))" +
                     "|" +
                     // 模式 4：系统表和函数（information_schema, xp_cmdshell 等）
                     "\\b(?:information_schema\\.|sys\\.|sysobjects\\.|xp_cmdshell|sp_executesql|@@version|user\\s*\\(\\s*\\)|database\\s*\\(\\s*\\)|schema\\s*\\(\\s*\\))\\b" +
@@ -89,6 +93,12 @@ public interface GXBaseBuilder {
                     // 模式 7：其他常见注入模式（exec, execute 等）
                     "\\b(?:exec\\s+\\w+|execute\\s+\\w+)\\b" +
                     ")"
+    );
+
+    // 合法子查询的正则表达式，用于豁免检测
+    Pattern LEGITIMATE_SUBQUERY_PATTERN = Pattern.compile(
+            "^\\s*\\(\\s*SELECT\\s+.*\\s+FROM\\s+.*\\s*(?:WHERE\\s+.*)?\\s*\\)\\s*(?:UNION\\s+(?:ALL\\s+)?\\s*\\(\\s*SELECT\\s+.*\\s+FROM\\s+.*\\s*(?:WHERE\\s+.*)?\\s*\\)\\s*)*$",
+            Pattern.CASE_INSENSITIVE
     );
 
     /**
@@ -123,7 +133,7 @@ public interface GXBaseBuilder {
                 if (field != null) {
                     // 获取安全的更新表达式
                     String updateExpr = field.updateString();
-                    checkSQLInjection(updateExpr, "updateField");
+                    checkSQLInjection(updateExpr, "updateField", true);
                     sql.SET(updateExpr);
                 }
             }
@@ -273,7 +283,7 @@ public interface GXBaseBuilder {
         // 处理HAVING
         if (CollUtil.isNotEmpty(having)) {
             String[] safeHavingClauses = having.stream()
-                    .peek(h -> checkSQLInjection(h, "having"))
+                    .peek(h -> checkSQLInjection(h, "having", true))
                     .toArray(String[]::new);
             sql.HAVING(safeHavingClauses);
         }
@@ -348,7 +358,7 @@ public interface GXBaseBuilder {
                     .stream()
                     .map(op -> {
                         String opStr = op.opString();
-                        checkSQLInjection(opStr, "joinAndClause");
+                        checkSQLInjection(opStr, "joinAndClause", true);
                         return opStr;
                     })
                     .collect(Collectors.joining(GXBuilderConstant.AND_OP));
@@ -357,7 +367,7 @@ public interface GXBaseBuilder {
                     .stream()
                     .map(op -> {
                         String opStr = op.opString();
-                        checkSQLInjection(opStr, "joinOrClause");
+                        checkSQLInjection(opStr, "joinOrClause", true);
                         return opStr;
                     })
                     .collect(Collectors.joining(GXBuilderConstant.AND_OP));
@@ -382,19 +392,37 @@ public interface GXBaseBuilder {
     }
 
     /**
-     * 检查SQL注入
+     * 检查输入字符串是否存在潜在的 SQL 注入攻击。
      * <p>
-     * 该方法检查输入字符串是否包含潜在的SQL注入攻击模式。
-     * 使用GXDBStringEscapeUtils.check方法进行全面的SQL注入检测。
-     * 如果检测到可能的SQL注入，将抛出异常。
+     * 该方法通过以下步骤进行检测：
+     * 1. 检查输入是否为空或超长。
+     * 2. 如果输入是合法的子查询，则豁免检测。
+     * 3. 使用正则表达式进行初步检测。
+     * 4. 使用 GXDBStringEscapeUtils.check 方法进行更全面的检测（如果可用）。
      * </p>
      *
-     * @param input  要检查的输入字符串
-     * @param source 输入来源的描述（用于日志和错误消息）
-     * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
+     * @param input       需要检查的输入字符串
+     * @param source      输入来源（用于日志记录）
+     * @param isUserInput 是否为用户输入（如果是，则严格检测；如果不是，则放宽检测）
+     * @throws GXSqlInjectionException 如果检测到 SQL 注入攻击
      */
-    static void checkSQLInjection(String input, String source) {
+    static void checkSQLInjection(String input, String source, boolean isUserInput) {
+        // 检查输入是否为空
         if (CharSequenceUtil.isEmpty(input)) {
+            LOGGER.debug("输入为空，直接返回 (来源: {})", source);
+            return;
+        }
+
+        // 检查输入长度，防止超长输入导致性能问题
+        if (input.length() > MAX_INPUT_LENGTH) {
+            String message = CharSequenceUtil.format("输入长度超过最大限制 ({}): {} (来源: {})", MAX_INPUT_LENGTH, input, source);
+            LOGGER.error(message);
+            throw new IllegalArgumentException(message);
+        }
+
+        // 如果不是用户输入，且输入是合法的子查询，则豁免检测
+        if (!isUserInput && LEGITIMATE_SUBQUERY_PATTERN.matcher(input).matches()) {
+            LOGGER.debug("输入是合法的子查询，豁免检测: {} (来源: {})", input, source);
             return;
         }
 
@@ -437,7 +465,7 @@ public interface GXBaseBuilder {
         }
 
         // 检查SQL注入
-        checkSQLInjection(tableName, "tableName");
+        checkSQLInjection(tableName, "tableName", false);
 
         // 表名通常不应包含特殊字符，但为了安全起见，仍然进行检查
         // 如果表名包含特殊字符（如点号以外的特殊字符），可能表示SQL注入尝试
@@ -465,7 +493,7 @@ public interface GXBaseBuilder {
         }
 
         // 检查SQL注入
-        checkSQLInjection(tableAlias, "tableAlias");
+        checkSQLInjection(tableAlias, "tableAlias", false);
 
         // 表别名通常不应包含特殊字符，但为了安全起见，仍然进行检查
         // 如果表别名包含特殊字符，可能表示SQL注入尝试
@@ -500,7 +528,7 @@ public interface GXBaseBuilder {
 
         if (!isSqlFunction) {
             // 如果不是SQL函数调用，则进行常规SQL注入检查
-            checkSQLInjection(columnName, "columnName");
+            checkSQLInjection(columnName, "columnName", true);
 
             // 列名通常不应包含特殊字符，但为了安全起见，仍然进行检查
             // 如果列名包含特殊字符（如点号以外的特殊字符），可能表示SQL注入尝试
@@ -581,7 +609,7 @@ public interface GXBaseBuilder {
         String rawSQL = dbQueryParamInnerDto.getRawSQL();
         if (CharSequenceUtil.isNotBlank(rawSQL)) {
             // 使用增强的SQL注入检测
-            checkSQLInjection(rawSQL, "rawSQL");
+            checkSQLInjection(rawSQL, "rawSQL", true);
 
             // 尝试使用GXDBStringEscapeUtils进行额外的安全检查
             try {
@@ -686,7 +714,7 @@ public interface GXBaseBuilder {
                     }
 
                     // 使用增强的SQL注入检测
-                    checkSQLInjection(whereExpr, "whereCondition:" + c.getClass().getSimpleName());
+                    checkSQLInjection(whereExpr, "whereCondition:" + c.getClass().getSimpleName(), true);
 
                     // 尝试使用GXDBStringEscapeUtils进行额外的安全检查
                     try {
@@ -719,7 +747,7 @@ public interface GXBaseBuilder {
         if (!lastWheres.isEmpty()) {
             String whereStr = String.join(" AND ", lastWheres);
             // 最后一次检查组合后的WHERE子句
-            checkSQLInjection(whereStr, "combinedWhereClause");
+            checkSQLInjection(whereStr, "combinedWhereClause", true);
             sql.WHERE(whereStr);
         }
     }
@@ -776,7 +804,7 @@ public interface GXBaseBuilder {
                 if (field != null) {
                     // 获取安全的更新表达式
                     String updateExpr = field.updateString();
-                    checkSQLInjection(updateExpr, "updateField");
+                    checkSQLInjection(updateExpr, "updateField", true);
                     sql.SET(updateExpr);
                 }
             }
@@ -786,7 +814,7 @@ public interface GXBaseBuilder {
         if (extraData != null && CharSequenceUtil.isNotBlank(extraData.getStr("deletedBy"))) {
             String deletedBy = extraData.getStr("deletedBy");
             // 检查SQL注入
-            checkSQLInjection(deletedBy, "deletedBy");
+            checkSQLInjection(deletedBy, "deletedBy", true);
 
             // 检查表是否有deleted_by字段
             List<TableFieldInfo> fieldList = tableInfo.getFieldList();
@@ -907,7 +935,7 @@ public interface GXBaseBuilder {
 
         // 使用UNION类型连接所有子查询
         String unionType = unionTypeEnums.getUnionType();
-        checkSQLInjection(unionType, "unionType");
+        checkSQLInjection(unionType, "unionType", true);
         String unionSql = String.join("\n " + unionType + " \n", unionSqlLst);
 
         // 设置主查询的表名为UNION子查询
@@ -1007,7 +1035,7 @@ public interface GXBaseBuilder {
         // 如果有原始SQL，检查SQL注入并返回
         String rawSQL = masterQueryParamInnerDto.getRawSQL();
         if (CharSequenceUtil.isNotBlank(rawSQL)) {
-            checkSQLInjection(rawSQL, "rawSQL");
+            checkSQLInjection(rawSQL, "rawSQL", true);
             return rawSQL;
         }
 
