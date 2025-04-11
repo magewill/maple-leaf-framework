@@ -198,6 +198,42 @@ public class GXTraceIdContextUtils {
     }
 
     /**
+     * 如果当前线程的 MDC 中不存在 TraceId，则生成并设置一个新的 TraceId。
+     * <p>
+     * 此方法不会覆盖现有的 TraceId，保证链路追踪的连续性。
+     * 如果 MDC 中没有 TraceId，则调用 {@link #generateTraceId()} 生成新的 TraceId，
+     * 并通过 {@link #setTraceId(String)} 设置到当前线程的 MDC 中。
+     * </p>
+     * <p>
+     * <b>使用场景</b>：
+     * - 在请求处理开始时，确保线程具有 TraceId，例如在 Filter 或 Interceptor 中调用。
+     * - 在异步任务启动时，确保子线程具有 TraceId（需结合 GXMdcThreadUtils 传递上下文）。
+     * </p>
+     * <p>
+     * <b>线程安全</b>：
+     * - MDC 基于 ThreadLocal，操作仅影响当前线程，天然线程安全。
+     * - {@link #generateTraceId()} 方法是线程安全的，基于 UUID.randomUUID() 实现。
+     * - 判断和设置操作是原子性的，因为 MDC 的 get 和 put 操作针对当前线程的独立上下文。
+     * </p>
+     * <p>
+     * <b>注意事项</b>：
+     * - 如果当前线程已有 TraceId，则不会生成或设置新的 TraceId。
+     * - 在多线程环境下，子线程需通过 GXMdcThreadUtils 包装任务以继承父线程的 TraceId。
+     * - 调用方无需显式传递 TraceId，方法内部会自动生成。
+     * </p>
+     */
+    public static void setTraceIdIfAbsent() {
+        String currentTraceId = getTraceId();
+        if (CharSequenceUtil.isEmpty(currentTraceId)) {
+            String newTraceId = generateTraceId();
+            setTraceId(newTraceId);
+            LOG.debug("线程 {} 自动设置了新的 TraceId: {}", Thread.currentThread().getName(), newTraceId);
+        } else {
+            LOG.debug("线程 {} 已存在 TraceId: {}，无需设置", Thread.currentThread().getName(), currentTraceId);
+        }
+    }
+
+    /**
      * TraceId 生成器，内部静态类，负责生成唯一的 TraceId 标识符。
      * <p>
      * 使用内部类实现延迟加载，仅在首次调用 generateTraceId 方法时加载，提高性能。

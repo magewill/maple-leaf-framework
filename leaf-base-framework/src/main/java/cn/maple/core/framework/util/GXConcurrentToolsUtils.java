@@ -8,6 +8,7 @@ import org.slf4j.MDC;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -231,6 +232,63 @@ public class GXConcurrentToolsUtils {
     }
 
     /**
+     * 在指定的MDC上下文中执行任务，并在执行完成后恢复原始MDC上下文。
+     * <p>
+     * 这个方法确保在异步任务执行过程中，日志中的MDC上下文（如traceId）能够正确传递，
+     * 避免日志上下文丢失导致的日志追踪困难。
+     * </p>
+     * <p>
+     * <b>线程安全</b>：
+     * - MDC操作是线程安全的，每个线程有自己独立的MDC上下文。
+     * - 使用try-finally结构确保即使任务执行过程中发生异常，原始MDC上下文也能被正确恢复。
+     * </p>
+     *
+     * @param mdcContext 要设置的MDC上下文，可以为null
+     * @param task       要执行的任务
+     * @param <T>        任务返回值类型
+     * @return 任务执行结果
+     */
+    private static <T> T withMdcContext(Map<String, String> mdcContext, Supplier<T> task) {
+        // 保存当前线程的MDC上下文
+        Map<String, String> originalMdc = MDC.getCopyOfContextMap();
+        try {
+            // 设置新的MDC上下文
+            if (mdcContext != null) {
+                MDC.setContextMap(mdcContext);
+            }
+            // 执行任务
+            return task.get();
+        } finally {
+            // 恢复原始MDC上下文
+            if (originalMdc != null) {
+                MDC.setContextMap(originalMdc);
+            } else {
+                MDC.clear();
+            }
+        }
+    }
+
+    /**
+     * 确保当前线程有TraceId，如果没有则设置一个。
+     * <p>
+     * 这个方法通过反射调用GXTraceIdContextUtils.setTraceIdIfAbsent方法，
+     * 避免直接依赖该类，提高代码的灵活性。
+     * </p>
+     * <p>
+     * <b>线程安全</b>：
+     * - 反射调用是线程安全的，不会影响其他线程。
+     * - 异常处理确保即使反射调用失败也不会影响主要业务逻辑。
+     * </p>
+     *
+     * @param mdcContext 当前MDC上下文，用于检查是否已有traceId
+     */
+    private static void ensureTraceId(Map<String, String> mdcContext) {
+        if (mdcContext == null || !mdcContext.containsKey("traceId")) {
+            GXTraceIdContextUtils.setTraceIdIfAbsent();
+        }
+    }
+
+    /**
      * 将任务对象包装为一个 CompletableFuture 对象，用于异步执行。
      * <p>
      * <b>实现原理</b>：
@@ -262,15 +320,9 @@ public class GXConcurrentToolsUtils {
      */
     public static <T> CompletableFuture<T> composerFuture(Supplier<T> callable, ConcurrentMap<String, Object> results, String resultKey) {
         // 参数校验
-        if (callable == null) {
-            throw new IllegalArgumentException("callable cannot be null");
-        }
-        if (results == null) {
-            throw new IllegalArgumentException("results cannot be null");
-        }
-        if (resultKey == null) {
-            throw new IllegalArgumentException("resultKey cannot be null");
-        }
+        Objects.requireNonNull(callable, "callable cannot be null");
+        Objects.requireNonNull(results, "results cannot be null");
+        Objects.requireNonNull(resultKey, "resultKey cannot be null");
 
         // 记录任务开始时间，用于性能监控
         final long startTime = System.currentTimeMillis();
@@ -291,29 +343,10 @@ public class GXConcurrentToolsUtils {
         }
 
         // 包装原始任务，确保 MDC 上下文传递
-        Supplier<T> wrappedTask = () -> {
-            // 保存异步线程原始的 MDC 上下文
-            Map<String, String> originalMdc = MDC.getCopyOfContextMap();
+        Supplier<T> wrappedTask = () -> withMdcContext(mdcContext, () -> {
             try {
-                // 设置 MDC 上下文，确保日志中的 traceId 一致性
-                if (mdcContext != null) {
-                    MDC.setContextMap(mdcContext);
-                }
-
-                // 确保子线程有 TraceId（如果使用了GXTraceIdContextUtils）
-                try {
-                    if (Class.forName("cn.maple.core.framework.util.GXTraceIdContextUtils") != null) {
-                        if (mdcContext == null || !mdcContext.containsKey("traceId")) {
-                            // 使用反射调用，避免直接依赖
-                            Class<?> clazz = Class.forName("cn.maple.core.framework.util.GXTraceIdContextUtils");
-                            java.lang.reflect.Method setTraceIdIfAbsent = clazz.getMethod("setTraceIdIfAbsent");
-                            setTraceIdIfAbsent.invoke(null);
-                        }
-                    }
-                } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException |
-                         java.lang.reflect.InvocationTargetException ignored) {
-                    // 忽略异常，说明没有使用GXTraceIdContextUtils
-                }
+                // 确保子线程有 TraceId
+                ensureTraceId(mdcContext);
 
                 // 执行原始任务
                 return callable.get();
@@ -324,15 +357,8 @@ public class GXConcurrentToolsUtils {
                 LOG.error("Task {} for key {} execution error: {} ({})",
                         taskId, resultKey, e.getMessage(), errorType, e);
                 throw e; // 重新抛出异常，让CompletableFuture的异常处理机制处理
-            } finally {
-                // 恢复异步线程原始的 MDC 上下文
-                if (originalMdc != null) {
-                    MDC.setContextMap(originalMdc);
-                } else {
-                    MDC.clear();
-                }
             }
-        };
+        });
 
         // 使用线程池异步执行包装后的任务
         final CompletableFuture<T> future = CompletableFuture.supplyAsync(wrappedTask, EXECUTOR_SERVICE);
@@ -486,37 +512,6 @@ public class GXConcurrentToolsUtils {
      * 等待所有 CompletableFuture 任务完成，支持超时控制。
      * <p>
      * <b>实现原理</b>：
-     * 1. 使用 CompletableFuture.allOf 将所有任务组合为一个 CompletableFuture。
-     * 2. 通过 get 方法等待所有任务完成，支持超时控制。
-     * 3. 如果发生超时（TimeoutException），取消所有未完成的任务（cancel(true)）。
-     * 4. 捕获并记录异常（InterruptedException、ExecutionException、TimeoutException），并抛出 RuntimeException。
-     * 5. 记录任务执行时间和详细统计信息，便于性能监控和问题诊断。
-     * 6. 在异常情况下，确保恢复MDC上下文，避免日志上下文丢失。
-     * 7. 提供任务状态监控，包括完成率、执行时间分布等信息。
-     * 8. 支持任务取消后的资源清理，避免资源泄漏。
-     * </p>
-     * <p>
-     * <b>线程安全</b>：
-     * - CompletableFuture.allOf 是线程安全的，内部使用同步机制。
-     * - 任务取消（cancel(true)）是线程安全的，CompletableFuture 保证取消操作不会影响已完成的任务。
-     * - 异常处理中记录日志，日志对象（SLF4J Logger）是线程安全的。
-     * - 超时控制通过 get 方法实现，线程安全。
-     * - 任务统计使用 AtomicLong，保证线程安全的计数。
-     * - 使用CAS操作确保计数器的线程安全性。
-     * - MDC上下文传递使用线程安全的方式，确保日志上下文的正确性。
-     * - 任务状态监控使用原子操作，确保在高并发情况下的正确性。
-     * </p>
-     *
-     * @param completableFutures CompletableFuture 对象列表
-     * @param timeOut            超时时间
-     * @param unit               超时时间单位
-     * @throws IllegalArgumentException 如果 completableFutures 为 null 或为空
-     * @throws RuntimeException         如果任务执行失败（InterruptedException、ExecutionException、TimeoutException）
-     */
-    /**
-     * 等待所有 CompletableFuture 任务完成，支持超时控制。
-     * <p>
-     * <b>实现原理</b>：
      * 1. 使用 CompletableFuture.allOf 创建一个表示所有任务完成的 CompletableFuture。
      * 2. 使用 get(timeout, unit) 方法等待所有任务完成，支持超时控制。
      * 3. 如果等待过程中发生异常（中断、执行异常、超时），取消所有未完成的任务，避免资源泄漏。
@@ -539,8 +534,9 @@ public class GXConcurrentToolsUtils {
      */
     public static void allOf(List<CompletableFuture<?>> completableFutures, int timeOut, TimeUnit unit) {
         // 参数校验
-        if (completableFutures == null || completableFutures.isEmpty()) {
-            throw new IllegalArgumentException("completableFutures cannot be null or empty");
+        Objects.requireNonNull(completableFutures, "completableFutures cannot be null");
+        if (completableFutures.isEmpty()) {
+            throw new IllegalArgumentException("completableFutures cannot be empty");
         }
 
         // 记录任务开始时间，用于性能监控
@@ -550,9 +546,6 @@ public class GXConcurrentToolsUtils {
         // 捕获当前线程的 MDC 上下文，用于日志记录
         final Map<String, String> mdcContext = MDC.getCopyOfContextMap();
 
-        // 保存原始MDC上下文
-        final Map<String, String> originalMdc = MDC.getCopyOfContextMap();
-
         // 记录线程池状态（开始）
         final String initialPoolStatus = getThreadPoolStatus();
 
@@ -560,32 +553,19 @@ public class GXConcurrentToolsUtils {
         boolean wasInterrupted = Thread.currentThread().isInterrupted();
 
         try {
-            // 设置MDC上下文，确保日志中的traceId一致性
-            if (mdcContext != null) {
-                MDC.setContextMap(mdcContext);
-            }
+            // 使用辅助方法设置MDC上下文并确保TraceId
+            withMdcContext(mdcContext, () -> {
+                // 确保当前线程有 TraceId
+                ensureTraceId(mdcContext);
 
-            // 确保当前线程有 TraceId（如果使用了GXTraceIdContextUtils）
-            try {
-                if (Class.forName("cn.maple.core.framework.util.GXTraceIdContextUtils") != null) {
-                    if (mdcContext == null || !mdcContext.containsKey("traceId")) {
-                        // 使用反射调用，避免直接依赖
-                        Class<?> clazz = Class.forName("cn.maple.core.framework.util.GXTraceIdContextUtils");
-                        java.lang.reflect.Method setTraceIdIfAbsent = clazz.getMethod("setTraceIdIfAbsent");
-                        setTraceIdIfAbsent.invoke(null);
-                    }
-                }
-            } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException |
-                     java.lang.reflect.InvocationTargetException ignored) {
-                // 忽略异常，说明没有使用GXTraceIdContextUtils
-            }
-
-            // 记录详细的任务和线程池状态信息
-            LOG.info("Waiting for {} tasks to complete with timeout {} {}. {}",
-                    taskCount,
-                    timeOut,
-                    unit,
-                    initialPoolStatus);
+                // 记录详细的任务和线程池状态信息
+                LOG.info("Waiting for {} tasks to complete with timeout {} {}. {}",
+                        taskCount,
+                        timeOut,
+                        unit,
+                        initialPoolStatus);
+                return null;
+            });
 
             // 创建一个包含所有任务的 CompletableFuture
             CompletableFuture<Void> allFutures = CompletableFuture.allOf(
@@ -597,11 +577,14 @@ public class GXConcurrentToolsUtils {
 
             // 记录任务执行时间和统计信息
             long executionTime = System.currentTimeMillis() - startTime;
-            LOG.info("All {} tasks completed in {} ms. {}. {}",
-                    taskCount,
-                    executionTime,
-                    getTaskStatistics(),
-                    getThreadPoolStatus());
+            withMdcContext(mdcContext, () -> {
+                LOG.info("All {} tasks completed in {} ms. {}. {}",
+                        taskCount,
+                        executionTime,
+                        getTaskStatistics(),
+                        getThreadPoolStatus());
+                return null;
+            });
 
         } catch (InterruptedException e) {
             // 计算执行时间
@@ -611,21 +594,27 @@ public class GXConcurrentToolsUtils {
             TaskStatusInfo statusInfo = collectTaskStatusInfo(completableFutures, taskCount);
 
             // 记录详细的错误信息和任务状态
-            LOG.error("Thread interrupted after {} ms while waiting for {} tasks. Completion rate: {}/{}({:.2f}%). {}. {}",
-                    executionTime,
-                    taskCount,
-                    statusInfo.completedCount,
-                    taskCount,
-                    statusInfo.completionRate,
-                    getTaskStatistics(),
-                    getThreadPoolStatus(),
-                    e);
+            withMdcContext(mdcContext, () -> {
+                LOG.error("Thread interrupted after {} ms while waiting for {} tasks. Completion rate: {}/{}({}%). {}. {}",
+                        executionTime,
+                        taskCount,
+                        statusInfo.completedCount,
+                        taskCount,
+                        String.format("%.2f", statusInfo.completionRate),
+                        getTaskStatistics(),
+                        getThreadPoolStatus(),
+                        e);
+                return null;
+            });
 
             // 取消所有未完成的任务，避免资源泄漏
             int cancelledCount = cancelUnfinishedTasks(completableFutures);
-            LOG.warn("Cancelled {} of {} incomplete tasks due to thread interruption",
-                    cancelledCount,
-                    statusInfo.unfinishedCount);
+            withMdcContext(mdcContext, () -> {
+                LOG.warn("Cancelled {} of {} incomplete tasks due to thread interruption",
+                        cancelledCount,
+                        statusInfo.unfinishedCount);
+                return null;
+            });
 
             // 标记当前线程为中断状态
             wasInterrupted = true;
@@ -649,22 +638,28 @@ public class GXConcurrentToolsUtils {
             TaskStatusInfo statusInfo = collectTaskStatusInfo(completableFutures, taskCount);
 
             // 记录详细的错误信息和任务状态
-            LOG.error("Task execution failed after {} ms: {} ({}). Completion rate: {}/{}({:.2f}%). Task statistics: {}. Thread pool status: {}. Exception: {}",
-                    executionTime,
-                    errorMessage,
-                    errorType,
-                    statusInfo.completedCount,
-                    taskCount,
-                    statusInfo.completionRate,
-                    getTaskStatistics(),
-                    getThreadPoolStatus(),
-                    e);
+            withMdcContext(mdcContext, () -> {
+                LOG.error("Task execution failed after {} ms: {} ({}). Completion rate: {}/{}({}%). {}. {}",
+                        executionTime,
+                        errorMessage,
+                        errorType,
+                        statusInfo.completedCount,
+                        taskCount,
+                        String.format("%.2f", statusInfo.completionRate),
+                        getTaskStatistics(),
+                        getThreadPoolStatus(),
+                        e);
+                return null;
+            });
 
             // 取消所有未完成的任务，避免资源泄漏
             int cancelledCount = cancelUnfinishedTasks(completableFutures);
-            LOG.warn("Cancelled {} of {} incomplete tasks due to execution failure",
-                    cancelledCount,
-                    statusInfo.unfinishedCount);
+            withMdcContext(mdcContext, () -> {
+                LOG.warn("Cancelled {} of {} incomplete tasks due to execution failure",
+                        cancelledCount,
+                        statusInfo.unfinishedCount);
+                return null;
+            });
 
             throw new RuntimeException(String.format(
                     "Task execution failed: %s (%s). Only %d of %d tasks completed (%.2f%%)",
@@ -681,22 +676,28 @@ public class GXConcurrentToolsUtils {
             TaskStatusInfo statusInfo = collectTaskStatusInfo(completableFutures, taskCount);
 
             // 记录详细的超时信息和任务状态
-            LOG.warn("Tasks timed out after {} {} (elapsed time: {} ms). Completion rate: {}/{}({:.2f}%). {}. {}",
-                    timeOut,
-                    unit,
-                    executionTime,
-                    statusInfo.completedCount,
-                    taskCount,
-                    statusInfo.completionRate,
-                    getTaskStatistics(),
-                    getThreadPoolStatus());
+            withMdcContext(mdcContext, () -> {
+                LOG.warn("Tasks timed out after {} {} (elapsed time: {} ms). Completion rate: {}/{}({}%). {}. {}",
+                        timeOut,
+                        unit,
+                        executionTime,
+                        statusInfo.completedCount,
+                        taskCount,
+                        String.format("%.2f", statusInfo.completionRate),
+                        getTaskStatistics(),
+                        getThreadPoolStatus());
+                return null;
+            });
 
             // 取消未完成的任务，避免资源泄漏
             int cancelledCount = cancelUnfinishedTasks(completableFutures);
 
-            LOG.warn("Cancelled {} of {} incomplete tasks due to timeout",
-                    cancelledCount,
-                    statusInfo.unfinishedCount);
+            withMdcContext(mdcContext, () -> {
+                LOG.warn("Cancelled {} of {} incomplete tasks due to timeout",
+                        cancelledCount,
+                        statusInfo.unfinishedCount);
+                return null;
+            });
 
             throw new RuntimeException(String.format(
                     "Tasks timed out after %d %s. Only %d of %d tasks completed (%.2f%%)",
@@ -714,31 +715,30 @@ public class GXConcurrentToolsUtils {
             String errorMessage = rootCause != null ? rootCause.getMessage() : e.getMessage();
             String errorType = rootCause != null ? rootCause.getClass().getName() : e.getClass().getName();
 
-            LOG.error("Unexpected error after {} ms while waiting for {} tasks: {} ({}). {}. {}",
-                    executionTime,
-                    taskCount,
-                    errorMessage,
-                    errorType,
-                    getTaskStatistics(),
-                    getThreadPoolStatus(),
-                    e);
+            withMdcContext(mdcContext, () -> {
+                LOG.error("Unexpected error after {} ms while waiting for {} tasks: {} ({}). {}. {}",
+                        executionTime,
+                        taskCount,
+                        errorMessage,
+                        errorType,
+                        getTaskStatistics(),
+                        getThreadPoolStatus(),
+                        e);
+                return null;
+            });
 
             // 取消所有未完成的任务，避免资源泄漏
             int cancelledCount = cancelUnfinishedTasks(completableFutures);
-            LOG.warn("Cancelled {} incomplete tasks due to unexpected error", cancelledCount);
+            withMdcContext(mdcContext, () -> {
+                LOG.warn("Cancelled {} incomplete tasks due to unexpected error", cancelledCount);
+                return null;
+            });
 
             throw new RuntimeException(String.format(
                     "Unexpected error while waiting for tasks: %s (%s)",
                     errorMessage,
                     errorType), e);
         } finally {
-            // 恢复原始MDC上下文
-            if (originalMdc != null) {
-                MDC.setContextMap(originalMdc);
-            } else {
-                MDC.clear();
-            }
-
             // 如果当前线程在进入此方法前已被中断，则恢复中断状态
             if (wasInterrupted) {
                 Thread.currentThread().interrupt();
@@ -746,17 +746,6 @@ public class GXConcurrentToolsUtils {
         }
     }
 
-    /**
-     * 查找异常的根本原因
-     * <p>
-     * 递归查找异常链中的根本原因，避免在日志中只显示包装异常。
-     * 这对于诊断问题非常有用，特别是在使用CompletableFuture时，
-     * 异常通常会被多层包装。
-     * </p>
-     *
-     * @param throwable 异常对象
-     * @return 根本原因异常，如果没有则返回原始异常
-     */
     /**
      * 查找异常的根本原因
      * <p>
@@ -849,24 +838,8 @@ public class GXConcurrentToolsUtils {
      * 2. 记录每个任务的取消状态，便于诊断问题。
      * 3. 提供取消失败的任务数量统计。
      * 4. 在高并发环境下使用线程安全的计数方式。
-     * </p>
-     *
-     * @param futures 任务列表
-     * @return 成功取消的任务数量
-     */
-    /**
-     * 取消所有未完成的任务
-     * <p>
-     * 遍历任务列表，取消所有未完成的任务，并返回成功取消的任务数量。
-     * 这个方法是线程安全的，因为CompletableFuture的isDone和cancel方法都是线程安全的。
-     * </p>
-     * <p>
-     * <b>增强功能</b>：
-     * 1. 使用mayInterruptIfRunning=true参数，尝试中断正在执行的任务。
-     * 2. 记录每个任务的取消状态，便于诊断问题。
-     * 3. 提供取消失败的任务数量统计。
-     * 4. 在高并发环境下使用线程安全的计数方式。
      * 5. 增加防止线程中断传播的保护措施。
+     * 6. 使用原子计数器确保线程安全的统计。
      * </p>
      *
      * @param futures 任务列表
@@ -877,9 +850,10 @@ public class GXConcurrentToolsUtils {
             return 0;
         }
 
-        int cancelledCount = 0;
-        int failedToCancel = 0;
-        int alreadyDoneCount = 0;
+        // 使用原子计数器确保线程安全的统计
+        AtomicLong cancelledCount = new AtomicLong(0);
+        AtomicLong failedToCancel = new AtomicLong(0);
+        AtomicLong alreadyDoneCount = new AtomicLong(0);
 
         // 记录开始取消任务的时间
         long startTime = System.currentTimeMillis();
@@ -888,35 +862,36 @@ public class GXConcurrentToolsUtils {
         boolean wasInterrupted = Thread.currentThread().isInterrupted();
 
         try {
-            for (CompletableFuture<?> future : futures) {
+            // 并行处理任务取消，提高效率
+            futures.parallelStream().forEach(future -> {
                 if (future == null) {
-                    continue;
+                    return;
                 }
 
                 if (future.isDone()) {
-                    alreadyDoneCount++;
-                    continue;
+                    alreadyDoneCount.incrementAndGet();
+                    return;
                 }
 
                 try {
                     // 尝试取消任务，mayInterruptIfRunning=true表示尝试中断正在执行的任务
                     boolean cancelled = future.cancel(true);
                     if (cancelled) {
-                        cancelledCount++;
+                        cancelledCount.incrementAndGet();
                     } else {
-                        failedToCancel++;
+                        failedToCancel.incrementAndGet();
                         // 再次检查是否已完成，可能在我们调用cancel之前刚好完成
                         if (future.isDone()) {
-                            alreadyDoneCount++;
-                            failedToCancel--; // 不算作取消失败
+                            alreadyDoneCount.incrementAndGet();
+                            failedToCancel.decrementAndGet(); // 不算作取消失败
                         }
                     }
                 } catch (Exception e) {
                     // 捕获取消过程中的异常，避免影响其他任务的取消
-                    failedToCancel++;
+                    failedToCancel.incrementAndGet();
                     LOG.warn("Failed to cancel a task: {}", e.getMessage(), e);
                 }
-            }
+            });
         } finally {
             // 如果当前线程在进入此方法前已被中断，则恢复中断状态
             if (wasInterrupted) {
@@ -928,18 +903,19 @@ public class GXConcurrentToolsUtils {
         long duration = System.currentTimeMillis() - startTime;
 
         // 只有在有任务需要取消时才记录日志
-        if (cancelledCount > 0 || failedToCancel > 0) {
+        if (cancelledCount.get() > 0 || failedToCancel.get() > 0) {
             LOG.info("Cancelled {} tasks, failed to cancel {} tasks, already done {} tasks in {} ms",
-                    cancelledCount, failedToCancel, alreadyDoneCount, duration);
+                    cancelledCount.get(), failedToCancel.get(), alreadyDoneCount.get(), duration);
         }
 
-        return cancelledCount;
+        return cancelledCount.intValue();
     }
 
     /**
      * 等待所有 CompletableFuture 任务完成，使用默认超时时间（5秒）。
      * <p>
      * 委托给 allOf(List, int, TimeUnit) 方法，使用默认超时时间。
+     * 这个方法提供了一个更简单的接口，适用于大多数场景，无需指定超时时间。
      * </p>
      *
      * @param completableFutures CompletableFuture 对象列表
@@ -947,6 +923,7 @@ public class GXConcurrentToolsUtils {
      * @throws RuntimeException         如果任务执行失败（InterruptedException、ExecutionException、TimeoutException）
      */
     public static void allOf(List<CompletableFuture<?>> completableFutures) {
+        Objects.requireNonNull(completableFutures, "completableFutures cannot be null");
         allOf(completableFutures, DEFAULT_TIME_OUT, TimeUnit.SECONDS);
     }
 
@@ -990,15 +967,6 @@ public class GXConcurrentToolsUtils {
     /**
      * 任务状态信息类，用于收集和传递任务执行状态
      */
-    private static class TaskStatusInfo {
-        final long completedCount;
-        final long unfinishedCount;
-        final double completionRate;
-
-        TaskStatusInfo(long completedCount, long unfinishedCount, double completionRate) {
-            this.completedCount = completedCount;
-            this.unfinishedCount = unfinishedCount;
-            this.completionRate = completionRate;
-        }
+    private record TaskStatusInfo(long completedCount, long unfinishedCount, double completionRate) {
     }
 }
