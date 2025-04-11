@@ -56,6 +56,9 @@ import java.util.function.Supplier;
  *
  * // 获取结果
  * System.out.println("Results: " + results);
+ *
+ * // 优雅关闭线程池（可选）
+ * GXConcurrentToolsUtils.shutdownThreadPool();
  * </pre>
  * </p>
  * <p>
@@ -123,26 +126,32 @@ public class GXConcurrentToolsUtils {
      * </p>
      */
     private static final ThreadPoolExecutor EXECUTOR_SERVICE;
+
     /**
      * 任务执行计数器，用于统计任务执行情况
      */
     private static final AtomicLong TASK_COUNTER = new AtomicLong(0);
+
     /**
      * 任务成功计数器
      */
     private static final AtomicLong SUCCESS_COUNTER = new AtomicLong(0);
+
     /**
      * 任务失败计数器
      */
     private static final AtomicLong FAILURE_COUNTER = new AtomicLong(0);
+
     /**
      * 任务执行总时间，用于计算平均执行时间
      */
     private static final AtomicLong TOTAL_EXECUTION_TIME = new AtomicLong(0);
+
     /**
      * 最大任务执行时间，用于监控最慢的任务
      */
     private static final AtomicLong MAX_EXECUTION_TIME = new AtomicLong(0);
+
     /**
      * 当前活跃任务数，用于监控线程池负载
      */
@@ -205,18 +214,18 @@ public class GXConcurrentToolsUtils {
         // 添加JVM关闭钩子，优雅关闭线程池
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
-                LOG.info("Shutting down thread pool...");
+                LOG.info("Shutting down thread pool via JVM shutdown hook...");
                 EXECUTOR_SERVICE.shutdown();
                 if (!EXECUTOR_SERVICE.awaitTermination(5, TimeUnit.SECONDS)) {
                     int unfinishedTasks = EXECUTOR_SERVICE.getQueue().size();
                     LOG.warn("{} tasks did not complete in time, forcing shutdown", unfinishedTasks);
                     EXECUTOR_SERVICE.shutdownNow();
                 }
-                LOG.info("Thread pool shutdown successfully");
+                LOG.info("Thread pool shutdown successfully via JVM shutdown hook");
             } catch (InterruptedException e) {
                 EXECUTOR_SERVICE.shutdownNow();
                 Thread.currentThread().interrupt();
-                LOG.error("Thread pool shutdown interrupted", e);
+                LOG.error("Thread pool shutdown interrupted via JVM shutdown hook", e);
             }
         }));
     }
@@ -527,9 +536,9 @@ public class GXConcurrentToolsUtils {
      * </p>
      *
      * @param completableFutures CompletableFuture 对象列表
-     * @param timeOut            超时时间
-     * @param unit               超时时间单位
-     * @throws IllegalArgumentException 如果 completableFutures 为 null 或为空
+     * @param timeOut            超时时间，必须为非负数
+     * @param unit               超时时间单位，不能为 null
+     * @throws IllegalArgumentException 如果 completableFutures 为 null、空、timeOut 为负数或 unit 为 null
      * @throws RuntimeException         如果任务执行失败（InterruptedException、ExecutionException、TimeoutException）
      */
     public static void allOf(List<CompletableFuture<?>> completableFutures, int timeOut, TimeUnit unit) {
@@ -538,6 +547,10 @@ public class GXConcurrentToolsUtils {
         if (completableFutures.isEmpty()) {
             throw new IllegalArgumentException("completableFutures cannot be empty");
         }
+        if (timeOut < 0) {
+            throw new IllegalArgumentException("timeOut cannot be negative: " + timeOut);
+        }
+        Objects.requireNonNull(unit, "unit cannot be null");
 
         // 记录任务开始时间，用于性能监控
         final long startTime = System.currentTimeMillis();
@@ -593,28 +606,9 @@ public class GXConcurrentToolsUtils {
             // 收集任务状态信息
             TaskStatusInfo statusInfo = collectTaskStatusInfo(completableFutures, taskCount);
 
-            // 记录详细的错误信息和任务状态
-            withMdcContext(mdcContext, () -> {
-                LOG.error("Thread interrupted after {} ms while waiting for {} tasks. Completion rate: {}/{}({}%). {}. {}",
-                        executionTime,
-                        taskCount,
-                        statusInfo.completedCount,
-                        taskCount,
-                        String.format("%.2f", statusInfo.completionRate),
-                        getTaskStatistics(),
-                        getThreadPoolStatus(),
-                        e);
-                return null;
-            });
-
-            // 取消所有未完成的任务，避免资源泄漏
-            int cancelledCount = cancelUnfinishedTasks(completableFutures);
-            withMdcContext(mdcContext, () -> {
-                LOG.warn("Cancelled {} of {} incomplete tasks due to thread interruption",
-                        cancelledCount,
-                        statusInfo.unfinishedCount);
-                return null;
-            });
+            // 统一处理任务取消和日志记录
+            handleTaskCancellation(completableFutures, statusInfo, executionTime, mdcContext,
+                    "Thread interrupted", e);
 
             // 标记当前线程为中断状态
             wasInterrupted = true;
@@ -637,29 +631,9 @@ public class GXConcurrentToolsUtils {
             // 收集任务状态信息
             TaskStatusInfo statusInfo = collectTaskStatusInfo(completableFutures, taskCount);
 
-            // 记录详细的错误信息和任务状态
-            withMdcContext(mdcContext, () -> {
-                LOG.error("Task execution failed after {} ms: {} ({}). Completion rate: {}/{}({}%). {}. {}",
-                        executionTime,
-                        errorMessage,
-                        errorType,
-                        statusInfo.completedCount,
-                        taskCount,
-                        String.format("%.2f", statusInfo.completionRate),
-                        getTaskStatistics(),
-                        getThreadPoolStatus(),
-                        e);
-                return null;
-            });
-
-            // 取消所有未完成的任务，避免资源泄漏
-            int cancelledCount = cancelUnfinishedTasks(completableFutures);
-            withMdcContext(mdcContext, () -> {
-                LOG.warn("Cancelled {} of {} incomplete tasks due to execution failure",
-                        cancelledCount,
-                        statusInfo.unfinishedCount);
-                return null;
-            });
+            // 统一处理任务取消和日志记录
+            handleTaskCancellation(completableFutures, statusInfo, executionTime, mdcContext,
+                    String.format("Task execution failed: %s (%s)", errorMessage, errorType), e);
 
             throw new RuntimeException(String.format(
                     "Task execution failed: %s (%s). Only %d of %d tasks completed (%.2f%%)",
@@ -675,29 +649,9 @@ public class GXConcurrentToolsUtils {
             // 收集任务状态信息
             TaskStatusInfo statusInfo = collectTaskStatusInfo(completableFutures, taskCount);
 
-            // 记录详细的超时信息和任务状态
-            withMdcContext(mdcContext, () -> {
-                LOG.warn("Tasks timed out after {} {} (elapsed time: {} ms). Completion rate: {}/{}({}%). {}. {}",
-                        timeOut,
-                        unit,
-                        executionTime,
-                        statusInfo.completedCount,
-                        taskCount,
-                        String.format("%.2f", statusInfo.completionRate),
-                        getTaskStatistics(),
-                        getThreadPoolStatus());
-                return null;
-            });
-
-            // 取消未完成的任务，避免资源泄漏
-            int cancelledCount = cancelUnfinishedTasks(completableFutures);
-
-            withMdcContext(mdcContext, () -> {
-                LOG.warn("Cancelled {} of {} incomplete tasks due to timeout",
-                        cancelledCount,
-                        statusInfo.unfinishedCount);
-                return null;
-            });
+            // 统一处理任务取消和日志记录
+            handleTaskCancellation(completableFutures, statusInfo, executionTime, mdcContext,
+                    String.format("Tasks timed out after %d %s", timeOut, unit), e);
 
             throw new RuntimeException(String.format(
                     "Tasks timed out after %d %s. Only %d of %d tasks completed (%.2f%%)",
@@ -715,24 +669,12 @@ public class GXConcurrentToolsUtils {
             String errorMessage = rootCause != null ? rootCause.getMessage() : e.getMessage();
             String errorType = rootCause != null ? rootCause.getClass().getName() : e.getClass().getName();
 
-            withMdcContext(mdcContext, () -> {
-                LOG.error("Unexpected error after {} ms while waiting for {} tasks: {} ({}). {}. {}",
-                        executionTime,
-                        taskCount,
-                        errorMessage,
-                        errorType,
-                        getTaskStatistics(),
-                        getThreadPoolStatus(),
-                        e);
-                return null;
-            });
+            // 收集任务状态信息
+            TaskStatusInfo statusInfo = collectTaskStatusInfo(completableFutures, taskCount);
 
-            // 取消所有未完成的任务，避免资源泄漏
-            int cancelledCount = cancelUnfinishedTasks(completableFutures);
-            withMdcContext(mdcContext, () -> {
-                LOG.warn("Cancelled {} incomplete tasks due to unexpected error", cancelledCount);
-                return null;
-            });
+            // 统一处理任务取消和日志记录
+            handleTaskCancellation(completableFutures, statusInfo, executionTime, mdcContext,
+                    String.format("Unexpected error: %s (%s)", errorMessage, errorType), e);
 
             throw new RuntimeException(String.format(
                     "Unexpected error while waiting for tasks: %s (%s)",
@@ -740,6 +682,92 @@ public class GXConcurrentToolsUtils {
                     errorType), e);
         } finally {
             // 如果当前线程在进入此方法前已被中断，则恢复中断状态
+            if (wasInterrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    /**
+     * 优雅关闭线程池。
+     * <p>
+     * <b>实现原理</b>：
+     * 1. 调用 shutdown() 方法，停止接受新任务并等待现有任务完成。
+     * 2. 设置 5 秒超时，若任务未完成，则调用 shutdownNow() 强制关闭。
+     * 3. 记录关闭过程中的状态和异常，便于监控和调试。
+     * </p>
+     * <p>
+     * <b>线程安全</b>：
+     * - ThreadPoolExecutor 的 shutdown() 和 shutdownNow() 方法是线程安全的。
+     * - 日志记录在当前线程执行，不涉及并发问题。
+     * - 中断状态通过 try-finally 结构恢复，确保线程安全性。
+     * </p>
+     * <p>
+     * <b>使用场景</b>：
+     * - 在应用程序关闭前主动释放线程池资源。
+     * - 在特定业务逻辑完成后清理线程池，避免资源占用。
+     * </p>
+     * <p>
+     * <b>注意事项</b>：
+     * - 调用此方法后，线程池将不可用，后续任务提交会抛出 RejectedExecutionException。
+     * - 若需要更长的等待时间，可通过系统属性 maple.thread.shutdown.timeout 配置（单位：秒）。
+     * - 此方法与 JVM 关闭钩子独立，互不干扰。
+     * </p>
+     */
+    public static void shutdownThreadPool() {
+        // 检查线程池是否已关闭，避免重复操作
+        if (EXECUTOR_SERVICE.isShutdown()) {
+            LOG.info("Thread pool is already shut down, skipping shutdown operation");
+            return;
+        }
+
+        // 从系统属性读取关闭超时时间，默认 5 秒
+        long shutdownTimeout = NumberUtil.parseLong(
+                System.getProperty("maple.thread.shutdown.timeout"),
+                5L
+        );
+        if (shutdownTimeout < 0) {
+            shutdownTimeout = 5L; // 确保超时时间非负
+            LOG.warn("Invalid shutdown timeout specified, using default 5 seconds");
+        }
+
+        // 保存当前线程的中断状态
+        boolean wasInterrupted = Thread.currentThread().isInterrupted();
+
+        try {
+            // 记录当前线程池状态
+            String poolStatus = getThreadPoolStatus();
+            LOG.info("Initiating thread pool shutdown. Current status: {}", poolStatus);
+
+            // 开始优雅关闭
+            EXECUTOR_SERVICE.shutdown();
+
+            // 等待指定时间，允许任务完成
+            if (!EXECUTOR_SERVICE.awaitTermination(shutdownTimeout, TimeUnit.SECONDS)) {
+                int unfinishedTasks = EXECUTOR_SERVICE.getQueue().size();
+                LOG.warn("Thread pool did not terminate within {} seconds, {} tasks remain, forcing shutdown",
+                        shutdownTimeout, unfinishedTasks);
+
+                // 强制关闭未完成任务
+                List<Runnable> unexecutedTasks = EXECUTOR_SERVICE.shutdownNow();
+                LOG.warn("Forced shutdown completed, {} tasks were not executed", unexecutedTasks.size());
+            } else {
+                LOG.info("Thread pool shut down gracefully within {} seconds", shutdownTimeout);
+            }
+
+            // 记录最终状态
+            LOG.info("Thread pool shutdown completed. Final status: {}", getThreadPoolStatus());
+        } catch (InterruptedException e) {
+            // 中断时强制关闭
+            EXECUTOR_SERVICE.shutdownNow();
+            Thread.currentThread().interrupt();
+            LOG.error("Thread pool shutdown interrupted, forced shutdown executed", e);
+        } catch (Exception e) {
+            // 捕获其他意外异常
+            LOG.error("Unexpected error during thread pool shutdown: {}", e.getMessage(), e);
+            EXECUTOR_SERVICE.shutdownNow();
+        } finally {
+            // 恢复中断状态
             if (wasInterrupted) {
                 Thread.currentThread().interrupt();
             }
@@ -862,15 +890,15 @@ public class GXConcurrentToolsUtils {
         boolean wasInterrupted = Thread.currentThread().isInterrupted();
 
         try {
-            // 并行处理任务取消，提高效率
-            futures.parallelStream().forEach(future -> {
+            // 顺序处理任务取消，避免并行流对小型任务列表的开销
+            for (CompletableFuture<?> future : futures) {
                 if (future == null) {
-                    return;
+                    continue;
                 }
 
                 if (future.isDone()) {
                     alreadyDoneCount.incrementAndGet();
-                    return;
+                    continue;
                 }
 
                 try {
@@ -891,7 +919,7 @@ public class GXConcurrentToolsUtils {
                     failedToCancel.incrementAndGet();
                     LOG.warn("Failed to cancel a task: {}", e.getMessage(), e);
                 }
-            });
+            }
         } finally {
             // 如果当前线程在进入此方法前已被中断，则恢复中断状态
             if (wasInterrupted) {
@@ -909,6 +937,56 @@ public class GXConcurrentToolsUtils {
         }
 
         return cancelledCount.intValue();
+    }
+
+    /**
+     * 统一处理任务取消和日志记录。
+     * <p>
+     * 当任务执行过程中发生异常（如中断、执行失败、超时等）时，调用此方法：
+     * 1. 记录详细的错误日志，包括任务状态、线程池状态和统计信息。
+     * 2. 取消所有未完成的任务，避免资源泄漏。
+     * </p>
+     * <p>
+     * <b>线程安全</b>：
+     * - 日志记录和任务取消操作在指定的 MDC 上下文中执行，确保日志上下文一致性。
+     * - 使用 cancelUnfinishedTasks 方法取消任务，保证线程安全。
+     * </p>
+     *
+     * @param futures        CompletableFuture 对象列表
+     * @param statusInfo     任务状态信息
+     * @param executionTime  执行时间（毫秒）
+     * @param mdcContext     MDC 上下文
+     * @param errorMessage   错误信息
+     * @param throwable      异常对象
+     */
+    private static void handleTaskCancellation(List<CompletableFuture<?>> futures,
+                                               TaskStatusInfo statusInfo,
+                                               long executionTime,
+                                               Map<String, String> mdcContext,
+                                               String errorMessage,
+                                               Throwable throwable) {
+        // 记录错误日志
+        withMdcContext(mdcContext, () -> {
+            LOG.error("{} after {} ms while waiting for {} tasks. Completion rate: {}/{}({}%). {}. {}",
+                    errorMessage,
+                    executionTime,
+                    statusInfo.completedCount + statusInfo.unfinishedCount,
+                    statusInfo.completedCount,
+                    statusInfo.completedCount + statusInfo.unfinishedCount,
+                    String.format("%.2f", statusInfo.completionRate),
+                    getTaskStatistics(),
+                    getThreadPoolStatus(),
+                    throwable);
+            return null;
+        });
+
+        // 取消未完成的任务
+        int cancelledCount = cancelUnfinishedTasks(futures);
+        withMdcContext(mdcContext, () -> {
+            LOG.warn("Cancelled {} of {} incomplete tasks due to {}",
+                    cancelledCount, statusInfo.unfinishedCount, errorMessage.toLowerCase());
+            return null;
+        });
     }
 
     /**
