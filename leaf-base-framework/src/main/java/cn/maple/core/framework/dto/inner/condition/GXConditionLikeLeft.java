@@ -7,23 +7,31 @@ import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 public class GXConditionLikeLeft extends GXCondition<String> {
     public GXConditionLikeLeft(String tableNameAlias, String fieldName, String value) {
         super(tableNameAlias, fieldName, value);
+        // 检查SQL注入
+        if (GXDBStringEscapeUtils.check(value)) {
+            throw new GXSqlInjectionException("SQL注入异常");
+        }
+        // 清除原参数映射并添加带通配符的参数
+        this.paramMap.clear();
+        this.paramMap.put(paramName, "%" + value);
     }
 
     @Override
     public String getOp() {
         return "like";
     }
+    
+    @Override
+    public String whereString() {
+        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
+            return CharSequenceUtil.format("{} {} #{{}}", getFieldExpression(), getOp(), paramName);
+        }
+        return CharSequenceUtil.format("{}.{} {} #{{}}", tableNameAlias, getFieldExpression(), getOp(), paramName);
+    }
 
     @Override
     public String getFieldValue() {
-        if (GXDBStringEscapeUtils.check(value.toString())) {
-            throw new GXSqlInjectionException("SQL注入异常");
-        }
-        String str = GXDBStringEscapeUtils.escapeRawString(value.toString());
-        String format = "'%{}'";
-        if (CharSequenceUtil.contains(str, "\\'")) {
-            format = "\"%{}\"";
-        }
-        return CharSequenceUtil.format(format, str);
+        // 此方法不再使用，但为了兼容性保留
+        return "";
     }
 }

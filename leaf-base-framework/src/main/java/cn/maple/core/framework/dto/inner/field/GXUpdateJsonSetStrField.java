@@ -13,12 +13,25 @@ public class GXUpdateJsonSetStrField extends GXUpdateField<String> {
 
     @Override
     public String getFieldValue() {
-        String strValue = value.toString();
-        if (CharSequenceUtil.contains(strValue, "'") && JSONUtil.isTypeJSON(strValue)) {
-            strValue = CharSequenceUtil.format("CAST('{}' as JSON)", CharSequenceUtil.replace(strValue, "'", "''"));
-            return CharSequenceUtil.format("JSON_SET({}.{} , '$.{}' , {})", tableNameAlias, fieldName, path, strValue);
+        // 此方法不再用于SQL拼接，而是用于特殊情况处理
+        return value.toString();
+    }
+    
+    @Override
+    public String updateString() {
+        // JSON操作需要特殊处理
+        // 为JSON路径和值创建单独的参数
+        String pathParamName = paramName + "_path";
+        this.paramMap.put(pathParamName, path);
+        
+        if (JSONUtil.isTypeJSON(value.toString())) {
+            // 对于JSON值，使用CAST函数
+            return CharSequenceUtil.format("{}.{} = JSON_SET({}.{}, '$.' || #{{{}}}, CAST(#{{{}} as JSON))", 
+                tableNameAlias, fieldName, tableNameAlias, fieldName, pathParamName, paramName);
+        } else {
+            // 对于普通字符串值
+            return CharSequenceUtil.format("{}.{} = JSON_SET({}.{}, '$.' || #{{{}}}, #{{}})", 
+                tableNameAlias, fieldName, tableNameAlias, fieldName, pathParamName, paramName);
         }
-        strValue = CharSequenceUtil.replace(strValue, "'", "\\'");
-        return CharSequenceUtil.format("JSON_SET({}.{} , '$.{}' , '{}')", tableNameAlias, fieldName, path, strValue);
     }
 }

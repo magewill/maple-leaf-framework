@@ -27,14 +27,9 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
 
     @Override
     public String getFieldExpression() {
-        if (CharSequenceUtil.isEmpty(jsonPath)) {
-            jsonPath = "$";
-        } else {
-            jsonPath = CharSequenceUtil.format("$.{}", jsonPath);
-        }
-        // TODO 需要兼容  JSON_CONTAINS(ext, JSON_OBJECT("name", "塵子曦", "father", "塵渊")) 表达式
-        String format = "`{}`.`{}`->'" + jsonPath + "', CAST('[{}]' AS JSON)";
-        return CharSequenceUtil.format(format, tableNameAlias);
+        // 不再在此方法中构建完整表达式
+        // 仅返回字段名，完整表达式将在whereString中构建
+        return fieldExpression;
     }
 
     @Override
@@ -55,7 +50,31 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
 
     @Override
     public String whereString() {
-        String format = CharSequenceUtil.format("{}({})", getFunctionName(), getFieldExpression());
-        return CharSequenceUtil.format(format, getOp(), getFieldValue());
+        // 清除原来的参数映射，因为JSON函数需要特殊处理
+        this.paramMap.clear();
+        
+        // 处理JSON路径
+        String jsonPathParamName = paramName + "_path";
+        String normalizedJsonPath = CharSequenceUtil.isEmpty(jsonPath) ? "$" : "$." + jsonPath;
+        this.paramMap.put(jsonPathParamName, normalizedJsonPath);
+        
+        // 处理JSON值数组
+        String valuesParamName = paramName + "_values";
+        String jsonArray = "[" + values.stream().map(v -> {
+            if (v instanceof Number) {
+                return v.toString();
+            } else {
+                return "\"" + v + "\"";
+            }
+        }).collect(Collectors.joining(",")) + "]";
+        this.paramMap.put(valuesParamName, jsonArray);
+        
+        // 构建参数化的JSON_CONTAINS函数调用
+        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
+            return CharSequenceUtil.format("JSON_CONTAINS({}, CAST(#{{{}} as JSON), #{{}})", 
+                getFieldExpression(), valuesParamName, jsonPathParamName);
+        }
+        return CharSequenceUtil.format("JSON_CONTAINS({}.{}, CAST(#{{{}} as JSON), #{{}})", 
+            tableNameAlias, getFieldExpression(), valuesParamName, jsonPathParamName);
     }
 }

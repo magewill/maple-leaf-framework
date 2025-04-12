@@ -5,13 +5,45 @@ import lombok.extern.log4j.Log4j2;
 
 @Log4j2
 public class GXConditionRaw extends GXCondition<String> {
+    private final boolean useRawValue;
+    
+    /**
+     * 创建一个原始SQL条件
+     * 
+     * @param value 条件值
+     */
     public GXConditionRaw(String value) {
+        this(value, false);
+    }
+    
+    /**
+     * 创建一个原始SQL条件
+     * 
+     * @param value 条件值
+     * @param useRawValue 是否使用原始值（不参数化）
+     */
+    public GXConditionRaw(String value, boolean useRawValue) {
         super("", "", value);
+        this.useRawValue = useRawValue;
     }
 
     @Override
     public String getOp() {
         return "";
+    }
+    
+    @Override
+    public String whereString() {
+        if (useRawValue) {
+            // 使用原始值，不参数化（需要确保已经进行了SQL注入检查）
+            log.warn("使用原始SQL条件，请确保已进行SQL注入检查: {}", value);
+            return value.toString();
+        } else {
+            // 使用参数化查询
+            this.paramMap.clear();
+            this.paramMap.put(paramName, value);
+            return "#{" + paramName + "}";
+        }
     }
 
     @Override

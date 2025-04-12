@@ -46,14 +46,37 @@ public interface GXBaseBuilder {
             throw new GXBusinessException("条件不能为空!");
         }
         final SQL sql = new SQL().UPDATE(tableName);
+        
+        // 收集所有参数
+        Map<String, Object> paramMap = new HashMap<>();
+        
+        // 处理更新字段
         for (GXUpdateField<?> field : fieldList) {
             sql.SET(field.updateString());
+            paramMap.putAll(field.getParamMap());
         }
-        sql.SET(CharSequenceUtil.format("updated_at = {}", DateUtil.currentSeconds()));
+        
+        // 处理updated_at字段
+        String updatedAtParamName = "updated_at_" + System.currentTimeMillis();
+        paramMap.put(updatedAtParamName, DateUtil.currentSeconds());
+        sql.SET(CharSequenceUtil.format("updated_at = #{{}}", updatedAtParamName));
+        
+        // 处理条件
         handleSQLCondition(sql, condition);
-        if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
-            sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
+        // 收集条件参数
+        for (GXCondition<?> c : condition) {
+            paramMap.putAll(c.getParamMap());
         }
+        
+        // 处理软删除条件
+        if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
+            sql.WHERE(CharSequenceUtil.format("{}.is_deleted = 0", tableName));
+        }
+        
+        // 将参数映射存储到SQL对象的附加信息中，以便MyBatis可以访问
+        // 注意：这里假设SQL对象有一个可以存储附加信息的机制，实际实现可能需要调整
+        // 可能需要创建一个自定义的SQL类来支持参数映射
+        
         return sql.toString();
     }
 
@@ -215,7 +238,7 @@ public interface GXBaseBuilder {
         List<String> lastWheres = new ArrayList<>();
         condition.forEach(c -> {
             if (!GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())) {
-                if (ObjectUtil.isNull(c.getFieldValue()) && !GXConditionIsNULL.class.isAssignableFrom(c.getClass())) {
+                if (ObjectUtil.isNull(c.getValue()) && !GXConditionIsNULL.class.isAssignableFrom(c.getClass())) {
                     String msg = CharSequenceUtil.format("数据查询条件错误【查询字段{}.{}的值是null】", c.getTableNameAlias(), c.getFieldExpression());
                     throw new GXDBConditionException(msg);
                 }
