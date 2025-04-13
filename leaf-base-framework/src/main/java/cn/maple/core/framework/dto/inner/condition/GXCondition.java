@@ -81,6 +81,7 @@ public abstract class GXCondition<T> implements Serializable {
             return CharSequenceUtil.format("{}.{} {} NULL", tableNameAlias, getFieldExpression(), opStr);
         }
         
+        // 使用参数化查询，防止SQL注入
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
             return CharSequenceUtil.format("{} {} #{{}}", getFieldExpression(), opStr, paramName);
         }

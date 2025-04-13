@@ -37,12 +37,6 @@ public abstract class GXUpdateField<T> implements Serializable {
     
     /**
      * 生成唯一的参数名
-     *
-     * @param fieldName 字段名
-     * @return 参数名
-     */
-    /**
-     * 生成唯一的参数名
      * 确保在同一次操作中不会有重复的参数名
      *
      * @param fieldName 字段名

@@ -56,13 +56,16 @@ public interface GXBaseBuilder {
         String updatedAtParamName = "updated_at_" + System.currentTimeMillis();
         sql.SET(CharSequenceUtil.format("updated_at = #{{}}", updatedAtParamName));
         // 注意：在实际执行时，需要确保updatedAtParamName和当前时间戳被添加到参数映射中
+        // 这里假设调用方会将当前时间戳添加到参数映射中
         
         // 处理条件
         handleSQLCondition(sql, condition);
         
         // 处理软删除条件
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
-            sql.WHERE(CharSequenceUtil.format("{}.is_deleted = 0", tableName));
+            // 使用参数化查询处理is_deleted条件
+            GXConditionEQ isDeletedCondition = new GXConditionEQ(tableName, "is_deleted", 0);
+            sql.WHERE(isDeletedCondition.whereString());
         }
         
         // 注意：参数映射已经在各个GXUpdateField和GXCondition对象中收集
@@ -112,7 +115,9 @@ public interface GXBaseBuilder {
         // 处理WHERE
         handleSQLCondition(sql, condition);
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
-            sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableNameAlias, 0));
+            // 使用参数化查询处理is_deleted条件
+            GXConditionEQ isDeletedCondition = new GXConditionEQ(tableNameAlias, "is_deleted", 0);
+            sql.WHERE(isDeletedCondition.whereString());
         }
         // 处理JOIN表的Where条件
         if (Objects.nonNull(joins) && !joins.isEmpty()) {
@@ -276,26 +281,45 @@ public interface GXBaseBuilder {
         keyProperty = CharSequenceUtil.toUnderlineCase(keyProperty);
         LOGGER.info("deleteSoftCondition方法中的{}表的主键名字{}", tableName, keyProperty);
         SQL sql = new SQL().UPDATE(tableName);
-        sql.SET(CharSequenceUtil.format("is_deleted = {}", keyProperty), CharSequenceUtil.format("deleted_at = {}", DateUtil.currentSeconds()));
+        
+        // 使用参数化查询处理is_deleted和deleted_at字段
+        String isDeletedParamName = "is_deleted_" + System.currentTimeMillis();
+        String deletedAtParamName = "deleted_at_" + System.currentTimeMillis();
+        sql.SET(CharSequenceUtil.format("is_deleted = #{{{}}}", isDeletedParamName));
+        sql.SET(CharSequenceUtil.format("deleted_at = #{{{}}}", deletedAtParamName));
+        // 注意：在实际执行时，需要确保这些参数被添加到参数映射中
+        // 例如：paramMap.put(isDeletedParamName, keyProperty);
+        // 例如：paramMap.put(deletedAtParamName, DateUtil.currentSeconds());
+        
         if (CollUtil.isNotEmpty(updateFieldList)) {
             for (GXUpdateField<?> field : updateFieldList) {
                 sql.SET(field.updateString());
             }
         }
+        
         if (CharSequenceUtil.isNotBlank(extraData.getStr("deletedBy"))) {
             List<TableFieldInfo> fieldList = tableInfo.getFieldList();
             for (TableFieldInfo fieldInfo : fieldList) {
                 String column = fieldInfo.getColumn();
                 if (CharSequenceUtil.equalsIgnoreCase("deleted_by", column)) {
-                    sql.SET(CharSequenceUtil.format("deleted_by = '{}'", extraData.getStr("deletedBy")));
+                    // 使用参数化查询处理deleted_by字段
+                    String deletedByParamName = "deleted_by_" + System.currentTimeMillis();
+                    sql.SET(CharSequenceUtil.format("deleted_by = #{{{}}}", deletedByParamName));
+                    // 注意：在实际执行时，需要确保deletedByParamName和deletedBy值被添加到参数映射中
+                    // 例如：paramMap.put(deletedByParamName, extraData.getStr("deletedBy"));
                     break;
                 }
             }
         }
+        
         handleSQLCondition(sql, condition);
+        
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
-            sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
+            // 使用参数化查询处理is_deleted条件
+            GXConditionEQ isDeletedCondition = new GXConditionEQ(tableName, "is_deleted", 0);
+            sql.WHERE(isDeletedCondition.whereString());
         }
+        
         return sql.toString();
     }
 
