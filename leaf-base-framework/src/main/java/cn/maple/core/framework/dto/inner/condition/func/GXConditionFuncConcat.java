@@ -14,7 +14,25 @@ public class GXConditionFuncConcat extends GXConditionFunc<String> {
 
     @Override
     public String getFieldValue() {
-        return CharSequenceUtil.format("'{}%'", value);
+        // 此方法不再用于SQL拼接，而是用于特殊情况处理
+        return value.toString();
+    }
+    
+    @Override
+    public String whereString() {
+        // 清除原来的参数映射，因为CONCAT函数需要特殊处理
+        this.paramMap.clear();
+        
+        // 为值创建参数
+        String valueParamName = paramName + "_value";
+        this.paramMap.put(valueParamName, value + "%");
+        
+        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
+            return CharSequenceUtil.format("{}({}) {} #{{}}", 
+                getFunctionName(), getFieldExpression(), getOp(), valueParamName);
+        }
+        return CharSequenceUtil.format("{}({}) {} #{{}}", 
+            getFunctionName(), getFieldExpression(), getOp(), valueParamName);
     }
 
     @Override

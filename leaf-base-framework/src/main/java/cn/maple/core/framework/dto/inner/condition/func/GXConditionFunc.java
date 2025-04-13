@@ -31,6 +31,17 @@ public abstract class GXConditionFunc<T> extends GXCondition<T> {
 
     @Override
     public String whereString() {
-        return CharSequenceUtil.format("{}({}) {} {}", getFunctionName(), getFieldExpression(), getOp(), getFieldValue());
+        // 清除原来的参数映射，因为函数条件需要特殊处理
+        this.paramMap.clear();
+        
+        // 为值创建参数
+        this.paramMap.put(paramName, value);
+        
+        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
+            return CharSequenceUtil.format("{}({}) {} #{{}}", 
+                getFunctionName(), getFieldExpression(), getOp(), paramName);
+        }
+        return CharSequenceUtil.format("{}({}) {} #{{}}", 
+            getFunctionName(), getFieldExpression(), getOp(), paramName);
     }
 }

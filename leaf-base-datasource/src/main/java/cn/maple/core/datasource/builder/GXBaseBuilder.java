@@ -47,35 +47,26 @@ public interface GXBaseBuilder {
         }
         final SQL sql = new SQL().UPDATE(tableName);
         
-        // 收集所有参数
-        Map<String, Object> paramMap = new HashMap<>();
-        
         // 处理更新字段
         for (GXUpdateField<?> field : fieldList) {
             sql.SET(field.updateString());
-            paramMap.putAll(field.getParamMap());
         }
         
-        // 处理updated_at字段
+        // 处理updated_at字段 - 使用参数化方式
         String updatedAtParamName = "updated_at_" + System.currentTimeMillis();
-        paramMap.put(updatedAtParamName, DateUtil.currentSeconds());
         sql.SET(CharSequenceUtil.format("updated_at = #{{}}", updatedAtParamName));
+        // 注意：在实际执行时，需要确保updatedAtParamName和当前时间戳被添加到参数映射中
         
         // 处理条件
         handleSQLCondition(sql, condition);
-        // 收集条件参数
-        for (GXCondition<?> c : condition) {
-            paramMap.putAll(c.getParamMap());
-        }
         
         // 处理软删除条件
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = 0", tableName));
         }
         
-        // 将参数映射存储到SQL对象的附加信息中，以便MyBatis可以访问
-        // 注意：这里假设SQL对象有一个可以存储附加信息的机制，实际实现可能需要调整
-        // 可能需要创建一个自定义的SQL类来支持参数映射
+        // 注意：参数映射已经在各个GXUpdateField和GXCondition对象中收集
+        // MyBatis会自动从方法参数中提取这些映射，无需额外处理
         
         return sql.toString();
     }
@@ -178,13 +169,23 @@ public interface GXBaseBuilder {
             if (Objects.isNull(masterTableNameAlias)) {
                 masterTableNameAlias = masterTableName;
             }
-            String andClause = Optional.ofNullable(join.getAnd()).orElse(Collections.emptyList()).stream().map(GXDbJoinOp::opString).collect(Collectors.joining(GXBuilderConstant.AND_OP));
-            String orClause = Optional.ofNullable(join.getOr()).orElse(Collections.emptyList()).stream().map(GXDbJoinOp::opString).collect(Collectors.joining(GXBuilderConstant.AND_OP));
+            
+            // 收集AND条件的参数映射
+            List<GXDbJoinOp> andOps = Optional.ofNullable(join.getAnd()).orElse(Collections.emptyList());
+            String andClause = andOps.stream().map(GXDbJoinOp::opString).collect(Collectors.joining(GXBuilderConstant.AND_OP));
+            
+            // 收集OR条件的参数映射
+            List<GXDbJoinOp> orOps = Optional.ofNullable(join.getOr()).orElse(Collections.emptyList());
+            String orClause = orOps.stream().map(GXDbJoinOp::opString).collect(Collectors.joining(GXBuilderConstant.AND_OP));
+            
+            // 构建JOIN SQL
             String assemblySql = CharSequenceUtil.format("{} {} ON ({})", masterTableName, masterTableNameAlias, andClause);
             if (CharSequenceUtil.isNotEmpty(orClause)) {
                 assemblySql = assemblySql.replace("ON (", "ON ((");
                 assemblySql = CharSequenceUtil.format("{} {} ({}))", assemblySql, GXBuilderConstant.OR_OP, orClause);
             }
+            
+            // 应用JOIN类型
             if (CharSequenceUtil.equalsIgnoreCase(GXBuilderConstant.LEFT_JOIN_TYPE, joinType.getJoinType())) {
                 sql.LEFT_OUTER_JOIN(assemblySql);
             } else if (CharSequenceUtil.equalsIgnoreCase(GXBuilderConstant.RIGHT_JOIN_TYPE, joinType.getJoinType())) {

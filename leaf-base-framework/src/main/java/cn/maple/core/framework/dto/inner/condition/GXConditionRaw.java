@@ -48,7 +48,8 @@ public class GXConditionRaw extends GXCondition<String> {
 
     @Override
     public String getFieldValue() {
+        // 此方法不再用于SQL拼接，而是用于特殊情况处理
         log.info("~~请确保使用GXDBStringEscapeUtils.check(str)函数对用户传入的数据进行了SQL注入检测~~");
-        return CharSequenceUtil.format("{}", value);
+        return value.toString();
     }
 }

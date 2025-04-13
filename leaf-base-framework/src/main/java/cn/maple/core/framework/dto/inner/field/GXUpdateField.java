@@ -41,8 +41,16 @@ public abstract class GXUpdateField<T> implements Serializable {
      * @param fieldName 字段名
      * @return 参数名
      */
+    /**
+     * 生成唯一的参数名
+     * 确保在同一次操作中不会有重复的参数名
+     *
+     * @param fieldName 字段名
+     * @return 参数名
+     */
     protected String generateParamName(String fieldName) {
-        return "update_" + CharSequenceUtil.toUnderlineCase(fieldName) + "_" + PARAM_COUNTER.incrementAndGet();
+        String simplifiedName = CharSequenceUtil.toUnderlineCase(fieldName);
+        return "update_" + simplifiedName + "_" + PARAM_COUNTER.incrementAndGet();
     }
 
     /**

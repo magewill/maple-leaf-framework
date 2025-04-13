@@ -55,7 +55,7 @@ public abstract class GXCondition<T> implements Serializable {
      * @return 参数名
      */
     protected String generateParamName(String fieldExpression) {
-        String simplifiedName = fieldExpression;
+        String simplifiedName;
         // 如果是函数表达式，提取一个简化名称
         if (fieldExpression.contains("(")) {
             simplifiedName = "func" + Math.abs(fieldExpression.hashCode());
@@ -69,12 +69,12 @@ public abstract class GXCondition<T> implements Serializable {
 
     public String whereString() {
         String opStr = getOp();
-        if (CharSequenceUtil.isEmpty(opStr) && CharSequenceUtil.equals(opStr, GXDataSourceConstant.IGNORE_DATA_FILTER_CONDITION_OP_VALUE)) {
+        if (CharSequenceUtil.isEmpty(opStr) || CharSequenceUtil.equals(opStr, GXDataSourceConstant.IGNORE_DATA_FILTER_CONDITION_OP_VALUE)) {
             return "";
         }
         
         // 特殊处理IS NULL和IS NOT NULL情况
-        if ("is".equalsIgnoreCase(opStr) && value == null) {
+        if (("is".equalsIgnoreCase(opStr) || "is not".equalsIgnoreCase(opStr)) && value == null) {
             if (CharSequenceUtil.isEmpty(tableNameAlias)) {
                 return CharSequenceUtil.format("{} {} NULL", getFieldExpression(), opStr);
             }
