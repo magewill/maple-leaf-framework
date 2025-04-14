@@ -120,4 +120,6 @@ public class GXBaseQueryParamInnerDto extends GXBaseDto {
      */
     @Builder.Default
     private boolean paginateCount = Boolean.TRUE;
+
+    private Map<String, Object> paramMap;
 }

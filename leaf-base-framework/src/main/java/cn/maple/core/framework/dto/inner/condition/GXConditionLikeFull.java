@@ -24,9 +24,9 @@ public class GXConditionLikeFull extends GXCondition<String> {
     @Override
     public String whereString() {
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{} {} #{{}}", getFieldExpression(), getOp(), paramName);
+            return CharSequenceUtil.format("{} {} #{dbQueryParamInnerDto.paramMap.{}}", getFieldExpression(), getOp(), paramName);
         }
-        return CharSequenceUtil.format("{}.{} {} #{{}}", tableNameAlias, getFieldExpression(), getOp(), paramName);
+        return CharSequenceUtil.format("{}.{} {} #{dbQueryParamInnerDto.paramMap.{}}", tableNameAlias, getFieldExpression(), getOp(), paramName);
     }
 
     @Override

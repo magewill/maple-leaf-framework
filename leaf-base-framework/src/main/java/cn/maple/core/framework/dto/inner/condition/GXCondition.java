@@ -83,9 +83,9 @@ public abstract class GXCondition<T> implements Serializable {
         
         // 使用参数化查询，防止SQL注入
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{} {} #{{}}", getFieldExpression(), opStr, paramName);
+            return CharSequenceUtil.format("{} {} #{dbQueryParamInnerDto.paramMap.{}}", getFieldExpression(), opStr, paramName);
         }
-        return CharSequenceUtil.format("{}.{} {} #{{}}", tableNameAlias, getFieldExpression(), opStr, paramName);
+        return CharSequenceUtil.format("{}.{} {} #{dbQueryParamInnerDto.paramMap.{}}", tableNameAlias, getFieldExpression(), opStr, paramName);
     }
 
     public String getFieldExpression() {

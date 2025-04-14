@@ -1,7 +1,6 @@
 package cn.maple.core.datasource.builder;
 
 import cn.hutool.core.collection.CollUtil;
-import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
@@ -46,31 +45,31 @@ public interface GXBaseBuilder {
             throw new GXBusinessException("条件不能为空!");
         }
         final SQL sql = new SQL().UPDATE(tableName);
-        
+
         // 处理更新字段
         for (GXUpdateField<?> field : fieldList) {
             sql.SET(field.updateString());
         }
-        
+
         // 处理updated_at字段 - 使用参数化方式
         String updatedAtParamName = "updated_at_" + System.currentTimeMillis();
         sql.SET(CharSequenceUtil.format("updated_at = #{{}}", updatedAtParamName));
         // 注意：在实际执行时，需要确保updatedAtParamName和当前时间戳被添加到参数映射中
         // 这里假设调用方会将当前时间戳添加到参数映射中
-        
+
         // 处理条件
         handleSQLCondition(sql, condition);
-        
+
         // 处理软删除条件
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
             // 使用参数化查询处理is_deleted条件
             GXConditionEQ isDeletedCondition = new GXConditionEQ(tableName, "is_deleted", 0);
             sql.WHERE(isDeletedCondition.whereString());
         }
-        
+
         // 注意：参数映射已经在各个GXUpdateField和GXCondition对象中收集
         // MyBatis会自动从方法参数中提取这些映射，无需额外处理
-        
+
         return sql.toString();
     }
 
@@ -113,7 +112,8 @@ public interface GXBaseBuilder {
         }
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
         // 处理WHERE
-        handleSQLCondition(sql, condition);
+        Map<String, Object> paramMap = handleSQLCondition(sql, condition);
+        dbQueryParamInnerDto.setParamMap(paramMap);
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
             // 使用参数化查询处理is_deleted条件
             GXConditionEQ isDeletedCondition = new GXConditionEQ(tableNameAlias, "is_deleted", 0);
@@ -174,22 +174,22 @@ public interface GXBaseBuilder {
             if (Objects.isNull(masterTableNameAlias)) {
                 masterTableNameAlias = masterTableName;
             }
-            
+
             // 收集AND条件的参数映射
             List<GXDbJoinOp> andOps = Optional.ofNullable(join.getAnd()).orElse(Collections.emptyList());
             String andClause = andOps.stream().map(GXDbJoinOp::opString).collect(Collectors.joining(GXBuilderConstant.AND_OP));
-            
+
             // 收集OR条件的参数映射
             List<GXDbJoinOp> orOps = Optional.ofNullable(join.getOr()).orElse(Collections.emptyList());
             String orClause = orOps.stream().map(GXDbJoinOp::opString).collect(Collectors.joining(GXBuilderConstant.AND_OP));
-            
+
             // 构建JOIN SQL
             String assemblySql = CharSequenceUtil.format("{} {} ON ({})", masterTableName, masterTableNameAlias, andClause);
             if (CharSequenceUtil.isNotEmpty(orClause)) {
                 assemblySql = assemblySql.replace("ON (", "ON ((");
                 assemblySql = CharSequenceUtil.format("{} {} ({}))", assemblySql, GXBuilderConstant.OR_OP, orClause);
             }
-            
+
             // 应用JOIN类型
             if (CharSequenceUtil.equalsIgnoreCase(GXBuilderConstant.LEFT_JOIN_TYPE, joinType.getJoinType())) {
                 sql.LEFT_OUTER_JOIN(assemblySql);
@@ -237,11 +237,12 @@ public interface GXBaseBuilder {
      * @param sql       SQL对象
      * @param condition 条件
      */
-    static void handleSQLCondition(SQL sql, List<GXCondition<?>> condition) {
+    static Map<String, Object> handleSQLCondition(SQL sql, List<GXCondition<?>> condition) {
         if (Objects.isNull(condition) || condition.isEmpty()) {
-            return;
+            return new HashMap<>();
         }
         List<String> lastWheres = new ArrayList<>();
+        Map<String, Object> paramMap = new HashMap<>();
         condition.forEach(c -> {
             if (!GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())) {
                 if (ObjectUtil.isNull(c.getValue()) && !GXConditionIsNULL.class.isAssignableFrom(c.getClass())) {
@@ -251,6 +252,7 @@ public interface GXBaseBuilder {
                 String str = c.whereString();
                 if (CharSequenceUtil.isNotEmpty(str)) {
                     lastWheres.add(str);
+                    paramMap.putAll(c.getParamMap());
                 }
             }
         });
@@ -258,6 +260,7 @@ public interface GXBaseBuilder {
             String whereStr = String.join(" AND ", lastWheres);
             sql.WHERE(whereStr);
         }
+        return paramMap;
     }
 
     /**
@@ -281,7 +284,7 @@ public interface GXBaseBuilder {
         keyProperty = CharSequenceUtil.toUnderlineCase(keyProperty);
         LOGGER.info("deleteSoftCondition方法中的{}表的主键名字{}", tableName, keyProperty);
         SQL sql = new SQL().UPDATE(tableName);
-        
+
         // 使用参数化查询处理is_deleted和deleted_at字段
         String isDeletedParamName = "is_deleted_" + System.currentTimeMillis();
         String deletedAtParamName = "deleted_at_" + System.currentTimeMillis();
@@ -290,13 +293,13 @@ public interface GXBaseBuilder {
         // 注意：在实际执行时，需要确保这些参数被添加到参数映射中
         // 例如：paramMap.put(isDeletedParamName, keyProperty);
         // 例如：paramMap.put(deletedAtParamName, DateUtil.currentSeconds());
-        
+
         if (CollUtil.isNotEmpty(updateFieldList)) {
             for (GXUpdateField<?> field : updateFieldList) {
                 sql.SET(field.updateString());
             }
         }
-        
+
         if (CharSequenceUtil.isNotBlank(extraData.getStr("deletedBy"))) {
             List<TableFieldInfo> fieldList = tableInfo.getFieldList();
             for (TableFieldInfo fieldInfo : fieldList) {
@@ -311,15 +314,15 @@ public interface GXBaseBuilder {
                 }
             }
         }
-        
+
         handleSQLCondition(sql, condition);
-        
+
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
             // 使用参数化查询处理is_deleted条件
             GXConditionEQ isDeletedCondition = new GXConditionEQ(tableName, "is_deleted", 0);
             sql.WHERE(isDeletedCondition.whereString());
         }
-        
+
         return sql.toString();
     }
 
