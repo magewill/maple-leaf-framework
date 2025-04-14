@@ -4,7 +4,6 @@ import cn.hutool.core.lang.Dict;
 import cn.maple.core.datasource.builder.GXBaseBuilder;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.GXUnionTypeEnums;
-import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.model.GXBaseModel;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
@@ -17,7 +16,7 @@ import java.util.List;
 @Mapper
 public interface GXBaseMapper<T extends GXBaseModel> extends BaseMapper<T> {
     @UpdateProvider(type = GXBaseBuilder.class, method = "updateFieldByCondition")
-    Integer updateFieldByCondition(String tableName, List<GXUpdateField<?>> fieldList, List<GXCondition<?>> condition);
+    Integer updateFieldByCondition(@Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> fieldList);
 
     @SelectProvider(type = GXBaseBuilder.class, method = "checkRecordIsExists")
     Integer checkRecordIsExists(@Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto);

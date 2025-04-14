@@ -1,8 +1,5 @@
 package cn.maple.core.framework.dto.inner.field;
 
-import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.json.JSONUtil;
-
 public class GXUpdateStrField extends GXUpdateField<String> {
     public GXUpdateStrField(String tableNameAlias, String fieldName, String strValue) {
         super(tableNameAlias, fieldName, strValue);
@@ -10,14 +7,8 @@ public class GXUpdateStrField extends GXUpdateField<String> {
 
     @Override
     public String getFieldValue() {
-        String strValue = value.toString();
-        if (CharSequenceUtil.contains(strValue, "'")) {
-            if (JSONUtil.isTypeJSON(strValue)) {
-                strValue = CharSequenceUtil.replace(strValue, "'", "''");
-            } else {
-                strValue = CharSequenceUtil.replace(strValue, "'", "\\'");
-            }
-        }
-        return CharSequenceUtil.format("'{}'", strValue);
+        // 此方法不再用于SQL拼接，而是用于特殊情况处理
+        // 在参数化查询中，值会通过paramMap传递给MyBatis
+        return value.toString();
     }
 }

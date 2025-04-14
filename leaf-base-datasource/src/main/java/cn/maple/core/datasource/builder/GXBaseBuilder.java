@@ -37,21 +37,24 @@ public interface GXBaseBuilder {
     /**
      * 更新实体字段和虚拟字段
      *
-     * @param tableName 表名
-     * @param fieldList 数据列表
-     * @param condition 条件
+     * @param dbQueryParamInnerDto 查询条件
+     * @param fieldList            数据列表
      * @return String
      */
-    static String updateFieldByCondition(String tableName, List<GXUpdateField<?>> fieldList, List<GXCondition<?>> condition) {
+    static String updateFieldByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> fieldList) {
+        List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
+        String tableName = dbQueryParamInnerDto.getTableName();
         if (CollUtil.isEmpty(condition)) {
             throw new GXBusinessException("条件不能为空!");
         }
         final SQL sql = new SQL().UPDATE(tableName);
         for (GXUpdateField<?> field : fieldList) {
             sql.SET(field.updateString());
+            dbQueryParamInnerDto.getParamMap().putAll(field.getParamMap());
         }
         sql.SET(CharSequenceUtil.format("updated_at = {}", DateUtil.currentSeconds()));
-        handleSQLCondition(sql, condition);
+        Map<String, Object> paramMap = handleSQLCondition(sql, condition);
+        dbQueryParamInnerDto.getParamMap().putAll(paramMap);
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
         }
@@ -99,7 +102,7 @@ public interface GXBaseBuilder {
         // 处理WHERE
         Map<String, Object> paramMap = handleSQLCondition(sql, condition);
         // 将参数设置到Mybatis的参数Map中
-        dbQueryParamInnerDto.setParamMap(paramMap);
+        dbQueryParamInnerDto.getParamMap().putAll(paramMap);
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableNameAlias, 0));
         }
@@ -119,7 +122,7 @@ public interface GXBaseBuilder {
                 }
                 Map<String, Object> joinParamMap = handleSQLCondition(sql, joinConditions);
                 // 将参数设置到Mybatis的参数Map中
-                dbQueryParamInnerDto.setParamMap(paramMap);
+                dbQueryParamInnerDto.getParamMap().putAll(paramMap);
             });
         }
         // 处理分组
@@ -278,7 +281,7 @@ public interface GXBaseBuilder {
             }
         }
         Map<String, Object> paramMap = handleSQLCondition(sql, condition);
-        dbQueryParamInnerDto.setParamMap(paramMap);
+        dbQueryParamInnerDto.getParamMap().putAll(paramMap);
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
         }
@@ -299,7 +302,7 @@ public interface GXBaseBuilder {
         }
         SQL sql = new SQL().DELETE_FROM(tableName);
         Map<String, Object> paramMap = handleSQLCondition(sql, condition);
-        dbQueryParamInnerDto.setParamMap(paramMap);
+        dbQueryParamInnerDto.getParamMap().putAll(paramMap);
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
         }
@@ -310,7 +313,7 @@ public interface GXBaseBuilder {
      * 构建Union语句 将组合出来的union语句作为from的表名来处理
      * eg: select * from (select * from test where name like '子曦%' union select * from test where phone like '520%') tmp where father='塵渊'
      *
-     * @param dbQueryParamInnerDto   外层的主查询条件
+     * @param dbQueryParamInnerDto       外层的主查询条件
      * @param unionQueryParamInnerDtoLst union查询条件
      * @param unionTypeEnums             union的类型
      * @return SQL语句
@@ -346,7 +349,7 @@ public interface GXBaseBuilder {
      * 构建Union语句 将组合出来的union语句作为from的表名来处理
      * eg: select * from (select * from test where name like '子曦%' union select * from test where phone like '520%') tmp where father='塵渊'
      *
-     * @param dbQueryParamInnerDto   外层的主查询条件
+     * @param dbQueryParamInnerDto       外层的主查询条件
      * @param unionQueryParamInnerDtoLst union查询条件
      * @param unionTypeEnums             union的类型
      * @return SQL语句
@@ -371,7 +374,7 @@ public interface GXBaseBuilder {
      * eg: select * from (select * from test where name='子曦' union select * from test where phone like '520%') tmp where father='塵渊'
      *
      * @param page                       分页对象
-     * @param dbQueryParamInnerDto   外层的主查询条件
+     * @param dbQueryParamInnerDto       外层的主查询条件
      * @param unionQueryParamInnerDtoLst union查询条件
      * @param unionTypeEnums             union的类型
      * @return SQL语句

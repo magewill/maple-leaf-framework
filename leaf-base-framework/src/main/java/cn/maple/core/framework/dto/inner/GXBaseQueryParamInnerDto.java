@@ -125,5 +125,6 @@ public class GXBaseQueryParamInnerDto extends GXBaseDto {
     /**
      * MyBatis参数化参数参数映射
      */
+    @Builder.Default
     private Map<String, Object> paramMap = new HashMap<>();
 }

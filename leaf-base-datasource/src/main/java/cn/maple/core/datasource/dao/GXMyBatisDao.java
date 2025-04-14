@@ -113,7 +113,8 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
         if (Objects.isNull(condition) || condition.isEmpty()) {
             throw new GXBusinessException("更新数据需要指定条件");
         }
-        return baseMapper.updateFieldByCondition(tableName, data, condition);
+        GXBaseQueryParamInnerDto dbQueryParamInnerDto = GXBaseQueryParamInnerDto.builder().tableName(tableName).condition(condition).build();
+        return baseMapper.updateFieldByCondition(dbQueryParamInnerDto, data);
     }
 
     /**
