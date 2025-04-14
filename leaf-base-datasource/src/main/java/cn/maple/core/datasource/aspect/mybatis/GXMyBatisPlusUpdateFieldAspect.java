@@ -11,6 +11,7 @@ import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.datasource.event.GXMyBatisModelUpdateFieldEvent;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
+import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
@@ -64,8 +65,9 @@ public class GXMyBatisPlusUpdateFieldAspect {
                 }
             });
             Dict conditionFieldData = Dict.create();
-            List<GXCondition<?>> conditionList = Convert.convert(new TypeReference<>() {
-            }, args[2]);
+            GXBaseQueryParamInnerDto baseQueryParamInnerDto = Convert.convert(new TypeReference<>() {
+            }, args[0]);
+            List<GXCondition<?>> conditionList = baseQueryParamInnerDto.getCondition();
             conditionList.forEach(condition -> {
                 Object fieldValue = condition.getFieldValue();
                 String fieldName = condition.getFieldExpression();

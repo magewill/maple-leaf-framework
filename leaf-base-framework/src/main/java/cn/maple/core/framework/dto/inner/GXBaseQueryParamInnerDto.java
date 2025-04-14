@@ -7,10 +7,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 @EqualsAndHashCode(callSuper = true)
 @SuppressWarnings("all")
@@ -40,7 +37,8 @@ public class GXBaseQueryParamInnerDto extends GXBaseDto {
     /**
      * 搜索条件
      */
-    private List<GXCondition<?>> condition;
+    @Builder.Default
+    private List<GXCondition<?>> condition = new ArrayList<>();
 
     /**
      * 需要查询的数据列
