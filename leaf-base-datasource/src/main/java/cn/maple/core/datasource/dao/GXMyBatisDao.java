@@ -224,7 +224,8 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
      */
     @Override
     public Integer deleteSoftCondition(String tableName, List<GXUpdateField<?>> updateFieldList, List<GXCondition<?>> condition, Dict extraData) {
-        return baseMapper.deleteSoftCondition(tableName, updateFieldList, condition, extraData);
+        GXBaseQueryParamInnerDto dbQueryParamInnerDto = GXBaseQueryParamInnerDto.builder().tableName(tableName).condition(condition).extraData(extraData).build();
+        return baseMapper.deleteSoftCondition(dbQueryParamInnerDto, updateFieldList);
     }
 
     /**
@@ -249,7 +250,8 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
      */
     @Override
     public Integer deleteCondition(String tableName, List<GXCondition<?>> condition) {
-        return baseMapper.deleteCondition(tableName, condition);
+        GXBaseQueryParamInnerDto baseQueryParamInnerDto = GXBaseQueryParamInnerDto.builder().tableName(tableName).condition(condition).build();
+        return baseMapper.deleteCondition(baseQueryParamInnerDto);
     }
 
     /**

@@ -7,6 +7,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -120,4 +121,9 @@ public class GXBaseQueryParamInnerDto extends GXBaseDto {
      */
     @Builder.Default
     private boolean paginateCount = Boolean.TRUE;
+
+    /**
+     * MyBatis参数化参数参数映射
+     */
+    private Map<String, Object> paramMap = new HashMap<>();
 }

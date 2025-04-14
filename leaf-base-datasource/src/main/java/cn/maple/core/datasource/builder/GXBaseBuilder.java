@@ -1,6 +1,7 @@
 package cn.maple.core.datasource.builder;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.convert.Convert;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
@@ -96,7 +97,9 @@ public interface GXBaseBuilder {
         }
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
         // 处理WHERE
-        handleSQLCondition(sql, condition);
+        Map<String, Object> paramMap = handleSQLCondition(sql, condition);
+        // 将参数设置到Mybatis的参数Map中
+        dbQueryParamInnerDto.setParamMap(paramMap);
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableNameAlias, 0));
         }
@@ -114,7 +117,9 @@ public interface GXBaseBuilder {
                         joinConditions.add(isDeletedCondition);
                     }
                 }
-                handleSQLCondition(sql, joinConditions);
+                Map<String, Object> joinParamMap = handleSQLCondition(sql, joinConditions);
+                // 将参数设置到Mybatis的参数Map中
+                dbQueryParamInnerDto.setParamMap(paramMap);
             });
         }
         // 处理分组
@@ -208,9 +213,10 @@ public interface GXBaseBuilder {
      * @param sql       SQL对象
      * @param condition 条件
      */
-    static void handleSQLCondition(SQL sql, List<GXCondition<?>> condition) {
+    static Map<String, Object> handleSQLCondition(SQL sql, List<GXCondition<?>> condition) {
+        Map<String, Object> paramMap = new HashMap<>();
         if (Objects.isNull(condition) || condition.isEmpty()) {
-            return;
+            return paramMap;
         }
         List<String> lastWheres = new ArrayList<>();
         condition.forEach(c -> {
@@ -222,6 +228,7 @@ public interface GXBaseBuilder {
                 String str = c.whereString();
                 if (CharSequenceUtil.isNotEmpty(str)) {
                     lastWheres.add(str);
+                    paramMap.putAll(c.getParamMap());
                 }
             }
         });
@@ -229,18 +236,20 @@ public interface GXBaseBuilder {
             String whereStr = String.join(" AND ", lastWheres);
             sql.WHERE(whereStr);
         }
+        return paramMap;
     }
 
     /**
      * 根据条件软(逻辑)删除
      *
-     * @param tableName       表名
-     * @param updateFieldList 软删除时需要同时更新的字段
-     * @param condition       删除条件
-     * @param extraData       额外数据
+     * @param dbQueryParamInnerDto 查询条件
+     * @param updateFieldList      软删除时需要同时更新的字段
      * @return SQL语句
      */
-    static String deleteSoftCondition(String tableName, List<GXUpdateField<?>> updateFieldList, List<GXCondition<?>> condition, Dict extraData) {
+    static String deleteSoftCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> updateFieldList) {
+        List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
+        String tableName = dbQueryParamInnerDto.getTableName();
+        Dict extraData = Convert.convert(Dict.class, dbQueryParamInnerDto.getExtraData());
         if (CollUtil.isEmpty(condition)) {
             throw new GXBusinessException("条件不能为空!");
         }
@@ -268,7 +277,8 @@ public interface GXBaseBuilder {
                 }
             }
         }
-        handleSQLCondition(sql, condition);
+        Map<String, Object> paramMap = handleSQLCondition(sql, condition);
+        dbQueryParamInnerDto.setParamMap(paramMap);
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
         }
@@ -278,16 +288,18 @@ public interface GXBaseBuilder {
     /**
      * 根据条件删除
      *
-     * @param tableName 表名
-     * @param condition 删除条件
+     * @param dbQueryParamInnerDto 查询条件
      * @return SQL语句
      */
-    static String deleteCondition(String tableName, List<GXCondition<?>> condition) {
+    static String deleteCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
+        List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
+        String tableName = dbQueryParamInnerDto.getTableName();
         if (CollUtil.isEmpty(condition)) {
             throw new GXBusinessException("条件不能为空!");
         }
         SQL sql = new SQL().DELETE_FROM(tableName);
-        handleSQLCondition(sql, condition);
+        Map<String, Object> paramMap = handleSQLCondition(sql, condition);
+        dbQueryParamInnerDto.setParamMap(paramMap);
         if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
         }
@@ -298,17 +310,17 @@ public interface GXBaseBuilder {
      * 构建Union语句 将组合出来的union语句作为from的表名来处理
      * eg: select * from (select * from test where name like '子曦%' union select * from test where phone like '520%') tmp where father='塵渊'
      *
-     * @param masterQueryParamInnerDto   外层的主查询条件
+     * @param dbQueryParamInnerDto   外层的主查询条件
      * @param unionQueryParamInnerDtoLst union查询条件
      * @param unionTypeEnums             union的类型
      * @return SQL语句
      */
-    static String unionFindByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
+    static String unionFindByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
         List<String> unionSqlLst = new ArrayList<>();
         unionQueryParamInnerDtoLst.forEach(queryParamInnerDto -> {
             String tableName = queryParamInnerDto.getTableName();
             if (CharSequenceUtil.isEmpty(tableName)) {
-                queryParamInnerDto.setTableName(masterQueryParamInnerDto.getTableName());
+                queryParamInnerDto.setTableName(dbQueryParamInnerDto.getTableName());
             }
             String tableNameAlias = queryParamInnerDto.getTableNameAlias();
             if (CharSequenceUtil.isEmpty(tableNameAlias)) {
@@ -318,40 +330,40 @@ public interface GXBaseBuilder {
             unionSqlLst.add("(" + sql + ")");
         });
         String unionSql = String.join("\n " + unionTypeEnums.getUnionType() + " \n", unionSqlLst);
-        masterQueryParamInnerDto.setTableName("(" + unionSql + ")");
-        masterQueryParamInnerDto.setTableNameAlias("tmp");
-        if (CollUtil.isNotEmpty(masterQueryParamInnerDto.getCondition())) {
-            masterQueryParamInnerDto.getCondition().forEach(condition -> {
+        dbQueryParamInnerDto.setTableName("(" + unionSql + ")");
+        dbQueryParamInnerDto.setTableNameAlias("tmp");
+        if (CollUtil.isNotEmpty(dbQueryParamInnerDto.getCondition())) {
+            dbQueryParamInnerDto.getCondition().forEach(condition -> {
                 if (!condition.getTableNameAlias().equalsIgnoreCase("tmp")) {
                     condition.setTableNameAlias("tmp");
                 }
             });
         }
-        return GXBaseBuilder.findByCondition(masterQueryParamInnerDto);
+        return GXBaseBuilder.findByCondition(dbQueryParamInnerDto);
     }
 
     /**
      * 构建Union语句 将组合出来的union语句作为from的表名来处理
      * eg: select * from (select * from test where name like '子曦%' union select * from test where phone like '520%') tmp where father='塵渊'
      *
-     * @param masterQueryParamInnerDto   外层的主查询条件
+     * @param dbQueryParamInnerDto   外层的主查询条件
      * @param unionQueryParamInnerDtoLst union查询条件
      * @param unionTypeEnums             union的类型
      * @return SQL语句
      */
-    static String unionFindOneByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        int limit = Optional.ofNullable(masterQueryParamInnerDto.getLimit()).orElse(1);
+    static String unionFindOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
+        int limit = Optional.ofNullable(dbQueryParamInnerDto.getLimit()).orElse(1);
         if (limit <= 0) {
             limit = 1;
         }
-        masterQueryParamInnerDto.setLimit(limit);
+        dbQueryParamInnerDto.setLimit(limit);
         unionQueryParamInnerDtoLst.forEach(queryParamInnerDto -> {
             String tableNameAlias = queryParamInnerDto.getTableNameAlias();
             if (CharSequenceUtil.isEmpty(tableNameAlias)) {
                 queryParamInnerDto.setTableNameAlias(queryParamInnerDto.getTableName());
             }
         });
-        return unionFindByCondition(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        return unionFindByCondition(dbQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
     }
 
     /**
@@ -359,16 +371,16 @@ public interface GXBaseBuilder {
      * eg: select * from (select * from test where name='子曦' union select * from test where phone like '520%') tmp where father='塵渊'
      *
      * @param page                       分页对象
-     * @param masterQueryParamInnerDto   外层的主查询条件
+     * @param dbQueryParamInnerDto   外层的主查询条件
      * @param unionQueryParamInnerDtoLst union查询条件
      * @param unionTypeEnums             union的类型
      * @return SQL语句
      */
     @SuppressWarnings("unused")
-    static <R> String unionPaginate(IPage<R> page, GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        if (CharSequenceUtil.isNotBlank(masterQueryParamInnerDto.getRawSQL())) {
-            return masterQueryParamInnerDto.getRawSQL();
+    static <R> String unionPaginate(IPage<R> page, GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
+        if (CharSequenceUtil.isNotBlank(dbQueryParamInnerDto.getRawSQL())) {
+            return dbQueryParamInnerDto.getRawSQL();
         }
-        return unionFindByCondition(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        return unionFindByCondition(dbQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
     }
 }

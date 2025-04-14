@@ -19,11 +19,9 @@ public class GXConditionStrNE extends GXCondition<String> {
         if (GXDBStringEscapeUtils.check(value.toString())) {
             throw new GXSqlInjectionException("SQL注入异常");
         }
-        String str = GXDBStringEscapeUtils.escapeRawString(value.toString());
-        String format = "'{}'";
-        if (CharSequenceUtil.contains(str, "\\'")) {
-            format = "\"{}\"";
-        }
-        return CharSequenceUtil.format(format, str);
+        // 清除原参数映射并添加带通配符的参数
+        this.paramMap.clear();
+        this.paramMap.put(paramName, value);
+        return "";
     }
 }

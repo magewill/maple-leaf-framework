@@ -6,6 +6,8 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
 
 public abstract class GXCondition<T> implements Serializable {
     /**
@@ -23,6 +25,12 @@ public abstract class GXCondition<T> implements Serializable {
     @Getter
     protected Object value;
 
+    @Getter
+    protected String paramName;
+
+    @Getter
+    protected Map<String, Object> paramMap = new HashMap<>();
+
     protected GXCondition(String fieldExpression, Object value) {
         this("", fieldExpression, value);
     }
@@ -31,6 +39,27 @@ public abstract class GXCondition<T> implements Serializable {
         this.tableNameAlias = tableNameAlias;
         this.fieldExpression = fieldExpression;
         this.value = value;
+        this.paramName = generateParamName(fieldExpression);
+        if (value != null) {
+            this.paramMap.put(paramName, value);
+        }
+    }
+
+    /**
+     * 生成唯一的参数名
+     *
+     * @param fieldExpression 字段表达式
+     * @return 参数名
+     */
+    protected String generateParamName(String fieldExpression) {
+        String simplifiedName;
+        // 如果是函数表达式，提取一个简化名称
+        if (fieldExpression.contains("(")) {
+            simplifiedName = "func" + Math.abs(fieldExpression.hashCode());
+        } else {
+            simplifiedName = CharSequenceUtil.toUnderlineCase(fieldExpression);
+        }
+        return "condition_" + simplifiedName /*+ "_" + PARAM_COUNTER.incrementAndGet()*/;
     }
 
     public abstract String getOp();
@@ -41,9 +70,9 @@ public abstract class GXCondition<T> implements Serializable {
             return "";
         }
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{} {} {}", getFieldExpression(), opStr, getFieldValue());
+            return CharSequenceUtil.format("{} {} #{dbQueryParamInnerDto.paramMap.{}}", getFieldExpression(), opStr, /*getFieldValue()*/paramName);
         }
-        return CharSequenceUtil.format("{}.{} {} {}", tableNameAlias, getFieldExpression(), opStr, getFieldValue());
+        return CharSequenceUtil.format("{}.{} {} #{dbQueryParamInnerDto.paramMap.{}}", tableNameAlias, getFieldExpression(), opStr, /*getFieldValue()*/paramName);
     }
 
     public String getFieldExpression() {
