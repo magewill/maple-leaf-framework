@@ -16,6 +16,13 @@ public class GXConditionRaw extends GXCondition<String> {
         return "";
     }
 
+    @Override
+    public String whereString() {
+        // 使用原始值，不参数化（需要确保已经进行了SQL注入检查）
+        log.warn("使用原始SQL条件，请确保已进行SQL注入检查: {}", value);
+        return value.toString();
+    }
+
     /**
      * 获取原始条件值的字符串表示
      * <p>
