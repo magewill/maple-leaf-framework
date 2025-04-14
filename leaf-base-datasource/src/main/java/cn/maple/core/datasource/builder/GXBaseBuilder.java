@@ -30,8 +30,20 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * 基础SQL构建器接口
+ * <p>
+ * 该接口提供了一系列静态方法，用于构建SQL语句。
+ * 所有方法都经过SQL注入防护处理，确保生成的SQL语句安全可靠。
+ * </p>
+ *
+ * @author 塵子曦
+ */
 @SuppressWarnings("unused")
 public interface GXBaseBuilder {
+    /**
+     * 日志对象
+     */
     Logger LOGGER = LoggerFactory.getLogger(GXBaseBuilder.class);
 
     /**
