@@ -5,6 +5,10 @@ import org.slf4j.MDC;
 
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * MDC 线程工具类，用于在多线程环境下安全传递 MDC 上下文。
@@ -260,5 +264,228 @@ public class GXMdcThreadUtils {
         } else {
             MDC.setContextMap(context);
         }
+    }
+
+    /**
+     * 包装 CompletableFuture 的 Supplier，确保 MDC 上下文在异步执行时正确传递。
+     * <p>
+     * <b>实现原理</b>：
+     * 1. 在创建 CompletableFuture 时，将当前线程的 MDC 上下文传递给异步执行的线程。
+     * 2. 在异步线程执行任务前，设置 MDC 上下文。
+     * 3. 在任务执行完成后，清理 MDC 上下文。
+     * </p>
+     * <p>
+     * <b>线程安全</b>：
+     * - 与 wrap(Callable) 和 wrap(Runnable) 方法类似，使用 try-finally 块确保 MDC 上下文的清理。
+     * - 传入的 context 是不可变 Map，避免被修改。
+     * </p>
+     * <p>
+     * <b>使用示例</b>：
+     * <pre>
+     * Map<String, String> context = GXMdcThreadUtils.getMdcContext();
+     * CompletableFuture<String> future = CompletableFuture.supplyAsync(
+     *     GXMdcThreadUtils.wrapSupplier(() -> "Result", context)
+     * );
+     * </pre>
+     * </p>
+     *
+     * @param supplier 需要包装的 Supplier
+     * @param context  父线程的 MDC 上下文映射（通过 getMdcContext 获取）
+     * @param <T>      Supplier 返回值的类型
+     * @return 包装后的 Supplier
+     */
+    public static <T> Supplier<T> wrapSupplier(final Supplier<T> supplier, final Map<String, String> context) {
+        if (supplier == null) {
+            throw new IllegalArgumentException("Supplier cannot be null");
+        }
+        return () -> {
+            // 保存子线程的原始 MDC 上下文（如果存在）
+            Map<String, String> originalContext = MDC.getCopyOfContextMap();
+            try {
+                // 设置子线程的 MDC 上下文
+                if (context == null) {
+                    MDC.clear();
+                } else {
+                    MDC.setContextMap(context);
+                }
+                // 确保子线程有 TraceId
+                setTraceIdIfAbsent();
+                // 执行任务
+                return supplier.get();
+            } finally {
+                // 清理子线程的 MDC
+                MDC.clear();
+                // 恢复子线程的原始 MDC 上下文（如果有）
+                if (originalContext != null) {
+                    MDC.setContextMap(originalContext);
+                }
+            }
+        };
+    }
+
+    /**
+     * 创建一个包含当前 MDC 上下文的 CompletableFuture。
+     * <p>
+     * 该方法是对 CompletableFuture.supplyAsync 的包装，确保异步任务能够继承当前线程的 MDC 上下文。
+     * </p>
+     * <p>
+     * <b>线程安全</b>：
+     * - 通过 wrapSupplier 方法确保 MDC 上下文的安全传递和清理。
+     * </p>
+     * <p>
+     * <b>使用示例</b>：
+     * <pre>
+     * CompletableFuture<String> future = GXMdcThreadUtils.supplyAsync(() -> {
+     *     // 在这里可以安全地访问 MDC 中的 TraceId
+     *     return "TraceId: " + GXTraceIdContextUtils.getTraceId();
+     * });
+     * </pre>
+     * </p>
+     *
+     * @param supplier 异步执行的 Supplier
+     * @param <T>      返回值类型
+     * @return 包装后的 CompletableFuture
+     */
+    public static <T> CompletableFuture<T> supplyAsync(Supplier<T> supplier) {
+        Map<String, String> context = getMdcContext();
+        return CompletableFuture.supplyAsync(wrapSupplier(supplier, context));
+    }
+
+    /**
+     * 使用指定的执行器创建一个包含当前 MDC 上下文的 CompletableFuture。
+     * <p>
+     * 该方法是对 CompletableFuture.supplyAsync 的包装，确保异步任务能够继承当前线程的 MDC 上下文，
+     * 并使用指定的执行器执行任务。
+     * </p>
+     * <p>
+     * <b>线程安全</b>：
+     * - 通过 wrapSupplier 方法确保 MDC 上下文的安全传递和清理。
+     * </p>
+     * <p>
+     * <b>使用示例</b>：
+     * <pre>
+     * ExecutorService executor = Executors.newFixedThreadPool(2);
+     * CompletableFuture<String> future = GXMdcThreadUtils.supplyAsync(() -> {
+     *     return "TraceId: " + GXTraceIdContextUtils.getTraceId();
+     * }, executor);
+     * </pre>
+     * </p>
+     *
+     * @param supplier 异步执行的 Supplier
+     * @param executor 执行异步任务的执行器
+     * @param <T>      返回值类型
+     * @return 包装后的 CompletableFuture
+     */
+    public static <T> CompletableFuture<T> supplyAsync(Supplier<T> supplier, Executor executor) {
+        Map<String, String> context = getMdcContext();
+        return CompletableFuture.supplyAsync(wrapSupplier(supplier, context), executor);
+    }
+
+    /**
+     * 包装 Runnable 任务，创建一个包含当前 MDC 上下文的 CompletableFuture。
+     * <p>
+     * 该方法是对 CompletableFuture.runAsync 的包装，确保异步任务能够继承当前线程的 MDC 上下文。
+     * </p>
+     * <p>
+     * <b>线程安全</b>：
+     * - 通过 wrap(Runnable) 方法确保 MDC 上下文的安全传递和清理。
+     * </p>
+     * <p>
+     * <b>使用示例</b>：
+     * <pre>
+     * CompletableFuture<Void> future = GXMdcThreadUtils.runAsync(() -> {
+     *     // 在这里可以安全地访问 MDC 中的 TraceId
+     *     System.out.println("TraceId: " + GXTraceIdContextUtils.getTraceId());
+     * });
+     * </pre>
+     * </p>
+     *
+     * @param runnable 异步执行的 Runnable
+     * @return 包装后的 CompletableFuture
+     */
+    public static CompletableFuture<Void> runAsync(Runnable runnable) {
+        Map<String, String> context = getMdcContext();
+        return CompletableFuture.runAsync(wrap(runnable, context));
+    }
+
+    /**
+     * 使用指定的执行器，包装 Runnable 任务，创建一个包含当前 MDC 上下文的 CompletableFuture。
+     * <p>
+     * 该方法是对 CompletableFuture.runAsync 的包装，确保异步任务能够继承当前线程的 MDC 上下文，
+     * 并使用指定的执行器执行任务。
+     * </p>
+     * <p>
+     * <b>线程安全</b>：
+     * - 通过 wrap(Runnable) 方法确保 MDC 上下文的安全传递和清理。
+     * </p>
+     * <p>
+     * <b>使用示例</b>：
+     * <pre>
+     * ExecutorService executor = Executors.newFixedThreadPool(2);
+     * CompletableFuture<Void> future = GXMdcThreadUtils.runAsync(() -> {
+     *     System.out.println("TraceId: " + GXTraceIdContextUtils.getTraceId());
+     * }, executor);
+     * </pre>
+     * </p>
+     *
+     * @param runnable 异步执行的 Runnable
+     * @param executor 执行异步任务的执行器
+     * @return 包装后的 CompletableFuture
+     */
+    public static CompletableFuture<Void> runAsync(Runnable runnable, Executor executor) {
+        Map<String, String> context = getMdcContext();
+        return CompletableFuture.runAsync(wrap(runnable, context), executor);
+    }
+
+    /**
+     * 包装 CompletableFuture 的 thenApply 方法，确保 MDC 上下文在链式调用中正确传递。
+     * <p>
+     * 该方法用于在 CompletableFuture 链式调用中传递 MDC 上下文，确保每个阶段都能访问到正确的 TraceId。
+     * </p>
+     * <p>
+     * <b>线程安全</b>：
+     * - 通过包装 Function 确保 MDC 上下文的安全传递和清理。
+     * </p>
+     * <p>
+     * <b>使用示例</b>：
+     * <pre>
+     * CompletableFuture<String> future = GXMdcThreadUtils.supplyAsync(() -> "result")
+     *     .thenApply(GXMdcThreadUtils.contextWrapper(result -> {
+     *         // 在这里可以安全地访问 MDC 中的 TraceId
+     *         return result + " with TraceId: " + GXTraceIdContextUtils.getTraceId();
+     *     }));
+     * </pre>
+     * </p>
+     *
+     * @param function 需要包装的函数
+     * @param <T>      输入类型
+     * @param <R>      输出类型
+     * @return 包装后的函数，可以安全地访问 MDC 上下文
+     */
+    public static <T, R> Function<T, R> contextWrapper(Function<T, R> function) {
+        Map<String, String> context = getMdcContext();
+        return input -> {
+            // 保存当前线程的原始 MDC 上下文
+            Map<String, String> originalContext = MDC.getCopyOfContextMap();
+            try {
+                // 设置 MDC 上下文
+                if (context == null) {
+                    MDC.clear();
+                } else {
+                    MDC.setContextMap(context);
+                }
+                // 确保有 TraceId
+                setTraceIdIfAbsent();
+                // 执行函数
+                return function.apply(input);
+            } finally {
+                // 清理 MDC
+                MDC.clear();
+                // 恢复原始 MDC 上下文
+                if (originalContext != null) {
+                    MDC.setContextMap(originalContext);
+                }
+            }
+        };
     }
 }

@@ -16,7 +16,9 @@ import org.springframework.expression.spel.support.StandardEvaluationContext;
 import jakarta.validation.constraints.NotNull;
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -64,6 +66,22 @@ public class GXSpELToolUtils {
      * 数据对象为空的提示信息
      */
     private static final String DATA_EMPTY_TIPS = "数据对象不能为空";
+    
+    /**
+     * 表达式解析器，线程安全的单例
+     */
+    private static final ExpressionParser PARSER = new SpelExpressionParser();
+    
+    /**
+     * 表达式缓存，提高性能
+     * 使用ConcurrentHashMap保证线程安全，初始容量设为256
+     */
+    private static final Map<String, Expression> EXPRESSION_CACHE = new ConcurrentHashMap<>(256);
+    
+    /**
+     * 缓存最大容量
+     */
+    private static final int MAX_CACHE_SIZE = 1024;
 
     /**
      * 私有构造函数，防止实例化
@@ -101,17 +119,18 @@ public class GXSpELToolUtils {
             return GXCommonUtils.getClassDefaultValue(beanClass);
         }
         LOG.debug("开始计算SpEL表达式: {}, 数据键名: {}", expressionString, dataKey);
-        ExpressionParser parser = new SpelExpressionParser();
         EvaluationContext context = new StandardEvaluationContext();
         dataKey = Objects.isNull(dataKey) ? "data" : dataKey;
         context.setVariable(dataKey, data);
         try {
-            final Expression expression = parser.parseExpression(expressionString);
+            final Expression expression = getOrCreateExpression(expressionString);
             T result = expression.getValue(context, beanClass);
             LOG.debug("SpEL表达式计算成功: {}, 结果: {}", expressionString, result);
             return result;
         } catch (SpelEvaluationException e) {
             LOG.error("SpEL表达式计算失败, 表达式: {}, 异常信息: {}", expressionString, e.getMessage());
+        } catch (Exception e) {
+            LOG.error("SpEL表达式计算发生未知异常, 表达式: {}, 异常类型: {}, 异常信息: {}", expressionString, e.getClass().getName(), e.getMessage());
         }
         return GXCommonUtils.getClassDefaultValue(beanClass);
     }
@@ -173,13 +192,15 @@ public class GXSpELToolUtils {
         }
         LOG.debug("开始计算目标对象SpEL表达式: {}, 目标对象类型: {}", expressionString, targetObject.getClass().getName());
         try {
-            ExpressionParser parser = new SpelExpressionParser();
             StandardEvaluationContext context = new StandardEvaluationContext(targetObject);
-            T result = parser.parseExpression(expressionString).getValue(context, beanClazz);
+            final Expression expression = getOrCreateExpression(expressionString);
+            T result = expression.getValue(context, beanClazz);
             LOG.debug("目标对象SpEL表达式计算成功: {}, 结果: {}", expressionString, result);
             return result;
         } catch (SpelEvaluationException e) {
             LOG.error("目标对象SpEL表达式计算失败, 表达式: {}, 异常信息: {}", expressionString, e.getMessage());
+        } catch (Exception e) {
+            LOG.error("目标对象SpEL表达式计算发生未知异常, 表达式: {}, 异常类型: {}, 异常信息: {}", expressionString, e.getClass().getName(), e.getMessage());
         }
         return GXCommonUtils.getClassDefaultValue(beanClazz);
     }
@@ -222,12 +243,15 @@ public class GXSpELToolUtils {
         }
         LOG.debug("开始设置目标对象属性值, 目标对象类型: {}, 目标属性: {}", targetObj.getClass().getName(), targetKey);
         final StandardEvaluationContext inventorContext = new StandardEvaluationContext(targetObj);
-        final ExpressionParser parser = new SpelExpressionParser();
         if (data.isEmpty()) {
             return GXCommonUtils.getClassDefaultValue(clazz);
         }
-        data.forEach((key, value) -> parser.parseExpression(key).setValue(inventorContext, value));
-        T result = parser.parseExpression(targetKey).getValue(inventorContext, clazz);
+        data.forEach((key, value) -> {
+            final Expression expression = getOrCreateExpression(key);
+            expression.setValue(inventorContext, value);
+        });
+        final Expression expression = getOrCreateExpression(targetKey);
+        T result = expression.getValue(inventorContext, clazz);
         LOG.debug("目标对象属性值设置成功, 目标属性: {}, 结果: {}", targetKey, result);
         return result;
     }
@@ -267,7 +291,6 @@ public class GXSpELToolUtils {
             return null;
         }
         LOG.debug("开始注册并调用函数, 目标类: {}, 方法名: {}", targetClass.getName(), methodName);
-        ExpressionParser parser = new SpelExpressionParser();
         StandardEvaluationContext context = new StandardEvaluationContext();
         context.setVariable("params", params);
         if (methodNotExists(targetClass, methodName, methodParamTypes)) {
@@ -275,7 +298,8 @@ public class GXSpELToolUtils {
         }
         context.registerFunction(methodName, ReflectUtil.getMethod(targetClass, methodName, methodParamTypes));
         final String format = CharSequenceUtil.format("#{}({})", methodName, parsePlaceholderParams(methodParamTypes, params));
-        T result = parser.parseExpression(format).getValue(context, clazz);
+        final Expression expression = getOrCreateExpression(format);
+        T result = expression.getValue(context, clazz);
         LOG.debug("函数调用成功, 方法名: {}, 结果: {}", methodName, result);
         return result;
     }
@@ -327,11 +351,11 @@ public class GXSpELToolUtils {
         if (methodNotExists(beanClazz, methodName, methodParamTypes)) {
             return null;
         }
-        final ExpressionParser expressionParser = new SpelExpressionParser();
         final StandardEvaluationContext context = new StandardEvaluationContext(beanObj);
         final String expressionString = CharSequenceUtil.format("{}({})", methodName,
                 parseArgumentParams(context, methodParamTypes, params));
-        T result = expressionParser.parseExpression(expressionString).getValue(context, clazz);
+        final Expression expression = getOrCreateExpression(expressionString);
+        T result = expression.getValue(context, clazz);
         LOG.debug("Bean方法调用成功, 方法名: {}, 结果: {}", methodName, result);
         return result;
     }
@@ -400,11 +424,11 @@ public class GXSpELToolUtils {
             LOG.debug(METHOD_NOT_FOUND_TIPS_TEMPLATE, targetObject.getClass().getSimpleName(), methodName, paramStr);
             return null;
         }
-        final ExpressionParser expressionParser = new SpelExpressionParser();
         final StandardEvaluationContext context = new StandardEvaluationContext(targetObject);
         final String expressionString = CharSequenceUtil.format("{}({})", methodName,
                 parseArgumentParams(context, methodParamTypes, params));
-        T result = expressionParser.parseExpression(expressionString).getValue(context, clazz);
+        final Expression expression = getOrCreateExpression(expressionString);
+        T result = expression.getValue(context, clazz);
         LOG.debug("目标对象方法调用成功, 方法名: {}, 结果: {}", methodName, result);
         return result;
     }
@@ -446,10 +470,10 @@ public class GXSpELToolUtils {
             return null;
         }
         LOG.debug("开始设置对象属性值, 目标对象类型: {}, 表达式: {}", targetObject.getClass().getName(), expressionString);
-        final ExpressionParser expressionParser = new SpelExpressionParser();
         final StandardEvaluationContext context = new StandardEvaluationContext(targetObject);
-        final T oldValue = expressionParser.parseExpression(expressionString).getValue(context, oldValueClazz);
-        expressionParser.parseExpression(expressionString).setValue(context, newValue);
+        final Expression expression = getOrCreateExpression(expressionString);
+        final T oldValue = expression.getValue(context, oldValueClazz);
+        expression.setValue(context, newValue);
         LOG.debug("对象属性值设置成功, 表达式: {}, 旧值: {}, 新值: {}", expressionString, oldValue, newValue);
         return oldValue;
     }
@@ -493,12 +517,12 @@ public class GXSpELToolUtils {
             return null;
         }
         LOG.debug("开始设置Dict对象属性值, 表达式: {}", expressionString);
-        ExpressionParser expressionParser = new SpelExpressionParser();
         EvaluationContext context = new StandardEvaluationContext();
         String dataKey = "data";
         context.setVariable(dataKey, dict);
-        final T oldValue = expressionParser.parseExpression(expressionString).getValue(context, oldValueClazz);
-        expressionParser.parseExpression(expressionString).setValue(context, newValue);
+        final Expression expression = getOrCreateExpression(expressionString);
+        final T oldValue = expression.getValue(context, oldValueClazz);
+        expression.setValue(context, newValue);
         LOG.debug("Dict对象属性值设置成功, 表达式: {}, 旧值: {}, 新值: {}", expressionString, oldValue, newValue);
         return oldValue;
     }
@@ -551,5 +575,41 @@ public class GXSpELToolUtils {
             }
         }
         return CharSequenceUtil.subBefore(methodParam.toString(), ',', true);
+    }
+    
+    /**
+     * 获取或创建表达式对象，使用缓存提高性能
+     * 当缓存大小超过阈值时，会清理缓存
+     *
+     * @param expressionString 表达式字符串
+     * @return 表达式对象
+     */
+    private static Expression getOrCreateExpression(String expressionString) {
+        // 检查缓存大小，超过阈值时清理一半的缓存
+        if (EXPRESSION_CACHE.size() > MAX_CACHE_SIZE) {
+            synchronized (EXPRESSION_CACHE) {
+                if (EXPRESSION_CACHE.size() > MAX_CACHE_SIZE) {
+                    LOG.debug("表达式缓存大小超过阈值，开始清理缓存，当前大小: {}", EXPRESSION_CACHE.size());
+                    // 保留一半的缓存项
+                    EXPRESSION_CACHE.keySet().stream()
+                            .skip(EXPRESSION_CACHE.size() / 2)
+                            .collect(Collectors.toList())
+                            .forEach(EXPRESSION_CACHE::remove);
+                    LOG.debug("表达式缓存清理完成，清理后大小: {}", EXPRESSION_CACHE.size());
+                }
+            }
+        }
+        return EXPRESSION_CACHE.computeIfAbsent(expressionString, PARSER::parseExpression);
+    }
+    
+    /**
+     * 清空表达式缓存
+     * 在应用需要释放内存或重新加载配置时调用
+     */
+    public static void clearExpressionCache() {
+        synchronized (EXPRESSION_CACHE) {
+            EXPRESSION_CACHE.clear();
+            LOG.debug("表达式缓存已清空");
+        }
     }
 }

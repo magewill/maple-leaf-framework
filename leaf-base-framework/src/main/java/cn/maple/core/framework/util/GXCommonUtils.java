@@ -57,11 +57,9 @@ public class GXCommonUtils {
      * <p>
      * 复杂的JSON字符串请使用cn.hutool.json.JSONObject来作为type
      * eg: private JSONObject ext
-     *
-     * @return CopyOptions
      */
     @Getter
-    private static final CopyOptions defaultCopyOptions = CopyOptions.create().setConverter((type, value) -> {
+    private static final CopyOptions defaultCopyOptions = CopyOptions.create().setIgnoreError(true).setConverter((type, value) -> {
         if (null == value) {
             return null;
         }
@@ -200,8 +198,11 @@ public class GXCommonUtils {
      * @return String
      */
     public static String hiddenPhoneNumber(CharSequence phoneNumber, int startInclude, int endExclude, char replacedChar) {
+        if (CharSequenceUtil.isBlank(phoneNumber)) {
+            return "";
+        }
         if (Validator.isMobile(phoneNumber)) {
-            return CharSequenceUtil.replace(phoneNumber, startInclude, endExclude, replacedChar);
+            return CharSequenceUtil.replaceByCodePoint(phoneNumber, startInclude, endExclude, replacedChar);
         }
         return "";
     }
@@ -226,11 +227,11 @@ public class GXCommonUtils {
     }
 
     /**
-     * 解密手机号码
+     * 解密数据
      *
      * @param encryptedStr 加密字符串
      * @param key          解密KEY
-     * @return String
+     * @return Dict 解密后的数据
      */
     public static Dict decryptedData(String encryptedStr, String key) {
         if (CharSequenceUtil.isEmpty(key)) {
@@ -260,11 +261,12 @@ public class GXCommonUtils {
      *
      * @param source      源对象
      * @param tClass      目标对象类型
-     * @param methodName  需要条用的方法名字
+     * @param methodName  需要调用的方法名字
      * @param copyOptions 复制选项  可以设置自定义的TypeConvert来自定义转换规则
      * @param extraData   额外参数
      * @return 目标对象
      */
+    @SuppressWarnings("unchecked")
     public static <S, T> T convertSourceToTarget(S source, Class<T> tClass, String methodName, CopyOptions copyOptions, Object extraData) {
         if (Objects.isNull(source)) {
             return null;
@@ -328,7 +330,7 @@ public class GXCommonUtils {
      *
      * @param source      源对象
      * @param tClass      目标对象类型
-     * @param methodName  需要条用的方法名字
+     * @param methodName  需要调用的方法名字
      * @param copyOptions 复制选项
      * @return 目标对象
      */
@@ -352,7 +354,7 @@ public class GXCommonUtils {
      *
      * @param collection  需要转换的对象列表
      * @param tClass      目标对象的类型
-     * @param methodName  需要条用的方法名字
+     * @param methodName  需要调用的方法名字
      * @param copyOptions 需要拷贝的选项
      * @return List
      */
@@ -365,7 +367,7 @@ public class GXCommonUtils {
      *
      * @param collection  需要转换的对象列表
      * @param tClass      目标对象的类型
-     * @param methodName  需要条用的方法名字
+     * @param methodName  需要调用的方法名字
      * @param copyOptions 需要拷贝的选项
      * @param extraData   额外参数
      * @return List
@@ -396,6 +398,7 @@ public class GXCommonUtils {
      * @param methodName 对象中的方法
      * @param params     参数
      * @param <R>        对象类型
+     * @return 方法调用的返回值
      */
     public static <R> Object reflectCallObjectMethod(R object, String methodName, Object... params) {
         if (Objects.isNull(object)) {
@@ -427,16 +430,19 @@ public class GXCommonUtils {
             retVal = ReflectUtil.invoke(object, method, params);
         } catch (UtilException e) {
             Throwable cause = e.getCause();
-            Throwable targetException = ((InvocationTargetException) cause).getTargetException();
-            if (targetException instanceof GXBeanValidateException) {
-                throw (GXBeanValidateException) targetException;
+            if (cause instanceof InvocationTargetException) {
+                Throwable targetException = ((InvocationTargetException) cause).getTargetException();
+                if (targetException instanceof GXBeanValidateException) {
+                    throw (GXBeanValidateException) targetException;
+                }
+                if (InvocationTargetRuntimeException.class.isAssignableFrom(e.getClass())) {
+                    throw new GXBusinessException(targetException.getMessage(), Optional.ofNullable(targetException.getCause()).orElse(targetException));
+                }
+                String exceptionMessage = CharSequenceUtil.isEmpty(targetException.getMessage()) ? "系统反射调用失败" : targetException.getMessage();
+                LOG.error("系统反射调用{}.{}({})失败 , [错误消息 : {}] [错误原因 : {}]", object.getClass().getSimpleName(), methodName, params, e.getMessage(), cause);
+                throw new GXBusinessException(exceptionMessage, targetException);
             }
-            if (InvocationTargetRuntimeException.class.isAssignableFrom(e.getClass())) {
-                throw new GXBusinessException(targetException.getMessage(), Optional.ofNullable(targetException.getCause()).orElse(targetException));
-            }
-            String exceptionMessage = CharSequenceUtil.isEmpty(targetException.getMessage()) ? "系统反射调用失败" : targetException.getMessage();
-            LOG.error("系统反射调用{}.{}({})失败 , [错误消息 : {}] [错误原因 : {}]", object.getClass().getSimpleName(), methodName, params, e.getMessage(), cause);
-            throw new GXBusinessException(exceptionMessage, targetException);
+            throw e;
         }
         return retVal;
     }
@@ -445,9 +451,12 @@ public class GXCommonUtils {
      * 验证手机号码
      *
      * @param phone 手机号码
-     * @return boolean
+     * @return boolean 返回true表示手机号码无效，返回false表示手机号码有效
      */
     public static boolean checkPhone(String phone) {
+        if (CharSequenceUtil.isEmpty(phone)) {
+            return true;
+        }
         final String regex = "^((13[0-9])|(14[5,7])|(15[0-3,5-9])|(17[0,3,5-8])|(18[0-9])|166|198|199|(147))\\d{8}$";
         return !ReUtil.isMatch(regex, phone);
     }
@@ -456,9 +465,12 @@ public class GXCommonUtils {
      * 验证固话号码
      *
      * @param telephone 电话号码
-     * @return boolean
+     * @return boolean 返回true表示电话号码无效，返回false表示电话号码有效
      */
     public static boolean checkTelephone(String telephone) {
+        if (CharSequenceUtil.isEmpty(telephone)) {
+            return true;
+        }
         String regex = "^(0\\d{2}-\\d{8}(-\\d{1,4})?)|(0\\d{3}-\\d{7,8}(-\\d{1,4})?)$";
         return !ReUtil.isMatch(regex, telephone);
     }
@@ -513,6 +525,9 @@ public class GXCommonUtils {
      * @param <R>                 元素类型
      */
     private static <R> void buildSubs(R parent, List<R> subs, String getParentMethodName) {
+        if (CollUtil.isEmpty(subs) || Objects.isNull(parent)) {
+            return;
+        }
         List<R> children = subs.stream().filter(sub -> {
             Object parentId = GXCommonUtils.reflectCallObjectMethod(sub, getParentMethodName);
             Object id = GXCommonUtils.reflectCallObjectMethod(parent, "getId");
@@ -535,9 +550,14 @@ public class GXCommonUtils {
      * </pre>
      *
      * @param connectEncodeStr 加密的链接信息
+     * @param targetClazz      目标类型
+     * @param <R>              返回类型
      * @return 解码之后的链接信息
      */
     public static <R> R decodeConnectStr(String connectEncodeStr, Class<R> targetClazz) {
+        if (CharSequenceUtil.isEmpty(connectEncodeStr)) {
+            return null;
+        }
         String secretKey = System.getProperty(GXCommonConstant.DATA_SOURCE_SECRET_KEY);
         if (CharSequenceUtil.isEmpty(secretKey)) {
             secretKey = System.getenv(GXCommonConstant.DATA_SOURCE_SECRET_KEY_ENV);
@@ -595,22 +615,45 @@ public class GXCommonUtils {
      *
      * @param str         待转换的字符串 JSON表示 : {"name":"jack"} OR Map表示 : {name=jack}
      * @param targetClazz 目标类类型
+     * @param <T>         返回类型
      * @return T 转出的目标对象
      */
     public static <T> T convertStrToTarget(String str, Class<T> targetClazz) {
-        if (!JSONUtil.isTypeJSON(str)) {
+        if (CharSequenceUtil.isEmpty(str)) {
             return null;
         }
+
+        // 处理Map格式字符串 {name=jack}
         if (ReUtil.isMatch(MAP_STR_FORMAT_REGULAR, str)) {
-            Map<String, Object> tmpMap = Arrays.stream(str.replace("{", "").replace("}", "").split(",")).map(arrayData -> arrayData.split("=")).collect(Collectors.toMap(d -> d[0].trim(), d -> d[1].trim()));
-            return Convert.convert(targetClazz, tmpMap);
+            try {
+                Map<String, Object> tmpMap = new HashMap<>();
+                String content = str.replace("{", "").replace("}", "");
+                if (CharSequenceUtil.isNotEmpty(content)) {
+                    Arrays.stream(content.split(","))
+                            .map(String::trim)
+                            .map(arrayData -> arrayData.split("=", 2)) // 限制分割次数为2，避免值中包含=符号导致问题
+                            .filter(array -> array.length == 2) // 确保数组有两个元素
+                            .forEach(array -> tmpMap.put(array[0].trim(), array[1].trim()));
+                }
+                return Convert.convert(targetClazz, tmpMap);
+            } catch (Exception ex) {
+                LOG.error("Map格式字符串转换失败! 原始字符串: {}, 错误信息: {}", str, ex.getMessage());
+                return null;
+            }
         }
-        try {
-            return JSONUtil.toBean(str, targetClazz);
-        } catch (ConvertException ex) {
-            LOG.error("数据转换失败!错误信息 : {}", ex.getMessage());
-            return null;
+
+        // 处理JSON格式字符串
+        if (JSONUtil.isTypeJSON(str)) {
+            try {
+                return JSONUtil.toBean(str, targetClazz);
+            } catch (ConvertException ex) {
+                LOG.error("JSON数据转换失败! 原始字符串: {}, 错误信息: {}", str, ex.getMessage());
+                return null;
+            }
         }
+
+        // 不是有效的JSON或Map格式
+        return null;
     }
 
     /**

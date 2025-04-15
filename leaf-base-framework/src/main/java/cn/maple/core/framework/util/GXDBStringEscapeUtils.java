@@ -7,6 +7,8 @@ import cn.maple.core.framework.exception.GXSqlInjectionException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -276,13 +278,36 @@ public class GXDBStringEscapeUtils {
         if (escapeStr == null) {
             return null;
         }
-        if (escapeStr.matches("'(.+)'")) {
+        // 优化字符串匹配，避免使用正则表达式提高性能
+        if (escapeStr.length() >= 2 && escapeStr.charAt(0) == '\'' && escapeStr.charAt(escapeStr.length() - 1) == '\'') {
             escapeStr = escapeStr.substring(1, escapeStr.length() - 1);
         }
         // 使用SQL标准的单引号转义（''而不是\'）
         return "'" + escapeBasicChars(escapeStr, true) + "'";
     }
 
+    /**
+     * 线程安全的Pattern匹配器缓存，避免重复创建Matcher对象
+     */
+    private static final ConcurrentHashMap<Pattern, ThreadLocal<Matcher>> MATCHER_CACHE = new ConcurrentHashMap<>();
+    
+    /**
+     * 获取线程安全的Matcher对象
+     * 
+     * @param pattern 正则表达式模式
+     * @param input 输入字符串
+     * @return 匹配器对象
+     */
+    private static Matcher getMatcher(Pattern pattern, String input) {
+        ThreadLocal<Matcher> threadLocal = MATCHER_CACHE.computeIfAbsent(pattern, p -> new ThreadLocal<>());
+        Matcher matcher = threadLocal.get();
+        if (matcher == null) {
+            matcher = pattern.matcher("");
+            threadLocal.set(matcher);
+        }
+        return matcher.reset(input);
+    }
+    
     /**
      * 检查字符串是否包含SQL注入风险
      * 使用多种模式进行全面检测
@@ -293,10 +318,10 @@ public class GXDBStringEscapeUtils {
      */
     public static boolean check(String value) {
         Objects.requireNonNull(value);
-        return SQL_COMMENT_PATTERN.matcher(value).find() ||
-                SQL_SYNTAX_PATTERN.matcher(value).find() ||
-                SQL_INJECTION_PATTERN.matcher(value).find() ||
-                SQL_BLIND_INJECTION_PATTERN.matcher(value).find();
+        return getMatcher(SQL_COMMENT_PATTERN, value).find() ||
+               getMatcher(SQL_SYNTAX_PATTERN, value).find() ||
+               getMatcher(SQL_INJECTION_PATTERN, value).find() ||
+               getMatcher(SQL_BLIND_INJECTION_PATTERN, value).find();
     }
 
     /**
@@ -308,7 +333,7 @@ public class GXDBStringEscapeUtils {
      */
     public static boolean checkComprehensive(String value) {
         Objects.requireNonNull(value);
-        return check(value) || XSS_PATTERN.matcher(value).find();
+        return check(value) || getMatcher(XSS_PATTERN, value).find();
     }
 
     /**
@@ -320,7 +345,7 @@ public class GXDBStringEscapeUtils {
      */
     public static boolean checkJsonInjection(String jsonStr) {
         Objects.requireNonNull(jsonStr);
-        return JSON_INJECTION_PATTERN.matcher(jsonStr).find() || check(jsonStr);
+        return getMatcher(JSON_INJECTION_PATTERN, jsonStr).find() || check(jsonStr);
     }
 
     /**
@@ -332,7 +357,8 @@ public class GXDBStringEscapeUtils {
      */
     public static String removeEscapeCharacter(String text) {
         Objects.requireNonNull(text);
-        return text.replaceAll("\"", "").replaceAll("'", "");
+        // 使用单次替换提高性能
+        return text.replaceAll("[\"']", "");
     }
 
     /**
@@ -524,17 +550,21 @@ public class GXDBStringEscapeUtils {
             return new Object[]{"()", new ArrayList<>()};
         }
 
-        StringBuilder placeholders = new StringBuilder("(");
-        for (int i = 0; i < values.size(); i++) {
+        int paramCount = values.size();
+        // 使用预计算的容量初始化StringBuilder，提高性能
+        StringBuilder placeholders = new StringBuilder(paramCount * 3);
+        placeholders.append('(');
+        for (int i = 0; i < paramCount; i++) {
             if (i > 0) {
                 placeholders.append(", ");
             }
-            placeholders.append("?");
+            placeholders.append('?');
         }
-        placeholders.append(")");
+        placeholders.append(')');
 
         return new Object[]{placeholders.toString(), values};
     }
+    
 
     /**
      * 安全地构建SQL IN子句，防止SQL注入
@@ -549,19 +579,21 @@ public class GXDBStringEscapeUtils {
             return "('')"; // 返回一个不匹配任何内容的条件
         }
 
-        StringBuilder sb = new StringBuilder("(");
+        // 预估StringBuilder的初始容量，避免频繁扩容
+        StringBuilder sb = new StringBuilder(values.size() * 10);
+        sb.append('(');
         boolean first = true;
 
         for (String value : values) {
             // 检查每个值是否有SQL注入风险
-            if (check(value)) {
+            if (value != null && check(value)) {
                 continue; // 跳过有风险的值
             }
 
             if (!first) {
                 sb.append(", ");
             }
-            sb.append("'").append(escapeSql(value)).append("'");
+            sb.append('\'').append(value == null ? "" : escapeSql(value)).append('\'');
             first = false;
         }
 
@@ -570,9 +602,10 @@ public class GXDBStringEscapeUtils {
             return "('')";
         }
 
-        sb.append(")");
+        sb.append(')');
         return sb.toString();
     }
+    
 
     /**
      * 验证并清理输入字符串，确保其可以安全用于SQL查询
@@ -673,7 +706,7 @@ public class GXDBStringEscapeUtils {
         if (identifier == null || identifier.isEmpty()) {
             return false;
         }
-        return SAFE_IDENTIFIER_PATTERN.matcher(identifier).matches();
+        return getMatcher(SAFE_IDENTIFIER_PATTERN, identifier).matches();
     }
 
     /**
@@ -699,7 +732,7 @@ public class GXDBStringEscapeUtils {
         }
 
         // 检查是否包含NoSQL注入风险
-        if (JSON_INJECTION_PATTERN.matcher(jsonPath).find()) {
+        if (getMatcher(JSON_INJECTION_PATTERN, jsonPath).find()) {
             throw new GXSqlInjectionException("JSON路径中包含NoSQL注入风险");
         }
 
@@ -797,10 +830,8 @@ public class GXDBStringEscapeUtils {
                 String message = CharSequenceUtil.format("批量SQL操作中检测到潜在的SQL注入攻击: {}", sql);
                 throw new GXSqlInjectionException(message);
             }
-
-            // 对SQL语句进行安全处理
-            // 注意：这里不对SQL语句本身进行转义，因为它们应该已经是构建好的SQL语句
-            // 而是进行安全检查，确保不包含SQL注入风险
+            
+            // 已经通过安全检查的SQL语句直接添加到结果列表中
             safeStatements.add(sql);
         }
 
@@ -826,22 +857,29 @@ public class GXDBStringEscapeUtils {
 
         // 假设所有批次的参数数量相同，使用第一组参数构建占位符
         List<Object> firstBatch = batchValues.get(0);
-        StringBuilder placeholders = new StringBuilder("(");
+        int paramCount = firstBatch.size();
+        
+        // 使用预计算的容量初始化StringBuilder，提高性能
+        StringBuilder placeholders = new StringBuilder(paramCount * 3);
+        placeholders.append('(');
 
-        for (int i = 0; i < firstBatch.size(); i++) {
+        for (int i = 0; i < paramCount; i++) {
             if (i > 0) {
                 placeholders.append(", ");
             }
-            placeholders.append("?");
+            placeholders.append('?');
         }
-        placeholders.append(")");
+        placeholders.append(')');
 
         // 检查每组参数的值是否存在SQL注入风险
         for (List<Object> batch : batchValues) {
             for (Object value : batch) {
-                if (value instanceof String && check((String) value)) {
-                    String message = CharSequenceUtil.format("批量参数化查询中检测到潜在的SQL注入攻击: {}", value);
-                    throw new GXSqlInjectionException(message);
+                if (value instanceof String) {
+                    String strValue = (String) value;
+                    if (check(strValue)) {
+                        String message = CharSequenceUtil.format("批量参数化查询中检测到潜在的SQL注入攻击: {}", strValue);
+                        throw new GXSqlInjectionException(message);
+                    }
                 }
             }
         }

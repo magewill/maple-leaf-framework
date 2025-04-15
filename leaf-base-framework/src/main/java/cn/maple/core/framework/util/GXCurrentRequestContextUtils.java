@@ -22,9 +22,9 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * <p>
@@ -514,62 +514,29 @@ public class GXCurrentRequestContextUtils {
     }
 
     /**
-     * 验证IP地址是否有效，支持IPv4和IPv6格式
-     * <p>
-     * 该方法使用多层验证策略：
-     * <ol>
-     *   <li>首先检查输入是否为空或超长（防止DoS攻击）</li>
-     *   <li>检查是否包含非法字符（基本安全检查）</li>
-     *   <li>然后使用Java内置的InetAddress进行验证（最可靠的方法）</li>
-     *   <li>如果InetAddress验证失败，使用预编译正则表达式进行验证</li>
-     * </ol>
-     * </p>
+     * 判断是否是IPv4地址字符串
      *
-     * @param ip 需要验证的IP地址字符串
-     * @return 如果IP地址有效返回true，否则返回false
+     * @param ip IP地址字符串
+     * @return 如果是IPv4地址则返回true，否则返回false
      */
-    public static boolean isValidIP(String ip) {
-        // 检查输入是否为空或仅包含空白字符
-        if (CharSequenceUtil.isBlank(ip)) {
-            LOG.debug("IP 地址为空或仅包含空白字符: {}", ip);
+    public static boolean isIPv4(String ip) {
+        if (CharSequenceUtil.isBlank(ip) || ip.length() > MAX_IP_LENGTH) {
             return false;
         }
+        return IPV4_PATTERN.matcher(ip).matches();
+    }
 
-        // 检查输入长度，防止超长输入导致性能问题
-        if (ip.length() > MAX_IP_LENGTH) {
-            LOG.warn("IP 地址长度超过最大限制 ({}): {}", MAX_IP_LENGTH, ip);
+    /**
+     * 判断是否是IPv6地址字符串
+     *
+     * @param ip IP地址字符串
+     * @return 如果是IPv6地址则返回true，否则返回false
+     */
+    public static boolean isIPv6(String ip) {
+        if (CharSequenceUtil.isBlank(ip) || ip.length() > MAX_IP_LENGTH) {
             return false;
         }
-
-        // 检查是否包含非法字符（基本安全检查）
-        if (ip.contains("'") || ip.contains("\"") || ip.contains(";") || ip.contains("&") || ip.contains("|")) {
-            LOG.warn("IP 地址包含非法字符: {}", ip);
-            return false;
-        }
-
-        // 尝试使用 InetAddress 验证 IP 地址（最可靠的方法）
-        try {
-            InetAddress inetAddress = InetAddress.getByName(ip);
-            LOG.debug("IP 地址通过 InetAddress 验证: {}", ip);
-            return true;
-        } catch (UnknownHostException e) {
-            // 如果 InetAddress 验证失败，记录调试信息并继续使用正则表达式验证
-            LOG.debug("IP 地址通过 InetAddress 验证失败，尝试正则表达式验证: {}", ip, e);
-
-            // 使用预编译的正则表达式验证 IPv4 或 IPv6 地址
-            boolean isIPv4 = IPV4_PATTERN.matcher(ip).matches();
-            boolean isIPv6 = IPV6_PATTERN.matcher(ip).matches();
-
-            // 如果是有效的 IPv4 或 IPv6 地址，返回 true
-            if (isIPv4 || isIPv6) {
-                LOG.debug("IP 地址通过正则表达式验证: {} (IPv4: {}, IPv6: {})", ip, isIPv4, isIPv6);
-                return true;
-            }
-
-            // 如果正则表达式验证也失败，记录失败信息并返回 false
-            LOG.debug("IP 地址通过正则表达式验证失败: {}", ip);
-            return false;
-        }
+        return IPV6_PATTERN.matcher(ip).matches();
     }
 
     /**
@@ -704,7 +671,7 @@ public class GXCurrentRequestContextUtils {
      * @throws GXBusinessException 如果提供的字节数组长度不是4（不是有效的IPv4地址）
      */
     public static boolean isInternalV4IP(byte[] ip) {
-        if (ip.length != 4) {
+        if (ip == null || ip.length != 4) {
             throw new GXBusinessException("非法的IPv4地址字节数组", HttpStatus.HTTP_INTERNAL_ERROR);
         }
 
@@ -1095,8 +1062,7 @@ public class GXCurrentRequestContextUtils {
      */
     public static <T> T getSafeHttpParam(String paramName, Class<T> clazz) {
         T value = getHttpParam(paramName, clazz);
-        if (value instanceof String) {
-            String strValue = (String) value;
+        if (value instanceof String strValue) {
             if (!isValidParameter(strValue)) {
                 throw new GXBusinessException("参数包含非法字符", HttpStatus.HTTP_BAD_REQUEST);
             }
@@ -1124,6 +1090,28 @@ public class GXCurrentRequestContextUtils {
     }
 
     /**
+     * 验证IP地址是否有效，支持IPv4和IPv6格式
+     * <p>
+     * 该方法使用多层验证策略：
+     * <ol>
+     *   <li>首先检查输入是否为空或超长（防止DoS攻击）</li>
+     *   <li>检查是否包含非法字符（基本安全检查）</li>
+     *   <li>然后使用Java内置的InetAddress进行验证（最可靠的方法）</li>
+     *   <li>如果InetAddress验证失败，使用预编译正则表达式进行验证</li>
+     * </ol>
+     * </p>
+     *
+     * @param ip 需要验证的IP地址字符串
+     * @return 如果IP地址有效返回true，否则返回false
+     */
+    public static boolean isValidIP(String ip) {
+        if (CharSequenceUtil.isBlank(ip) || ip.length() > MAX_IP_LENGTH) {
+            return false;
+        }
+        return isIPv4(ip) || isIPv6(ip);
+    }
+
+    /**
      * 获取安全的客户端IP地址
      * 对IP地址进行格式验证和XSS过滤
      *
@@ -1133,6 +1121,7 @@ public class GXCurrentRequestContextUtils {
         String ip = getClientIP();
         if (CharSequenceUtil.isNotBlank(ip)) {
             if (!isValidIP(ip)) {
+                LOG.warn("检测到无效的IP地址格式: {}", ip);
                 throw new GXBusinessException("无效的IP地址格式", HttpStatus.HTTP_BAD_REQUEST);
             }
             return filterXSS(ip);
