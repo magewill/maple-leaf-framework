@@ -1,4 +1,4 @@
-[![Security Status](https://www.murphysec.com/platform3/v31/badge/1720020755503955968.svg)](https://www.murphysec.com/console/report/1720020755449430016/1720020755503955968)
+[![Security Status](https://www.murphysec.com/platform3/v31/badge/1912047649909272576.svg)](https://www.murphysec.com/console/report/1912039536918654976/1912047649909272576)
 
 4.x版本的计划
 1. 4.x版本 将MP替换为[MyBatis Dynamic SQL](https://mybatis.org/mybatis-dynamic-sql/docs/introduction.html)
