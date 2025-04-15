@@ -246,6 +246,13 @@ public class GXExceptionHandler {
         return GXResultUtils.error(HttpStatus.HTTP_INTERNAL_ERROR, "数据转换错误!");
     }
 
+    @ExceptionHandler(GXSqlInjectionException.class)
+    public GXResultUtils<Dict> handleGXSqlInjectionException(GXSqlInjectionException e) {
+        log.error(e.getMessage(), e);
+        exceptionNotify(e);
+        return GXResultUtils.error(HttpStatus.HTTP_INTERNAL_ERROR, "存在SQL注入风险!");
+    }
+
     /**
      * 发布异常通知信息事件
      *
