@@ -11,6 +11,10 @@ public class GXConditionJsonEQ extends GXCondition<String> {
     public GXConditionJsonEQ(String tableNameAlias, String fieldName, String jsonFieldName, String value) {
         super(tableNameAlias, fieldName, value);
         this.jsonPath = CharSequenceUtil.format("$.{}", jsonFieldName);
+        // 清除原参数映射并添加JSON路径参数
+        this.paramMap.clear();
+        this.paramMap.put(paramName, value);
+        this.paramMap.put(paramName + "_path", jsonPath);
     }
 
     @Override
@@ -30,8 +34,16 @@ public class GXConditionJsonEQ extends GXCondition<String> {
     }
 
     @Override
-    public String getFieldExpression() {
-        String format = "`{}`->'" + jsonPath + "'";
-        return CharSequenceUtil.format(format, fieldExpression);
+    public String whereString() {
+        if (GXDBStringEscapeUtils.check(value.toString())) {
+            throw new GXSqlInjectionException("SQL注入异常");
+        }
+
+        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
+            return CharSequenceUtil.format("`{}`->#{dbQueryParamInnerDto.paramMap.{}} {} #{dbQueryParamInnerDto.paramMap.{}}",
+                    fieldExpression, paramName + "_path", getOp(), paramName);
+        }
+        return CharSequenceUtil.format("{}.`{}`->#{dbQueryParamInnerDto.paramMap.{}} {} #{dbQueryParamInnerDto.paramMap.{}}",
+                tableNameAlias, fieldExpression, paramName + "_path", getOp(), paramName);
     }
 }
