@@ -35,6 +35,7 @@ import java.util.stream.Collectors;
  * <p>
  * 该接口提供了一系列静态方法，用于构建SQL语句。
  * 所有方法都经过SQL注入防护处理，确保生成的SQL语句安全可靠。
+ * 使用MyBatis的参数化查询机制(#{})防止SQL注入攻击。
  * </p>
  *
  * @author 塵子曦
