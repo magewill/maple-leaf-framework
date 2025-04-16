@@ -36,6 +36,27 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * MyBatis-Plus配置类
+ * <p>
+ * 该类负责配置MyBatis-Plus的各种拦截器和插件，包括：
+ * - 数据过滤拦截器
+ * - 分页插件
+ * - 防止全表更新与删除插件
+ * - 乐观锁插件
+ * - SQL性能规范插件
+ * - 数据变更记录插件
+ * - 数据权限处理
+ * - 多租户插件
+ * - 动态表名插件
+ * </p>
+ * <p>
+ * 各插件的启用由配置参数控制，可通过application配置文件中的maple.framework.enable.*属性进行设置
+ * </p>
+ *
+ * @author britton
+ * @since 1.0.0
+ */
 @Slf4j
 @EnableTransactionManagement
 @Configuration
@@ -43,6 +64,15 @@ public class GXMyBatisPlusConfig {
     @Resource
     private ApplicationContext applicationContext;
 
+    /**
+     * 自定义MyBatis配置
+     * <p>
+     * 设置ObjectWrapperFactory，用于处理Map类型的对象包装
+     * 这允许在MyBatis中更灵活地处理Map类型的结果
+     * </p>
+     *
+     * @param configuration MyBatis配置对象
+     */
     private static void customize(org.apache.ibatis.session.Configuration configuration) {
         configuration.setObjectWrapperFactory(new ObjectWrapperFactory() {
             @Override
@@ -59,6 +89,23 @@ public class GXMyBatisPlusConfig {
         });
     }
 
+    /**
+     * 配置MyBatis-Plus拦截器
+     * <p>
+     * 根据配置参数启用各种拦截器，包括：
+     * - 数据过滤拦截器
+     * - 分页插件
+     * - 防止全表更新与删除插件
+     * - 乐观锁插件
+     * - SQL性能规范插件
+     * - 数据变更记录插件
+     * - 数据权限处理
+     * - 多租户插件
+     * - 动态表名插件
+     * </p>
+     *
+     * @return 配置好的MybatisPlusInterceptor实例
+     */
     @Bean
     public MybatisPlusInterceptor mybatisPlusInterceptor() {
         // 将ApplicationContext提前注入
@@ -106,6 +153,15 @@ public class GXMyBatisPlusConfig {
         return interceptor;
     }
 
+    /**
+     * 配置MyBatis的ConfigurationCustomizer
+     * <p>
+     * 当配置参数use-camel-case-mapping为true时启用
+     * 用于自定义MyBatis的配置，主要是设置ObjectWrapperFactory
+     * </p>
+     *
+     * @return ConfigurationCustomizer实例
+     */
     @Bean
     @ConditionalOnExpression("'${use-camel-case-mapping}'.equals('true')")
     public ConfigurationCustomizer configurationCustomizer() {
@@ -114,6 +170,11 @@ public class GXMyBatisPlusConfig {
 
     /**
      * 自定义多租户插件类
+     * <p>
+     * 实现MyBatis-Plus的TenantLineHandler接口，用于多租户数据隔离
+     * 该处理器会自动为SQL添加租户条件，确保查询只返回当前租户的数据
+     * 使用缓存优化表结构检查，避免重复查询表信息
+     * </p>
      *
      * @author britton
      * @since 2021-11-17
@@ -121,6 +182,10 @@ public class GXMyBatisPlusConfig {
     private static class GXTenantLineHandler implements TenantLineHandler {
         /**
          * 数据缓存管理器
+         * <p>
+         * 用于缓存表结构信息，减少重复查询，提高性能
+         * 使用Spring的CaffeineCacheManager，支持自动过期和大小限制
+         * </p>
          */
         private static final CaffeineCacheManager caffeineCacheManager;
 
@@ -131,6 +196,9 @@ public class GXMyBatisPlusConfig {
         /**
          * 获取租户 ID 值表达式，只支持单个 ID 值
          * <p>
+         * 从GXTenantIdService获取当前租户ID
+         * 如果租户服务不可用，则返回默认值0
+         * </p>
          *
          * @return 租户 ID 值表达式
          */
@@ -159,6 +227,9 @@ public class GXMyBatisPlusConfig {
          * 根据表名判断是否忽略拼接多租户条件
          * <p>
          * 默认都要进行解析并拼接多租户条件
+         * 该方法使用缓存优化表结构检查，避免重复查询表信息
+         * 缓存结果存储在FRAMEWORK-CACHE中，键为表名，值为是否忽略租户条件
+         * </p>
          *
          * @param tableName 表名
          * @return 是否忽略, true:表示忽略，false:需要解析并拼接多租户条件
@@ -168,16 +239,26 @@ public class GXMyBatisPlusConfig {
             assert caffeineCacheManager != null;
             Cache cache = caffeineCacheManager.getCache("FRAMEWORK-CACHE");
             assert cache != null;
+            
+            // 先从缓存中获取结果，避免重复查询
             Boolean hasTenantIdField = cache.get(tableName, Boolean.class);
             if (Objects.nonNull(hasTenantIdField)) {
                 return Boolean.TRUE.equals(hasTenantIdField);
             }
+            
+            // 缓存未命中，查询表结构
             TableInfo tableInfo = TableInfoHelper.getTableInfo(tableName);
             if (Objects.isNull(tableInfo)) {
+                // 表不存在，缓存结果并返回true
                 cache.put(tableName, Boolean.TRUE);
                 return true;
             }
-            boolean contains = !CollUtil.contains(tableInfo.getFieldList(), field -> CharSequenceUtil.equalsIgnoreCase(field.getColumn(), getTenantIdColumn()));
+            
+            // 检查表是否包含租户ID字段
+            boolean contains = !CollUtil.contains(tableInfo.getFieldList(), 
+                field -> CharSequenceUtil.equalsIgnoreCase(field.getColumn(), getTenantIdColumn()));
+            
+            // 缓存结果
             cache.put(tableName, contains);
             return contains;
         }
