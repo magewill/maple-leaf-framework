@@ -37,7 +37,7 @@ public class GXDynamicDataSourceFactory {
         druidDataSource.setMaxOpenPreparedStatements(properties.getMaxOpenPreparedStatements());
         druidDataSource.setSharePreparedStatements(properties.isSharePreparedStatements());
         try {
-            druidDataSource.setFilters(properties.getFilters());
+            druidDataSource.setFilters(properties.getFilters() + ",wall");
             druidDataSource.init();
         } catch (SQLException e) {
             log.error(e.getMessage(), e);
