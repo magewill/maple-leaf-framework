@@ -22,17 +22,39 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 
 import java.util.List;
 
+/**
+ * 响应体处理增强类，用于拦截和处理HTTP响应体
+ * <p>
+ * 该类通过Spring的ResponseBodyAdvice机制，在响应体被写入之前提供拦截点，
+ * 允许对响应体进行处理和修改。主要功能包括：
+ * <ul>
+ *   <li>响应体的处理和转换</li>
+ *   <li>添加Cookie到HTTP响应头</li>
+ *   <li>委托给GXResponseBodyAdviceService进行实际业务处理</li>
+ * </ul>
+ * </p>
+ * <p>
+ * 该类实现了ResponseBodyAdvice接口，通过重写其方法来实现响应拦截和处理。
+ * 通过@RestControllerAdvice注解，使其对所有RestController的响应生效。
+ * </p>
+ *
+ * @author maple
+ * @see GXResponseBodyAdviceService 实际业务处理服务接口
+ * @see ResponseBodyAdvice Spring响应体处理接口
+ * @see RestControllerAdvice Spring REST控制器增强注解
+ */
 @Log4j2
 @RestControllerAdvice
-public class GXResponseBodyAdvice implements ResponseBodyAdvice<Object> /* implements ResponseBodyAdvice<GXResultUtils<?>>*/ {
+public class GXResponseBodyAdvice implements ResponseBodyAdvice<Object> {
     /**
-     * Whether this component supports the given controller method return type
-     * and the selected {@code HttpMessageConverter} type.
+     * 判断是否应该应用此拦截器
+     * 首先检查是否存在GXResponseBodyAdviceService，如果存在则委托给它判断
+     * 如果不存在则默认判断返回类型是否为GXResultUtils类型
      *
-     * @param returnType    the return type
-     * @param converterType the selected converter type
-     * @return {@code true} if {@link #beforeBodyWrite} should be invoked;
-     * {@code false} otherwise
+     * @param returnType    返回类型
+     * @param converterType 选择的转换器类型
+     * @return {@code true} 如果应该调用 {@link #beforeBodyWrite}；
+     * {@code false} 否则
      */
     @Override
     public boolean supports(MethodParameter returnType, Class converterType) {
@@ -44,16 +66,16 @@ public class GXResponseBodyAdvice implements ResponseBodyAdvice<Object> /* imple
     }
 
     /**
-     * Invoked after an {@code HttpMessageConverter} is selected and just before
-     * its write method is invoked.
+     * 在选择{@code HttpMessageConverter}之后且在调用其write方法之前调用
+     * 主要用于处理响应体，添加Cookie，并委托给GXResponseBodyAdviceService进行处理
      *
-     * @param body                  the body to be written
-     * @param returnType            the return type of the controller method
-     * @param selectedContentType   the content type selected through content negotiation
-     * @param selectedConverterType the converter type selected to write to the response
-     * @param request               the current request
-     * @param response              the current response
-     * @return the body that was passed in or a modified (possibly new) instance
+     * @param body                  要写入的响应体
+     * @param returnType            控制器方法的返回类型
+     * @param selectedContentType   通过内容协商选择的内容类型
+     * @param selectedConverterType 选择用于写入响应的转换器类型
+     * @param request               当前请求
+     * @param response              当前响应
+     * @return 传入的响应体或修改后的（可能是新的）实例
      */
     @Override
     public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType selectedContentType, Class<? extends HttpMessageConverter<?>> selectedConverterType, ServerHttpRequest request, ServerHttpResponse response) {
@@ -72,8 +94,10 @@ public class GXResponseBodyAdvice implements ResponseBodyAdvice<Object> /* imple
 
     /**
      * 构建响应Cookie
+     * 首先检查是否存在GXResponseBodyAdviceService，如果存在则委托给它构建Cookie
+     * 如果不存在则使用默认的Cookie构建方法
      *
-     * @return Cookie对象
+     * @return Cookie字符串列表
      */
     private List<String> buildCookies() {
         GXResponseBodyAdviceService responseBodyAdviceService = GXSpringContextUtils.getBean(GXResponseBodyAdviceService.class);
@@ -85,8 +109,10 @@ public class GXResponseBodyAdvice implements ResponseBodyAdvice<Object> /* imple
 
     /**
      * 默认的Cookie构建方法
+     * 从环境配置中获取Cookie相关参数，并构建包含认证码的ResponseCookie
+     * 主要用于在没有自定义GXResponseBodyAdviceService实现时提供基本的Cookie功能
      *
-     * @return Cookies
+     * @return Cookie字符串列表
      */
     private List<String> defaultBuildCookies() {
         boolean isSecure = GXCommonUtils.getEnvironmentValue("cors.cookie.secure", boolean.class, false);
