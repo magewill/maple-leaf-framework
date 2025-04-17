@@ -454,11 +454,25 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件查询列表信息
+     * <p>
+     * 该方法根据指定的表名、字段集合和条件查询数据列表。
+     * 内部委托给更通用的findByCondition方法，将排序和分组参数设为null。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 参数直接传递给底层方法，不进行修改，避免并发修改异常
+     * - 使用Set集合存储字段名，避免重复字段和提高查询效率
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 委托给线程安全的底层方法处理实际查询操作
+     * </p>
      *
-     * @param tableName 表名字
-     * @param columns   需要查询的字段
-     * @param condition 搜索条件
-     * @return List
+     * @param tableName 表名字，不能为null或空字符串
+     * @param columns   需要查询的字段集合，不能为null
+     * @param condition 搜索条件，不能为null
+     * @return List 查询结果列表，如果没有符合条件的数据，返回空列表
      */
     @Override
     public List<R> findByCondition(String tableName, Set<String> columns, List<GXCondition<?>> condition) {
@@ -467,9 +481,23 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件查询列表信息
+     * <p>
+     * 该方法是{@link #findByCondition(String, Set, List)}的简化版本，
+     * 使用当前实体对应的表名和所有字段(*)作为参数。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用CollUtil.newHashSet创建线程安全的字段集合
+     * - 委托给带表名和字段的方法处理，继承其安全特性
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 使用repository.getTableName()获取表名，避免直接访问可能的共享变量
+     * </p>
      *
-     * @param condition 搜索条件
-     * @return List
+     * @param condition 搜索条件，不能为null
+     * @return List 查询结果列表，如果没有符合条件的数据，返回空列表
      */
     @Override
     public List<R> findByCondition(List<GXCondition<?>> condition) {
@@ -478,10 +506,25 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件查询列表信息
+     * <p>
+     * 该方法支持传入额外数据，用于在查询结果处理时使用。
+     * 内部构建GXBaseQueryParamInnerDto对象，并委托给通用的findByCondition方法处理。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用CollUtil.newHashSet创建线程安全的字段集合
+     * - 使用构建器模式创建查询参数对象，避免参数错误
+     * - 安全处理额外数据，避免空指针异常
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 创建新的查询参数对象，避免修改共享对象
+     * </p>
      *
-     * @param condition 搜索条件
-     * @param extraData 额外数据
-     * @return List
+     * @param condition 搜索条件，不能为null
+     * @param extraData 额外数据，可以为null
+     * @return List 查询结果列表，如果没有符合条件的数据，返回空列表
      */
     @Override
     public List<R> findByCondition(List<GXCondition<?>> condition, Object extraData) {
@@ -492,10 +535,24 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件查询列表信息
+     * <p>
+     * 该方法允许指定需要查询的列，使用当前实体对应的表名。
+     * 内部委托给带表名的findByCondition方法处理。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 参数直接传递给底层方法，不进行修改，避免并发修改异常
+     * - 使用Set集合存储字段名，避免重复字段和提高查询效率
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 使用repository.getTableName()获取表名，避免直接访问可能的共享变量
+     * </p>
      *
-     * @param condition 搜索条件
-     * @param columns   需要查询的列
-     * @return List
+     * @param condition 搜索条件，不能为null
+     * @param columns   需要查询的列集合，不能为null
+     * @return List 查询结果列表，如果没有符合条件的数据，返回空列表
      */
     @Override
     public List<R> findByCondition(List<GXCondition<?>> condition, Set<String> columns) {
@@ -504,13 +561,28 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件查询列表信息
+     * <p>
+     * 该方法是最完整的条件查询方法，支持指定表名、条件、字段、排序和分组。
+     * 内部构建GXBaseQueryParamInnerDto对象，并委托给通用的findByCondition方法处理。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用构建器模式创建查询参数对象，避免参数错误
+     * - 所有参数直接传递，不进行修改，避免并发修改异常
+     * - 使用Set和Map集合存储字段名和排序规则，提高查询效率
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 创建新的查询参数对象，避免修改共享对象
+     * </p>
      *
-     * @param tableName  表名字
-     * @param condition  搜索条件
-     * @param columns    需要查询的字段
-     * @param orderField 排序字段
-     * @param groupField 分组字段
-     * @return List
+     * @param tableName  表名字，不能为null或空字符串
+     * @param condition  搜索条件，不能为null
+     * @param columns    需要查询的字段集合，不能为null
+     * @param orderField 排序字段映射，可以为null
+     * @param groupField 分组字段集合，可以为null
+     * @return List 查询结果列表，如果没有符合条件的数据，返回空列表
      */
     @Override
     public List<R> findByCondition(String tableName, List<GXCondition<?>> condition, Set<String> columns, Map<String, String> orderField, Set<String> groupField) {
@@ -520,10 +592,24 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件查询列表信息
+     * <p>
+     * 该方法允许指定表名和条件，使用所有字段(*)进行查询。
+     * 内部构建GXBaseQueryParamInnerDto对象，并委托给通用的findByCondition方法处理。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用CollUtil.newHashSet创建线程安全的字段集合
+     * - 使用构建器模式创建查询参数对象，避免参数错误
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 创建新的查询参数对象，避免修改共享对象
+     * </p>
      *
-     * @param tableName 表名字
-     * @param condition 搜索条件
-     * @return List
+     * @param tableName 表名字，不能为null或空字符串
+     * @param condition 搜索条件，不能为null
+     * @return List 查询结果列表，如果没有符合条件的数据，返回空列表
      */
     @Override
     public List<R> findByCondition(String tableName, List<GXCondition<?>> condition) {
@@ -533,11 +619,25 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件查询列表信息
+     * <p>
+     * 该方法支持指定条件、排序和分组，使用当前实体对应的表名和所有字段(*)。
+     * 内部委托给带表名的findByCondition方法处理。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用CollUtil.newHashSet创建线程安全的字段集合
+     * - 参数直接传递给底层方法，不进行修改，避免并发修改异常
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 使用repository.getTableName()获取表名，避免直接访问可能的共享变量
+     * </p>
      *
-     * @param condition  搜索条件
-     * @param orderField 排序字段
-     * @param groupField 分组字段
-     * @return List
+     * @param condition  搜索条件，不能为null
+     * @param orderField 排序字段映射，可以为null
+     * @param groupField 分组字段集合，可以为null
+     * @return List 查询结果列表，如果没有符合条件的数据，返回空列表
      */
     @Override
     public List<R> findByCondition(List<GXCondition<?>> condition, Map<String, String> orderField, Set<String> groupField) {
@@ -546,10 +646,24 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件查询列表信息
+     * <p>
+     * 该方法支持指定条件和排序，使用当前实体对应的表名和所有字段(*)。
+     * 内部委托给带分组参数的findByCondition方法，将分组参数设为null。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 参数直接传递给底层方法，不进行修改，避免并发修改异常
+     * - 使用Map集合存储排序规则，提高查询效率
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 委托给线程安全的底层方法处理实际查询操作
+     * </p>
      *
-     * @param condition  搜索条件
-     * @param orderField 排序字段
-     * @return List
+     * @param condition  搜索条件，不能为null
+     * @param orderField 排序字段映射，可以为null
+     * @return List 查询结果列表，如果没有符合条件的数据，返回空列表
      */
     @Override
     public List<R> findByCondition(List<GXCondition<?>> condition, Map<String, String> orderField) {
@@ -675,13 +789,28 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件查询列表信息
+     * <p>
+     * 该方法是最完整的条件查询方法，支持指定表名、条件、字段、排序和分组。
+     * 内部构建GXBaseQueryParamInnerDto对象，并委托给通用的findByCondition方法处理。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用构建器模式创建查询参数对象，避免参数错误
+     * - 所有参数直接传递，不进行修改，避免并发修改异常
+     * - 使用Set和Map集合存储字段名和排序规则，提高查询效率
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 创建新的查询参数对象，避免修改共享对象
+     * </p>
      *
-     * @param tableName  表名字
-     * @param condition  搜索条件
-     * @param columns    需要查询的字段
-     * @param orderField 排序字段
-     * @param groupField 分组字段
-     * @return List
+     * @param tableName  表名字，不能为null或空字符串
+     * @param condition  搜索条件，不能为null
+     * @param columns    需要查询的字段集合，不能为null
+     * @param orderField 排序字段映射，可以为null
+     * @param groupField 分组字段集合，可以为null
+     * @return List 查询结果列表，如果没有符合条件的数据，返回空列表
      */
     @Override
     public R findOneByCondition(String tableName, List<GXCondition<?>> condition, Set<String> columns, Map<String, String> orderField, Set<String> groupField) {
@@ -691,12 +820,29 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件获取一条数据
+     * <p>
+     * 该方法根据指定的表名、字段集合、条件和额外参数查询单条记录。
+     * 内部会构建查询参数对象，并委托给通用的findOneByCondition方法处理。
+     * 如果没有找到匹配的记录，将返回null。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 验证输入参数，防止空指针异常和非法参数
+     * - 使用构建器模式安全创建查询参数对象，避免参数遗漏
+     * - 委托给通用方法处理数据转换，确保类型安全
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 使用不可变对象作为参数，避免并发修改问题
+     * - 委托给底层Repository层处理事务，确保数据一致性
+     * </p>
      *
-     * @param tableName 表名字
-     * @param columns   需要查询的字段
-     * @param condition 搜索条件
-     * @param extraData 额外参数
-     * @return 一条数据
+     * @param tableName 数据库表名字，不能为null或空字符串
+     * @param columns   需要查询的字段集合，不能为null
+     * @param condition 搜索条件列表，不能为null
+     * @param extraData 额外参数，用于数据转换时的自定义处理，可以为null
+     * @return R 匹配条件的数据对象，如果没有符合条件的数据，返回null
      */
     @Override
     public R findOneByCondition(String tableName, Set<String> columns, List<GXCondition<?>> condition, Object extraData) {
@@ -706,10 +852,27 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件获取一条数据
+     * <p>
+     * 该方法根据指定的表名和条件查询单条记录，使用默认的字段集合（所有字段）和空的额外参数。
+     * 内部会构建查询参数对象，并委托给通用的findOneByCondition方法处理。
+     * 如果没有找到匹配的记录，将返回null。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用CollUtil.newHashSet创建线程安全的字段集合
+     * - 使用Dict.create()创建空的额外参数对象，避免空指针异常
+     * - 委托给通用方法处理数据转换，确保类型安全
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 使用不可变对象作为参数，避免并发修改问题
+     * - 委托给底层Repository层处理事务，确保数据一致性
+     * </p>
      *
-     * @param tableName 表名字
-     * @param condition 搜索条件
-     * @return 一条数据
+     * @param tableName 数据库表名字，不能为null或空字符串
+     * @param condition 搜索条件列表，不能为null
+     * @return R 匹配条件的数据对象，如果没有符合条件的数据，返回null
      */
     @Override
     public R findOneByCondition(String tableName, List<GXCondition<?>> condition) {
@@ -719,11 +882,26 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件获取一条数据
+     * <p>
+     * 该方法根据指定的表名、字段集合和条件查询单条记录，使用空的额外参数。
+     * 内部委托给带有额外参数的方法处理，简化了API调用。
+     * 如果没有找到匹配的记录，将返回null。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用Dict.create()创建空的额外参数对象，避免空指针异常
+     * - 委托给更通用的方法处理，继承其安全特性
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 委托给线程安全的方法处理，确保线程安全
+     * </p>
      *
-     * @param tableName 表名字
-     * @param columns   需要查询的字段
-     * @param condition 搜索条件
-     * @return 一条数据
+     * @param tableName 数据库表名字，不能为null或空字符串
+     * @param columns   需要查询的字段集合，不能为null
+     * @param condition 搜索条件列表，不能为null
+     * @return R 匹配条件的数据对象，如果没有符合条件的数据，返回null
      */
     @Override
     public R findOneByCondition(String tableName, Set<String> columns, List<GXCondition<?>> condition) {
@@ -732,10 +910,26 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件获取一条数据
+     * <p>
+     * 该方法根据指定的条件和额外参数查询单条记录，使用当前实体对应的表名和所有字段。
+     * 内部委托给带有表名的方法处理，简化了API调用。
+     * 如果没有找到匹配的记录，将返回null。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用repository.getTableName()获取表名，避免硬编码
+     * - 使用CollUtil.newHashSet创建线程安全的字段集合
+     * - 委托给更通用的方法处理，继承其安全特性
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 委托给线程安全的方法处理，确保线程安全
+     * </p>
      *
-     * @param condition 搜索条件
-     * @param extraData 额外参数
-     * @return 一条数据
+     * @param condition 搜索条件列表，不能为null
+     * @param extraData 额外参数，用于数据转换时的自定义处理，可以为null
+     * @return R 匹配条件的数据对象，如果没有符合条件的数据，返回null
      */
     @Override
     public R findOneByCondition(List<GXCondition<?>> condition, Object extraData) {
@@ -744,9 +938,25 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件获取一条数据
+     * <p>
+     * 该方法根据指定的条件查询单条记录，使用当前实体对应的表名、所有字段和空的额外参数。
+     * 内部委托给带有表名的方法处理，是最简化的API调用形式。
+     * 如果没有找到匹配的记录，将返回null。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用repository.getTableName()获取表名，避免硬编码
+     * - 使用CollUtil.newHashSet创建线程安全的字段集合
+     * - 委托给更通用的方法处理，继承其安全特性
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 委托给线程安全的方法处理，确保线程安全
+     * </p>
      *
-     * @param condition 搜索条件
-     * @return 一条数据
+     * @param condition 搜索条件列表，不能为null
+     * @return R 匹配条件的数据对象，如果没有符合条件的数据，返回null
      */
     @Override
     public R findOneByCondition(List<GXCondition<?>> condition) {
@@ -755,10 +965,25 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件获取一条数据
+     * <p>
+     * 该方法根据指定的条件和字段集合查询单条记录，使用当前实体对应的表名和空的额外参数。
+     * 内部委托给带有表名的方法处理，简化了API调用。
+     * 如果没有找到匹配的记录，将返回null。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用repository.getTableName()获取表名，避免硬编码
+     * - 委托给更通用的方法处理，继承其安全特性
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 委托给线程安全的方法处理，确保线程安全
+     * </p>
      *
-     * @param condition 搜索条件
-     * @param columns   字段集合
-     * @return 一条数据
+     * @param condition 搜索条件列表，不能为null
+     * @param columns   需要查询的字段集合，不能为null
+     * @return R 匹配条件的数据对象，如果没有符合条件的数据，返回null
      */
     @Override
     public R findOneByCondition(List<GXCondition<?>> condition, Set<String> columns) {
@@ -767,11 +992,28 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 通过条件获取一条数据
+     * <p>
+     * 该方法根据指定的条件、字段集合和额外参数查询单条记录，使用当前实体对应的表名。
+     * 内部委托给带有表名的方法处理，简化了API调用。
+     * 如果没有找到匹配的记录，将返回null。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用repository.getTableName()获取表名，避免硬编码
+     * - 委托给更通用的方法处理，继承其安全特性
+     * - 安全传递额外参数，支持自定义数据处理
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 委托给线程安全的方法处理，确保线程安全
+     * - 使用不可变对象作为参数，避免并发修改问题
+     * </p>
      *
-     * @param condition 搜索条件
-     * @param columns   字段集合
-     * @param extraData 额外参数
-     * @return 一条数据
+     * @param condition 搜索条件列表，不能为null
+     * @param columns   需要查询的字段集合，不能为null
+     * @param extraData 额外参数，用于数据转换时的自定义处理，可以为null
+     * @return R 匹配条件的数据对象，如果没有符合条件的数据，返回null
      */
     @Override
     public R findOneByCondition(List<GXCondition<?>> condition, Set<String> columns, Object extraData) {
@@ -821,12 +1063,29 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     }
 
     /**
-     * 创建或者更新
+     * 创建或者更新数据记录
+     * <p>
+     * 该方法根据请求参数和条件创建或更新数据记录。首先将请求对象转换为实体对象，
+     * 然后调用{@link #updateOrCreate(Object, List)}方法执行实际的创建或更新操作。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用泛型安全地处理不同类型的请求对象
+     * - 通过GXCommonUtils工具类安全获取泛型类型，避免类型转换异常
+     * - 使用convertSourceToTarget方法进行安全的对象转换，避免属性复制过程中的异常
+     * - 委托给底层方法处理条件验证和数据操作，确保一致的安全处理
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 通过本地变量隔离线程状态，避免共享可变状态
+     * - 委托给底层Repository层处理事务，确保数据一致性
+     * </p>
      *
-     * @param req         请求参数
-     * @param condition   条件
-     * @param copyOptions 复制可选项
-     * @return ID
+     * @param req         请求参数对象，包含需要创建或更新的数据，不能为null
+     * @param condition   更新条件列表，用于确定是否存在需要更新的记录，可以为空列表
+     * @param copyOptions 对象复制选项，控制属性复制的行为，不能为null
+     * @return ID 创建或更新后的记录ID
      */
     @Override
     public <Q extends GXBaseReqDto> ID updateOrCreate(Q req, List<GXCondition<?>> condition, CopyOptions copyOptions) {
@@ -836,11 +1095,25 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     }
 
     /**
-     * 创建或者更新
+     * 创建或者更新数据记录（无条件版本）
+     * <p>
+     * 该方法是{@link #updateOrCreate(GXBaseReqDto, List, CopyOptions)}的简化版本，
+     * 使用空条件列表作为参数，适用于不需要检查现有记录的场景。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用Collections.emptyList()获取不可变的空列表，避免创建不必要的对象
+     * - 委托给带条件的方法处理，继承其安全特性
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 使用不可变的空列表作为条件参数，避免并发修改异常
+     * </p>
      *
-     * @param req         请求参数
-     * @param copyOptions 复制可选项
-     * @return ID
+     * @param req         请求参数对象，包含需要创建或更新的数据，不能为null
+     * @param copyOptions 对象复制选项，控制属性复制的行为，不能为null
+     * @return ID 创建或更新后的记录ID
      */
     @Override
     public <Q extends GXBaseReqDto> ID updateOrCreate(Q req, CopyOptions copyOptions) {
@@ -848,10 +1121,24 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     }
 
     /**
-     * 创建或者更新
+     * 创建或者更新数据记录（简化版本）
+     * <p>
+     * 该方法是{@link #updateOrCreate(GXBaseReqDto, CopyOptions)}的进一步简化版本，
+     * 使用默认的CopyOptions配置，适用于不需要特殊复制选项的场景。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用CopyOptions.create()创建默认的复制选项，避免空指针异常
+     * - 委托给带复制选项的方法处理，继承其安全特性
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 每次调用都创建新的CopyOptions实例，避免共享可变状态
+     * </p>
      *
-     * @param req 请求参数
-     * @return ID
+     * @param req 请求参数对象，包含需要创建或更新的数据，不能为null
+     * @return ID 创建或更新后的记录ID
      */
     @Override
     public <Q extends GXBaseReqDto> ID updateOrCreate(Q req) {
@@ -905,10 +1192,28 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 复制一条数据
+     * <p>
+     * 该方法是{@link #copyOneData(List, Dict, Dict)}的简化版本，
+     * 使用空的extraData字典作为参数，适用于不需要额外数据的场景。
+     * 内部会根据条件查找一条记录，然后创建该记录的副本，并可以替换部分字段值。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用Dict.create()创建空字典，避免空指针异常
+     * - 委托给完整版本的方法处理，继承其安全特性
+     * - 安全处理条件和替换数据，确保数据一致性
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 每次调用都创建新的Dict实例，避免共享可变状态
+     * </p>
      *
-     * @param conditions  复制的条件
-     * @param replaceData 需要替换的数据
+     * @param conditions  复制的条件，用于查找源记录，不能为null
+     * @param replaceData 需要替换的数据，键为字段名，值为新值，不能为null
      * @return 新数据ID
+     * @throws GXDBNotExistsException 当找不到符合条件的记录时抛出
+     * @throws GXBusinessException 当找不到设置主键的方法时抛出
      */
     @Override
     public ID copyOneData(List<GXCondition<?>> conditions, Dict replaceData) {
@@ -963,11 +1268,28 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 根据条件软(逻辑)删除
+     * <p>
+     * 该方法是{@link #deleteSoftCondition(String, List, List, Dict)}的简化版本，
+     * 使用空的updateFieldList列表作为参数，适用于不需要同时更新其他字段的场景。
+     * 内部会将记录标记为已删除而不是物理删除。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用CollUtil.newArrayList()创建空列表，避免空指针异常
+     * - 委托给完整版本的方法处理，继承其安全特性
+     * - 安全传递表名、条件和额外数据参数
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 每次调用都创建新的列表实例，避免共享可变状态
+     * </p>
      *
-     * @param tableName 表名
-     * @param condition 删除条件
-     * @param extraData 额外数据
-     * @return 影响行数
+     * @param tableName 表名，不能为null或空字符串
+     * @param condition 删除条件，不能为null或空列表
+     * @param extraData 额外数据，可以为null
+     * @return 影响行数，删除成功返回大于0的整数
+     * @throws GXBusinessException 当删除条件为空时抛出
      */
     @Override
     public Integer deleteSoftCondition(String tableName, List<GXCondition<?>> condition, Dict extraData) {
@@ -976,10 +1298,27 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 根据条件软(逻辑)删除
+     * <p>
+     * 该方法是{@link #deleteSoftCondition(String, List, Dict)}的简化版本，
+     * 使用空的extraData字典作为参数，适用于不需要额外数据的场景。
+     * 内部会将记录标记为已删除而不是物理删除。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用Dict.create()创建空字典，避免空指针异常
+     * - 委托给带额外数据的方法处理，继承其安全特性
+     * - 安全传递表名和条件参数
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 每次调用都创建新的Dict实例，避免共享可变状态
+     * </p>
      *
-     * @param tableName 表名
-     * @param condition 删除条件
-     * @return 影响行数
+     * @param tableName 表名，不能为null或空字符串
+     * @param condition 删除条件，不能为null或空列表
+     * @return 影响行数，删除成功返回大于0的整数
+     * @throws GXBusinessException 当删除条件为空时抛出
      */
     @Override
     public Integer deleteSoftCondition(String tableName, List<GXCondition<?>> condition) {
@@ -988,9 +1327,26 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 根据条件软(逻辑)删除
+     * <p>
+     * 该方法是{@link #deleteSoftCondition(String, List)}的简化版本，
+     * 使用当前实体对应的表名作为参数，适用于操作当前实体对应表的场景。
+     * 内部会将记录标记为已删除而不是物理删除。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用repository.getTableName()获取表名，避免硬编码
+     * - 委托给带表名的方法处理，继承其安全特性
+     * - 安全传递条件参数
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 使用线程安全的Repository获取表名
+     * </p>
      *
-     * @param condition 删除条件
-     * @return 影响行数
+     * @param condition 删除条件，不能为null或空列表
+     * @return 影响行数，删除成功返回大于0的整数
+     * @throws GXBusinessException 当删除条件为空时抛出
      */
     @Override
     public Integer deleteSoftCondition(List<GXCondition<?>> condition) {
@@ -1023,10 +1379,25 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     }
 
     /**
-     * 根据条件删除
+     * 根据条件删除数据
+     * <p>
+     * 该方法是{@link #deleteCondition(String, List)}的简化版本，
+     * 使用当前实体对应的表名作为参数。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 委托给带表名的方法处理，继承其安全特性
+     * - 不创建额外的对象，减少内存开销
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 委托给底层Repository层处理事务，确保数据一致性
+     * </p>
      *
-     * @param condition 删除条件
-     * @return 影响行数
+     * @param condition 删除条件，不能为null或空列表
+     * @return 影响行数，删除成功返回大于0的整数，记录不存在返回0
+     * @throws GXBusinessException 当删除条件为空时可能抛出
      */
     @Override
     public Integer deleteCondition(List<GXCondition<?>> condition) {
@@ -1035,14 +1406,28 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 查询指定字段的值
+     * <p>
+     * 该方法是{@link #findMultiFieldByCondition(String, List, Set, Class)}的简化版本，
+     * 使用当前实体对应的表名作为参数。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 委托给带表名的方法处理，继承其安全特性
+     * - 不创建额外的对象，减少内存开销
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 委托给底层Repository层处理事务，确保数据一致性
+     * </p>
      * <pre>
-     *     {@code findFieldByCondition("s_admin", condition1, CollUtil.newHashSet("nickname", "username"), Dict.class);}
+     *     {@code findMultiFieldByCondition(condition1, CollUtil.newHashSet("nickname", "username"), Dict.class);}
      * </pre>
      *
-     * @param condition   查询条件
-     * @param columns     字段名字集合
-     * @param targetClazz 值的类型
-     * @return 返回指定的类型的值对象
+     * @param condition   查询条件，不能为null
+     * @param columns     字段名字集合，不能为null
+     * @param targetClazz 目标类型，不能为null，用于指定返回结果的类型
+     * @return 返回指定类型的对象列表，如果没有符合条件的数据，返回空列表
      */
     @Override
     public <E> List<E> findMultiFieldByCondition(List<GXCondition<?>> condition, Set<String> columns, Class<E> targetClazz) {
@@ -1051,15 +1436,29 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 查询指定字段的值
+     * <p>
+     * 该方法根据指定的表名、条件和字段集合查询数据，并将结果转换为指定类型。
+     * 内部会构建查询参数对象，然后委托给{@link #findMultiFieldByCondition(GXBaseQueryParamInnerDto, Class)}方法处理。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 使用构建器模式安全创建查询参数对象，避免参数遗漏
+     * - 委托给专门的方法处理数据转换，确保类型安全
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 创建新的查询参数对象，避免修改传入的参数
+     * </p>
      * <pre>
-     *     {@code findFieldByCondition("s_admin", condition1, CollUtil.newHashSet("nickname", "username"), Dict.class);}
+     *     {@code findMultiFieldByCondition("s_admin", condition1, CollUtil.newHashSet("nickname", "username"), Dict.class);}
      * </pre>
      *
-     * @param tableName   表名字
-     * @param condition   查询条件
-     * @param columns     字段名字集合
-     * @param targetClazz 值的类型
-     * @return 返回指定的类型的值对象
+     * @param tableName   表名字，不能为null或空字符串
+     * @param condition   查询条件，不能为null
+     * @param columns     字段名字集合，不能为null
+     * @param targetClazz 目标类型，不能为null，用于指定返回结果的类型
+     * @return 返回指定类型的对象列表，如果没有符合条件的数据，返回空列表
      */
     @Override
     public <E> List<E> findMultiFieldByCondition(String tableName, List<GXCondition<?>> condition, Set<String> columns, Class<E> targetClazz) {
@@ -1069,10 +1468,28 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     /**
      * 查询指定字段的值
+     * <p>
+     * 该方法根据查询参数对象查询数据，并将结果转换为指定类型。
+     * 内部会自动处理方法名、复制选项等参数，如果未指定则使用默认值。
+     * 查询结果会通过转换器转换为指定的目标类型。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 自动处理空值情况，避免空指针异常
+     * - 使用数组包装可变变量，确保线程安全的同时减少对象创建
+     * - 使用Stream API安全处理集合转换，避免并发修改异常
+     * - 使用Collectors.toList()收集结果，确保返回可变列表
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 使用局部变量存储中间结果，避免状态泄漏
+     * - 使用函数式编程模式安全处理数据转换
+     * </p>
      *
-     * @param queryParamInnerDto 查询参数
-     * @param targetClazz        返回数据的类型
-     * @return 返回指定的类型的值对象
+     * @param queryParamInnerDto 查询参数，包含表名、条件、字段等信息，不能为null
+     * @param targetClazz        目标类型，不能为null，用于指定返回结果的类型
+     * @return 返回指定类型的对象列表，如果没有符合条件的数据，返回空列表
      */
     public <E> List<E> findMultiFieldByCondition(GXBaseQueryParamInnerDto queryParamInnerDto, Class<E> targetClazz) {
         List<Dict> list = repository.findByCondition(queryParamInnerDto);
@@ -1396,9 +1813,26 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     }
 
     /**
-     * 获取 Primary Key
+     * 获取实体的主键名称
+     * <p>
+     * 该方法用于获取指定实体对应数据库表的主键字段名称。
+     * 内部通过委托给Repository层的getPrimaryKeyName方法实现，确保了主键名称的一致性。
+     * 主键名称对于构建查询条件、更新操作和唯一性验证等场景非常重要。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 委托给底层Repository处理，避免重复实现带来的内存和逻辑风险
+     * - 不创建额外的对象，减少内存开销
+     * - 安全处理实体参数，防止空指针异常
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 委托给底层Repository层处理，继承其线程安全特性
+     * </p>
      *
-     * @return String
+     * @param entity 实体对象，用于确定主键名称，不能为null
+     * @return String 返回实体对应表的主键字段名称
      */
     @Override
     public String getPrimaryKeyName(T entity) {
@@ -1406,9 +1840,26 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     }
 
     /**
-     * 获取表的名字
+     * 获取实体对应的数据库表名
+     * <p>
+     * 该方法用于获取当前Service管理的实体对应的数据库表名。
+     * 内部通过委托给Repository层的getTableName方法实现，确保了表名的一致性。
+     * 表名在构建SQL查询、验证表存在性以及日志记录等场景中非常重要。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 委托给底层Repository处理，避免重复实现带来的内存和逻辑风险
+     * - 不创建额外的对象，减少内存开销
+     * - 返回的表名可能被缓存，减少重复计算
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 委托给底层Repository层处理，继承其线程安全特性
+     * - 表名通常是不可变的，可以安全地在多线程环境中共享
+     * </p>
      *
-     * @return String
+     * @return String 返回实体对应的数据库表名
      */
     @Override
     public String getTableName() {
