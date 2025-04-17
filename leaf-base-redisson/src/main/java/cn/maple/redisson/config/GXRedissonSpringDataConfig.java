@@ -19,18 +19,43 @@ import org.springframework.context.annotation.Configuration;
 
 import java.util.Map;
 
+/**
+ * Redisson Spring Data配置类
+ * <p>
+ * 该类负责配置和创建Redisson客户端实例，用于Redis操作和缓存管理
+ * 包括标准Redisson客户端、消息队列专用客户端以及Spring缓存管理器
+ * </p>
+ *
+ * @author maple
+ */
 @Configuration
 @ConditionalOnClass(name = {"org.redisson.Redisson"})
 public class GXRedissonSpringDataConfig {
+    /**
+     * 标准Redisson配置属性
+     */
     @Resource
     private GXRedissonProperties redissonConfig;
-
+    /**
+     * Redisson消息队列配置属性
+     */
     @Resource
     private GXRedissonMQProperties redissonMQConfig;
-
+    /**
+     * Redisson缓存管理器配置属性
+     */
     @Resource
     private GXRedissonCacheManagerProperties redissonCacheManagerConfig;
 
+    /**
+     * 创建标准Redisson客户端
+     * <p>
+     * 使用JsonJacksonCodec作为默认编解码器，确保对象序列化的一致性和安全性
+     * </p>
+     *
+     * @param config Redisson配置对象
+     * @return RedissonClient实例
+     */
     @Bean(destroyMethod = "shutdown")
     public RedissonClient redissonClient(Config config) {
         Codec jsonJacksonCodec = new JsonJacksonCodec();
@@ -38,6 +63,16 @@ public class GXRedissonSpringDataConfig {
         return Redisson.create(config);
     }
 
+    /**
+     * 创建消息队列专用Redisson客户端
+     * <p>
+     * 使用独立的客户端实例处理消息队列操作，避免与标准操作互相影响
+     * 同样使用JsonJacksonCodec作为默认编解码器
+     * </p>
+     *
+     * @param mqConfig 消息队列Redisson配置对象
+     * @return 消息队列专用RedissonClient实例
+     */
     @Bean(destroyMethod = "shutdown")
     public RedissonClient redissonMQClient(Config mqConfig) {
         Codec jsonJacksonCodec = new JsonJacksonCodec();
@@ -45,6 +80,16 @@ public class GXRedissonSpringDataConfig {
         return Redisson.create(mqConfig);
     }
 
+    /**
+     * 创建Redisson Spring缓存管理器
+     * <p>
+     * 集成Spring Cache抽象，提供基于Redis的缓存实现
+     * 根据配置决定是否使用特定的缓存配置
+     * </p>
+     *
+     * @param redissonClient Redisson客户端实例
+     * @return RedissonSpringCacheManager实例
+     */
     @Bean("redissonSpringCacheManager")
     public RedissonSpringCacheManager redissonSpringCacheManager(RedissonClient redissonClient) {
         final Map<String, CacheConfig> config = redissonCacheManagerConfig.getConfig();
@@ -54,6 +99,15 @@ public class GXRedissonSpringDataConfig {
         return new RedissonSpringCacheManager(redissonClient, config);
     }
 
+    /**
+     * 创建标准Redisson配置
+     * <p>
+     * 处理连接信息，包括地址、密码和用户名的解码
+     * 使用线程安全的方式处理配置转换，避免并发问题
+     * </p>
+     *
+     * @return Redisson配置对象
+     */
     @Bean("config")
     public Config config() {
         redissonConfig.getConfig().forEach((k, v) -> {
@@ -64,6 +118,15 @@ public class GXRedissonSpringDataConfig {
         return JSONUtil.toBean(JSONUtil.toJsonStr(redissonConfig.getConfig()), Config.class);
     }
 
+    /**
+     * 创建消息队列专用Redisson配置
+     * <p>
+     * 处理MQ连接信息，包括地址、密码和用户名的解码
+     * 使用线程安全的方式处理配置转换，避免并发问题
+     * </p>
+     *
+     * @return 消息队列专用Redisson配置对象
+     */
     @Bean("mqConfig")
     public Config mqConfig() {
         redissonMQConfig.getConfig().forEach((k, v) -> {
