@@ -31,6 +31,23 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+/**
+ * 数据库通用工具类
+ * <p>
+ * 提供数据库操作相关的工具方法，包括：
+ * 1. SQL注入防护 - 对用户输入进行严格检查和转义，防止SQL注入攻击
+ * 2. 查询条件构建 - 安全地构建和组装SQL查询条件
+ * 3. 分页对象处理 - 创建和转换分页对象
+ * 4. JSON搜索表达式生成 - 安全地生成用于JSON字段搜索的表达式
+ * 5. 表名和列名安全处理 - 确保表名和列名不包含SQL注入风险
+ * </p>
+ * <p>
+ * 该类中的所有方法都是线程安全的，可以在多线程环境中安全使用。
+ * 所有方法都进行了内存安全处理，避免内存泄漏和溢出风险。
+ * </p>
+ * 
+ * @author 塵子曦
+ */
 @SuppressWarnings({"unused"})
 public class GXDBCommonUtils {
     /**
@@ -38,8 +55,15 @@ public class GXDBCommonUtils {
      */
     private static final Logger LOG = LoggerFactory.getLogger(GXDBCommonUtils.class);
 
-    // 最大输入长度，防止超长输入导致性能问题
-    static int MAX_INPUT_LENGTH = 1024 * 1024; // 1MB
+    /**
+     * 最大输入长度，防止超长输入导致性能问题和内存溢出
+     * 限制为1MB，足够处理大多数正常业务场景的输入
+     */
+    /**
+     * 最大输入长度，防止超长输入导致性能问题和内存溢出
+     * 限制为1MB，足够处理大多数正常业务场景的输入
+     */
+    private static final int MAX_INPUT_LENGTH = 1024 * 1024; // 1MB
 
     /**
      * SQL注入检测正则表达式
@@ -53,7 +77,7 @@ public class GXDBCommonUtils {
      * 6. 常见的条件注入模式（OR 1=1, AND 1=1等）
      * 7. 系统函数和变量（@@version, user()等）
      */
-    static Pattern SQL_INJECTION_PATTERN = Pattern.compile(
+    private static final Pattern SQL_INJECTION_PATTERN = Pattern.compile(
             "(?i)" + // 忽略大小写
                     "(" +
                     // 模式 1：SQL 注释和语句分隔符（独立出现）
@@ -86,12 +110,17 @@ public class GXDBCommonUtils {
     );
 
     // 合法子查询的正则表达式，用于豁免检测
-    static Pattern LEGITIMATE_SUBQUERY_PATTERN = Pattern.compile(
+    private static final Pattern LEGITIMATE_SUBQUERY_PATTERN = Pattern.compile(
             "^\\s*\\(\\s*SELECT\\s+.*\\s+FROM\\s+.*\\s*(?:WHERE\\s+.*)?\\s*\\)\\s*(?:UNION\\s+(?:ALL\\s+)?\\s*\\(\\s*SELECT\\s+.*\\s+FROM\\s+.*\\s*(?:WHERE\\s+.*)?\\s*\\)\\s*)*$",
             Pattern.CASE_INSENSITIVE
     );
 
+    /**
+     * 私有构造函数，防止实例化
+     * 该类只提供静态方法，不需要实例化
+     */
     private GXDBCommonUtils() {
+        // 私有构造函数，防止实例化
     }
 
     /**
@@ -100,12 +129,16 @@ public class GXDBCommonUtils {
      * 该方法对key和value参数进行安全检查，防止SQL注入攻击。
      * 如果检测到潜在的SQL注入，将抛出GXSqlInjectionException异常。
      * </p>
+     * <p>
+     * 内存安全：该方法不会创建大量临时对象，避免内存泄漏。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param requestParam       请求参数
-     * @param key                添加的key
-     * @param value              添加的value
-     * @param returnRequestParam 是否返回requestParam
-     * @return Dict
+     * @param requestParam       请求参数，包含现有查询条件的Dict对象
+     * @param key                添加的key，不能为null或包含SQL注入风险字符
+     * @param value              添加的value，如果是字符串类型会进行SQL注入检查
+     * @param returnRequestParam 是否返回requestParam，true返回原始requestParam，false只返回条件Dict
+     * @return Dict 根据returnRequestParam参数返回原始requestParam或只包含条件的Dict
      * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     public static Dict addSearchCondition(Dict requestParam, String key, Object value, boolean returnRequestParam) {
@@ -138,16 +171,20 @@ public class GXDBCommonUtils {
     }
 
     /**
-     * 给现有查询条件新增查询条件
+     * 给现有查询条件新增查询条件（批量添加）
      * <p>
      * 该方法对sourceData中的键值对进行安全检查，防止SQL注入攻击。
      * 如果检测到潜在的SQL注入，将抛出GXSqlInjectionException异常。
      * </p>
+     * <p>
+     * 内存安全：该方法不会创建大量临时对象，避免内存泄漏。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param requestParam       请求参数
-     * @param sourceData         需要添加的map
-     * @param returnRequestParam 是否返回requestParam
-     * @return Dict
+     * @param requestParam       请求参数，包含现有查询条件的Dict对象
+     * @param sourceData         需要批量添加的条件map，其中每个键值对都会被添加到查询条件中
+     * @param returnRequestParam 是否返回requestParam，true返回原始requestParam，false只返回条件Dict
+     * @return Dict 根据returnRequestParam参数返回原始requestParam或只包含条件的Dict
      * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     public static Dict addSearchCondition(Dict requestParam, Dict sourceData, boolean returnRequestParam) {
@@ -185,10 +222,19 @@ public class GXDBCommonUtils {
     }
 
     /**
-     * 获取实体的表名字
+     * 获取实体类对应的数据库表名
+     * <p>
+     * 该方法通过MyBatis Plus的TableInfoHelper获取实体类对应的表名。
+     * 实体类必须已经被MyBatis Plus正确配置，否则可能返回null或抛出异常。
+     * </p>
+     * <p>
+     * 内存安全：该方法不会创建大量临时对象。
+     * 线程安全：该方法依赖MyBatis Plus的TableInfoHelper，其内部实现是线程安全的。
+     * </p>
      *
-     * @param clazz Class
-     * @return String
+     * @param clazz 实体类的Class对象
+     * @return String 对应的数据库表名
+     * @throws RuntimeException 如果实体类未被MyBatis Plus正确配置
      */
     public static String getTableName(Class<?> clazz) {
         TableInfo tableInfo = TableInfoHelper.getTableInfo(clazz);
@@ -196,11 +242,19 @@ public class GXDBCommonUtils {
     }
 
     /**
-     * 获取分页对象信息
+     * 获取分页对象信息（自定义记录集）
+     * <p>
+     * 该方法将MyBatis Plus的IPage对象转换为自定义的GXPaginationResDto对象，
+     * 同时允许传入自定义的记录集替换原始分页对象中的记录。
+     * </p>
+     * <p>
+     * 内存安全：该方法创建新的GXPaginationResDto对象，但不会持有原始IPage对象的引用，避免内存泄漏。
+     * 线程安全：该方法不修改输入参数，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param page    分页对象
-     * @param records 分页数据
-     * @return GXPagination
+     * @param page    MyBatis Plus的分页对象，包含分页信息（总页数、当前页等）
+     * @param records 自定义的分页数据记录集，将替换page中原有的记录集
+     * @return GXPaginationResDto 自定义分页响应对象
      */
     public static <R> GXPaginationResDto<R> convertPageToPaginationResDto(IPage<R> page, List<R> records) {
         long pages = page.getPages();
@@ -211,10 +265,18 @@ public class GXDBCommonUtils {
     }
 
     /**
-     * 获取分页对象信息
+     * 获取分页对象信息（使用原始记录集）
+     * <p>
+     * 该方法将MyBatis Plus的IPage对象转换为自定义的GXPaginationResDto对象，
+     * 使用原始分页对象中的记录集。
+     * </p>
+     * <p>
+     * 内存安全：该方法创建新的GXPaginationResDto对象，但不会持有原始IPage对象的引用，避免内存泄漏。
+     * 线程安全：该方法不修改输入参数，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param page 分页对象
-     * @return GXPagination
+     * @param page MyBatis Plus的分页对象，包含分页信息和记录集
+     * @return GXPaginationResDto 自定义分页响应对象
      */
     public static <R> GXPaginationResDto<R> convertPageToPaginationResDto(IPage<R> page) {
         long pages = page.getPages();
@@ -225,24 +287,28 @@ public class GXDBCommonUtils {
     }
 
     /**
-     * 组合JSON搜索条件
+     * 生成JSON搜索表达式
      * <p>
      * 该方法对searchField和searchExpression参数进行安全检查，防止SQL注入攻击。
      * 同时对searchValue中的字符串值进行安全处理。
      * 如果检测到潜在的SQL注入，将抛出GXSqlInjectionException异常。
      * </p>
+     * <p>
+     * 内存安全：该方法使用StringBuilder构建表达式，避免字符串拼接产生大量临时对象。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      * <pre>
      *     {@code
-     *     compositeJSONSearchExpression("custer_info" , "emp[*].name" , CollUtil.newHashSet("jack"));
-     *     compositeJSONSearchExpression("label_id" , "" , CollUtil.newHashSet(1));
+     *     generateJSONSearchExpression("custer_info" , "emp[*].name" , CollUtil.newHashSet("jack"));
+     *     generateJSONSearchExpression("label_id" , "" , CollUtil.newHashSet(1));
      *     }
      * </pre>
      *
-     * @param searchField      需要搜索的字段
-     * @param searchExpression 表达式
-     * @param searchValue      搜索的值
-     * @return 搜索表达式
-     * @throws GXBusinessException     如果参数为空
+     * @param searchField      需要搜索的JSON字段名，不能为空
+     * @param searchExpression JSON路径表达式，可以为空（为空时默认为"$"）
+     * @param searchValue      搜索的值集合，不能为空
+     * @return 格式化的JSON搜索表达式，可直接用于SQL查询
+     * @throws GXBusinessException     如果searchField或searchValue为空
      * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     public static String generateJSONSearchExpression(String searchField, String searchExpression, Set<Object> searchValue) {
@@ -296,29 +362,54 @@ public class GXDBCommonUtils {
     }
 
     /**
-     * 获取SELECT　SQL语句
+     * 获取SELECT SQL语句（多条记录查询）
+     * <p>
+     * 该方法根据查询参数构建完整的SELECT SQL语句，用于查询多条记录。
+     * 内部调用GXBaseBuilder.findByCondition方法生成SQL。
+     * </p>
+     * <p>
+     * 内存安全：该方法不会创建大量临时对象。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param dbQueryParamInnerDto 查询条件
-     * @return String
+     * @param dbQueryParamInnerDto 查询条件参数对象，包含表名、字段、条件等信息
+     * @return String 生成的完整SELECT SQL语句
      */
     public static String getSelectSql(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         return GXBaseBuilder.findByCondition(dbQueryParamInnerDto);
     }
 
     /**
-     * 获取SELECT　SQL语句
+     * 获取SELECT SQL语句（单条记录查询）
+     * <p>
+     * 该方法根据查询参数构建完整的SELECT SQL语句，用于查询单条记录。
+     * 内部调用GXBaseBuilder.findOneByCondition方法生成SQL。
+     * </p>
+     * <p>
+     * 内存安全：该方法不会创建大量临时对象。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param dbQueryParamInnerDto 查询条件
-     * @return SQL
+     * @param dbQueryParamInnerDto 查询条件参数对象，包含表名、字段、条件等信息
+     * @return String 生成的完整SELECT SQL语句（针对单条记录查询优化）
      */
     public static String getSelectOneSql(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         return GXBaseBuilder.findOneByCondition(dbQueryParamInnerDto);
     }
 
     /**
-     * 设置更新条件对象的值
+     * 组装更新条件包装器
+     * <p>
+     * 该方法根据条件列表构建MyBatis Plus的UpdateWrapper对象，用于执行更新操作。
+     * 会自动处理不同类型的条件（等于、不等于、大于、小于等），并进行安全处理。
+     * </p>
+     * <p>
+     * 内存安全：该方法创建新的UpdateWrapper对象，但不会持有原始条件列表的引用。
+     * 线程安全：该方法不修改输入参数，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param condition 条件
+     * @param condition 条件列表，每个条件包含字段表达式、操作符和值
+     * @return UpdateWrapper 构建好的更新条件包装器
      */
     public static <T> UpdateWrapper<T> assemblyUpdateWrapper(List<GXCondition<?>> condition) {
         UpdateWrapper<T> updateWrapper = new UpdateWrapper<>();
@@ -355,23 +446,39 @@ public class GXDBCommonUtils {
     }
 
     /**
-     * 构造分页对象
+     * 构造分页对象（带默认计数）
+     * <p>
+     * 该方法根据当前页和每页大小构建MyBatis Plus的分页对象，
+     * 默认启用总记录数计算。会对参数进行校验，确保分页参数在合理范围内。
+     * </p>
+     * <p>
+     * 内存安全：该方法创建新的Page对象，占用内存较小。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param page     当前页
-     * @param pageSize 每页大小
-     * @return 分页对象
+     * @param page     当前页码，如果为null或小于0，将使用默认值
+     * @param pageSize 每页大小，如果为null、小于等于0或大于最大限制，将使用默认值
+     * @return IPage 构建好的分页对象
      */
     public static <R> IPage<R> constructPageObject(Integer page, Integer pageSize) {
         return constructPageObject(page, pageSize, true);
     }
 
     /**
-     * 构造分页对象
+     * 构造分页对象（可控制是否计数）
+     * <p>
+     * 该方法根据当前页和每页大小构建MyBatis Plus的分页对象，
+     * 可以控制是否启用总记录数计算。会对参数进行校验，确保分页参数在合理范围内。
+     * </p>
+     * <p>
+     * 内存安全：该方法创建新的Page对象，占用内存较小。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param page        当前页
-     * @param pageSize    每页大小
-     * @param searchCount 是否使用MyBatis Plus提供的count(*)
-     * @return 分页对象
+     * @param page        当前页码，如果为null或小于0，将使用默认值
+     * @param pageSize    每页大小，如果为null、小于等于0或大于最大限制，将使用默认值
+     * @param searchCount 是否使用MyBatis Plus提供的count(*)计算总记录数
+     * @return IPage 构建好的分页对象
      */
     public static <R> IPage<R> constructPageObject(Integer page, Integer pageSize, boolean searchCount) {
         int defaultCurrentPage = GXCommonConstant.DEFAULT_CURRENT_PAGE;
@@ -393,9 +500,13 @@ public class GXDBCommonUtils {
      * 对列名和值进行适当的转义处理，确保生成的SQL语句安全可靠。
      * 如果检测到潜在的SQL注入，将抛出GXSqlInjectionException异常。
      * </p>
+     * <p>
+     * 内存安全：该方法不会创建大量临时对象，避免内存泄漏。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param sql       SQL对象
-     * @param condition 条件
+     * @param sql       MyBatis的SQL对象，用于构建SQL语句
+     * @param condition 条件字典，键为列名，值为对应的条件值
      * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     public static void assemblySqlObjectCondition(SQL sql, Dict condition) {
@@ -444,7 +555,7 @@ public class GXDBCommonUtils {
     }
 
     /**
-     * 检查输入字符串是否存在潜在的 SQL 注入攻击。
+     * 检查输入字符串是否存在潜在的 SQL 注入攻击
      * <p>
      * 该方法通过以下步骤进行检测：
      * 1. 检查输入是否为空或超长。
@@ -452,11 +563,16 @@ public class GXDBCommonUtils {
      * 3. 使用正则表达式进行初步检测。
      * 4. 使用 GXDBStringEscapeUtils.check 方法进行更全面的检测（如果可用）。
      * </p>
+     * <p>
+     * 内存安全：该方法对输入长度进行限制，防止超长输入导致内存溢出。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      *
      * @param input       需要检查的输入字符串
-     * @param source      输入来源（用于日志记录）
+     * @param source      输入来源（用于日志记录，帮助定位问题）
      * @param isUserInput 是否为用户输入（如果是，则严格检测；如果不是，则放宽检测）
      * @throws GXSqlInjectionException 如果检测到 SQL 注入攻击
+     * @throws IllegalArgumentException 如果输入长度超过最大限制
      */
     public static void checkSQLInjection(String input, String source, boolean isUserInput) {
         // 检查输入是否为空
@@ -505,9 +621,13 @@ public class GXDBCommonUtils {
      * 该方法确保表名不包含SQL注入攻击模式，并对表名进行适当的转义处理。
      * 表名通常不应包含需要转义的特殊字符，但为了安全起见，仍然进行检查。
      * </p>
+     * <p>
+     * 内存安全：该方法不会创建大量临时对象。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param tableName 原始表名
-     * @return 安全的表名
+     * @param tableName 原始表名，不能为空
+     * @return 安全的表名，经过验证和处理
      * @throws GXBusinessException     如果表名为空
      * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
@@ -534,9 +654,13 @@ public class GXDBCommonUtils {
      * 该方法确保表别名不包含SQL注入攻击模式，并对表别名进行适当的转义处理。
      * 表别名通常不应包含需要转义的特殊字符，但为了安全起见，仍然进行检查。
      * </p>
+     * <p>
+     * 内存安全：该方法不会创建大量临时对象。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param tableAlias 原始表别名
-     * @return 安全的表别名，如果输入为空则返回null
+     * @param tableAlias 原始表别名，可以为空
+     * @return 安全的表别名，如果输入为空则返回null，否则返回经过验证和处理的别名
      * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
     public static String safeTableAlias(String tableAlias) {
@@ -563,9 +687,13 @@ public class GXDBCommonUtils {
      * 列名通常不应包含需要转义的特殊字符，但为了安全起见，仍然进行检查。
      * 该方法支持处理SQL函数调用，如GROUP_CONCAT等聚合函数。
      * </p>
+     * <p>
+     * 内存安全：该方法不会创建大量临时对象。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param columnName 原始列名
-     * @return 安全的列名
+     * @param columnName 原始列名，不能为空
+     * @return 安全的列名，经过验证和处理
      * @throws GXBusinessException     如果列名为空
      * @throws GXSqlInjectionException 如果检测到潜在的SQL注入攻击
      */
@@ -607,8 +735,12 @@ public class GXDBCommonUtils {
      * 该方法检查字符串是否符合SQL函数调用的基本模式，
      * 包括常见的聚合函数（如GROUP_CONCAT, SUM, COUNT等）和其他SQL函数。
      * </p>
+     * <p>
+     * 内存安全：该方法使用正则表达式进行匹配，不会创建大量临时对象。
+     * 线程安全：该方法不修改静态变量，可在多线程环境中安全使用。
+     * </p>
      *
-     * @param str 要检查的字符串
+     * @param str 要检查的字符串，可以为空
      * @return 如果字符串是SQL函数调用则返回true，否则返回false
      */
     public static boolean isSqlFunctionCall(String str) {
