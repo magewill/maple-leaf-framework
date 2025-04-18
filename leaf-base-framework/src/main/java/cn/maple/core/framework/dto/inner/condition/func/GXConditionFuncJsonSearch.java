@@ -23,15 +23,29 @@ public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
         return op;
     }
 
+    /**
+     * 获取字段表达式，用于JSON_SEARCH函数的第一个参数
+     * 使用反引号包裹表名和字段名，防止SQL关键字冲突
+     *
+     * @return 安全的字段表达式字符串
+     */
     @Override
     public String getFieldExpression() {
         String format = "`{}`.`{}`";
         return CharSequenceUtil.format(format, tableNameAlias, getOp());
     }
 
+    /**
+     * 获取字段值，用于JSON_SEARCH函数的搜索值参数
+     * 注意：返回值仅用于日志或调试，实际SQL中使用参数化查询
+     *
+     * @return 字段值字符串
+     */
     @Override
     public String getFieldValue() {
-        return CharSequenceUtil.format("'{}'", value);
+        // 存储原始值到参数映射中，不需要手动添加引号，Mybatis会处理
+        this.paramMap.put(paramName, value);
+        return value;
     }
 
     @Override
