@@ -29,8 +29,15 @@ public abstract class GXConditionFunc<T> extends GXCondition<T> {
 
     protected abstract String getFunctionName();
 
+    /**
+     * 生成WHERE子句字符串，使用Mybatis参数化查询形式防止SQL注入
+     *
+     * @return 安全的WHERE子句字符串
+     */
     @Override
     public String whereString() {
-        return CharSequenceUtil.format("{}({}) {} {}", getFunctionName(), getFieldExpression(), getOp(), getFieldValue());
+        return CharSequenceUtil.format("{}({})",
+                getFunctionName(),
+                getFieldExpression());
     }
 }

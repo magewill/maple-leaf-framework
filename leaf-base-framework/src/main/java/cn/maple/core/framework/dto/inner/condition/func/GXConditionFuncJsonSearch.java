@@ -25,8 +25,8 @@ public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
 
     @Override
     public String getFieldExpression() {
-        String format = "{}.{},{},{}";
-        return CharSequenceUtil.format(format, tableNameAlias);
+        String format = "`{}`.`{}`";
+        return CharSequenceUtil.format(format, tableNameAlias, getOp());
     }
 
     @Override
@@ -39,9 +39,20 @@ public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
         return "JSON_SEARCH";
     }
 
+    /**
+     * 生成WHERE子句字符串，使用Mybatis参数化查询形式防止SQL注入
+     *
+     * @return 安全的WHERE子句字符串
+     */
     @Override
     public String whereString() {
-        String format = CharSequenceUtil.format("{}({})", getFunctionName(), getFieldExpression());
-        return CharSequenceUtil.format(format, getOp(), CharSequenceUtil.format("'{}'", oneOrAll), getFieldValue());
+        // 使用Mybatis参数化查询形式，防止SQL注入
+        // oneOrAll参数也需要参数化处理
+        this.paramMap.put(paramName + "_oneOrAll", oneOrAll);
+        return CharSequenceUtil.format("{}({}, #{dbQueryParamInnerDto.paramMap.{}_oneOrAll}, #{dbQueryParamInnerDto.paramMap.{}})",
+                getFunctionName(),
+                getFieldExpression(),
+                paramName,
+                paramName);
     }
 }
