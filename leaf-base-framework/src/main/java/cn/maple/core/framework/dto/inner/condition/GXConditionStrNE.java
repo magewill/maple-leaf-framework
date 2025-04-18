@@ -1,6 +1,5 @@
 package cn.maple.core.framework.dto.inner.condition;
 
-import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
