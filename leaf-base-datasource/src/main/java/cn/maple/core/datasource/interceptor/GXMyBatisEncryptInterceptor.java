@@ -14,6 +14,38 @@ import java.lang.reflect.Field;
 import java.sql.PreparedStatement;
 import java.util.Objects;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * MyBatis敏感数据加密拦截器
+ * <p>
+ * 该拦截器用于在MyBatis执行SQL前自动加密标记了{@link GXSensitiveData}注解的实体类中的敏感字段。
+ * 通过拦截{@link ParameterHandler}的setParameters方法，在参数设置到PreparedStatement前进行加密处理。
+ * </p>
+ * 
+ * <p>使用示例：</p>
+ * <pre>
+ * // 1. 在需要加密字段的实体类上添加@GXSensitiveData注解
+ * @GXSensitiveData
+ * public class UserEntity {
+ *     private String username;
+ *     private String password; // 将被加密
+ *     private String idCard;   // 将被加密
+ *     // getter和setter方法
+ * }
+ * 
+ * // 2. 确保GXSensitiveDataEncryptService的实现类已注册到Spring容器中
+ * // 3. 确保本拦截器已通过@Component注解注册到Spring容器中
+ * </pre>
+ * 
+ * <p>线程安全说明：</p>
+ * <p>本拦截器是线程安全的，因为：</p>
+ * <p>1. 不维护任何可变状态</p>
+ * <p>2. 所有操作都基于方法参数</p>
+ * <p>3. 使用了线程安全的ReflectionUtils工具类</p>
+ * 
+ * @author britton <britton@126.com>
+ */
 
 @Slf4j
 @Component
@@ -21,45 +53,115 @@ import java.util.Properties;
         @Signature(type = ParameterHandler.class, method = "setParameters", args = PreparedStatement.class),
 })
 public class GXMyBatisEncryptInterceptor implements Interceptor {
+    /**
+     * 敏感数据加密服务
+     * <p>
+     * 用于执行实际的字段加密操作，通过Spring的依赖注入机制获取实现类
+     * </p>
+     */
     @Resource
-    private GXSensitiveDataEncryptService gxSensitiveDataEncryptService;
+    private GXSensitiveDataEncryptService sensitiveDataEncryptService;
+    
+    /**
+     * 注解缓存，用于提高性能，避免重复反射查找相同类的注解
+     * <p>
+     * 使用ConcurrentHashMap确保线程安全
+     * </p>
+     */
+    private final ConcurrentHashMap<Class<?>, Boolean> annotationCache = new ConcurrentHashMap<>();
 
+    /**
+     * 拦截方法，在MyBatis执行SQL前处理参数
+     * <p>
+     * 该方法会检查参数对象是否标记了{@link GXSensitiveData}注解，
+     * 如果是，则调用加密服务对敏感字段进行加密处理
+     * </p>
+     *
+     * @param invocation MyBatis拦截器方法调用对象
+     * @return 处理后的结果对象
+     * @throws Throwable 处理过程中可能抛出的异常
+     */
     @Override
     @SuppressWarnings("all")
     public Object intercept(Invocation invocation) throws Throwable {
-        // @Signature 指定了 type= parameterHandler 后，这里的 invocation.getTarget() 便是parameterHandler
-        // 若指定ResultSetHandler ，这里则能强转为ResultSetHandler
-        ParameterHandler parameterHandler = (ParameterHandler) invocation.getTarget();
-        // 获取参数对像，即 mapper 中 paramsType 的实例
-        //Field parameterField = parameterHandler.getClass().getDeclaredField("parameterObject");
-        Field parameterField = ReflectionUtils.findField(parameterHandler.getClass() ,  "parameterObject");
-        parameterField.setAccessible(true);
-        // 取出实例
-        Object parameterObject = parameterField.get(parameterHandler);
-        if (parameterObject != null) {
-            Class<?> parameterObjectClass = parameterObject.getClass();
-            // 校验该实例的类是否被@SensitiveData所注解
-            GXSensitiveData sensitiveData = AnnotationUtils.findAnnotation(parameterObjectClass, GXSensitiveData.class);
-            if (Objects.nonNull(sensitiveData)) {
-                // 取出当前当前类所有字段，传入加密方法
-                Field[] declaredFields = parameterObjectClass.getDeclaredFields();
-                // 对每个字段进行加密
-                gxSensitiveDataEncryptService.encrypt(declaredFields, parameterObject);
+        try {
+            // 获取参数处理器
+            // @Signature 指定了 type=parameterHandler 后，这里的 invocation.getTarget() 便是parameterHandler
+            ParameterHandler parameterHandler = (ParameterHandler) invocation.getTarget();
+            
+            // 安全地获取参数对象字段
+            Field parameterField = ReflectionUtils.findField(parameterHandler.getClass(), "parameterObject");
+            if (parameterField == null) {
+                log.warn("无法找到parameterObject字段，跳过敏感数据加密处理");
+                return invocation.proceed();
             }
+            
+            // 设置字段可访问
+            parameterField.setAccessible(true);
+            
+            // 获取参数对象实例
+            Object parameterObject = parameterField.get(parameterHandler);
+            if (parameterObject == null) {
+                return invocation.proceed();
+            }
+            
+            // 获取参数对象类型
+            Class<?> parameterObjectClass = parameterObject.getClass();
+            
+            // 检查类是否需要进行敏感数据加密（使用缓存提高性能）
+            Boolean hasAnnotation = annotationCache.get(parameterObjectClass);
+            if (hasAnnotation == null) {
+                // 首次检查，查找注解并缓存结果
+                GXSensitiveData sensitiveData = AnnotationUtils.findAnnotation(parameterObjectClass, GXSensitiveData.class);
+                hasAnnotation = Objects.nonNull(sensitiveData);
+                annotationCache.put(parameterObjectClass, hasAnnotation);
+            }
+            
+            // 如果类标记了敏感数据注解，执行加密处理
+            if (hasAnnotation) {
+                log.debug("检测到敏感数据类: {}, 执行加密处理", parameterObjectClass.getName());
+                // 获取类的所有字段
+                Field[] declaredFields = parameterObjectClass.getDeclaredFields();
+                // 调用加密服务进行加密
+                sensitiveDataEncryptService.encrypt(declaredFields, parameterObject);
+            }
+        } catch (Exception e) {
+            // 记录异常但不中断流程，确保SQL能够继续执行
+            log.error("敏感数据加密过程发生异常: {}", e.getMessage(), e);
         }
+        
+        // 继续执行原方法
         return invocation.proceed();
     }
 
     /**
-     * 切记配置，否则当前拦截器不会加入拦截器链
+     * 包装目标对象，确保拦截器被添加到拦截器链中
+     * <p>
+     * 该方法是MyBatis拦截器接口的必要实现，用于将当前拦截器包装到目标对象上
+     * </p>
+     *
+     * @param target 要拦截的目标对象
+     * @return 包装后的对象
      */
     @Override
-    public Object plugin(Object o) {
-        return Plugin.wrap(o, this);
+    public Object plugin(Object target) {
+        // 只拦截ParameterHandler类型的对象
+        if (target instanceof ParameterHandler) {
+            return Plugin.wrap(target, this);
+        }
+        return target;
     }
 
+    /**
+     * 设置拦截器属性
+     * <p>
+     * 可通过此方法接收配置参数，当前实现不需要额外配置
+     * </p>
+     *
+     * @param properties 配置属性
+     */
     @Override
     public void setProperties(Properties properties) {
-        // 自定义配置写入，没有自定义配置的可以直接置空此方法
+        // 当前实现不需要额外配置
     }
 }

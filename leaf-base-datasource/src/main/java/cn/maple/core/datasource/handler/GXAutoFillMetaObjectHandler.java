@@ -14,9 +14,62 @@ import java.util.Optional;
 
 /**
  * MyBatis公共字段自动填充器
- * 用于在插入和更新操作时自动填充创建和更新相关字段
- * 该类是线程安全的，因为它不维护任何状态，每次操作都是基于传入的MetaObject对象
- *
+ * <p>
+ * 该类实现了MyBatis-Plus的MetaObjectHandler接口，用于在插入和更新操作时自动填充创建和更新相关字段，
+ * 如创建人、创建时间、更新人、更新时间等，无需在业务代码中手动设置这些字段值。
+ * </p>
+ * 
+ * <p>线程安全说明：</p>
+ * <p>该类是线程安全的，因为它不维护任何状态，每次操作都是基于传入的MetaObject对象。</p>
+ * <p>所有方法都是无状态的，不存在线程间共享数据的问题。</p>
+ * 
+ * <p>使用示例：</p>
+ * <pre>
+ * // 1. 确保实体类中包含以下字段
+ * public class BaseEntity {
+ *     private String createdBy; // 创建人
+ *     private Integer createdAt; // 创建时间（Unix时间戳）
+ *     private String updatedBy; // 更新人
+ *     private Integer updatedAt; // 更新时间（Unix时间戳）
+ *     
+ *     // getter和setter方法
+ * }
+ * 
+ * // 2. 在实体类字段上添加填充注解
+ * public class UserEntity extends BaseEntity {
+ *     @TableId
+ *     private Long id;
+ *     
+ *     private String username;
+ *     
+ *     @TableField(fill = FieldFill.INSERT) // 插入时自动填充
+ *     private String createdBy;
+ *     
+ *     @TableField(fill = FieldFill.INSERT)
+ *     private Integer createdAt;
+ *     
+ *     @TableField(fill = FieldFill.UPDATE) // 更新时自动填充
+ *     private String updatedBy;
+ *     
+ *     @TableField(fill = FieldFill.UPDATE)
+ *     private Integer updatedAt;
+ * }
+ * 
+ * // 3. 实现GXMyBatisAutoFillMetaObjectService接口，提供当前操作用户信息
+ * @Service
+ * public class MyBatisAutoFillMetaObjectServiceImpl implements GXMyBatisAutoFillMetaObjectService {
+ *     @Override
+ *     public String getCreatedBy() {
+ *         return SecurityUtils.getCurrentUsername(); // 获取当前登录用户
+ *     }
+ *     
+ *     @Override
+ *     public String getUpdatedBy() {
+ *         return SecurityUtils.getCurrentUsername(); // 获取当前登录用户
+ *     }
+ * }
+ * </pre>
+ * 
  * @author britton <britton@126.com>
  */
 @Slf4j
