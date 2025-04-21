@@ -8,25 +8,97 @@ import cn.hutool.json.JSONUtil;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * MySQL JSON_CONTAINS函数条件构建类
+ * <p>
+ * 该类用于构建使用MySQL JSON_CONTAINS函数的查询条件，用于检查JSON文档是否包含特定值或路径。
+ * JSON_CONTAINS函数返回1（真）如果目标JSON文档包含指定的值，或者0（假）如果不包含。
+ * </p>
+ * 
+ * <p>使用示例：</p>
+ * <pre>
+ * // 示例1：检查tags字段是否包含指定的标签列表
+ * List&lt;Object&gt; tagList = new ArrayList<>();
+ * tagList.add("技术");
+ * tagList.add("Java");
+ * GXConditionFuncJsonContains condition = new GXConditionFuncJsonContains("t_article", "tags", tagList);
+ * 
+ * // 示例2：检查user_info字段中的特定路径是否包含指定值
+ * Dict dict = Dict.create().set("name", "张三").set("age", 25);
+ * GXConditionFuncJsonContains condition = new GXConditionFuncJsonContains("t_user", "user_info", dict, "profile");
+ * 
+ * // 示例3：检查JSON对象中是否包含特定键值对
+ * Dict userInfo = Dict.create().set("name", "张三");
+ * GXConditionFuncJsonContains condition = new GXConditionFuncJsonContains("t_user", "ext", userInfo);
+ * // 生成的SQL类似于：JSON_CONTAINS(ext, JSON_OBJECT("name", "张三"))
+ * 
+ * // 将条件添加到查询参数中
+ * List&lt;GXCondition&lt;?&gt;&gt; conditions = new ArrayList<>();
+ * conditions.add(condition);
+ * GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+ *     .tableName("t_user")
+ *     .condition(conditions)
+ *     .build();
+ * </pre>
+ * 
+ * @author 塵子曦
+ * @since 1.0.0
+ */
 public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
+    /**
+     * JSON值对象，可以是List或Dict类型
+     */
     private final Object values;
 
+    /**
+     * JSON路径，用于指定要检查的JSON文档中的路径
+     */
     private String jsonPath;
 
+    /**
+     * 构造函数，使用List作为值，默认JSON路径为空
+     *
+     * @param tableNameAlias 表名别名，用于SQL查询
+     * @param jsonField JSON字段名，包含要检查的JSON数据
+     * @param values 要检查包含的值列表
+     */
     public GXConditionFuncJsonContains(String tableNameAlias, String jsonField, List<Object> values) {
         this(tableNameAlias, jsonField, values, "");
     }
 
+    /**
+     * 构造函数，使用List作为值，指定JSON路径
+     *
+     * @param tableNameAlias 表名别名，用于SQL查询
+     * @param jsonField JSON字段名，包含要检查的JSON数据
+     * @param values 要检查包含的值列表
+     * @param jsonPath JSON路径表达式，如"$.tags"
+     */
     public GXConditionFuncJsonContains(String tableNameAlias, String jsonField, List<Object> values, String jsonPath) {
         super(tableNameAlias, jsonField, "", null);
         this.values = values;
         this.jsonPath = jsonPath;
     }
 
+    /**
+     * 构造函数，使用Dict作为值，默认JSON路径为空
+     *
+     * @param tableNameAlias 表名别名，用于SQL查询
+     * @param jsonField JSON字段名，包含要检查的JSON数据
+     * @param values 要检查包含的值字典
+     */
     public GXConditionFuncJsonContains(String tableNameAlias, String jsonField, Dict values) {
         this(tableNameAlias, jsonField, values, "");
     }
 
+    /**
+     * 构造函数，使用Dict作为值，指定JSON路径
+     *
+     * @param tableNameAlias 表名别名，用于SQL查询
+     * @param jsonField JSON字段名，包含要检查的JSON数据
+     * @param values 要检查包含的值字典
+     * @param jsonPath JSON路径表达式，如"$.profile"
+     */
     public GXConditionFuncJsonContains(String tableNameAlias, String jsonField, Dict values, String jsonPath) {
         super(tableNameAlias, jsonField, "", null);
         this.values = values;
@@ -38,6 +110,12 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
         return op;
     }
 
+    /**
+     * 获取字段表达式，用于JSON_CONTAINS函数的参数
+     * 使用Mybatis参数化查询形式#{dbQueryParamInnerDto.paramMap.xxx}防止SQL注入
+     *
+     * @return 安全的字段表达式字符串
+     */
     @Override
     public String getFieldExpression() {
         if (CharSequenceUtil.isEmpty(jsonPath)) {
@@ -53,6 +131,12 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
         return CharSequenceUtil.format(format, tableNameAlias, getOp(), paramName, paramName);
     }
 
+    /**
+     * 获取字段值，将值列表或字典转换为JSON格式的字符串
+     * 根据值的类型决定是否添加引号
+     *
+     * @return JSON格式的字符串
+     */
     @Override
     public String getFieldValue() {
         if (values.getClass().isAssignableFrom(Dict.class)) {
@@ -71,6 +155,11 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
         return values.toString();
     }
 
+    /**
+     * 获取MySQL JSON函数名
+     *
+     * @return JSON_CONTAINS函数名
+     */
     @Override
     protected String getFunctionName() {
         return "JSON_CONTAINS";
@@ -78,6 +167,7 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
 
     /**
      * 生成WHERE子句字符串，使用Mybatis参数化查询形式防止SQL注入
+     * 格式为：JSON_CONTAINS(字段->路径, JSON数组)
      *
      * @return 安全的WHERE子句字符串
      */
