@@ -16,6 +16,8 @@ import java.util.Set;
 
 /**
  * 暴露服务的基础API接口
+ * 定义了一系列通用的数据操作方法，支持条件查询、分页、更新、删除等操作
+ * 实现类通过反射机制调用底层服务类的方法
  */
 @SuppressWarnings("all")
 public interface GXBaseServeApi {
@@ -93,8 +95,8 @@ public interface GXBaseServeApi {
      *
      * @param id          待查询的ID
      * @param columns     需要查询的列
-     * @param targetClazz 返回的数据剋新
-     * @return R
+     * @param targetClazz 返回的数据类型
+     * @return R 查询结果，如果不存在则返回null
      */
     <R extends GXBaseApiResDto> R findById(Long id, Set<String> columns, Class<R> targetClazz);
 
@@ -102,8 +104,8 @@ public interface GXBaseServeApi {
      * 通过ID查询一条数据
      *
      * @param id          待查询的ID
-     * @param targetClazz 返回的数据剋新
-     * @return R
+     * @param targetClazz 返回的数据类型
+     * @return R 查询结果，如果不存在则返回null
      */
     <R extends GXBaseApiResDto> R findById(Long id, Class<R> targetClazz);
 
@@ -206,74 +208,85 @@ public interface GXBaseServeApi {
 
     /**
      * 转指定的对象到指定的目标类型对象
+     * 支持自定义转换方法和额外数据
      *
      * @param reqDto      请求参数
      * @param targetClass 目标对象类型
-     * @param methodName  转换方法名字
+     * @param methodName  转换方法名字，可以为null
      * @param copyOptions 转换的自定义项
-     * @param extraData   额外数据
-     * @return
+     * @param extraData   额外数据，用于转换过程中的数据填充
+     * @return T 转换后的目标对象
      */
     <T, Q extends GXBaseApiReqDto> T sourceToTarget(Q reqDto, Class<T> targetClass, String methodName, CopyOptions copyOptions, Dict extraData);
 
     /**
      * 转指定的对象到指定的目标类型对象
+     * 支持自定义转换方法
      *
      * @param reqDto      请求参数
      * @param targetClass 目标对象类型
-     * @param methodName  转换方法名字
+     * @param methodName  转换方法名字，可以为null
      * @param copyOptions 转换的自定义项
-     * @return
+     * @return T 转换后的目标对象
      */
     <T, Q extends GXBaseApiReqDto> T sourceToTarget(Q reqDto, Class<T> targetClass, String methodName, CopyOptions copyOptions);
 
     /**
      * 转指定的对象到指定的目标类型对象
+     * 使用默认转换方法和选项
      *
      * @param reqDto      请求参数
      * @param targetClass 目标对象类型
-     * @return
+     * @return T 转换后的目标对象
      */
     <T, Q extends GXBaseApiReqDto> T sourceToTarget(Q reqDto, Class<T> targetClass);
 
     /**
      * 设置服务类的Class对象
-     * 在子类的构造函数中调用
+     * 在子类的构造函数中调用，将当前API实现类与具体的服务类进行绑定
+     * 该绑定是静态的，对所有实例都有效
      *
-     * @param serveServiceClass 服务类Class对象
+     * @param serveServiceClass 服务类Class对象，不能为null
+     * @throws IllegalArgumentException 如果serveServiceClass为null
      */
     void staticBindServeServiceClass(Class<?> serveServiceClass);
 
     /**
      * 子类可以动态指定目标服务类型
-     * 方法调用的时候自己调用
+     * 用于临时指定一个服务类，在后续的方法调用中使用
+     * 该绑定是线程局部的，不会影响其他线程，且在方法调用后会被清理
      *
-     * @return GXBaseServeApi
+     * @param targetServeServiceClass 目标服务类的Class对象
+     * @return GXBaseServeApi 当前实例，支持链式调用
      */
     GXBaseServeApi callBindTargetServeSericeClass(Class<?> targetServeServiceClass);
 
     /**
      * 调用指定类中的指定方法
+     * 通过反射机制调用服务类中的方法，支持可变参数
      *
-     * @param methodName 方法名字
-     * @param params     参数列表
-     * @return Object
+     * @param methodName 方法名字，不能为空
+     * @param params     参数列表，可以为空
+     * @return Object 方法调用的返回结果，如果服务类不存在或调用失败则返回null
+     * @throws IllegalArgumentException 如果methodName为null或空
      */
     Object callMethod(String methodName, Object... params);
 
     /**
      * 获取底层服务类的Class
+     * 优先获取动态绑定的服务类，如果不存在则获取静态绑定的服务类
+     * 获取后会自动清理ThreadLocal，防止内存泄漏
      *
-     * @return
+     * @return Class<?> 返回服务类的类型，可能为null
      */
     Class<?> getServeServiceClass();
 
     /**
-     * 通过条件查询列表信息
+     * 将Table类型的条件转换为条件表达式
+     * 使用默认表名作为表别名
      *
-     * @param condition 搜索条件
-     * @param extraData 额外数据
-     * @return List
+     * @param condition 搜索条件，Table格式的条件表达式
+     * @return List<GXCondition<?>> 转换后的条件表达式列表
      */
     List<GXCondition<?>> convertTableConditionToConditionExp(Table<String, String, Object> condition);
 
