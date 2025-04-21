@@ -29,6 +29,54 @@ import java.util.Optional;
  * 通过@GXDataSource注解可以指定默认数据源，如果未指定则使用名为"framework"的数据源作为默认数据源。
  * 支持与Seata分布式事务框架的集成，可以将普通DataSource包装成Seata的DataSourceProxy。
  * </p>
+ * 
+ * <p>
+ * 使用示例1：在启动类上指定默认数据源
+ * <pre>
+ * @SpringBootApplication
+ * @GXDataSource("master")
+ * public class Application {
+ *     public static void main(String[] args) {
+ *         SpringApplication.run(Application.class, args);
+ *     }
+ * }
+ * </pre>
+ * </p>
+ * 
+ * <p>
+ * 使用示例2：在业务方法中动态切换数据源
+ * <pre>
+ * @Service
+ * public class UserServiceImpl implements UserService {
+ *     @Override
+ *     public User getUser(Long id) {
+ *         // 切换到从库查询
+ *         GXDynamicContextHolder.push("slave");
+ *         try {
+ *             return userMapper.selectById(id);
+ *         } finally {
+ *             // 操作完成后清理数据源标识
+ *             GXDynamicContextHolder.poll();
+ *         }
+ *     }
+ * }
+ * </pre>
+ * </p>
+ * 
+ * <p>
+ * 使用示例3：使用注解方式切换数据源
+ * <pre>
+ * @Service
+ * public class OrderServiceImpl implements OrderService {
+ *     @GXDataSource("order")
+ *     @Override
+ *     public void createOrder(OrderDTO orderDTO) {
+ *         // 此方法中使用的是order数据源
+ *         orderMapper.insert(orderDTO);
+ *     }
+ * }
+ * </pre>
+ * </p>
  */
 @Configuration
 @Slf4j
