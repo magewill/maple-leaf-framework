@@ -29,50 +29,127 @@ import java.util.function.Function;
 
 /**
  * 业务DB基础Service
+ * <p>
+ * 该接口定义了MyBatis数据库操作的基础服务方法，提供了一系列数据库操作功能，包括：
+ * 1. 条件查询 - 支持多种条件组合的单条和批量查询
+ * 2. 数据更新 - 支持条件更新和创建或更新操作
+ * 3. 数据删除 - 支持物理删除和逻辑删除
+ * 4. 分页查询 - 支持复杂条件的分页数据获取
+ * 5. 字段查询 - 支持查询指定字段或单个字段的值
+ * </p>
+ * <p>
+ * 线程安全说明：
+ * 该接口的实现类应确保所有方法在多线程环境下是安全的。特别是：
+ * - 查询方法应避免修改共享状态
+ * - 更新方法应使用事务确保数据一致性
+ * - 所有方法应防御性地处理输入参数，避免并发修改异常
+ * </p>
+ * <p>
+ * 事务安全：
+ * - 所有修改数据的方法应在事务控制下执行
+ * - 实现类应使用Spring的@Transactional注解或编程式事务管理
+ * - 事务边界应明确定义，避免长事务
+ * </p>
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 条件查询示例
+ * List<GXCondition<?>> conditions = new ArrayList<>();
+ * conditions.add(new GXConditionEQ("status", 1));
+ * conditions.add(new GXConditionLike("name", "%测试%"));
+ * List<UserResDto> users = userService.findByCondition(conditions);
+ * 
+ * // 2. 创建或更新示例
+ * UserReqDto reqDto = new UserReqDto();
+ * reqDto.setUsername("test_user");
+ * reqDto.setEmail("test@example.com");
+ * Long userId = userService.updateOrCreate(reqDto);
+ * 
+ * // 3. 分页查询示例
+ * GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+ *     .tableName("t_user")
+ *     .condition(conditions)
+ *     .page(1)
+ *     .pageSize(10)
+ *     .build();
+ * GXPaginationResDto<UserResDto> pageData = userService.paginate(queryParam);
+ * </pre>
+ * </p>
  *
- * @param <P>  仓库对象类型
- * @param <M>  Mapper类型
- * @param <T>  实体类型
- * @param <D>  DAO类型
- * @param <R>  响应对象类型
- * @param <ID> 实体的主键ID类型
+ * @param <P>  仓库对象类型，必须继承自GXMyBatisRepository
+ * @param <M>  Mapper类型，必须继承自GXBaseMapper
+ * @param <T>  实体类型，必须继承自GXBaseModel
+ * @param <D>  DAO类型，必须继承自GXMyBatisDao
+ * @param <R>  响应对象类型，必须继承自GXBaseDBResDto
+ * @param <ID> 实体的主键ID类型，必须实现Serializable接口
  * @author britton chen <britton@126.com>
+ * @since 1.0.0
  */
 @SuppressWarnings("unused")
 public interface GXMyBatisBaseService<P extends GXMyBatisRepository<M, T, D, ID>, M extends GXBaseMapper<T>, T extends GXBaseModel, D extends GXMyBatisDao<M, T, ID>, R extends GXBaseDBResDto, ID extends Serializable> extends GXBusinessService, GXValidateDBExistsService {
     /**
      * 检测给定条件的记录是否存在
+     * <p>
+     * 该方法用于验证指定表中是否存在满足条件的记录。
+     * 内部通过调用Repository的checkRecordIsExists方法实现，返回结果会转换为布尔值。
+     * </p>
+     * <p>
+     * 线程安全：该方法不修改共享状态，可在多线程环境中安全调用
+     * </p>
      *
-     * @param tableName 数据库表名字
-     * @param condition 条件
-     * @return int
+     * @param tableName 数据库表名字，不能为null或空字符串
+     * @param condition 条件，不能为null或空列表
+     * @return boolean 存在返回true，不存在返回false
      */
     boolean checkRecordIsExists(String tableName, List<GXCondition<?>> condition);
 
     /**
      * 检测给定条件的记录是否存在
+     * <p>
+     * 该方法是{@link #checkRecordIsExists(String, List)}的简化版本，
+     * 使用当前实体对应的表名作为参数。
+     * </p>
+     * <p>
+     * 线程安全：该方法不修改共享状态，可在多线程环境中安全调用
+     * </p>
      *
-     * @param condition 条件
-     * @return int
+     * @param condition 条件，不能为null或空列表
+     * @return boolean 存在返回true，不存在返回false
      */
     boolean checkRecordIsExists(List<GXCondition<?>> condition);
 
     /**
      * 通过SQL更新表中的数据
+     * <p>
+     * 该方法根据指定的条件更新表中的数据。更新前会先验证记录是否存在，不存在则返回错误码。
+     * 实现类应确保该方法在事务中执行，以保证数据一致性。
+     * </p>
+     * <p>
+     * 线程安全：实现类应确保在多线程环境下安全更新数据，避免并发修改问题
+     * 事务安全：实现类应使用@Transactional注解确保事务的原子性
+     * </p>
      *
-     * @param tableName    表名字
-     * @param updateFields 需要更新的数据
-     * @param condition    更新条件
-     * @return Integer
+     * @param tableName    表名字，不能为null或空字符串
+     * @param updateFields 需要更新的数据字段列表，不能为null
+     * @param condition    更新条件，不能为null或空列表
+     * @return Integer 影响的行数，更新成功返回大于0的整数，记录不存在返回特定错误码
      */
     Integer updateFieldByCondition(String tableName, List<GXUpdateField<?>> updateFields, List<GXCondition<?>> condition);
 
     /**
      * 通过SQL更新表中的数据
+     * <p>
+     * 该方法是{@link #updateFieldByCondition(String, List, List)}的简化版本，
+     * 使用当前实体对应的表名作为参数。
+     * </p>
+     * <p>
+     * 线程安全：实现类应确保在多线程环境下安全更新数据，避免并发修改问题
+     * 事务安全：实现类应使用@Transactional注解确保事务的原子性
+     * </p>
      *
-     * @param updateFields 需要更新的数据
-     * @param condition    更新条件
-     * @return Integer
+     * @param updateFields 需要更新的数据字段列表，不能为null
+     * @param condition    更新条件，不能为null或空列表
+     * @return Integer 影响的行数，更新成功返回大于0的整数，记录不存在返回特定错误码
      */
     Integer updateFieldByCondition(List<GXUpdateField<?>> updateFields, List<GXCondition<?>> condition);
 
