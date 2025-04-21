@@ -7,23 +7,38 @@ import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
 
 /**
- * 用户可以实现该接口
- * 实现自己的业务配置
+ * Token配置服务接口
+ * <p>
+ * 用户可以实现该接口来自定义Token的生成、存储和验证策略
+ * 在SSO系统中负责Token的全生命周期管理，包括：
+ * 1. 提供Token加解密密钥
+ * 2. 定义Token缓存策略
+ * 3. 验证Token有效性
+ * 4. 管理Token存储
+ * </p>
  */
 public interface GXTokenConfigService {
     /**
-     * 获取通用token的加解密key
+     * 获取通用token的加解密密钥
+     * <p>
+     * 该密钥用于Token的加密和解密操作，是确保Token安全性的关键
+     * 建议在生产环境中使用足够复杂且定期更换的密钥
+     * </p>
      *
-     * @return token加解密key
+     * @return token加解密密钥字符串
      */
     default String getTokenSecret() {
         return GXTokenConstant.TOKEN_SECRET_KEY;
     }
 
     /**
-     * 获取token的缓存存储桶
+     * 获取token的缓存存储桶名称
+     * <p>
+     * 定义Token在缓存系统中的存储位置，通常基于应用名称构建
+     * 可用于在分布式系统中隔离不同应用的Token存储空间
+     * </p>
      *
-     * @return 存储桶的名字
+     * @return 缓存存储桶的名称字符串
      */
     default String getCacheBucketName() {
         String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "");
@@ -35,9 +50,14 @@ public interface GXTokenConfigService {
 
     /**
      * 检测当前用户的登录状态是否有效
-     * 可以通过调用别的服务来判断
+     * <p>
+     * 验证用户登录状态的有效性，可以通过以下方式实现：
+     * 1. 调用其他微服务进行验证
+     * 2. 检查本地缓存中的状态信息
+     * 3. 查询数据库验证用户状态
+     * </p>
      *
-     * @return 是否有效
+     * @return 如果登录状态有效返回true，否则返回false
      */
     default boolean checkLoginStatus() {
         return true;
@@ -45,31 +65,46 @@ public interface GXTokenConfigService {
 
     /**
      * 获取token的缓存key的前缀
+     * <p>
+     * 定义Token缓存键的前缀，用于在缓存系统中组织和识别Token
+     * 合理的前缀设计有助于缓存管理和问题排查
+     * </p>
      *
-     * @return 缓存key前缀
+     * @return 缓存key前缀字符串
      */
     default String getTokenCachePrefix() {
         return "ssoTokenKey_";
     }
 
     /**
-     * 获取token的缓存
+     * 获取token的缓存键
+     * <p>
+     * 根据用户ID和额外参数生成唯一的缓存键
+     * 该键用于在缓存系统中存储和检索Token信息
+     * 实现类需要确保生成的键具有唯一性和一致性
+     * </p>
      *
-     * @param userId    用户id
-     * @param extraData 额外参数 根据业务需要自信传递
-     * @return token的cache缓存
+     * @param userId    用户ID，用于标识Token所属用户
+     * @param extraData 额外参数，根据业务需要自行传递，如设备信息、平台标识等
+     * @return 生成的缓存键字符串
+     * @throws GXBusinessException 当无法生成有效的缓存键时抛出异常
      */
     default String getTokenCacheKey(Long userId, Dict extraData) {
         throw new GXBusinessException("请实现缓存的cache键方法!");
     }
 
     /**
-     * 获取业务有效的token
-     * 该token可以来自于缓存或者别的服务
-     * 默认为当前请求中的token解码之后的数据
+     * 获取业务有效的token数据
+     * <p>
+     * 根据请求中的Token获取完整有效的Token数据，可能的实现方式：
+     * 1. 直接返回解码后的请求Token（默认实现）
+     * 2. 从缓存系统中获取完整Token数据
+     * 3. 调用其他服务获取Token信息
+     * 4. 对Token数据进行验证和补充
+     * </p>
      *
      * @param requestToken 当前请求中token字符串解码之后的数据
-     * @return Dict
+     * @return 包含完整Token信息的Dict对象
      */
     default Dict getEfficaciousToken(Dict requestToken) {
         return requestToken;
@@ -77,12 +112,22 @@ public interface GXTokenConfigService {
 
     /**
      * 验证token的有效性
-     * 验证规则可以调用别的服务
-     * 亦可以自己验证
-     * 自身验证可以通过redis的token缓存key+tokenSecret来进行验证解密 并验证是否有效
-     * 减少服务间的通信
+     * <p>
+     * 验证当前Token是否有效，可以通过多种方式实现：
+     * 1. 调用其他服务进行验证
+     * 2. 通过缓存系统验证（如Redis中是否存在对应的Token缓存）
+     * 3. 使用tokenSecret解密并验证Token内容
+     * 4. 检查Token是否过期或被撤销
+     * </p>
+     * <p>
+     * 安全建议：
+     * - 验证Token的签名和内容完整性
+     * - 检查Token的过期时间
+     * - 验证Token的使用环境（如IP、设备信息等）
+     * - 考虑实现Token黑名单机制
+     * </p>
      *
-     * @return true 有效 ; false 无效
+     * @return 如果Token有效返回true，否则返回false
      */
     default boolean verifyTokenEffectiveness() {
         return Boolean.TRUE;

@@ -23,6 +23,13 @@ import java.util.Objects;
  * <p>
  * SSO 单点登录服务抽象实现类
  * </p>
+ * 
+ * 实现了SSO服务的核心功能，包括：
+ * 1. Token的获取和验证
+ * 2. 用户登录状态管理
+ * 3. Cookie设置和清理
+ * 4. 登录和注销流程处理
+ * 5. 插件机制支持
  *
  * @author britton britton@126.com
  * @since 2021-09-16
@@ -30,12 +37,20 @@ import java.util.Objects;
 @Slf4j
 public abstract class GXAbstractSSOService extends GXSSOSupportService implements GXSSOService {
     /**
-     * 获取当前请求 GXSsoToken
-     * 从 Cookie 解密 GXSSOToken 使用场景, 拦截器
-     * 非拦截器建议使用 attrSSOToken 减少二次解密
+     * 获取当前请求的SSO Token
+     * <p>
+     * 从Cookie或请求头中解密获取SSO Token，主要用于拦截器场景
+     * 非拦截器场景建议使用attrSSOToken方法减少重复解密开销
+     * </p>
+     * <p>
+     * 处理流程：
+     * 1. 从缓存中获取Token
+     * 2. 验证Token的IP和浏览器信息
+     * 3. 通过插件机制进行额外验证
+     * </p>
      *
-     * @param request 请求对象
-     * @return Dict
+     * @param request HTTP请求对象
+     * @return 包含用户登录信息的Dict对象，验证失败则返回空Dict
      */
     @Override
     public Dict getSSOToken(HttpServletRequest request) {
@@ -58,10 +73,14 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
     }
 
     /**
-     * 踢出 指定用户 ID 的登录用户，退出当前系统。=
+     * 踢出指定用户ID的登录用户，强制其退出当前系统
+     * <p>
+     * 通过删除用户的Token缓存实现强制注销
+     * 适用于管理员强制下线用户、检测到异常登录等安全场景
+     * </p>
      *
-     * @param userId 用户ID
-     * @return boolean
+     * @param userId 要踢出的用户ID
+     * @return 操作是否成功，成功返回true，失败返回false
      */
     @Override
     public boolean kickLogin(Object userId) {
@@ -76,14 +95,28 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
     }
 
     /**
-     * 当前访问域下设置登录Cookie
+     * 在当前访问域下设置登录Cookie
      * <p>
+     * 将用户登录信息写入Cookie并同步到缓存系统
+     * Cookie的超时时间可通过以下方式设置：
      * request.setAttribute(GXSsoConfig.SSO_COOKIE_MAX_AGE, -1);
-     * 可以设置 Cookie 超时时间 ，默认读取配置文件数据 。
-     * -1 浏览器关闭时自动删除 0 立即删除 120 表示Cookie有效期2分钟(以秒为单位)
+     * </p>
+     * <p>
+     * 超时时间说明：
+     * -1: 浏览器关闭时自动删除（会话Cookie）
+     * 0: 立即删除Cookie
+     * 正整数: 表示Cookie有效期（以秒为单位），如120表示2分钟
+     * </p>
+     * <p>
+     * 安全措施：
+     * 1. 支持HttpOnly选项，防止XSS攻击获取Cookie
+     * 2. 可配置Secure选项，要求通过HTTPS传输Cookie
+     * 3. 执行SSO插件的登录逻辑
+     * </p>
      *
-     * @param request  请求对象
-     * @param response 响应对象
+     * @param request  HTTP请求对象
+     * @param response HTTP响应对象
+     * @param ssoToken 包含用户登录信息的Token数据
      */
     @Override
     public void setCookie(HttpServletRequest request, HttpServletResponse response, Dict ssoToken) {
@@ -122,10 +155,15 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
     }
 
     /**
-     * 当前访问域下设置登录Cookie 设置防止伪造SESSION_ID攻击
+     * 在当前访问域下设置登录Cookie并防止伪造SESSION_ID攻击
+     * <p>
+     * 在设置登录Cookie的同时，重新生成JSESSIONID，防止会话固定攻击
+     * 这是一种增强的安全措施，特别适用于敏感操作场景
+     * </p>
      *
-     * @param request  请求对象
-     * @param response 响应对象
+     * @param request  HTTP请求对象
+     * @param response HTTP响应对象
+     * @param ssoToken 包含用户登录信息的Token数据
      */
     public void authCookie(HttpServletRequest request, HttpServletResponse response, Dict ssoToken) {
         GXCookieHelperUtil.authJSESSIONID(request, GXRandomUtil.getCharacterAndNumber(8));
@@ -133,11 +171,17 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
     }
 
     /**
-     * 清除登录状态
+     * 清除用户登录状态
+     * <p>
+     * 完整清理用户的登录信息，包括：
+     * 1. 删除浏览器Cookie
+     * 2. 清除服务端缓存
+     * 3. 执行SSO插件的注销逻辑
+     * </p>
      *
-     * @param request  请求对象
-     * @param response 响应对象
-     * @return boolean true 成功, false 失败
+     * @param request  HTTP请求对象
+     * @param response HTTP响应对象
+     * @return 操作是否成功，成功返回true，失败返回false
      */
     @Override
     public boolean clearLogin(HttpServletRequest request, HttpServletResponse response) {
@@ -145,12 +189,21 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
     }
 
     /**
+     * 重新登录处理
      * <p>
-     * 重新登录 退出当前登录状态、重定向至登录页.
+     * 执行完整的注销流程，然后将用户重定向到登录页面
+     * 会保留当前请求的URL作为参数，便于登录后返回原页面
+     * </p>
+     * <p>
+     * 处理流程：
+     * 1. 清理当前登录状态
+     * 2. 获取配置的登录页URL
+     * 3. 对于API请求返回JSON响应，对于页面请求进行重定向
      * </p>
      *
-     * @param request  请求对象
-     * @param response 响应对象
+     * @param request  HTTP请求对象
+     * @param response HTTP响应对象
+     * @throws IOException 如果重定向过程中发生I/O错误
      */
     @Override
     public void clearRedirectLogin(HttpServletRequest request, HttpServletResponse response) throws IOException {
@@ -170,7 +223,15 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
     }
 
     /**
-     * SSO 退出登录
+     * SSO系统退出登录
+     * <p>
+     * 执行完整的SSO注销流程，包括清理本地状态和重定向到注销页面
+     * 与clearLogin的区别在于，此方法会进行页面重定向
+     * </p>
+     * 
+     * @param request  HTTP请求对象
+     * @param response HTTP响应对象
+     * @throws IOException 如果重定向过程中发生I/O错误
      */
     public void logout(HttpServletRequest request, HttpServletResponse response) throws IOException {
         // delete cookie
