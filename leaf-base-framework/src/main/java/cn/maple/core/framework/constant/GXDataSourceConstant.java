@@ -37,7 +37,7 @@ public class GXDataSourceConstant {
         CONDITION_FUNCTION.put(GXBuilderConstant.LT, data -> new GXConditionLT(data.getStr("tableNameAlias"), data.getStr("fieldName"), data.getLong("value")));
         CONDITION_FUNCTION.put(GXBuilderConstant.NOT_EQ, data -> new GXConditionNE(data.getStr("tableNameAlias"), data.getStr("fieldName"), data.getLong("value")));
         CONDITION_FUNCTION.put(GXBuilderConstant.IS_NULL, data -> new GXConditionIsNULL(data.getStr("tableNameAlias"), data.getStr("fieldName")));
-        CONDITION_FUNCTION.put(GXBuilderConstant.EXCLUSION_DELETED_CONDITION_FLAG, data -> new GXConditionExclusionDeletedField(data.getStr("tableNameAlias"), data.getStr("fieldName"), data.getLong("value")));
+        CONDITION_FUNCTION.put(GXBuilderConstant.EXCLUSION_DELETED_CONDITION_FLAG, data -> new GXExclusionDeletedFieldCondition(data.getStr("tableNameAlias"), data.getStr("fieldName"), data.getLong("value")));
     }
 
     private GXDataSourceConstant() {

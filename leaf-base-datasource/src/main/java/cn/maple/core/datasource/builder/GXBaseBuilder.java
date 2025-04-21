@@ -13,7 +13,7 @@ import cn.maple.core.framework.dto.inner.GXJoinTypeEnums;
 import cn.maple.core.framework.dto.inner.GXUnionTypeEnums;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
-import cn.maple.core.framework.dto.inner.condition.GXConditionExclusionDeletedField;
+import cn.maple.core.framework.dto.inner.condition.GXExclusionDeletedFieldCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionIsNULL;
 import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.dto.inner.op.GXDbJoinOp;
@@ -68,7 +68,7 @@ public interface GXBaseBuilder {
         sql.SET(CharSequenceUtil.format("updated_at = {}", DateUtil.currentSeconds()));
         Map<String, Object> paramMap = handleSQLCondition(sql, condition);
         dbQueryParamInnerDto.getParamMap().putAll(paramMap);
-        if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
+        if (!CollUtil.contains(condition, (c -> GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
         }
         return sql.toString();
@@ -116,7 +116,7 @@ public interface GXBaseBuilder {
         Map<String, Object> paramMap = handleSQLCondition(sql, condition);
         // 将参数设置到Mybatis的参数Map中
         dbQueryParamInnerDto.getParamMap().putAll(paramMap);
-        if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
+        if (!CollUtil.contains(condition, (c -> GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableNameAlias, 0));
         }
         // 处理JOIN表的Where条件
@@ -236,7 +236,7 @@ public interface GXBaseBuilder {
         }
         List<String> lastWheres = new ArrayList<>();
         condition.forEach(c -> {
-            if (!GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())) {
+            if (!GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())) {
                 if (ObjectUtil.isNull(c.getFieldValue()) && !GXConditionIsNULL.class.isAssignableFrom(c.getClass())) {
                     String msg = CharSequenceUtil.format("数据查询条件错误【查询字段{}.{}的值是null】", c.getTableNameAlias(), c.getFieldExpression());
                     throw new GXDBConditionException(msg);
@@ -295,7 +295,7 @@ public interface GXBaseBuilder {
         }
         Map<String, Object> paramMap = handleSQLCondition(sql, condition);
         dbQueryParamInnerDto.getParamMap().putAll(paramMap);
-        if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
+        if (!CollUtil.contains(condition, (c -> GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
         }
         return sql.toString();
@@ -316,7 +316,7 @@ public interface GXBaseBuilder {
         SQL sql = new SQL().DELETE_FROM(tableName);
         Map<String, Object> paramMap = handleSQLCondition(sql, condition);
         dbQueryParamInnerDto.getParamMap().putAll(paramMap);
-        if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
+        if (!CollUtil.contains(condition, (c -> GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
         }
         return sql.toString();

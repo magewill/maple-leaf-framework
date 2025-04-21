@@ -12,7 +12,7 @@ import cn.maple.core.framework.dto.inner.GXJoinTypeEnums;
 import cn.maple.core.framework.dto.inner.GXUnionTypeEnums;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
-import cn.maple.core.framework.dto.inner.condition.GXConditionExclusionDeletedField;
+import cn.maple.core.framework.dto.inner.condition.GXExclusionDeletedFieldCondition;
 import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.dto.inner.op.GXDbJoinOp;
 import cn.maple.core.framework.exception.GXBusinessException;
@@ -60,7 +60,7 @@ public interface GXBuildRawSql {
         }
         sql.append(CharSequenceUtil.format("updated_at = {}", DateUtil.currentSeconds()));
         handleSQLCondition(sql, condition, columnToUnderlineCase);
-        if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
+        if (!CollUtil.contains(condition, (c -> GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())))) {
             sql.append(" WHERE ").append(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
         }
         return sql;
@@ -278,7 +278,7 @@ public interface GXBuildRawSql {
         }
         List<String> lastWheres = new ArrayList<>();
         condition.forEach(c -> {
-            if (!GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())) {
+            if (!GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())) {
                 String str = c.whereString();
                 if (!columnToUnderlineCase) {
                     str = CharSequenceUtil.replace(str, c.getFieldExpression(), CharSequenceUtil.toCamelCase(c.getFieldExpression()));
@@ -359,7 +359,7 @@ public interface GXBuildRawSql {
         sql.append(" SET ").append(CollUtil.join(columns, ","));
         handleSQLCondition(sql, condition, columnToUnderlineCase);
         Set<Object> wheres = CollUtil.newHashSet();
-        if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
+        if (!CollUtil.contains(condition, (c -> GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())))) {
             wheres.add(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
         }
         sql.append(" AND ").append(CollUtil.join(wheres, " AND "));
@@ -378,7 +378,7 @@ public interface GXBuildRawSql {
         StringBuilder sql = new StringBuilder("DELETE FROM ").append(tableName);
         handleSQLCondition(sql, condition, columnToUnderlineCase);
         Set<String> wheres = CollUtil.newHashSet();
-        if (!CollUtil.contains(condition, (c -> GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())))) {
+        if (!CollUtil.contains(condition, (c -> GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())))) {
             wheres.add(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
         }
         sql.append(" AND ").append(CollUtil.join(wheres, " AND "));

@@ -30,7 +30,7 @@ package cn.maple.core.framework.dto.inner.condition;
  * 
  * @author 塵子曦
  */
-public class GXConditionExclusionDeletedField extends GXCondition<String> {
+public class GXExclusionDeletedFieldCondition extends GXCondition<String> {
     /**
      * 带字符串值的构造函数
      * 
@@ -38,7 +38,7 @@ public class GXConditionExclusionDeletedField extends GXCondition<String> {
      * @param fieldName 表示删除状态的字段名
      * @param value 表示未删除状态的值（字符串类型）
      */
-    public GXConditionExclusionDeletedField(String tableNameAlias, String fieldName, String value) {
+    public GXExclusionDeletedFieldCondition(String tableNameAlias, String fieldName, String value) {
         super(tableNameAlias, fieldName, value);
     }
 
@@ -49,7 +49,7 @@ public class GXConditionExclusionDeletedField extends GXCondition<String> {
      * @param fieldName 表示删除状态的字段名
      * @param value 表示未删除状态的值（Long类型）
      */
-    public GXConditionExclusionDeletedField(String tableNameAlias, String fieldName, Long value) {
+    public GXExclusionDeletedFieldCondition(String tableNameAlias, String fieldName, Long value) {
         super(tableNameAlias, fieldName, value);
     }
 
@@ -57,7 +57,7 @@ public class GXConditionExclusionDeletedField extends GXCondition<String> {
      * 无参构造函数
      * 创建一个默认的排除已删除字段条件，所有参数均为空字符串
      */
-    public GXConditionExclusionDeletedField() {
+    public GXExclusionDeletedFieldCondition() {
         this("", "", "");
     }
 

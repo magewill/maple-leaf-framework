@@ -10,7 +10,7 @@ import cn.maple.core.framework.constant.GXBuilderConstant;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
-import cn.maple.core.framework.dto.inner.condition.GXConditionExclusionDeletedField;
+import cn.maple.core.framework.dto.inner.condition.GXExclusionDeletedFieldCondition;
 import cn.maple.core.framework.dto.res.GXPaginationResDto;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
@@ -424,7 +424,7 @@ public class GXDBCommonUtils {
                 .set("<", "lt");
 
         condition.forEach(c -> {
-            if (!GXConditionExclusionDeletedField.class.isAssignableFrom(c.getClass())) {
+            if (!GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())) {
                 String column = c.getFieldExpression();
                 Object value = c.getFieldValue();
 
