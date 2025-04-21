@@ -6,17 +6,48 @@ import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.TypeUtil;
 import cn.maple.core.datasource.event.*;
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 
 import java.lang.reflect.Type;
 
+/**
+ * MyBatis事件监听器基础接口
+ * <p>
+ * 该接口定义了处理MyBatis操作事件的基本方法，包括实体保存、更新、字段更新、软删除和批量保存等操作的事件监听。
+ * 实现类可以选择同步或异步方式处理这些事件，分别通过{@link GXMyBatisSyncListener}和{@link GXMyBatisAsyncListener}实现。
+ * <p>
+ * 线程安全说明：
+ * 1. 接口中的默认方法实现是无状态的，主要进行参数转换和反射调用
+ * 2. 实现类需要确保在并发环境下的线程安全性，特别是在异步处理时
+ * 3. 所有方法内部使用的反射调用通过{@link GXCommonUtils#reflectCallObjectMethod}进行，该方法内部已处理异常
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 自定义监听器实现
+ * public class CustomEntityListener implements GXEntityListener<CustomEntity> {
+ *     public void saveEntityListener(CustomEntity entity) {
+ *         // 处理实体保存后的业务逻辑
+ *     }
+ * }
+ * </pre>
+ */
 @SuppressWarnings("all")
 interface GXMyBatisBaseListener {
     /**
      * 监听保存实体(Entity)事件
+     * <p>
+     * 该方法处理实体保存后触发的事件，通过反射调用目标监听器的saveEntityListener方法。
+     * 处理流程：
+     * 1. 从事件中获取源数据和参数
+     * 2. 获取目标监听器类名和类对象
+     * 3. 获取目标参数类型并进行类型转换
+     * 4. 通过Spring容器获取监听器实例
+     * 5. 反射调用监听器的saveEntityListener方法
      *
-     * @param saveEntityEvent 事件对象
+     * @param saveEntityEvent 保存实体事件对象，包含已保存的实体数据
+     * @throws GXBusinessException 如果反射调用失败或类型转换异常
      */
     default void listenerSaveEntity(GXMyBatisModelSaveEntityEvent<Dict> saveEntityEvent) {
         Dict source = saveEntityEvent.getSource();
@@ -32,8 +63,18 @@ interface GXMyBatisBaseListener {
 
     /**
      * 监听更新实体(Entity)事件
+     * <p>
+     * 该方法处理实体更新后触发的事件，通过反射调用目标监听器的updateEntityListener方法。
+     * 处理流程：
+     * 1. 从事件中获取源数据和参数
+     * 2. 获取目标监听器类名和类对象
+     * 3. 获取目标参数类型并进行类型转换
+     * 4. 提取更新条件相关参数
+     * 5. 通过Spring容器获取监听器实例
+     * 6. 反射调用监听器的updateEntityListener方法，传入实体数据和条件参数
      *
-     * @param updateEntityEvent 事件对象
+     * @param updateEntityEvent 更新实体事件对象，包含已更新的实体数据和条件信息
+     * @throws GXBusinessException 如果反射调用失败或类型转换异常
      */
     default void listenerUpdateEntity(GXMyBatisModelUpdateEntityEvent<Dict> updateEntityEvent) {
         Dict source = updateEntityEvent.getSource();
@@ -51,8 +92,17 @@ interface GXMyBatisBaseListener {
 
     /**
      * 监听更新指定字段事件
+     * <p>
+     * 该方法处理字段更新后触发的事件，通过反射调用目标监听器的updateFieldListener方法。
+     * 处理流程：
+     * 1. 从事件中获取源数据和参数
+     * 2. 获取目标监听器类名和类对象
+     * 3. 通过Spring容器获取监听器实例
+     * 4. 提取更新字段数据和条件字段数据
+     * 5. 反射调用监听器的updateFieldListener方法，传入更新字段和条件字段数据
      *
-     * @param updateFieldEvent 事件对象
+     * @param updateFieldEvent 更新字段事件对象，包含已更新的字段数据和条件信息
+     * @throws GXBusinessException 如果反射调用失败或类型转换异常
      */
     default void listenerUpdateField(GXMyBatisModelUpdateFieldEvent<Dict> updateFieldEvent) {
         Dict source = updateFieldEvent.getSource();
@@ -67,9 +117,18 @@ interface GXMyBatisBaseListener {
     }
 
     /**
-     * 监听更新指定字段事件
+     * 监听软删除事件
+     * <p>
+     * 该方法处理软删除操作后触发的事件，通过反射调用目标监听器的deleteSoftListener方法。
+     * 软删除通常是将记录标记为已删除状态，而非物理删除。
+     * 处理流程：
+     * 1. 从事件中获取源数据和参数
+     * 2. 获取目标监听器类名和类对象
+     * 3. 通过Spring容器获取监听器实例
+     * 4. 反射调用监听器的deleteSoftListener方法，传入源数据
      *
-     * @param deleteSoftEvent 事件对象
+     * @param deleteSoftEvent 软删除事件对象，包含删除条件信息
+     * @throws GXBusinessException 如果反射调用失败或类型转换异常
      */
     default void listenerDeleteSoft(GXMyBatisModelDeleteSoftEvent<Dict> deleteSoftEvent) {
         Dict source = deleteSoftEvent.getSource();
@@ -83,8 +142,16 @@ interface GXMyBatisBaseListener {
 
     /**
      * 监听批量新增与更新事件
+     * <p>
+     * 该方法处理批量保存操作后触发的事件，通过反射调用目标监听器的saveBatchListener方法。
+     * 处理流程：
+     * 1. 从事件中获取源数据和参数
+     * 2. 获取目标监听器类名和类对象
+     * 3. 通过Spring容器获取监听器实例
+     * 4. 反射调用监听器的saveBatchListener方法，传入源数据
      *
-     * @param saveBatchEntityEvent 事件对象
+     * @param saveBatchEntityEvent 批量保存事件对象，包含已保存的实体集合数据
+     * @throws GXBusinessException 如果反射调用失败或类型转换异常
      */
     default void listenerSaveBatch(GXMyBatisModelSaveBatchEntityEvent<Dict> saveBatchEntityEvent) {
         Dict source = saveBatchEntityEvent.getSource();
