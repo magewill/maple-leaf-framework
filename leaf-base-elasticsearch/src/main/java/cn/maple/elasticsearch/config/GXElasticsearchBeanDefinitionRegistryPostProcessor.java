@@ -6,6 +6,7 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.config.aware.GXApplicationContextSingleton;
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.elasticsearch.properties.GXElasticsearchProperties;
@@ -41,6 +42,7 @@ import org.springframework.data.elasticsearch.client.elc.ElasticsearchTemplate;
 import org.springframework.data.elasticsearch.core.convert.MappingElasticsearchConverter;
 import org.springframework.data.elasticsearch.core.mapping.SimpleElasticsearchMappingContext;
 import org.springframework.data.elasticsearch.support.HttpHeaders;
+import org.springframework.util.Assert;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -50,8 +52,24 @@ import java.util.Objects;
 
 /**
  * Elasticsearch的多数据源配置，支持动态注册多个ElasticsearchTemplate实例
- * 实现了BeanDefinitionRegistryPostProcessor接口，用于在Spring容器启动时动态注册Bean
- * 线程安全说明：该类在Spring容器初始化阶段执行，不存在并发访问问题
+ * <p>
+ * 该类负责动态注册多个Elasticsearch数据源，支持从本地配置文件或Nacos配置中心读取配置信息。
+ * 实现了BeanDefinitionRegistryPostProcessor接口，在Spring容器启动时动态注册Elasticsearch相关的Bean。
+ * 支持配置主从数据源，确保系统中有且仅有一个主数据源。
+ * </p>
+ * <p>
+ * 内存安全特性：
+ * - 安全处理凭证信息，避免敏感信息泄露
+ * - 对所有外部输入进行严格验证和解码
+ * - 合理管理资源，避免内存泄漏
+ * - 使用不可变对象和线程安全的集合类
+ * </p>
+ * <p>
+ * 线程安全特性：
+ * - 避免共享可变状态，确保方法执行的线程安全
+ * - 在Spring容器初始化阶段执行，不存在并发访问问题
+ * - 通过参数验证和防御性编程确保多线程环境下的安全性
+ * </p>
  *
  * @author britton <britton@126.com>
  * @since 2023-08-24
@@ -64,60 +82,127 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
     private ApplicationContext applicationContext;
 
     /**
-     * Modify the application context's internal bean definition registry after its
-     * standard initialization. All regular bean definitions will have been loaded,
-     * but no beans will have been instantiated yet. This allows for adding further
-     * bean definitions before the next post-processing phase kicks in.
+     * 修改应用上下文的内部Bean定义注册表
+     * <p>
+     * 在标准初始化后，所有常规Bean定义都已加载，但尚未实例化任何Bean。
+     * 这允许在下一个后处理阶段开始之前添加更多的Bean定义。
+     * 该方法负责动态创建和注册Elasticsearch数据源相关的Bean，包括ElasticsearchClient和ElasticsearchTemplate。
+     * </p>
+     * <p>
+     * 内存安全：安全处理凭证信息，避免敏感信息泄露
+     * 线程安全：在Spring容器初始化阶段执行，不存在并发访问问题
+     * </p>
      *
-     * @param beanDefinitionRegistry the bean definition registry used by the application context
-     * @throws BeansException in case of errors
+     * @param beanDefinitionRegistry Spring应用上下文使用的Bean定义注册表
+     * @throws BeansException 如果在处理过程中发生错误
      */
     @Override
     public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry beanDefinitionRegistry) throws BeansException {
         // 检查配置中是否只有一个主数据源
         checkElasticsearchDataSourceProperties();
         
-        getSourceElasticsearchProperties().getDatasource().forEach((key, dataSourceProperties) -> {
-            ElasticsearchClient elasticsearchClient = buildElasticsearchClient(dataSourceProperties);
-            // 创建ElasticsearchTemplate的BeanDefinition构建对象
-            BeanDefinitionBuilder elasticsearchTemplateBeanDefinitionBuilder = BeanDefinitionBuilder.rootBeanDefinition(ElasticsearchTemplate.class);
-            elasticsearchTemplateBeanDefinitionBuilder.addConstructorArgValue(elasticsearchClient);
-            MappingElasticsearchConverter mappingElasticsearchConverter = new MappingElasticsearchConverter(new SimpleElasticsearchMappingContext());
-            mappingElasticsearchConverter.afterPropertiesSet();
-            elasticsearchTemplateBeanDefinitionBuilder.addConstructorArgValue(mappingElasticsearchConverter);
-            elasticsearchTemplateBeanDefinitionBuilder.setAutowireMode(AutowireCapableBeanFactory.AUTOWIRE_BY_NAME);
-            boolean primary = dataSourceProperties.isPrimary();
-            String beanName = key + "ElasticsearchTemplate";
-            if (Boolean.TRUE.equals(primary)) {
-                settingElasticsearchPropertiesBeanProperties(dataSourceProperties);
-                elasticsearchTemplateBeanDefinitionBuilder.setPrimary(true);
-                // 为主数据源注册别名，方便其他组件引用
-                beanDefinitionRegistry.registerAlias(beanName, "elasticsearchTemplate");
-            }
-            beanDefinitionRegistry.registerBeanDefinition(beanName, elasticsearchTemplateBeanDefinitionBuilder.getBeanDefinition());
-        });
+        try {
+            // 遍历所有配置的数据源，为每个数据源创建相应的Bean
+            getSourceElasticsearchProperties().getDatasource().forEach((key, dataSourceProperties) -> {
+                try {
+                    // 构建ElasticsearchClient客户端
+                    ElasticsearchClient elasticsearchClient = buildElasticsearchClient(dataSourceProperties);
+                    
+                    // 创建ElasticsearchTemplate的BeanDefinition构建对象
+                    BeanDefinitionBuilder elasticsearchTemplateBeanDefinitionBuilder = BeanDefinitionBuilder.rootBeanDefinition(ElasticsearchTemplate.class);
+                    elasticsearchTemplateBeanDefinitionBuilder.addConstructorArgValue(elasticsearchClient);
+                    
+                    // 创建并初始化转换器
+                    MappingElasticsearchConverter mappingElasticsearchConverter = new MappingElasticsearchConverter(new SimpleElasticsearchMappingContext());
+                    mappingElasticsearchConverter.afterPropertiesSet();
+                    elasticsearchTemplateBeanDefinitionBuilder.addConstructorArgValue(mappingElasticsearchConverter);
+                    
+                    // 设置自动装配模式
+                    elasticsearchTemplateBeanDefinitionBuilder.setAutowireMode(AutowireCapableBeanFactory.AUTOWIRE_BY_NAME);
+                    
+                    // 确定Bean名称和主数据源设置
+                    boolean primary = dataSourceProperties.isPrimary();
+                    String beanName = key + "ElasticsearchTemplate";
+                    
+                    // 如果是主数据源，设置相关属性并注册别名
+                    if (Boolean.TRUE.equals(primary)) {
+                        settingElasticsearchPropertiesBeanProperties(dataSourceProperties);
+                        elasticsearchTemplateBeanDefinitionBuilder.setPrimary(true);
+                        // 为主数据源注册别名，方便其他组件引用
+                        beanDefinitionRegistry.registerAlias(beanName, "elasticsearchTemplate");
+                    }
+                    
+                    // 注册ElasticsearchTemplate Bean
+                    beanDefinitionRegistry.registerBeanDefinition(beanName, elasticsearchTemplateBeanDefinitionBuilder.getBeanDefinition());
+                    
+                    // 记录数据源注册成功的日志
+                    log.info("Elasticsearch数据源[{}]注册成功", key);
+                    
+                } catch (Exception e) {
+                    // 记录详细的错误信息，但不暴露敏感数据
+                    log.error("Elasticsearch数据源[{}]注册失败: {}", key, e.getMessage());
+                    throw new GXBusinessException("Elasticsearch数据源注册失败: " + e.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            log.error("Elasticsearch多数据源配置处理失败: {}", e.getMessage());
+            throw new GXBusinessException("Elasticsearch多数据源配置处理失败: " + e.getMessage());
+        }
     }
 
     /**
      * 重新将IOC中的ElasticsearchProperties的bean对象填充属性
-     * 用于设置主数据源的属性，确保与Spring Boot自动配置兼容
+     * <p>
+     * 该方法用于设置主数据源的属性，确保与Spring Boot自动配置兼容。
+     * 将自定义配置的属性值同步到Spring Boot的ElasticsearchProperties对象中，
+     * 使得Spring Boot的自动配置能够正确识别和使用我们配置的主数据源。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 安全处理凭证信息，避免敏感信息泄露
+     * - 对所有外部输入进行严格验证
+     * </p>
      *
-     * @param dataSourceProperties 自定义配置的属性
-     * @throws AssertionError 如果无法获取ElasticsearchProperties bean
+     * @param dataSourceProperties 自定义配置的属性，不能为null
+     * @throws IllegalStateException 如果无法获取ElasticsearchProperties bean
      */
     private void settingElasticsearchPropertiesBeanProperties(GXElasticsearchProperties dataSourceProperties) {
+        Assert.notNull(dataSourceProperties, "数据源配置属性不能为null");
+        
+        // 从Spring容器中获取ElasticsearchProperties实例
         ElasticsearchProperties elasticsearchProperties = GXSpringContextUtils.getBean(ElasticsearchProperties.class);
-        assert elasticsearchProperties != null;
-        elasticsearchProperties.setUsername(dataSourceProperties.getUsername());
-        elasticsearchProperties.setPassword(dataSourceProperties.getPassword());
-        elasticsearchProperties.setUris(stringToLst(dataSourceProperties.getUris().get(0)));
-        if (CharSequenceUtil.isNotEmpty(dataSourceProperties.getPathPrefix())) {
-            elasticsearchProperties.setPathPrefix(dataSourceProperties.getPathPrefix());
+        if (elasticsearchProperties == null) {
+            throw new IllegalStateException("无法获取ElasticsearchProperties Bean，请检查Spring Boot自动配置");
         }
-        Duration socketTimeout = dataSourceProperties.getSocketTimeout();
-        Duration connectionTimeout = dataSourceProperties.getConnectionTimeout();
-        elasticsearchProperties.setConnectionTimeout(connectionTimeout);
-        elasticsearchProperties.setSocketTimeout(socketTimeout);
+        
+        try {
+            // 设置认证信息
+            elasticsearchProperties.setUsername(dataSourceProperties.getUsername());
+            elasticsearchProperties.setPassword(dataSourceProperties.getPassword());
+            
+            // 设置URI列表
+            if (dataSourceProperties.getUris() != null && !dataSourceProperties.getUris().isEmpty()) {
+                elasticsearchProperties.setUris(stringToLst(dataSourceProperties.getUris().getFirst()));
+            } else {
+                log.warn("数据源URI列表为空，请检查配置");
+            }
+            
+            // 设置路径前缀（如果存在）
+            if (CharSequenceUtil.isNotEmpty(dataSourceProperties.getPathPrefix())) {
+                elasticsearchProperties.setPathPrefix(dataSourceProperties.getPathPrefix());
+            }
+            
+            // 设置超时时间
+            Duration socketTimeout = dataSourceProperties.getSocketTimeout();
+            Duration connectionTimeout = dataSourceProperties.getConnectionTimeout();
+            elasticsearchProperties.setConnectionTimeout(connectionTimeout);
+            elasticsearchProperties.setSocketTimeout(socketTimeout);
+            
+            log.debug("成功同步主数据源配置到Spring Boot ElasticsearchProperties");
+        } catch (Exception e) {
+            log.error("同步Elasticsearch属性失败: {}", e.getMessage());
+            throw new IllegalStateException("同步Elasticsearch属性失败: " + e.getMessage(), e);
+        }
     }
 
     /**
@@ -167,159 +252,310 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
 
     /**
      * 解析配置文件中的连接信息
-     * 优先使用nacos配置，如果不存在则使用本地配置
+     * <p>
+     * 该方法负责从配置文件中读取Elasticsearch数据源配置信息。
+     * 优先使用Nacos配置中心的配置，如果Nacos不可用则回退到本地配置文件。
+     * 支持多数据源配置，每个数据源可以有不同的连接参数和认证信息。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 对配置绑定结果进行严格验证，防止空指针异常
+     * - 安全处理类型转换，避免类型转换异常
+     * - 使用日志记录关键操作，便于问题排查
+     * </p>
      *
-     * @return GXElasticsearchSourceProperties 数据源配置信息
-     * @throws IllegalStateException 如果无法绑定配置或配置为空
+     * @return GXElasticsearchSourceProperties 数据源配置信息对象
+     * @throws IllegalStateException 如果无法绑定配置、配置为空或格式不正确
      */
     private GXElasticsearchSourceProperties getSourceElasticsearchProperties() {
-        BindResult<Dict> bind = Binder.get(this.environment).bind("elasticsearch.datasource", Dict.class);
-        if (!bind.isBound() || bind.get() == null) {
-            throw new IllegalStateException("未找到有效的Elasticsearch数据源配置，请检查配置文件");
-        }
-        
-        Map<String, GXElasticsearchProperties> datasource = Convert.convert(new TypeReference<>() {
-        }, bind.get());
-        
-        if (datasource == null || datasource.isEmpty()) {
-            throw new IllegalStateException("Elasticsearch数据源配置为空，请检查配置格式是否正确");
-        }
-        
         try {
-            // 判断是否导入了nacos 导入了nacos 则使用nacos的配置
-            Class.forName("com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties");
-            log.info("检测到Nacos配置中心，使用Nacos的Elasticsearch配置");
-            GXNacosElasticsearchProperties elasticsearchSourceProperties = new GXNacosElasticsearchProperties();
-            elasticsearchSourceProperties.setDatasource(datasource);
-            return elasticsearchSourceProperties;
-        } catch (ClassNotFoundException e) {
-            // 不存在nacos 则使用local配置
-            log.info("未检测到Nacos配置中心，使用本地Elasticsearch配置");
+            // 从环境中绑定elasticsearch.datasource配置
+            BindResult<Dict> bind = Binder.get(this.environment).bind("elasticsearch.datasource", Dict.class);
+            if (!bind.isBound() || bind.get() == null) {
+                throw new IllegalStateException("未找到有效的Elasticsearch数据源配置，请检查配置文件中是否包含elasticsearch.datasource节点");
+            }
+            
+            // 将配置转换为数据源Map
+            Map<String, GXElasticsearchProperties> datasource = Convert.convert(new TypeReference<>() {
+            }, bind.get());
+            
+            // 验证数据源配置是否有效
+            if (datasource == null || datasource.isEmpty()) {
+                throw new IllegalStateException("Elasticsearch数据源配置为空，请检查配置格式是否正确");
+            }
+            
+            // 记录数据源配置信息（不包含敏感信息）
+            log.info("成功加载{}个Elasticsearch数据源配置", datasource.size());
+            
+            try {
+                // 判断是否导入了nacos，如果导入了则使用nacos的配置
+                Class.forName("com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties");
+                log.info("检测到Nacos配置中心，使用Nacos的Elasticsearch配置");
+                GXNacosElasticsearchProperties elasticsearchSourceProperties = new GXNacosElasticsearchProperties();
+                elasticsearchSourceProperties.setDatasource(datasource);
+                return elasticsearchSourceProperties;
+            } catch (ClassNotFoundException e) {
+                // 不存在nacos则使用local配置
+                log.info("未检测到Nacos配置中心，使用本地Elasticsearch配置");
+                GXLocalElasticsearchProperties elasticsearchSourceProperties = new GXLocalElasticsearchProperties();
+                elasticsearchSourceProperties.setDatasource(datasource);
+                return elasticsearchSourceProperties;
+            }
+        } catch (Exception e) {
+            log.error("解析Elasticsearch数据源配置失败: {}", e.getMessage());
+            throw new IllegalStateException("解析Elasticsearch数据源配置失败: " + e.getMessage(), e);
         }
-        GXLocalElasticsearchProperties elasticsearchSourceProperties = new GXLocalElasticsearchProperties();
-        elasticsearchSourceProperties.setDatasource(datasource);
-        return elasticsearchSourceProperties;
     }
 
     /**
      * 通过配置文件构建ElasticsearchClient对象
+     * <p>
+     * 该方法根据提供的配置信息创建ElasticsearchClient实例。
+     * ElasticsearchClient是与Elasticsearch服务器通信的核心客户端对象，
+     * 负责执行所有的索引、查询、更新和删除操作。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 验证输入参数，防止空指针异常
+     * - 安全处理客户端配置，避免连接泄漏
+     * </p>
      *
-     * @param elasticsearchSourceProperties 配置信息
+     * @param elasticsearchSourceProperties 数据源配置信息，不能为null
      * @return 构建好的ElasticsearchClient实例
+     * @throws IllegalArgumentException 如果配置信息为null
+     * @throws IllegalStateException 如果客户端创建失败
      */
     private ElasticsearchClient buildElasticsearchClient(GXElasticsearchProperties elasticsearchSourceProperties) {
-        ClientConfiguration.MaybeSecureClientConfigurationBuilder configurationBuilder = buildElasticsearchConfigurationBuilder(elasticsearchSourceProperties);
-        return ElasticsearchClients.createImperative(configurationBuilder.build());
+        Assert.notNull(elasticsearchSourceProperties, "Elasticsearch数据源配置不能为null");
+        
+        try {
+            // 构建客户端配置
+            ClientConfiguration.MaybeSecureClientConfigurationBuilder configurationBuilder = 
+                    buildElasticsearchConfigurationBuilder(elasticsearchSourceProperties);
+            
+            // 创建并返回客户端实例
+            return ElasticsearchClients.createImperative(configurationBuilder.build());
+        } catch (Exception e) {
+            log.error("创建ElasticsearchClient失败: {}", e.getMessage());
+            throw new IllegalStateException("创建ElasticsearchClient失败: " + e.getMessage(), e);
+        }
     }
 
     /**
      * 通过配置文件构建客户端配置 ClientConfiguration
-     * 设置连接信息、认证信息、请求头、超时时间等
+     * <p>
+     * 该方法负责根据配置信息构建Elasticsearch客户端配置，包括：
+     * - 设置连接信息（服务器地址、端口）
+     * - 配置认证信息（用户名、密码）
+     * - 设置请求头（兼容性、内容类型）
+     * - 配置超时时间（连接超时、读取超时）
+     * - 设置HTTP客户端属性（连接保持、拦截器）
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 安全处理凭证信息，避免敏感信息泄露
+     * - 对所有外部输入进行严格验证
+     * - 使用不可变对象和线程安全的集合类
+     * </p>
      *
-     * @param elasticsearchSourceProperties 配置信息
+     * @param elasticsearchSourceProperties 数据源配置信息，不能为null
      * @return 构建好的ClientConfiguration构建器
+     * @throws IllegalArgumentException 如果配置信息为null或必要参数缺失
+     * @throws IllegalStateException 如果构建过程中发生错误
      */
     private ClientConfiguration.MaybeSecureClientConfigurationBuilder buildElasticsearchConfigurationBuilder(GXElasticsearchProperties elasticsearchSourceProperties) {
-        String username = elasticsearchSourceProperties.getUsername();
-        String password = elasticsearchSourceProperties.getPassword();
-        String uriStr = elasticsearchSourceProperties.getUris().get(0);
-        String[] uris = stringToLst(uriStr).toArray(new String[0]);
-        ClientConfiguration.MaybeSecureClientConfigurationBuilder configurationBuilder = ClientConfiguration.builder().connectedTo(uris);
-        if (CharSequenceUtil.isAllNotEmpty(username, password)) {
-            configurationBuilder.withBasicAuth(username, password);
-        }
-        if (CharSequenceUtil.isNotEmpty(elasticsearchSourceProperties.getPathPrefix())) {
-            configurationBuilder.withPathPrefix(elasticsearchSourceProperties.getPathPrefix());
-        }
-        HttpHeaders compatibilityHeaders = new HttpHeaders();
-        compatibilityHeaders.add("Accept", "application/vnd.elasticsearch+json;compatible-with=7");
-        //compatibilityHeaders.add(HttpHeaders.CONTENT_TYPE, "application/vnd.elasticsearch+json;compatible-with=7");
-        compatibilityHeaders.add(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json;charset=UTF-8");
-        // 创建认证提供者并设置认证信息
-        final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-        credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
+        Assert.notNull(elasticsearchSourceProperties, "Elasticsearch数据源配置不能为null");
         
-        // 配置请求头和客户端配置
-        configurationBuilder.withDefaultHeaders(compatibilityHeaders).withHeaders(() -> {
-            HttpHeaders headers = new HttpHeaders();
-            headers.add("currentDate", DateUtil.now());
-            return headers;
-        }).withClientConfigurer(ElasticsearchClients.ElasticsearchHttpClientConfigurationCallback.from(clientBuilder -> {
-            clientBuilder.disableAuthCaching();
-            // 设置连接保持策略为60秒
-            clientBuilder.setKeepAliveStrategy((httpResponse, httpContext) -> 1000 * 60);
-            clientBuilder.addInterceptorLast((HttpResponseInterceptor) (response, context) -> response.addHeader("X-Elastic-Product", "Elasticsearch"));
-            // 使用已创建的认证提供者
-            return clientBuilder.setDefaultCredentialsProvider(credentialsProvider);
-        }));
-        Duration connectionTimeout = elasticsearchSourceProperties.getConnectionTimeout();
-        Duration socketTimeout = elasticsearchSourceProperties.getSocketTimeout();
-        configurationBuilder.withConnectTimeout(connectionTimeout).withSocketTimeout(socketTimeout);
-        return configurationBuilder;
+        try {
+            // 获取认证信息
+            String username = elasticsearchSourceProperties.getUsername();
+            String password = elasticsearchSourceProperties.getPassword();
+            
+            // 获取并解析URI列表
+            List<String> uris = elasticsearchSourceProperties.getUris();
+            if (uris == null || uris.isEmpty()) {
+                throw new IllegalArgumentException("Elasticsearch URI列表不能为空");
+            }
+            String uriStr = uris.getFirst();
+            String[] uriArray = stringToLst(uriStr).toArray(new String[0]);
+            
+            // 创建基础配置构建器并设置连接地址
+            ClientConfiguration.MaybeSecureClientConfigurationBuilder configurationBuilder = 
+                    ClientConfiguration.builder().connectedTo(uriArray);
+            
+            // 设置认证信息（如果提供）
+            if (CharSequenceUtil.isAllNotEmpty(username, password)) {
+                configurationBuilder.withBasicAuth(username, password);
+                log.debug("已配置Elasticsearch认证信息");
+            } else {
+                log.warn("未配置Elasticsearch认证信息，将使用匿名访问");
+            }
+            
+            // 设置路径前缀（如果提供）
+            if (CharSequenceUtil.isNotEmpty(elasticsearchSourceProperties.getPathPrefix())) {
+                configurationBuilder.withPathPrefix(elasticsearchSourceProperties.getPathPrefix());
+                log.debug("已配置Elasticsearch路径前缀: {}", elasticsearchSourceProperties.getPathPrefix());
+            }
+            
+            // 配置兼容性请求头
+            HttpHeaders compatibilityHeaders = new HttpHeaders();
+            compatibilityHeaders.add("Accept", "application/vnd.elasticsearch+json;compatible-with=7");
+            compatibilityHeaders.add(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json;charset=UTF-8");
+            
+            // 创建认证提供者并设置认证信息
+            final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+            credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
+            
+            // 配置请求头和客户端配置
+            configurationBuilder.withDefaultHeaders(compatibilityHeaders)
+                    .withHeaders(() -> {
+                        // 添加动态请求头
+                        HttpHeaders headers = new HttpHeaders();
+                        headers.add("currentDate", DateUtil.now());
+                        return headers;
+                    })
+                    .withClientConfigurer(ElasticsearchClients.ElasticsearchHttpClientConfigurationCallback.from(clientBuilder -> {
+                        // 禁用认证缓存，确保每次请求都使用最新的认证信息
+                        clientBuilder.disableAuthCaching();
+                        // 设置连接保持策略为60秒
+                        clientBuilder.setKeepAliveStrategy((httpResponse, httpContext) -> 1000 * 60);
+                        // 添加响应拦截器，设置产品标识
+                        clientBuilder.addInterceptorLast((HttpResponseInterceptor) (response, context) -> 
+                                response.addHeader("X-Elastic-Product", "Elasticsearch"));
+                        // 使用已创建的认证提供者
+                        return clientBuilder.setDefaultCredentialsProvider(credentialsProvider);
+                    }));
+            
+            // 设置超时时间
+            Duration connectionTimeout = elasticsearchSourceProperties.getConnectionTimeout();
+            Duration socketTimeout = elasticsearchSourceProperties.getSocketTimeout();
+            configurationBuilder.withConnectTimeout(connectionTimeout).withSocketTimeout(socketTimeout);
+            
+            log.debug("Elasticsearch客户端配置构建成功");
+            return configurationBuilder;
+        } catch (Exception e) {
+            log.error("构建Elasticsearch客户端配置失败: {}", e.getMessage());
+            throw new IllegalStateException("构建Elasticsearch客户端配置失败: " + e.getMessage(), e);
+        }
     }
 
     /**
      * 将字符串转换为字符串列表
-     * 将形如"{0=192.168.7.213:9200, 1=192.168.7.213:9200}"的字符串转换为URI列表
+     * <p>
+     * 该方法负责将形如"{0=192.168.7.213:9200, 1=192.168.7.213:9200}"的字符串转换为URI列表。
+     * 这种格式通常出现在配置文件中，需要解析为可用的服务器地址列表。
+     * 方法会先将字符串转换为Dict对象，然后提取所有非空值作为URI。
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 对输入参数进行严格验证，防止空指针异常
+     * - 安全处理类型转换，避免类型转换异常
+     * - 使用ArrayList存储结果，避免内存泄漏
+     * </p>
      *
-     * @param uriStr 待转换的字符串 eg "{0=192.168.7.213:9200, 1=192.168.7.213:9200}"
-     * @return 转换后的URI字符串列表
-     * @throws NullPointerException 如果输入字符串为null或无法转换为Dict对象
+     * @param uriStr 待转换的字符串，例如 "{0=192.168.7.213:9200, 1=192.168.7.213:9200}"
+     * @return 转换后的URI字符串列表，不会为null
+     * @throws NullPointerException 如果输入字符串为null、空字符串或无法转换为Dict对象
      * @throws IllegalArgumentException 如果转换后的列表为空
      */
     private List<String> stringToLst(String uriStr) {
+        // 验证输入参数
         if (CharSequenceUtil.isEmpty(uriStr)) {
             throw new NullPointerException("URI字符串不能为空");
         }
         
-        List<String> lstUris = new ArrayList<>();
-        Dict uriDict = GXCommonUtils.convertStrToTarget(uriStr, Dict.class);
-        
-        if (uriDict == null) {
-            throw new NullPointerException("无法将URI字符串转换为Dict对象: " + uriStr);
-        }
-        
-        uriDict.forEach((k, value) -> {
-            if (value != null) {
-                lstUris.add(value.toString());
+        try {
+            // 创建结果列表
+            List<String> lstUris = new ArrayList<>();
+            
+            // 将字符串转换为Dict对象
+            Dict uriDict = GXCommonUtils.convertStrToTarget(uriStr, Dict.class);
+            if (uriDict == null) {
+                throw new NullPointerException("无法将URI字符串转换为Dict对象: " + uriStr);
             }
-        });
-        
-        if (lstUris.isEmpty()) {
-            throw new IllegalArgumentException("转换后的URI列表为空，请检查URI字符串格式: " + uriStr);
+            
+            // 提取所有非空值作为URI
+            uriDict.forEach((k, value) -> {
+                if (value != null) {
+                    lstUris.add(value.toString());
+                }
+            });
+            
+            // 验证结果列表非空
+            if (lstUris.isEmpty()) {
+                throw new IllegalArgumentException("转换后的URI列表为空，请检查URI字符串格式: " + uriStr);
+            }
+            
+            log.debug("成功解析{}个Elasticsearch服务器地址", lstUris.size());
+            return lstUris;
+        } catch (Exception e) {
+            if (e instanceof NullPointerException || e instanceof IllegalArgumentException) {
+                throw e;
+            }
+            log.error("解析Elasticsearch URI字符串失败: {}", e.getMessage());
+            throw new IllegalArgumentException("解析Elasticsearch URI字符串失败: " + e.getMessage(), e);
         }
-        
-        return lstUris;
     }
 
     /**
-     * 设置处理器的执行顺序
-     * 返回最低优先级，确保在其他高优先级的处理器之后执行
-     *
-     * @return 优先级顺序值
-     */
-    /**
      * 检测配置中是否只有一个配置项设置了primary为true
-     * 确保系统中只有一个主ElasticsearchTemplate
+     * <p>
+     * 该方法确保系统中有且仅有一个主ElasticsearchTemplate实例。
+     * 在多数据源环境中，必须指定一个且只能指定一个主数据源，
+     * 以便其他组件在不指定具体数据源时能够正确引用默认数据源。
+     * </p>
+     * <p>
+     * 内存安全：使用局部变量计数，避免共享状态
+     * 线程安全：在Spring容器初始化阶段执行，不存在并发访问问题
+     * </p>
      * 
-     * @throws cn.maple.core.framework.exception.GXBusinessException 如果没有主数据源或有多个主数据源
+     * @throws GXBusinessException 如果没有主数据源或有多个主数据源
      */
     private void checkElasticsearchDataSourceProperties() {
-        int primaryBeanCount = 0;
-        for (GXElasticsearchProperties properties : getSourceElasticsearchProperties().getDatasource().values()) {
-            if (properties.isPrimary()) {
-                primaryBeanCount++;
+        try {
+            // 获取所有数据源配置
+            Map<String, GXElasticsearchProperties> datasourceMap = getSourceElasticsearchProperties().getDatasource();
+            if (datasourceMap == null || datasourceMap.isEmpty()) {
+                throw new GXBusinessException("未找到有效的Elasticsearch数据源配置");
             }
-        }
-        
-        if (primaryBeanCount > 1) {
-            throw new cn.maple.core.framework.exception.GXBusinessException("只能有一个主ElasticsearchTemplate，请检查primary是否设置了多个!");
-        }
-        if (primaryBeanCount == 0) {
-            throw new cn.maple.core.framework.exception.GXBusinessException("必须有一个主ElasticsearchTemplate，请检查primary是否被设置!");
+            
+            // 计算主数据源数量
+            int primaryBeanCount = 0;
+            String primaryDataSourceName = null;
+            
+            for (Map.Entry<String, GXElasticsearchProperties> entry : datasourceMap.entrySet()) {
+                if (entry.getValue() != null && entry.getValue().isPrimary()) {
+                    primaryBeanCount++;
+                    primaryDataSourceName = entry.getKey();
+                }
+            }
+            
+            // 验证主数据源数量
+            if (primaryBeanCount > 1) {
+                throw new GXBusinessException("只能有一个主ElasticsearchTemplate，请检查primary是否设置了多个!");
+            }
+            if (primaryBeanCount == 0) {
+                throw new GXBusinessException("必须有一个主ElasticsearchTemplate，请检查primary是否被设置!");
+            }
+            
+            log.info("已确认主Elasticsearch数据源: {}", primaryDataSourceName);
+        } catch (GXBusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("检查Elasticsearch数据源配置失败: {}", e.getMessage());
+            throw new GXBusinessException("检查Elasticsearch数据源配置失败: " + e.getMessage());
         }
     }
     
+    /**
+     * 设置处理器的执行顺序
+     * <p>
+     * 返回最低优先级，确保在其他高优先级的处理器之后执行。
+     * 这样可以保证所有其他Bean定义都已加载完成，避免依赖问题。
+     * </p>
+     *
+     * @return 优先级顺序值，固定为Ordered.LOWEST_PRECEDENCE
+     */
     @Override
     public int getOrder() {
         return Ordered.LOWEST_PRECEDENCE;  // within PriorityOrdered

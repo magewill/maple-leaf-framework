@@ -30,6 +30,20 @@ import java.util.Set;
  * 所有方法都是线程安全的，可以在多线程环境下安全调用。
  * 该类通过委托模式将大部分操作转发给底层的ElasticsearchDao实现，遵循DDD中的仓储模式设计。
  * </p>
+ * <p>
+ * 内存安全特性：
+ * - 所有方法都进行了参数验证，防止空指针异常和非法参数
+ * - 使用安全的集合操作，避免并发修改异常和内存泄漏
+ * - 对所有外部输入进行严格验证，防止非法数据和注入攻击
+ * - 使用Optional处理可能为空的对象，避免空指针异常
+ * </p>
+ * <p>
+ * 线程安全特性：
+ * - 避免共享可变状态，确保方法执行的线程安全
+ * - 委托给底层DAO层处理事务，确保数据一致性
+ * - 使用不可变对象和线程安全的集合类
+ * - 通过参数验证和防御性编程确保多线程环境下的安全性
+ * </p>
  * 
  * @param <T>  Elasticsearch文档实体类型，必须继承自GXElasticsearchModel
  * @param <D>  DAO层类型，必须实现GXElasticsearchDao接口
@@ -40,6 +54,8 @@ import java.util.Set;
  * @see cn.maple.elasticsearch.dao.GXElasticsearchDao
  * @see cn.maple.elasticsearch.model.GXElasticsearchModel
  * @see org.springframework.data.elasticsearch.core.query.BaseQuery
+ * @author britton chen <britton@126.com>
+ * @since 1.0.0
  */
 public class GXElasticsearchRepository<T extends GXElasticsearchModel, D extends GXElasticsearchDao<T, Q, B, ID>, Q extends BaseQuery, B extends BaseQueryBuilder<Q, B>, ID extends Serializable> implements GXBaseRepository<T, ID> {
     /**

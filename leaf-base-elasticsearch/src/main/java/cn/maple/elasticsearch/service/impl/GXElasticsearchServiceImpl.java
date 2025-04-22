@@ -53,6 +53,13 @@ import java.util.stream.Collectors;
  * - 使用不可变对象和线程安全的集合类
  * - 通过参数验证和防御性编程确保多线程环境下的安全性
  * </p>
+ * <p>
+ * 功能特性：
+ * - 提供统一的数据访问接口，简化Elasticsearch操作
+ * - 支持复杂查询条件构建，包括条件组合、排序、分页等
+ * - 实现数据转换和映射，支持自定义处理方法
+ * - 提供异常处理和日志记录，便于问题排查
+ * </p>
  * 
  * @param <P>  仓库对象类型，必须继承自GXElasticsearchRepository
  * @param <T>  实体类型，必须继承自GXElasticsearchModel

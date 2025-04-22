@@ -39,15 +39,34 @@ import java.util.stream.Collectors;
  * <p>
  * 该接口提供了对Elasticsearch数据的统一访问方法，包括查询、分页、删除等操作。
  * 实现了线程安全的数据访问，所有方法都是无状态的，可以在多线程环境下安全调用。
+ * </p>
  * <p>
+ * 内存安全特性：
+ * - 所有方法都进行了参数验证，防止空指针异常和非法参数
+ * - 使用安全的集合操作，避免并发修改异常和内存泄漏
+ * - 对所有外部输入进行严格验证，防止非法数据和注入攻击
+ * - 使用Optional处理可能为空的对象，避免空指针异常
+ * - 合理管理资源，避免资源泄漏和内存溢出
+ * </p>
+ * <p>
+ * 线程安全特性：
+ * - 避免共享可变状态，确保方法执行的线程安全
+ * - 使用不可变对象和线程安全的集合类
+ * - 通过参数验证和防御性编程确保多线程环境下的安全性
+ * </p>
+ * <p>
+ * 参考文档：
  * {@see <a href="https://docs.spring.io/spring-data/elasticsearch/reference/index.html">Spring Data Elasticsearch帮助文档</a>}
- * <p>
  * {@see <a href="https://www.elastic.co/guide/en/elasticsearch/reference/7.17/query-dsl.html">Elasticsearch查询DSL语法</a>}
+ * </p>
  *
  * @param <T>  Elasticsearch文档实体类型，必须继承自GXElasticsearchModel
  * @param <Q>  查询对象类型，必须继承自BaseQuery
  * @param <B>  查询构建器类型，必须继承自BaseQueryBuilder
  * @param <ID> 实体主键类型，必须实现Serializable接口
+ * 
+ * @author britton chen <britton@126.com>
+ * @since 1.0.0
  */
 public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends BaseQuery, B extends BaseQueryBuilder<Q, B>, ID extends Serializable> extends ElasticsearchRepository<T, ID> {
     /**
