@@ -26,6 +26,14 @@ import java.util.Map;
  * 包括标准Redisson客户端、消息队列专用客户端以及Spring缓存管理器
  * </p>
  *
+ * <p>
+ * 配置说明：
+ * 1. 提供两个独立的RedissonClient实例，分别用于普通操作和消息队列操作
+ * 2. 使用JsonJacksonCodec作为默认编解码器，确保序列化的一致性和安全性
+ * 3. 支持Spring Cache集成，可配置缓存过期时间和最大空闲时间
+ * 4. 所有配置处理过程保证线程安全
+ * </p>
+ *
  * @author maple
  */
 @Configuration
@@ -33,16 +41,21 @@ import java.util.Map;
 public class GXRedissonSpringDataConfig {
     /**
      * 标准Redisson配置属性
+     * 用于常规Redis操作的配置，包含连接信息、线程池设置等
      */
     @Resource
     private GXRedissonProperties redissonConfig;
+
     /**
      * Redisson消息队列配置属性
+     * 专用于消息队列操作的配置，与标准配置隔离，避免相互影响
      */
     @Resource
     private GXRedissonMQProperties redissonMQConfig;
+
     /**
      * Redisson缓存管理器配置属性
+     * 用于配置Spring Cache集成，支持设置TTL和最大空闲时间
      */
     @Resource
     private GXRedissonCacheManagerProperties redissonCacheManagerConfig;
