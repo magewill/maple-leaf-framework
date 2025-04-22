@@ -13,8 +13,8 @@ import cn.maple.core.framework.dto.inner.GXJoinTypeEnums;
 import cn.maple.core.framework.dto.inner.GXUnionTypeEnums;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
-import cn.maple.core.framework.dto.inner.condition.GXExclusionDeletedFieldCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionIsNULL;
+import cn.maple.core.framework.dto.inner.condition.GXExclusionDeletedFieldCondition;
 import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.dto.inner.op.GXDbJoinOp;
 import cn.maple.core.framework.exception.GXBusinessException;
@@ -343,6 +343,7 @@ public interface GXBaseBuilder {
                 queryParamInnerDto.setTableNameAlias(queryParamInnerDto.getTableName());
             }
             String sql = findByCondition(queryParamInnerDto);
+            dbQueryParamInnerDto.getParamMap().putAll(queryParamInnerDto.getParamMap());
             unionSqlLst.add("(" + sql + ")");
         });
         String unionSql = String.join("\n " + unionTypeEnums.getUnionType() + " \n", unionSqlLst);
