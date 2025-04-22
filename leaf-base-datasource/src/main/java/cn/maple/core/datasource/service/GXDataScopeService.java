@@ -1,21 +1,16 @@
 package cn.maple.core.datasource.service;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.datasource.annotation.GXDataFilter;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
-import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
-import cn.maple.core.framework.dto.inner.condition.GXConditionIn;
 import cn.maple.core.framework.dto.inner.condition.GXIgnoreDataFilterCondition;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import org.aspectj.lang.JoinPoint;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -51,12 +46,14 @@ public interface GXDataScopeService {
      *
      * @param tableAlias       SQL语句中表名的别名，用于构建完整的字段引用
      * @param deptIdFieldNames SQL语句中表示部门ID的字段名数组
-     * @return GXCondition<?> 部门的查询条件，如果没有部门ID则返回null
+     * @return String 部门的查询条件，如果没有部门ID则返回null
      */
-    default GXCondition<?> getDeptCondition(String tableAlias, String[] deptIdFieldNames) {
+    default String getDeptCondition(String tableAlias, String[] deptIdFieldNames) {
         Set<Number> deptIdLst = getDeptIdLst();
         if (CollUtil.isNotEmpty(deptIdLst)) {
-            return new GXConditionIn(tableAlias, getDeptIdFieldName(deptIdFieldNames), deptIdLst);
+            //return new GXConditionIn(tableAlias, getDeptIdFieldName(deptIdFieldNames), deptIdLst);
+            String inStr = CollUtil.join(deptIdLst, ",");
+            return CharSequenceUtil.format("{}.{} in ({})", tableAlias, getDeptIdFieldName(deptIdFieldNames), inStr);
         }
         return null;
     }
@@ -70,15 +67,16 @@ public interface GXDataScopeService {
      *
      * @param tableAlias       SQL语句中表名的别名，用于构建完整的字段引用
      * @param userIdFieldNames SQL语句中表示用户ID的字段名数组
-     * @return GXCondition<?> 用户的查询条件，如果无法获取用户ID则返回null
+     * @return String 用户的查询条件，如果无法获取用户ID则返回null
      */
-    default GXCondition<?> getUserCondition(String tableAlias, String[] userIdFieldNames) {
+    default String getUserCondition(String tableAlias, String[] userIdFieldNames) {
         GXDataScopeService dataScopeService = GXSpringContextUtils.getBean(GXDataScopeService.class);
         if (ObjectUtil.isNull(dataScopeService)) {
             return null;
         }
         Long userId = dataScopeService.getLoginUserId();
-        return new GXConditionEQ(tableAlias, getUserIdFieldName(userIdFieldNames), userId);
+        //GXConditionEQ conditionEQ = new GXConditionEQ(tableAlias, getUserIdFieldName(userIdFieldNames), userId);
+        return CharSequenceUtil.format("{}.{} = {}", tableAlias, getUserIdFieldName(userIdFieldNames), userId);
     }
 
     /**
@@ -115,7 +113,7 @@ public interface GXDataScopeService {
      * </p>
      *
      * @param dataFilter 数据过滤注解，包含表别名和字段名信息
-     * @param point 切点信息，用于获取方法参数
+     * @param point      切点信息，用于获取方法参数
      * @return String SQL过滤语句，如果不需要过滤则返回空字符串
      */
     default String getSqlFilter(GXDataFilter dataFilter, JoinPoint point) {
@@ -131,23 +129,27 @@ public interface GXDataScopeService {
         String[] deptIdFieldNames = dataFilter.deptIdFieldNames();
         String[] userIdFieldNames = dataFilter.userIdFieldNames();
 
-        // 构建sqlFilter对象
-        StringBuilder sqlFilter = new StringBuilder();
-        sqlFilter.append(" (");
+        // 构建sqlFilter对象列表
+        List<String> whereLst = new ArrayList<>();
 
         // 查询本人数据
-        GXCondition<?> userIdCondition = getUserCondition(tableAlias, userIdFieldNames);
-        sqlFilter.append(userIdCondition.whereString());
+        String userIdCondition = getUserCondition(tableAlias, userIdFieldNames);
+        if (ObjectUtil.isNotNull(userIdCondition)) {
+            //sqlFilter.append(userIdCondition);
+            whereLst.add(userIdCondition);
+        }
 
         // 部门ID列表
-        GXCondition<?> deptCondition = dataScopeService.getDeptCondition(tableAlias, deptIdFieldNames);
+        String deptCondition = dataScopeService.getDeptCondition(tableAlias, deptIdFieldNames);
         if (ObjectUtil.isNotNull(deptCondition)) {
-            String s = deptCondition.whereString();
             // 添加或条件
-            sqlFilter.append(" or ").append(s);
+            //sqlFilter.append(" or ").append(deptCondition);
+            whereLst.add(deptCondition);
         }
-        sqlFilter.append(")");
-        return sqlFilter.toString();
+        if (CollUtil.isNotEmpty(whereLst)) {
+            return CharSequenceUtil.format(" ({}) ", CollUtil.join(whereLst, " or "));
+        }
+        return "";
     }
 
     /**
@@ -187,7 +189,7 @@ public interface GXDataScopeService {
             // 创建一个新的列表，避免ConcurrentModificationException
             List<GXCondition<?>> newConditionList = new ArrayList<>();
             List<Integer> removeIndexLst = CollUtil.newArrayList();
-            
+
             for (int i = 0, len = conditionLst.size(); i < len; i++) {
                 if (!conditionLst.get(i).getClass().isAssignableFrom(GXIgnoreDataFilterCondition.class)) {
                     newConditionList.add(conditionLst.get(i));
@@ -195,7 +197,7 @@ public interface GXDataScopeService {
                     removeIndexLst.add(i);
                 }
             }
-            
+
             // 替换原有条件列表
             queryParams.setCondition(newConditionList);
             return CollUtil.isNotEmpty(removeIndexLst);
@@ -229,5 +231,23 @@ public interface GXDataScopeService {
      */
     default String getUserIdFieldName(String[] userIdFieldNames) {
         return userIdFieldNames[0];
+    }
+
+    /**
+     * 从切点中获取查询条件
+     *
+     * @param point 切点
+     * @return GXBaseQueryParamInnerDto 查询条件
+     */
+    default GXBaseQueryParamInnerDto getGXBaseQueryParamInnerDto(JoinPoint point) {
+        // 获取查询条件
+        GXBaseQueryParamInnerDto dbQueryParamInnerDto = null;
+        for (Object arg : point.getArgs()) {
+            if (arg instanceof GXBaseQueryParamInnerDto) {
+                dbQueryParamInnerDto = (GXBaseQueryParamInnerDto) arg;
+                break;
+            }
+        }
+        return dbQueryParamInnerDto;
     }
 }
