@@ -1,5 +1,6 @@
 package cn.maple.extension;
 
+import java.io.Serial;
 import java.io.Serializable;
 
 /**
@@ -30,6 +31,7 @@ public class GXExtensionCoordinate implements Serializable {
     /**
      * 序列化版本号
      */
+    @Serial
     private static final long serialVersionUID = 1L;
     
     /**
