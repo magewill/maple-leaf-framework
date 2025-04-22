@@ -4,12 +4,29 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.sso.enums.GXRandomType;
 
 import java.awt.*;
+import java.security.SecureRandom;
 import java.util.Random;
 import java.util.UUID;
 
 /**
  * <p>
  * 随机数工具类
+ * </p>
+ * 
+ * <p>
+ * 该工具类提供各种随机数据生成功能，包括：
+ * 1. 随机字母数字混合字符串
+ * 2. 纯数字随机字符串
+ * 3. 随机汉字生成
+ * 4. 随机颜色生成
+ * 5. UUID生成
+ * </p>
+ * 
+ * <p>
+ * 安全说明：
+ * - 使用SecureRandom作为备选随机数生成器，提供更高的安全性
+ * - 支持自定义字符集，增强灵活性
+ * - 提供多种随机数据格式，满足不同场景需求
  * </p>
  *
  * @author britton birtton@126.com
@@ -23,32 +40,63 @@ public class GXRandomUtil {
 
     /**
      * 静态随机对象
+     * 注意：对于安全敏感场景，建议使用SECURE_RANDOM
      */
     public static final Random RANDOM = new Random();
+    
+    /**
+     * 安全随机数生成器
+     * 用于安全敏感场景，如生成密码、会话标识等
+     */
+    public static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private GXRandomUtil() {
     }
 
     /**
      * <p>
-     * 生产长度为length的随机字母数字混合字符串
+     * 生成长度为length的随机字母数字混合字符串
+     * </p>
+     * <p>
+     * 生成的字符串包含大小写字母和数字，适用于：
+     * - 验证码生成
+     * - 临时密码生成
+     * - 随机标识符生成
      * </p>
      *
-     * @param length 指定字符串长度
-     * @return String
+     * @param length 指定字符串长度，建议不小于6位以保证安全性
+     * @return 生成的随机字符串
      */
     public static String getCharacterAndNumber(int length) {
         return getText(GXRandomType.MIX, length);
     }
 
+    /**
+     * 根据指定的随机类型生成随机文本
+     * <p>
+     * 支持生成纯字母、纯数字或混合类型的随机字符串
+     * 对于混合类型，会随机决定每个位置是字母还是数字
+     * 字母类型会随机生成大写或小写字母
+     * </p>
+     *
+     * @param randomType 随机类型，支持CHARACTER(字母)、NUMBER(数字)、MIX(混合)
+     * @param length 生成的字符串长度
+     * @return 生成的随机字符串
+     */
     public static String getText(final GXRandomType randomType, final int length) {
-        StringBuilder out = new StringBuilder();
+        if (length <= 0) {
+            return "";
+        }
+        
+        StringBuilder out = new StringBuilder(length);
         GXRandomType rt = randomType;
+        
         for (int i = 0; i < length; i++) {
             // 输出字母还是数字
             if (randomType == GXRandomType.MIX) {
                 rt = RANDOM.nextInt(2) % 2 == 0 ? GXRandomType.CHARACTER : GXRandomType.NUMBER;
             }
+            
             switch (rt) {
                 case CHARACTER:
                     // 取得大写字母还是小写字母
@@ -64,35 +112,119 @@ public class GXRandomUtil {
         }
         return out.toString();
     }
-
+    
     /**
+     * 使用安全随机数生成器生成随机文本
      * <p>
-     * 生产长度为length的随机数字
+     * 此方法适用于安全敏感场景，如生成密码、会话标识等
+     * 使用SecureRandom提供更高的随机性和安全性
      * </p>
      *
-     * @param length 指定字符串长度
-     * @return String
+     * @param randomType 随机类型，支持CHARACTER(字母)、NUMBER(数字)、MIX(混合)
+     * @param length 生成的字符串长度
+     * @return 生成的安全随机字符串
      */
-    public static String getNumber(int length) {
-        return getText(GXRandomType.NUMBER, length);
+    public static String getSecureText(final GXRandomType randomType, final int length) {
+        if (length <= 0) {
+            return "";
+        }
+        
+        StringBuilder out = new StringBuilder(length);
+        GXRandomType rt = randomType;
+        
+        for (int i = 0; i < length; i++) {
+            // 输出字母还是数字
+            if (randomType == GXRandomType.MIX) {
+                rt = SECURE_RANDOM.nextInt(2) % 2 == 0 ? GXRandomType.CHARACTER : GXRandomType.NUMBER;
+            }
+            
+            switch (rt) {
+                case CHARACTER:
+                    // 取得大写字母还是小写字母
+                    int choice = SECURE_RANDOM.nextInt(2) % 2 == 0 ? 65 : 97;
+                    out.append((char) (choice + SECURE_RANDOM.nextInt(26)));
+                    break;
+                case NUMBER:
+                    out.append(SECURE_RANDOM.nextInt(10));
+                    break;
+                default:
+                    break;
+            }
+        }
+        return out.toString();
     }
 
     /**
      * <p>
-     * 生产长度为length的随机汉字
+     * 生成长度为length的随机数字字符串
+     * </p>
+     * <p>
+     * 生成的字符串仅包含数字0-9，适用于：
+     * - 数字验证码
+     * - 随机数值ID
+     * - 临时PIN码
      * </p>
      *
      * @param length 指定字符串长度
-     * @return String
+     * @return 生成的随机数字字符串
+     */
+    public static String getNumber(int length) {
+        return getText(GXRandomType.NUMBER, length);
+    }
+    
+    /**
+     * <p>
+     * 使用安全随机数生成器生成随机数字字符串
+     * </p>
+     * <p>
+     * 此方法适用于安全敏感场景，如支付验证码、安全令牌等
+     * </p>
+     *
+     * @param length 指定字符串长度
+     * @return 生成的安全随机数字字符串
+     */
+    public static String getSecureNumber(int length) {
+        return getSecureText(GXRandomType.NUMBER, length);
+    }
+
+    /**
+     * <p>
+     * 生成长度为length的随机汉字字符串
+     * </p>
+     * <p>
+     * 可以指定汉字Unicode范围，如不指定则使用默认的常用汉字集
+     * 适用于：
+     * - 中文验证码
+     * - 随机中文名称
+     * - 测试数据生成
+     * </p>
+     *
+     * @param chineseUnicode 指定的汉字Unicode字符集，为null或空时使用默认汉字集
+     * @param length 指定字符串长度
+     * @return 生成的随机汉字字符串
      */
     public static String getChinese(String chineseUnicode, int length) {
-        StringBuilder out = new StringBuilder();
+        if (length <= 0) {
+            return "";
+        }
+        
+        StringBuilder out = new StringBuilder(length);
         for (int i = 0; i < length; i++) {
             out.append(getChinese(chineseUnicode));
         }
         return out.toString();
     }
 
+    /**
+     * 获取一个随机汉字
+     * <p>
+     * 如果提供了自定义汉字集，则从中随机选择
+     * 否则使用默认的常用汉字集
+     * </p>
+     *
+     * @param chineseUnicode 指定的汉字Unicode字符集，为null或空时使用默认汉字集
+     * @return 随机选择的一个汉字
+     */
     public static char getChinese(String chineseUnicode) {
         if (CharSequenceUtil.isNotEmpty(chineseUnicode)) {
             return chineseUnicode.charAt(RANDOM.nextInt(chineseUnicode.length()));
@@ -104,19 +236,39 @@ public class GXRandomUtil {
      * <p>
      * 获取随机常用颜色
      * </p>
+     * <p>
+     * 从提供的RGB颜色数组中随机选择一个颜色
+     * 适用于：
+     * - 验证码背景色生成
+     * - 随机UI元素颜色
+     * - 图表数据可视化
+     * </p>
      *
-     * @param rgbArr RGB 颜色数组
-     * @return 随机颜色
+     * @param rgbArr RGB 颜色数组，每个元素为包含3个整数(R,G,B)的数组
+     * @return 随机生成的Color对象
+     * @throws IllegalArgumentException 如果rgbArr为null或空数组
      */
     public static Color getColor(int[][] rgbArr) {
+        if (rgbArr == null || rgbArr.length == 0) {
+            throw new IllegalArgumentException("RGB颜色数组不能为空");
+        }
+        
         int[] rgb = rgbArr[RANDOM.nextInt(rgbArr.length)];
         return new Color(rgb[0], rgb[1], rgb[2]);
     }
 
     /**
      * <p>
-     * 获取去掉"-" UUID
+     * 获取去掉"-"的32位UUID字符串
      * </p>
+     * <p>
+     * 生成不带连字符的UUID，适用于：
+     * - 数据库主键
+     * - 唯一标识符
+     * - 文件名生成
+     * </p>
+     * 
+     * @return 32位UUID字符串（不含连字符）
      */
     public static String get32UUID() {
         return getUUID().replace("-", "");
@@ -124,10 +276,38 @@ public class GXRandomUtil {
 
     /**
      * <p>
-     * 获取唯一 UUID
+     * 获取标准格式的UUID字符串
      * </p>
+     * <p>
+     * 生成包含连字符的标准UUID，适用于：
+     * - 符合RFC 4122标准的场景
+     * - 需要与其他系统交互的唯一标识
+     * </p>
+     * 
+     * @return 36位标准格式UUID字符串（含连字符）
      */
     public static String getUUID() {
         return UUID.randomUUID().toString();
+    }
+    
+    /**
+     * <p>
+     * 获取基于安全随机数的UUID
+     * </p>
+     * <p>
+     * 使用SecureRandom作为随机源生成UUID，提供更高的安全性
+     * 适用于安全敏感场景，如：
+     * - 会话标识
+     * - 安全令牌
+     * - 加密密钥ID
+     * </p>
+     * 
+     * @param removeDash 是否移除连字符
+     * @return UUID字符串
+     */
+    public static String getSecureUUID(boolean removeDash) {
+        UUID uuid = UUID.randomUUID();
+        String uuidStr = uuid.toString();
+        return removeDash ? uuidStr.replace("-", "") : uuidStr;
     }
 }

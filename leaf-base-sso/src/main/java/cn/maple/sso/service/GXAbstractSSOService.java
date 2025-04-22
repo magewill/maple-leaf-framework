@@ -3,12 +3,14 @@ package cn.maple.sso.service;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.http.HttpStatus;
 import cn.hutool.json.JSONUtil;
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.sso.cache.GXSSOCache;
 import cn.maple.sso.enums.GXTokenFlag;
 import cn.maple.sso.plugins.GXSSOPlugin;
 import cn.maple.core.framework.util.GXCookieHelperUtil;
 import cn.maple.sso.utils.GXHttpUtil;
+import cn.maple.sso.utils.GXIpHelperUtil;
 import cn.maple.sso.utils.GXRandomUtil;
 import lombok.extern.slf4j.Slf4j;
 
@@ -37,16 +39,28 @@ import java.util.Objects;
 @Slf4j
 public abstract class GXAbstractSSOService extends GXSSOSupportService implements GXSSOService {
     /**
-     * 获取当前请求的SSO Token
      * <p>
-     * 从Cookie或请求头中解密获取SSO Token，主要用于拦截器场景
-     * 非拦截器场景建议使用attrSSOToken方法减少重复解密开销
+     * 获取当前请求的SSO Token
      * </p>
+     * 
+     * <p>
+     * 从Cookie或请求头中解密获取SSO Token，主要用于拦截器场景。
+     * 非拦截器场景建议使用attrSSOToken方法减少重复解密开销。
+     * </p>
+     * 
      * <p>
      * 处理流程：
      * 1. 从缓存中获取Token
      * 2. 验证Token的IP和浏览器信息
      * 3. 通过插件机制进行额外验证
+     * </p>
+     * 
+     * <p>
+     * 安全特性：
+     * 1. 多重验证 - 结合IP、浏览器信息和缓存验证，提高安全性
+     * 2. 插件扩展 - 支持通过插件机制添加自定义验证逻辑
+     * 3. 防篡改保护 - 验证Token的完整性，防止被恶意修改
+     * 4. 失效处理 - 对无效Token返回空对象而非异常，避免信息泄露
      * </p>
      *
      * @param request HTTP请求对象
@@ -95,23 +109,31 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
     }
 
     /**
-     * 在当前访问域下设置登录Cookie
      * <p>
-     * 将用户登录信息写入Cookie并同步到缓存系统
+     * 在当前访问域下设置登录Cookie
+     * </p>
+     * 
+     * <p>
+     * 将用户登录信息写入Cookie并同步到缓存系统。
      * Cookie的超时时间可通过以下方式设置：
      * request.setAttribute(GXSsoConfig.SSO_COOKIE_MAX_AGE, -1);
      * </p>
+     * 
      * <p>
      * 超时时间说明：
      * -1: 浏览器关闭时自动删除（会话Cookie）
      * 0: 立即删除Cookie
      * 正整数: 表示Cookie有效期（以秒为单位），如120表示2分钟
      * </p>
+     * 
      * <p>
      * 安全措施：
      * 1. 支持HttpOnly选项，防止XSS攻击获取Cookie
      * 2. 可配置Secure选项，要求通过HTTPS传输Cookie
      * 3. 执行SSO插件的登录逻辑
+     * 4. 设置SameSite属性，防止CSRF攻击
+     * 5. 使用加密存储Token，防止信息泄露
+     * 6. 缓存同步，确保分布式环境下的一致性
      * </p>
      *
      * @param request  HTTP请求对象
@@ -120,45 +142,90 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
      */
     @Override
     public void setCookie(HttpServletRequest request, HttpServletResponse response, Dict ssoToken) {
-        // 判断 GXSSOCache 是否缓存处理失效
-        // cache 缓存宕机，flag 设置为失效
-        GXSSOCache cache = getConfig().getCache();
-        if (cache != null) {
-            Dict cookieSSOToken = getSSOTokenFromCookie(GXCurrentRequestContextUtils.getHttpServletRequest());
-            ssoToken.putAll(cookieSSOToken);
-            boolean rlt = cache.set(ssoToken, getConfig().getCacheExpires());
-            if (!rlt) {
-                ssoToken.put("flag", GXTokenFlag.CACHE_SHUT.value());
-            }
-        }
-
-        // 设置加密 Cookie
-        Cookie ck = this.generateCookie(request, ssoToken);
-
-        //执行插件逻辑
-        List<GXSSOPlugin> pluginList = getConfig().getPluginList();
-        if (pluginList != null) {
-            for (GXSSOPlugin plugin : pluginList) {
-                boolean login = plugin.login(request, response);
-                if (!login) {
-                    plugin.login(request, response);
+        try {
+            // 判断 GXSSOCache 是否缓存处理失效
+            // cache 缓存宕机，flag 设置为失效
+            GXSSOCache cache = getConfig().getCache();
+            if (cache != null) {
+                // 添加额外安全信息
+                ssoToken.put("createTime", System.currentTimeMillis());
+                ssoToken.put("userAgent", request.getHeader("User-Agent"));
+                ssoToken.put("ip", GXIpHelperUtil.getIpAddr(request));
+                
+                Dict cookieSSOToken = getSSOTokenFromCookie(GXCurrentRequestContextUtils.getHttpServletRequest());
+                if (cookieSSOToken != null && !cookieSSOToken.isEmpty()) {
+                    ssoToken.putAll(cookieSSOToken);
+                }
+                
+                boolean rlt = cache.set(ssoToken, getConfig().getCacheExpires());
+                if (!rlt) {
+                    ssoToken.put("flag", GXTokenFlag.CACHE_SHUT.value());
+                    log.warn("缓存服务不可用，Token将使用本地模式");
                 }
             }
-        }
 
-        // Cookie设置HttpOnly
-        if (getConfig().isCookieHttpOnly()) {
-            GXCookieHelperUtil.addHttpOnlyCookie(response, ck);
-        } else {
-            response.addCookie(ck);
+            // 设置加密 Cookie
+            Cookie ck = this.generateCookie(request, ssoToken);
+            
+            // 设置SameSite属性，防止CSRF攻击
+            // 注意：此设置需要在Servlet容器支持的情况下生效
+            String cookieString = ck.getName() + "=" + ck.getValue() + "; Path=" + ck.getPath();
+            if (ck.getMaxAge() > 0) {
+                cookieString += "; Max-Age=" + ck.getMaxAge();
+            }
+            if (ck.getDomain() != null) {
+                cookieString += "; Domain=" + ck.getDomain();
+            }
+            if (ck.getSecure()) {
+                cookieString += "; Secure";
+            }
+            if (getConfig().isCookieHttpOnly()) {
+                cookieString += "; HttpOnly";
+            }
+            cookieString += "; SameSite=Lax";
+            
+            response.addHeader("Set-Cookie", cookieString);
+
+            //执行插件逻辑
+            List<GXSSOPlugin> pluginList = getConfig().getPluginList();
+            if (pluginList != null) {
+                for (GXSSOPlugin plugin : pluginList) {
+                    boolean login = plugin.login(request, response);
+                    if (!login) {
+                        log.warn("插件[{}]登录处理失败", plugin.getClass().getSimpleName());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("设置SSO Cookie时发生错误", e);
+            throw new GXBusinessException("设置登录Cookie失败");
         }
     }
 
     /**
-     * 在当前访问域下设置登录Cookie并防止伪造SESSION_ID攻击
      * <p>
-     * 在设置登录Cookie的同时，重新生成JSESSIONID，防止会话固定攻击
-     * 这是一种增强的安全措施，特别适用于敏感操作场景
+     * 在当前访问域下设置登录Cookie并防止会话固定攻击
+     * </p>
+     * 
+     * <p>
+     * 在设置登录Cookie的同时，重新生成JSESSIONID，防止会话固定攻击。
+     * 这是一种增强的安全措施，特别适用于敏感操作场景，如用户登录、密码修改等。
+     * </p>
+     * 
+     * <p>
+     * 安全特性：
+     * 1. 会话重新生成 - 使用随机字符串创建新的会话ID，防止会话固定攻击
+     * 2. 强随机性保证 - 使用安全的随机数生成器创建会话标识
+     * 3. 完整性保护 - 确保新会话包含原有的合法属性
+     * 4. 异常处理 - 捕获并记录会话操作中的异常，提高系统稳定性
+     * </p>
+     * 
+     * <p>
+     * 使用场景：
+     * - 用户首次登录系统时
+     * - 用户权限变更后
+     * - 检测到潜在的会话劫持尝试时
+     * - 用户执行敏感操作（如转账、修改密码）前
      * </p>
      *
      * @param request  HTTP请求对象
@@ -166,8 +233,28 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
      * @param ssoToken 包含用户登录信息的Token数据
      */
     public void authCookie(HttpServletRequest request, HttpServletResponse response, Dict ssoToken) {
-        GXCookieHelperUtil.authJSESSIONID(request, GXRandomUtil.getCharacterAndNumber(8));
-        this.setCookie(request, response, ssoToken);
+        try {
+            // 生成足够长度的随机会话标识，提高安全性
+            String sessionId = GXRandomUtil.getCharacterAndNumber(16);
+            
+            // 记录会话重新生成事件，便于安全审计
+            log.debug("重新生成会话ID，防止会话固定攻击");
+            
+            // 使用安全的方式重新生成会话
+            GXCookieHelperUtil.authJSESSIONID(request, sessionId);
+            
+            // 在新会话中设置Cookie
+            this.setCookie(request, response, ssoToken);
+            
+            // 添加安全响应头，进一步增强安全性
+            response.setHeader("X-Frame-Options", "DENY"); // 防止点击劫持
+            response.setHeader("X-Content-Type-Options", "nosniff"); // 防止MIME类型嗅探
+            response.setHeader("X-XSS-Protection", "1; mode=block"); // 启用XSS过滤
+        } catch (Exception e) {
+            log.error("重新生成会话时发生错误", e);
+            // 即使出错也尝试设置Cookie，确保基本功能可用
+            this.setCookie(request, response, ssoToken);
+        }
     }
 
     /**

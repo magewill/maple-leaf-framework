@@ -21,10 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 
 /**
  * <p>
@@ -69,17 +66,28 @@ public class GXSSOHelperUtil {
     }
 
     /**
-     * 获取SSO配置对象
      * <p>
-     * 懒加载方式初始化SSO配置，包括：
+     * 获取SSO配置对象
+     * </p>
+     * 
+     * <p>
+     * 线程安全的懒加载方式初始化SSO配置，包括：
      * 1. 加载基本配置信息
      * 2. 注册SSO插件
      * 3. 配置缓存实现
      * </p>
+     * 
      * <p>
      * 配置来源优先级：
      * 1. Spring容器中的GXSSOConfigProperties bean
      * 2. 默认配置
+     * </p>
+     * 
+     * <p>
+     * 线程安全说明：
+     * - 使用双重检查锁定模式确保线程安全
+     * - 防止多线程环境下的配置覆盖问题
+     * - 避免不必要的同步开销
      * </p>
      *
      * @return SSO配置对象
@@ -87,23 +95,38 @@ public class GXSSOHelperUtil {
      * @since 2021-09-17
      */
     public static GXSSOProperties getSSOConfig() {
-        // 为每个应用设置自己的配置信息
+        // 双重检查锁定，确保线程安全
         if (Objects.isNull(ssoConfig)) {
-            if (Objects.nonNull(GXSpringContextUtils.getBean(GXSSOConfigProperties.class))) {
-                ssoConfig = Objects.requireNonNull(GXSpringContextUtils.getBean(GXSSOConfigProperties.class)).getConfig();
-            } else {
-                ssoConfig = new GXSSOProperties();
-            }
-            // 为每个应用配置自己的插件
-            Map<String, GXSSOPlugin> ssoPluginMap = GXSpringContextUtils.getBeans(GXSSOPlugin.class);
-            if (!ssoPluginMap.isEmpty()) {
-                ArrayList<GXSSOPlugin> plugins = new ArrayList<>();
-                ssoPluginMap.forEach((key, val) -> plugins.add(val));
-                GXSSOHelperUtil.getSSOConfig().setPluginList(plugins);
-            }
-            // 为每个应用配置自己的SsoCache实例
-            if (Objects.nonNull(GXSpringContextUtils.getBean(GXSSOCache.class))) {
-                GXSSOHelperUtil.getSSOConfig().setCache(GXSpringContextUtils.getBean(GXSSOCache.class));
+            synchronized (GXSSOHelperUtil.class) {
+                if (Objects.isNull(ssoConfig)) {
+                    try {
+                        // 为每个应用设置自己的配置信息
+                        if (Objects.nonNull(GXSpringContextUtils.getBean(GXSSOConfigProperties.class))) {
+                            ssoConfig = Objects.requireNonNull(GXSpringContextUtils.getBean(GXSSOConfigProperties.class)).getConfig();
+                        } else {
+                            ssoConfig = new GXSSOProperties();
+                        }
+                        
+                        // 为每个应用配置自己的插件
+                        Map<String, GXSSOPlugin> ssoPluginMap = GXSpringContextUtils.getBeans(GXSSOPlugin.class);
+                        if (!ssoPluginMap.isEmpty()) {
+                            List<GXSSOPlugin> plugins = new ArrayList<>();
+                            ssoPluginMap.forEach((key, val) -> plugins.add(val));
+                            ssoConfig.setPluginList(plugins);
+                        }
+                        
+                        // 为每个应用配置自己的SsoCache实例
+                        if (Objects.nonNull(GXSpringContextUtils.getBean(GXSSOCache.class))) {
+                            ssoConfig.setCache(GXSpringContextUtils.getBean(GXSSOCache.class));
+                        }
+                    } catch (Exception e) {
+                        LOGGER.error("初始化SSO配置时发生错误", e);
+                        // 确保即使出错也有基本配置可用
+                        if (Objects.isNull(ssoConfig)) {
+                            ssoConfig = new GXSSOProperties();
+                        }
+                    }
+                }
             }
         }
         return ssoConfig;
@@ -377,40 +400,101 @@ public class GXSSOHelperUtil {
     }
 
     /**
+     * <p>
      * 解析浏览器端的Token
-     * <p>
-     * 解析并验证客户端传递的Token字符串
-     * 支持标记Token的来源（Cookie或Header）
      * </p>
+     * 
      * <p>
-     * 安全说明：
-     * - 使用配置的密钥进行解密
-     * - 自动添加客户端IP信息，用于后续验证
-     * - 对RPC调用做了特殊处理
-     * - 记录详细日志，便于安全审计
+     * 解析并验证客户端传递的Token字符串，
+     * 支持标记Token的来源（Cookie或Header）。
+     * </p>
+     * 
+     * <p>
+     * 安全特性：
+     * 1. 使用配置的密钥进行解密，确保Token的机密性
+     * 2. 自动添加客户端IP信息，用于后续验证，防止Token盗用
+     * 3. 对RPC调用做了特殊处理，适应不同调用场景
+     * 4. 记录详细日志，便于安全审计和问题排查
+     * 5. 完善的异常处理，防止解析错误导致系统不稳定
+     * 6. 对空值和非法值进行严格检查，提高系统健壮性
      * </p>
      *
      * @param token  Token字符串
      * @param header 标记Token是否来自请求头，true表示来自Header，false表示来自Cookie
      * @return 解码后的Token数据对象
-     * @throws GXBusinessException 当TokenConfigService未正确配置时抛出异常
+     * @throws GXBusinessException 当TokenConfigService未正确配置或Token解析失败时抛出异常
      */
     public static Dict parser(String token, boolean header) {
         // 如果是RPC 直接返回
         if (GXCurrentRequestContextUtils.isRPC()) {
             return Dict.create();
         }
-        if (CharSequenceUtil.isNotBlank(token) && header) {
+        
+        // 检查Token是否为空
+        if (CharSequenceUtil.isBlank(token)) {
+            LOGGER.warn("接收到空的Token字符串");
+            return Dict.create();
+        }
+        
+        if (header) {
             LOGGER.info("token字符串来自于header");
+        } else {
+            LOGGER.info("token字符串来自于cookie");
         }
-        GXTokenConfigService tokenSecretService = GXSpringContextUtils.getBean(GXTokenConfigService.class);
-        if (Objects.isNull(tokenSecretService)) {
-            throw new GXBusinessException("请实现GXTokenConfigService类,并将其加入到spring容器中");
+        
+        try {
+            // 获取Token配置服务
+            GXTokenConfigService tokenSecretService = GXSpringContextUtils.getBean(GXTokenConfigService.class);
+            if (Objects.isNull(tokenSecretService)) {
+                throw new GXBusinessException("请实现GXTokenConfigService类,并将其加入到spring容器中");
+            }
+            
+            // 获取密钥并解密Token
+            String tokenSecret = tokenSecretService.getTokenSecret();
+            if (CharSequenceUtil.isBlank(tokenSecret)) {
+                LOGGER.error("Token密钥为空，无法解析Token");
+                throw new GXBusinessException("Token密钥配置错误");
+            }
+            
+            // 解密Token
+            String decodedToken;
+            try {
+                decodedToken = GXAuthCodeUtils.authCodeDecode(token, tokenSecret);
+                if (CharSequenceUtil.isBlank(decodedToken)) {
+                    LOGGER.warn("Token解密结果为空");
+                    return Dict.create();
+                }
+            } catch (Exception e) {
+                LOGGER.error("Token解密失败: {}", e.getMessage());
+                return Dict.create();
+            }
+            
+            // 解析JSON
+            Dict requestToken;
+            try {
+                requestToken = JSONUtil.toBean(decodedToken, Dict.class);
+            } catch (Exception e) {
+                LOGGER.error("Token JSON解析失败: {}", e.getMessage());
+                return Dict.create();
+            }
+            
+            // 添加IP信息用于安全验证
+            String clientIP = GXCurrentRequestContextUtils.getClientIP();
+            requestToken.put("ip", clientIP);
+            
+            // 记录脱敏后的Token信息
+            Dict logToken = new Dict(requestToken);
+            if (logToken.containsKey("password")) {
+                logToken.put("password", "******");
+            }
+            LOGGER.info("SSO组件解析出来的token信息 : {}", logToken);
+            
+            return requestToken;
+        } catch (GXBusinessException e) {
+            throw e; // 业务异常直接抛出
+        } catch (Exception e) {
+            LOGGER.error("解析Token时发生未预期的错误", e);
+            return Dict.create(); // 其他异常返回空对象，避免系统崩溃
         }
-        String s = GXAuthCodeUtils.authCodeDecode(token, tokenSecretService.getTokenSecret());
-        Dict requestToken = JSONUtil.toBean(s, Dict.class);
-        requestToken.put("ip", GXCurrentRequestContextUtils.getClientIP());
-        LOGGER.info("SSO组件解析出来的token信息 : {}", requestToken);
-        return requestToken;
     }
 }
