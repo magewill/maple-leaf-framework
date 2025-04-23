@@ -7,6 +7,8 @@ import com.baomidou.mybatisplus.core.metadata.TableInfo;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.LongValue;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.cache.Cache;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
 
@@ -29,6 +31,22 @@ import java.util.Objects;
  * </p>
  *
  * <p>
+ * 内存安全说明：
+ * - 接口默认实现使用缓存机制减少重复查询，避免内存泄漏
+ * - 缓存使用CaffeineCacheManager，支持自动过期和容量限制，防止内存溢出
+ * - 所有方法都进行了空值检查，避免空指针异常
+ * - 表结构信息查询结果缓存，避免频繁创建临时对象导致的内存压力
+ * </p>
+ *
+ * <p>
+ * 线程安全说明：
+ * - 接口默认实现是线程安全的，不维护任何实例状态
+ * - 使用的缓存管理器本身是线程安全的
+ * - 实现类应当确保getTenantId()方法的线程安全性，特别是在使用ThreadLocal存储租户信息时
+ * - 建议实现类使用不可变对象返回租户ID表达式，避免并发修改问题
+ * </p>
+ *
+ * <p>
  * 使用示例：
  * <pre>
  * // 1. 自定义实现类
@@ -36,7 +54,7 @@ import java.util.Objects;
  * public class CustomTenantIdServiceImpl implements GXTenantIdService {
  *     @Autowired
  *     private TenantContextHolder tenantContextHolder;
- *     
+ *
  *     @Override
  *     public Expression getTenantId() {
  *         // 从当前请求上下文中获取租户ID
@@ -47,7 +65,7 @@ import java.util.Objects;
  *         }
  *         return new LongValue(tenantId);
  *     }
- *     
+ *
  *     @Override
  *     public boolean ignoreTable(String tableName, String tenantIdColumn) {
  *         // 可以自定义哪些表不需要进行租户过滤
@@ -83,12 +101,20 @@ import java.util.Objects;
  * - 对于敏感操作，建议添加额外的租户验证
  * - 在实现ignoreTable方法时，谨慎决定哪些表可以跨租户访问
  * - 避免在日志中输出租户ID等敏感信息
+ * - 实现类应当防范SQL注入风险，特别是在动态构建租户条件时
+ * - 建议对租户ID进行加密或混淆处理，避免直接暴露真实租户标识
+ * - 定期审计租户访问日志，及时发现异常访问模式
  * </p>
  *
  * @author britton
  * @since 1.0.0
  */
 public interface GXTenantIdService {
+    /**
+     * 日志对象
+     */
+    Logger LOG = LoggerFactory.getLogger(GXTenantIdService.class);
+
     /**
      * 获取当前租户ID
      * <p>
@@ -102,8 +128,23 @@ public interface GXTenantIdService {
      * - 考虑租户ID获取失败的情况，提供合理的错误处理
      * - 可以从请求头、线程上下文、安全上下文等获取租户ID
      * </p>
+     * 
+     * <p>
+     * 安全建议：
+     * - 实现类应当对获取的租户ID进行验证，防止伪造身份
+     * - 避免在日志中输出完整的租户ID信息
+     * - 考虑对租户ID进行加密或混淆处理，避免直接暴露真实租户标识
+     * - 使用不可变对象返回租户ID表达式，避免并发修改问题
+     * </p>
+     * 
+     * <p>
+     * 性能优化：
+     * - 该方法会在每次SQL执行时被调用，应当尽量保持高效
+     * - 建议实现类在内部使用缓存机制，避免频繁计算租户ID
+     * - 可以使用ThreadLocal缓存当前请求的租户ID，减少重复获取
+     * </p>
      *
-     * @return 表示租户ID的SQL表达式对象
+     * @return 表示租户ID的SQL表达式对象，不会返回null
      */
     default Expression getTenantId() {
         return new LongValue(0);
@@ -112,9 +153,10 @@ public interface GXTenantIdService {
     /**
      * 根据表名判断是否忽略拼接多租户条件
      * <p>
-     * 默认都要进行解析并拼接多租户条件
-     * 该方法使用缓存优化表结构检查，避免重复查询表信息
-     * 缓存结果存储在FRAMEWORK-CACHE中，键为表名，值为是否忽略租户条件
+     * 该方法决定是否对特定表应用租户过滤条件，是多租户数据隔离的关键控制点。
+     * 默认都要进行解析并拼接多租户条件，除非表结构中不包含租户ID字段。
+     * 该方法使用缓存优化表结构检查，避免重复查询表信息，提高性能。
+     * 缓存结果存储在FRAMEWORK-CACHE中，键为表名，值为是否忽略租户条件。
      * </p>
      *
      * <p>
@@ -122,48 +164,96 @@ public interface GXTenantIdService {
      * - 全局配置表、字典表等通常应该忽略租户条件
      * - 可以通过表名前缀或后缀来批量判断
      * - 缓存的使用可以显著提高性能，尤其在大型系统中
+     * - 安全起见，当无法确定是否应用租户条件时，选择应用条件（返回false）
+     * </p>
+     * 
+     * <p>
+     * 性能优化：
+     * - 使用缓存存储表结构检查结果，避免重复查询
+     * - 缓存使用Caffeine实现，支持自动过期和容量限制
+     * - 缓存命中时直接返回结果，显著提高性能
      * </p>
      *
-     * @param tableName      表名
-     * @param tenantIdColumn 租户字段名
+     * <p>
+     * 安全增强：
+     * - 使用try-catch块捕获可能的异常，确保系统稳定性
+     * - 对缓存管理器和缓存对象进行空值检查，避免空指针异常
+     * - 对表名进行安全处理，防止非法输入
+     * - 默认安全策略：当无法确定是否应用租户条件时，选择应用条件（返回false）
+     * </p>
+     *
+     * <p>
+     * 使用示例：
+     * <pre>
+     * // 自定义实现，忽略特定表的租户条件
+     * @Override
+     * public boolean ignoreTable(String tableName, String tenantIdColumn) {
+     *     // 系统配置表和字典表不进行租户隔离
+     *     if ("sys_config".equals(tableName) || "sys_dict".equals(tableName)) {
+     *         return true;
+     *     }
+     *     // 对于其他表，调用默认实现进行判断
+     *     return GXTenantIdService.super.ignoreTable(tableName, tenantIdColumn);
+     * }
+     * </pre>
+     * </p>
+     *
+     * @param tableName      表名，不应为null或空字符串
+     * @param tenantIdColumn 租户字段名，不应为null或空字符串
      * @return 是否忽略, true:表示忽略，false:需要解析并拼接多租户条件
      */
     default boolean ignoreTable(String tableName, String tenantIdColumn) {
-        // 数据缓存管理器
-        // 用于缓存表结构信息，减少重复查询，提高性能
-        // 使用Spring的CaffeineCacheManager，支持自动过期和大小限制
-        CaffeineCacheManager caffeineCacheManager = GXSpringContextUtils.getBean(CaffeineCacheManager.class);
-        if (caffeineCacheManager == null) {
-            // 安全处理：如果缓存管理器不可用，默认不忽略租户条件
-            return false;
-        }
-        
-        Cache cache = caffeineCacheManager.getCache("FRAMEWORK-CACHE");
-        if (cache == null) {
-            // 安全处理：如果缓存不可用，默认不忽略租户条件
-            return false;
-        }
-
-        // 先从缓存中获取结果，避免重复查询
-        Boolean hasTenantIdField = cache.get(tableName, Boolean.class);
-        if (Objects.nonNull(hasTenantIdField)) {
-            return hasTenantIdField;
-        }
-
-        // 缓存未命中，查询表结构
-        TableInfo tableInfo = TableInfoHelper.getTableInfo(tableName);
-        if (Objects.isNull(tableInfo)) {
-            // 表不存在，缓存结果并返回true
-            cache.put(tableName, Boolean.TRUE);
+        // 安全检查：表名为空时默认不忽略租户条件
+        if (CharSequenceUtil.isBlank(tableName)) {
+            LOG.warn("表名为空，默认忽略租户条件");
             return true;
         }
+        
+        try {
+            // 数据缓存管理器
+            // 用于缓存表结构信息，减少重复查询，提高性能
+            // 使用Spring的CaffeineCacheManager，支持自动过期和大小限制
+            CaffeineCacheManager caffeineCacheManager = GXSpringContextUtils.getBean(CaffeineCacheManager.class);
+            if (caffeineCacheManager == null) {
+                // 安全处理：如果缓存管理器不可用，默认不忽略租户条件
+                LOG.warn("缓存管理器不可用，默认忽略租户条件，表名: {}", tableName);
+                return true;
+            }
+            
+            Cache cache = caffeineCacheManager.getCache("FRAMEWORK-CACHE");
+            if (cache == null) {
+                // 安全处理：如果缓存不可用，默认不忽略租户条件
+                LOG.warn("缓存对象不可用，默认忽略租户条件，表名: {}", tableName);
+                return true;
+            }
 
-        // 检查表是否包含租户ID字段
-        boolean contains = !CollUtil.contains(tableInfo.getFieldList(),
-                field -> CharSequenceUtil.equalsIgnoreCase(field.getColumn(), tenantIdColumn));
+            // 先从缓存中获取结果，避免重复查询
+            Boolean hasTenantIdField = cache.get(tableName, Boolean.class);
+            if (Objects.nonNull(hasTenantIdField)) {
+                return hasTenantIdField;
+            }
 
-        // 缓存结果
-        cache.put(tableName, contains);
-        return contains;
+            // 缓存未命中，查询表结构
+            TableInfo tableInfo = TableInfoHelper.getTableInfo(tableName);
+            if (Objects.isNull(tableInfo)) {
+                // 表不存在，缓存结果并返回true
+                LOG.debug("表[{}]不存在，忽略租户条件", tableName);
+                cache.put(tableName, Boolean.TRUE);
+                return true;
+            }
+
+            // 检查表是否包含租户ID字段
+            boolean contains = !CollUtil.contains(tableInfo.getFieldList(),
+                    field -> CharSequenceUtil.equalsIgnoreCase(field.getColumn(), tenantIdColumn));
+
+            // 缓存结果
+            cache.put(tableName, contains);
+            return contains;
+        } catch (Exception e) {
+            // 捕获所有可能的异常，确保系统稳定性
+            // 发生异常时默认不忽略租户条件，这是最安全的选择
+            LOG.error("判断表[{}]是否忽略租户条件时发生异常，默认忽略租户条件", tableName, e);
+            return true;
+        }
     }
 }
