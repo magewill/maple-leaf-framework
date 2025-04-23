@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  * 该切面负责在方法执行前后动态切换数据源，支持多种切换场景：
  * 1. 方法上标注了@GXDataSource注解
  * 2. 类上标注了@GXDataSource注解（包括父类继承的注解）
- * 3. 目标对象是框架内置的特定类型（如GXMyBatisDao的实现类）
+ * 3. 目标对象是框架内置的特定类型（如GXMyBatisRepository的实现类）
  * 4. 目标对象是GXMyBatisBaseService的实现类
  * <p>
  * 数据源切换优先级：
@@ -36,34 +36,34 @@ import java.util.stream.Collectors;
  * 3. 父类注解 - 最低优先级
  * <p>
  * 使用方式：
- * 1. 在Dao类上添加注解：
+ * 1. 在Repository类上添加注解：
  * <pre>
  * @GXDataSource("slave")
- * public class UserDao extends GXMyBatisDao<UserEntity> {
+ * public class UserRepository extends GXMyBatisRepository<UserEntity> {
  *     // 所有方法都会使用slave数据源
  * }
  * </pre>
- * 
+ * <p>
  * 2. 在Service类上添加注解：
  * <pre>
  * @GXDataSource("master")
  * public class UserServiceImpl implements UserService {
  *     @Autowired
- *     private UserDao userDao;
- *     
+ *     private UserRepository userRepository;
+ *
  *     // 所有方法都会使用master数据源
  *     public void createUser(UserEntity user) {
- *         userDao.insert(user);
+ *         userRepository.insert(user);
  *     }
- *     
+ *
  *     // 方法级注解会覆盖类级注解
  *     @GXDataSource("slave")
  *     public List<UserEntity> getUserList() {
- *         return userDao.selectList(null);
+ *         return userRepository.selectList(null);
  *     }
  * }
  * </pre>
- * 
+ * <p>
  * 3. 在具体方法上添加注解：
  * <pre>
  * public class OrderService {
@@ -73,21 +73,21 @@ import java.util.stream.Collectors;
  *     }
  * }
  * </pre>
- * 
+ * <p>
  * 4. 嵌套调用场景：
  * <pre>
  * @GXDataSource("outer")
  * public class OuterService {
  *     @Autowired
  *     private InnerService innerService;
- *     
+ *
  *     public void outerMethod() {
  *         // 使用outer数据源
  *         innerService.innerMethod(); // 内部方法使用inner数据源
  *         // 返回后继续使用outer数据源
  *     }
  * }
- * 
+ *
  * @GXDataSource("inner")
  * public class InnerService {
  *     public void innerMethod() {
@@ -95,7 +95,7 @@ import java.util.stream.Collectors;
  *     }
  * }
  * </pre>
- * 
+ *
  * <p>
  * 内存安全优化：
  * 1. 使用基于软引用(SoftReference)的缓存机制，在内存不足时允许JVM回收缓存对象
@@ -125,7 +125,7 @@ public class GXDataSourceAspect {
      * - 支持自动清理机制，防止内存泄漏
      */
     private static final Map<Class<?>, SoftReference<DataSourceCacheEntry>> CLASS_ANNOTATION_CACHE = new ConcurrentHashMap<>();
-    
+
     /**
      * 缓存大小限制，防止缓存无限增长
      * <p>
@@ -138,8 +138,8 @@ public class GXDataSourceAspect {
      * - 对于大型应用或微服务架构，可以适当增大此值，如800-1000
      * - 如果应用中的类数量较多，建议增大此值以提高缓存命中率
      */
-    private static final int MAX_CACHE_SIZE = 500;
-    
+    private static final int MAX_CACHE_SIZE = 1000;
+
     /**
      * 当前缓存条目数量计数器
      * <p>
@@ -147,7 +147,7 @@ public class GXDataSourceAspect {
      * 使用AtomicInteger确保线程安全，避免并发更新问题
      */
     private static final AtomicInteger CACHE_COUNT = new AtomicInteger(0);
-    
+
     /**
      * 缓存命中计数器，用于统计缓存效率
      * <p>
@@ -156,7 +156,7 @@ public class GXDataSourceAspect {
      * 高命中率表示缓存策略有效，低命中率可能需要调整缓存大小或策略
      */
     private static final AtomicInteger CACHE_HIT_COUNT = new AtomicInteger(0);
-    
+
     /**
      * 缓存访问总次数计数器
      * <p>
@@ -178,7 +178,7 @@ public class GXDataSourceAspect {
      */
     @Pointcut("@annotation(cn.maple.core.datasource.annotation.GXDataSource) || " +
             "@within(cn.maple.core.datasource.annotation.GXDataSource) || " +
-            "execution(public * cn.maple.core.datasource.dao.GXMyBatisDao+.*(..)) || " +
+            "target(cn.maple.core.datasource.repository.GXMyBatisRepository+) || " +
             "execution(public * cn.maple.core.datasource.service.GXMyBatisBaseService.*(..)) ")
     public void dataSourcePointCut() {
         // 这是切点标记，用于拦截需要进行数据源切换的方法调用
@@ -208,12 +208,12 @@ public class GXDataSourceAspect {
     private DataSourceCacheEntry findDataSourceAnnotationInHierarchy(Class<?> targetClass) {
         // 更新缓存访问计数
         CACHE_ACCESS_COUNT.incrementAndGet();
-        
+
         if (targetClass == null) {
             log.warn("尝试在null类上查找@GXDataSource注解，返回空结果");
             return new DataSourceCacheEntry(false, "");
         }
-        
+
         String className = targetClass.getName();
         log.trace("在类{}上查找@GXDataSource注解", className);
 
@@ -284,29 +284,29 @@ public class GXDataSourceAspect {
             log.warn("尝试缓存null类的数据源注解信息，操作被忽略");
             return;
         }
-        
+
         if (entry == null) {
             log.warn("尝试缓存null数据源条目，操作被忽略");
             return;
         }
-        
+
         try {
             // 记录缓存操作的详细信息
             String className = targetClass.getName();
             boolean hasDataSource = entry.needSwitch;
             String dataSourceValue = entry.dataSourceValue;
-            
+
             // 添加到缓存并更新计数
             CLASS_ANNOTATION_CACHE.put(targetClass, new SoftReference<>(entry));
             int currentCount = CACHE_COUNT.incrementAndGet();
-            
+
             if (hasDataSource) {
-                log.trace("缓存类{}的数据源注解信息，数据源值为{}，当前缓存大小: {}", 
+                log.trace("缓存类{}的数据源注解信息，数据源值为{}，当前缓存大小: {}",
                         className, dataSourceValue, currentCount);
             } else {
                 log.trace("缓存类{}的空数据源注解信息，当前缓存大小: {}", className, currentCount);
             }
-            
+
             // 如果缓存大小接近限制，记录警告日志
             if (currentCount > MAX_CACHE_SIZE * 0.9) {
                 log.warn("数据源注解缓存大小({})接近限制({}), 即将触发清理", currentCount, MAX_CACHE_SIZE);
@@ -337,13 +337,13 @@ public class GXDataSourceAspect {
             if (CACHE_COUNT.get() < MAX_CACHE_SIZE) {
                 return;
             }
-    
+
             log.debug("开始清理数据源注解缓存，当前缓存大小: {}, 限制大小: {}", CACHE_COUNT.get(), MAX_CACHE_SIZE);
-            
+
             // 记录清理前的缓存大小
             int beforeSize = CACHE_COUNT.get();
             AtomicInteger removedNullRefs = new AtomicInteger();
-    
+
             // 清理无效的软引用
             CLASS_ANNOTATION_CACHE.entrySet().removeIf(entry -> {
                 boolean shouldRemove = entry.getValue().get() == null;
@@ -353,28 +353,28 @@ public class GXDataSourceAspect {
                 }
                 return shouldRemove;
             });
-            
+
             if (removedNullRefs.get() > 0) {
                 log.debug("已清理{}个无效软引用，清理后缓存大小: {}", removedNullRefs, CACHE_COUNT.get());
             }
-    
+
             // 如果清理无效引用后仍然超过限制，则清理最早创建的25%的缓存条目
             if (CACHE_COUNT.get() >= MAX_CACHE_SIZE) {
                 int targetSize = (int) (MAX_CACHE_SIZE * 0.75);
                 int toRemove = CACHE_COUNT.get() - targetSize;
-    
+
                 if (toRemove > 0) {
                     // 记录缓存效率统计信息
                     if (CACHE_ACCESS_COUNT.get() > 0) {
                         double hitRate = (double) CACHE_HIT_COUNT.get() / CACHE_ACCESS_COUNT.get() * 100;
                         log.info("数据源缓存统计 - 命中率: {}%, 访问次数: {}, 命中次数: {}, 当前大小: {}, 清理前大小: {}",
-                                String.format("%.2f", hitRate), 
+                                String.format("%.2f", hitRate),
                                 CACHE_ACCESS_COUNT.get(),
                                 CACHE_HIT_COUNT.get(),
-                                CACHE_COUNT.get(), 
+                                CACHE_COUNT.get(),
                                 beforeSize);
                     }
-    
+
                     // 收集所有有效的缓存条目及其创建时间
                     Map<Class<?>, Long> entryTimes = new HashMap<>();
                     CLASS_ANNOTATION_CACHE.forEach((clazz, ref) -> {
@@ -383,33 +383,33 @@ public class GXDataSourceAspect {
                             entryTimes.put(clazz, entry.creationTime);
                         }
                     });
-    
+
                     if (entryTimes.isEmpty()) {
                         log.warn("缓存清理异常：未找到有效的缓存条目，但缓存计数为{}", CACHE_COUNT.get());
                         // 重置计数器，修正可能的计数错误
                         CACHE_COUNT.set(0);
                         return;
                     }
-    
+
                     // 按创建时间排序，获取最早创建的条目
                     List<Class<?>> oldestEntries = entryTimes.entrySet().stream()
                             .sorted(Map.Entry.comparingByValue())
                             .limit(toRemove)
                             .map(Map.Entry::getKey)
                             .collect(Collectors.toList());
-    
+
                     // 删除最早创建的条目
                     for (Class<?> clazz : oldestEntries) {
                         CLASS_ANNOTATION_CACHE.remove(clazz);
                         CACHE_COUNT.decrementAndGet();
                         log.trace("从缓存中移除类: {}", clazz.getName());
                     }
-    
+
                     // 重置计数器
                     CACHE_HIT_COUNT.set(0);
                     CACHE_ACCESS_COUNT.set(0);
-    
-                    log.info("数据源缓存清理完成 - 超过限制 ({}), 已清理 {} 个最旧条目, 当前缓存大小: {}", 
+
+                    log.info("数据源缓存清理完成 - 超过限制 ({}), 已清理 {} 个最旧条目, 当前缓存大小: {}",
                             MAX_CACHE_SIZE, oldestEntries.size(), CACHE_COUNT.get());
                 }
             }
@@ -446,18 +446,17 @@ public class GXDataSourceAspect {
             log.error("切点对象为null，无法执行数据源切换");
             throw new IllegalArgumentException("切点对象不能为null");
         }
-        
-        if (!(point.getSignature() instanceof MethodSignature)) {
+
+        if (!(point.getSignature() instanceof MethodSignature signature)) {
             log.error("切点签名类型不是MethodSignature，无法执行数据源切换");
             return point.proceed();
         }
-        
-        MethodSignature signature = (MethodSignature) point.getSignature();
+
         Class<?> targetClass = point.getTarget().getClass();
         Method method = signature.getMethod();
         String methodName = method.getName();
         String className = targetClass.getName();
-        
+
         log.trace("开始处理数据源切换，类: {}, 方法: {}", className, methodName);
 
         // 检查是否需要切换数据源
@@ -475,7 +474,7 @@ public class GXDataSourceAspect {
             DataSourceCacheEntry entry = findDataSourceAnnotationInHierarchy(targetClass);
             needSwitchDataSource = entry.needSwitch;
             dataSourceValue = entry.dataSourceValue;
-            
+
             if (needSwitchDataSource) {
                 log.debug("类{}上找到@GXDataSource注解，数据源值为{}", className, dataSourceValue);
             } else {
@@ -489,7 +488,7 @@ public class GXDataSourceAspect {
             // 获取当前数据源，用于日志记录
             String previousDataSource = GXDynamicContextHolder.peek();
             GXDynamicContextHolder.push(dataSourceValue);
-            log.debug("{}线程数据源从[{}]切换为[{}]", threadName, 
+            log.debug("{}线程数据源从[{}]切换为[{}]", threadName,
                     (previousDataSource != null ? previousDataSource : "默认"), dataSourceValue);
         }
 
@@ -507,7 +506,7 @@ public class GXDataSourceAspect {
                 GXDynamicContextHolder.poll();
                 // 获取恢复后的数据源，用于日志记录
                 String restoredDataSource = GXDynamicContextHolder.peek();
-                log.debug("{}线程清除数据源[{}]，恢复为[{}]", threadName, dataSourceValue, 
+                log.debug("{}线程清除数据源[{}]，恢复为[{}]", threadName, dataSourceValue,
                         (restoredDataSource != null ? restoredDataSource : "默认"));
             }
         }
@@ -535,14 +534,14 @@ public class GXDataSourceAspect {
          * true表示需要切换数据源，false表示不需要切换
          */
         final boolean needSwitch;
-        
+
         /**
          * 数据源名称
          * 如果needSwitch为true，则为注解指定的数据源名称
          * 如果needSwitch为false，则为空字符串
          */
         final String dataSourceValue;
-        
+
         /**
          * 缓存条目创建时间
          * 用于实现基于时间的缓存淘汰策略
@@ -552,8 +551,8 @@ public class GXDataSourceAspect {
 
         /**
          * 创建数据源缓存条目
-         * 
-         * @param needSwitch 是否需要切换数据源
+         *
+         * @param needSwitch      是否需要切换数据源
          * @param dataSourceValue 数据源名称
          */
         DataSourceCacheEntry(boolean needSwitch, String dataSourceValue) {
