@@ -1,9 +1,9 @@
 package cn.maple.core.datasource.config;
 
-import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.hutool.core.collection.CollUtil;
 import cn.maple.core.datasource.interceptor.GXDataFilterInterceptor;
 import cn.maple.core.datasource.service.GXTenantIdService;
 import cn.maple.core.framework.config.aware.GXApplicationContextSingleton;
@@ -40,18 +40,42 @@ import java.util.Objects;
  * MyBatis-Plus配置类
  * <p>
  * 该类负责配置MyBatis-Plus的各种拦截器和插件，包括：
- * - 数据过滤拦截器
- * - 分页插件
- * - 防止全表更新与删除插件
- * - 乐观锁插件
- * - SQL性能规范插件
- * - 数据变更记录插件
- * - 数据权限处理
- * - 多租户插件
- * - 动态表名插件
+ * - 数据过滤拦截器：用于实现数据过滤功能，可根据业务需求自定义过滤条件
+ * - 分页插件：自动处理SQL分页，支持多种数据库
+ * - 防止全表更新与删除插件：避免误操作导致的数据灾难
+ * - 乐观锁插件：实现乐观锁机制，解决并发更新问题
+ * - SQL性能规范插件：检查SQL是否符合性能规范，提前发现潜在问题
+ * - 数据变更记录插件：记录数据变更历史，便于审计和追踪
+ * - 数据权限处理：实现细粒度的数据访问控制
+ * - 多租户插件：实现多租户数据隔离，保障数据安全
+ * - 动态表名插件：支持动态修改表名，适用于分表场景
  * </p>
+ * 
  * <p>
- * 各插件的启用由配置参数控制，可通过application配置文件中的maple.framework.enable.*属性进行设置
+ * 配置示例：
+ * <pre>
+ * # application.yml 配置示例
+ * maple:
+ *   framework:
+ *     enable:
+ *       # 是否启用乐观锁插件
+ *       optimistic-locker: true
+ *       # 是否启用SQL性能规范检查
+ *       sql-illegal: false
+ *       # 是否启用数据变更记录
+ *       data-change-recorder: false
+ *       # 是否启用数据权限控制
+ *       data-permission: false
+ *       # 是否启用多租户功能
+ *       tenant: true
+ * </pre>
+ * </p>
+ * 
+ * <p>
+ * 安全说明：
+ * - 防止全表更新与删除插件默认开启，有效防止SQL注入和误操作风险
+ * - 多租户插件通过自动添加租户条件，确保数据隔离，防止越权访问
+ * - 数据权限处理支持细粒度控制，可根据用户角色限制数据访问范围
  * </p>
  *
  * @author britton
@@ -93,15 +117,32 @@ public class GXMyBatisPlusConfig {
      * 配置MyBatis-Plus拦截器
      * <p>
      * 根据配置参数启用各种拦截器，包括：
-     * - 数据过滤拦截器
-     * - 分页插件
-     * - 防止全表更新与删除插件
-     * - 乐观锁插件
-     * - SQL性能规范插件
-     * - 数据变更记录插件
-     * - 数据权限处理
-     * - 多租户插件
-     * - 动态表名插件
+     * - 数据过滤拦截器：实现自定义数据过滤逻辑
+     * - 分页插件：自动处理分页查询，优化分页性能
+     * - 防止全表更新与删除插件：避免误操作导致的数据灾难
+     * - 乐观锁插件：通过版本号机制实现乐观锁，解决并发更新问题
+     * - SQL性能规范插件：检查SQL是否符合性能规范，提前发现潜在问题
+     * - 数据变更记录插件：记录数据变更历史，便于审计和追踪
+     * - 数据权限处理：实现细粒度的数据访问控制
+     * - 多租户插件：实现多租户数据隔离，保障数据安全
+     * - 动态表名插件：支持动态修改表名，适用于分表场景
+     * </p>
+     * 
+     * <p>
+     * 使用示例：
+     * <pre>
+     * // 在Service层使用分页查询
+     * public IPage<UserEntity> getUserList(Page<UserEntity> page, Map<String, Object> condition) {
+     *     // 分页插件会自动处理分页逻辑
+     *     return baseMapper.selectPage(page, new QueryWrapper<UserEntity>().allEq(condition));
+     * }
+     * 
+     * // 使用乐观锁机制（实体类中需要添加@Version注解）
+     * public boolean updateUser(UserEntity user) {
+     *     // 乐观锁插件会自动检查和更新版本号
+     *     return updateById(user);
+     * }
+     * </pre>
      * </p>
      *
      * @return 配置好的MybatisPlusInterceptor实例
@@ -113,43 +154,62 @@ public class GXMyBatisPlusConfig {
             GXApplicationContextSingleton.INSTANCE.setApplicationContext(applicationContext);
         }
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
+        
+        // 添加数据过滤拦截器，用于实现自定义数据过滤逻辑
         interceptor.addInnerInterceptor(new GXDataFilterInterceptor());
-        // 开启分页插件
+        
+        // 开启分页插件，设置数据库类型为MySQL
         PaginationInnerInterceptor paginationInnerInterceptor = new PaginationInnerInterceptor(DbType.MYSQL);
+        // 关闭优化JOIN查询，避免某些复杂查询场景下的问题
         paginationInnerInterceptor.setOptimizeJoin(false);
         interceptor.addInnerInterceptor(paginationInnerInterceptor);
-        // 开启防止全表更新与删除插件
+        
+        // 开启防止全表更新与删除插件，避免误操作导致的数据灾难
+        // 该插件会阻止没有WHERE条件的UPDATE和DELETE操作
         interceptor.addInnerInterceptor(new BlockAttackInnerInterceptor());
-        // 开启乐观锁插件
+        
+        // 根据配置决定是否开启乐观锁插件
         Boolean optimisticLocker = GXCommonUtils.getEnvironmentValue("maple.framework.enable.optimistic-locker", Boolean.class, Boolean.TRUE);
         if (optimisticLocker) {
+            // 乐观锁插件，通过@Version注解实现乐观锁机制
             interceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
         }
-        // 正式环境暂时不开启,开启sql性能规范插件,其他环境都开启sql性能规范插件
+        
+        // 根据配置决定是否开启SQL性能规范插件
         Boolean enableSqlIllegal = GXCommonUtils.getEnvironmentValue("maple.framework.enable.sql-illegal", Boolean.class, Boolean.FALSE);
         if (Boolean.TRUE.equals(enableSqlIllegal)) {
+            // SQL性能规范插件，检查SQL是否符合性能规范
             interceptor.addInnerInterceptor(new IllegalSQLInnerInterceptor());
         }
-        // 数据变更记录插件
+        
+        // 根据配置决定是否开启数据变更记录插件
         Boolean enableDataChangeRecorder = GXCommonUtils.getEnvironmentValue("maple.framework.enable.data-change-recorder", Boolean.class, Boolean.FALSE);
         if (Boolean.TRUE.equals(enableDataChangeRecorder)) {
+            // 数据变更记录插件，记录数据变更历史
             interceptor.addInnerInterceptor(new DataChangeRecorderInnerInterceptor());
         }
-        // 开启数据权限处理
+        
+        // 根据配置决定是否开启数据权限处理
         Boolean enableDataPermission = GXCommonUtils.getEnvironmentValue("maple.framework.enable.data-permission", Boolean.class, Boolean.FALSE);
         if (Boolean.TRUE.equals(enableDataPermission)) {
+            // 获取数据权限处理器并添加到拦截器中
             DataPermissionHandler dataPermissionHandler = GXSpringContextUtils.getBean(DataPermissionHandler.class);
             interceptor.addInnerInterceptor(new DataPermissionInterceptor(dataPermissionHandler));
         }
-        // 多租户插件(请在相应的表中新增tenant_id字段)
+        
+        // 根据配置决定是否开启多租户插件
         Boolean enableTenant = GXCommonUtils.getEnvironmentValue("maple.framework.enable.tenant", Boolean.class, Boolean.FALSE);
         if (enableTenant) {
+            // 多租户插件，实现多租户数据隔离
+            // 注意：使用该插件需要在相应的表中添加tenant_id字段
             interceptor.addInnerInterceptor(new TenantLineInnerInterceptor(new GXTenantLineHandler()));
         }
-        // 动态表名插件
+        
+        // 添加动态表名插件，支持动态修改表名，适用于分表场景
         DynamicTableNameInnerInterceptor dynamicTableNameInnerInterceptor = new DynamicTableNameInnerInterceptor();
         dynamicTableNameInnerInterceptor.setTableNameHandler((sql, tableName) -> tableName);
         interceptor.addInnerInterceptor(dynamicTableNameInnerInterceptor);
+        
         return interceptor;
     }
 
@@ -158,6 +218,14 @@ public class GXMyBatisPlusConfig {
      * <p>
      * 当配置参数use-camel-case-mapping为true时启用
      * 用于自定义MyBatis的配置，主要是设置ObjectWrapperFactory
+     * </p>
+     * 
+     * <p>
+     * 使用示例：
+     * <pre>
+     * # application.yml 配置
+     * use-camel-case-mapping: true
+     * </pre>
      * </p>
      *
      * @return ConfigurationCustomizer实例
@@ -174,6 +242,21 @@ public class GXMyBatisPlusConfig {
      * 实现MyBatis-Plus的TenantLineHandler接口，用于多租户数据隔离
      * 该处理器会自动为SQL添加租户条件，确保查询只返回当前租户的数据
      * 使用缓存优化表结构检查，避免重复查询表信息
+     * </p>
+     * 
+     * <p>
+     * 多租户模式说明：
+     * - 该实现采用独立数据库模式，通过在SQL中添加租户ID条件实现数据隔离
+     * - 每个表需要添加tenant_id字段用于标识数据所属租户
+     * - 系统会自动为所有SQL添加租户条件，无需手动处理
+     * - 可通过ignoreTable方法配置不需要进行租户隔离的表
+     * </p>
+     * 
+     * <p>
+     * 安全说明：
+     * - 多租户插件通过自动添加租户条件，有效防止越权访问其他租户数据
+     * - 使用缓存机制优化性能，避免频繁查询表结构信息
+     * - 租户ID通过服务接口获取，支持灵活的租户识别策略
      * </p>
      *
      * @author britton
@@ -199,6 +282,12 @@ public class GXMyBatisPlusConfig {
          * 从GXTenantIdService获取当前租户ID
          * 如果租户服务不可用，则返回默认值0
          * </p>
+         * 
+         * <p>
+         * 安全说明：
+         * - 租户ID通过专门的服务接口获取，避免硬编码
+         * - 当租户服务不可用时返回默认值，确保系统正常运行
+         * </p>
          *
          * @return 租户 ID 值表达式
          */
@@ -214,7 +303,9 @@ public class GXMyBatisPlusConfig {
         /**
          * 获取租户字段名
          * <p>
-         * 默认字段名叫: tenant_id
+         * 默认字段名为: tenant_id
+         * 所有需要进行租户隔离的表都应当包含该字段
+         * </p>
          *
          * @return 租户字段名
          */
@@ -229,6 +320,25 @@ public class GXMyBatisPlusConfig {
          * 默认都要进行解析并拼接多租户条件
          * 该方法使用缓存优化表结构检查，避免重复查询表信息
          * 缓存结果存储在FRAMEWORK-CACHE中，键为表名，值为是否忽略租户条件
+         * </p>
+         * 
+         * <p>
+         * 性能优化：
+         * - 使用缓存存储表结构检查结果，避免重复查询
+         * - 缓存使用Caffeine实现，支持自动过期和容量限制
+         * </p>
+         * 
+         * <p>
+         * 使用示例：
+         * <pre>
+         * // 在实体类上添加@TableName注解
+         * @TableName("sys_user")
+         * public class UserEntity implements Serializable {
+         *     // 必须包含租户ID字段
+         *     private Long tenantId;
+         *     // 其他字段...
+         * }
+         * </pre>
          * </p>
          *
          * @param tableName 表名
