@@ -33,6 +33,54 @@ import java.util.Objects;
  * 4. 登录和注销流程处理
  * 5. 插件机制支持
  *
+ * <p>
+ * 安全特性：
+ * - 多重验证机制：结合IP、浏览器信息和缓存验证，提高安全性
+ * - 防会话固定攻击：支持登录时重新生成会话标识
+ * - 防CSRF攻击：设置Cookie的SameSite属性
+ * - 防XSS攻击：支持HttpOnly选项，防止脚本获取Cookie
+ * - 分布式会话管理：支持集群环境下的会话同步和验证
+ * </p>
+ *
+ * <p>
+ * 性能优化：
+ * - 缓存机制：减少重复解密和验证的开销
+ * - 懒加载策略：仅在必要时执行验证逻辑
+ * - 插件化设计：按需加载额外的验证和处理逻辑
+ * </p>
+ *
+ * <p>
+ * 使用示例：
+ * <pre>
+ * @Service
+ * public class CustomSSOService extends GXAbstractSSOService {
+ *     // 可以覆盖父类方法，实现自定义逻辑
+ *     @Override
+ *     public boolean kickLogin(Object userId) {
+ *         // 实现自定义的踢出用户逻辑
+ *         log.info("强制用户{}下线", userId);
+ *         // 可以添加额外的安全审计记录
+ *         securityAuditService.recordForceLogout(userId);
+ *         return super.kickLogin(userId);
+ *     }
+ *     
+ *     // 使用示例
+ *     public void loginExample(HttpServletRequest request, HttpServletResponse response) {
+ *         // 1. 验证用户凭证（此处省略）
+ *         
+ *         // 2. 创建包含用户信息的Token
+ *         Dict userInfo = Dict.create()
+ *             .set("userId", 10001L)
+ *             .set("username", "张三")
+ *             .set("roles", "admin,user");
+ *             
+ *         // 3. 设置登录Cookie并防止会话固定攻击
+ *         authCookie(request, response, userInfo);
+ *     }
+ * }
+ * </pre>
+ * </p>
+ *
  * @author britton britton@126.com
  * @since 2021-09-16
  */
@@ -63,6 +111,13 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
      * 4. 失效处理 - 对无效Token返回空对象而非异常，避免信息泄露
      * </p>
      *
+     * <p>
+     * 性能考虑：
+     * 1. 缓存利用 - 优先从缓存获取Token，减少解密开销
+     * 2. 快速失败 - 对无效Token快速返回，避免不必要的处理
+     * 3. 延迟验证 - 仅在必要时执行完整的验证流程
+     * </p>
+     *
      * @param request HTTP请求对象
      * @return 包含用户登录信息的Dict对象，验证失败则返回空Dict
      */
@@ -91,6 +146,21 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
      * <p>
      * 通过删除用户的Token缓存实现强制注销
      * 适用于管理员强制下线用户、检测到异常登录等安全场景
+     * </p>
+     *
+     * <p>
+     * 安全应用场景：
+     * 1. 管理员在后台强制用户下线
+     * 2. 检测到用户账号异地登录时的安全措施
+     * 3. 用户修改密码后，使所有已登录会话失效
+     * 4. 系统检测到潜在的安全威胁时，主动使会话失效
+     * </p>
+     *
+     * <p>
+     * 实现说明：
+     * - 通过删除缓存中的Token记录实现强制注销
+     * - 需要配置有效的缓存实现才能正常工作
+     * - 建议在生产环境中实现完整的审计日志记录
      * </p>
      *
      * @param userId 要踢出的用户ID
@@ -134,6 +204,13 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
      * 4. 设置SameSite属性，防止CSRF攻击
      * 5. 使用加密存储Token，防止信息泄露
      * 6. 缓存同步，确保分布式环境下的一致性
+     * </p>
+     *
+     * <p>
+     * 性能优化：
+     * 1. 异常处理 - 捕获并记录异常，确保系统稳定性
+     * 2. 缓存状态检查 - 检测缓存服务可用性，提供降级方案
+     * 3. 合理设置Cookie属性 - 避免不必要的Cookie传输
      * </p>
      *
      * @param request  HTTP请求对象
@@ -228,6 +305,13 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
      * - 用户执行敏感操作（如转账、修改密码）前
      * </p>
      *
+     * <p>
+     * 最佳实践：
+     * - 在所有登录成功后调用此方法，而不是直接调用setCookie
+     * - 确保前端应用能够正确处理会话变更
+     * - 在分布式环境中，确保会话同步机制正常工作
+     * </p>
+     *
      * @param request  HTTP请求对象
      * @param response HTTP响应对象
      * @param ssoToken 包含用户登录信息的Token数据
@@ -266,6 +350,20 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
      * 3. 执行SSO插件的注销逻辑
      * </p>
      *
+     * <p>
+     * 安全考虑：
+     * - 确保所有会话状态和缓存数据被完全清除
+     * - 执行所有注册的SSO插件的注销逻辑
+     * - 适当处理清理失败的情况，避免部分状态残留
+     * </p>
+     *
+     * <p>
+     * 使用场景：
+     * - 用户主动登出系统
+     * - 会话超时后的清理
+     * - 检测到安全问题时的强制注销
+     * </p>
+     *
      * @param request  HTTP请求对象
      * @param response HTTP响应对象
      * @return 操作是否成功，成功返回true，失败返回false
@@ -286,6 +384,20 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
      * 1. 清理当前登录状态
      * 2. 获取配置的登录页URL
      * 3. 对于API请求返回JSON响应，对于页面请求进行重定向
+     * </p>
+     *
+     * <p>
+     * 使用场景：
+     * - 会话过期时自动跳转登录
+     * - 访问需要登录的资源时进行重定向
+     * - 检测到Token无效时的安全处理
+     * </p>
+     *
+     * <p>
+     * 实现说明：
+     * - 支持API和页面两种场景的处理
+     * - 对于API请求，返回标准的JSON响应
+     * - 对于页面请求，进行重定向并保留原始URL
      * </p>
      *
      * @param request  HTTP请求对象
@@ -314,6 +426,20 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
      * <p>
      * 执行完整的SSO注销流程，包括清理本地状态和重定向到注销页面
      * 与clearLogin的区别在于，此方法会进行页面重定向
+     * </p>
+     * 
+     * <p>
+     * 使用场景：
+     * - 用户点击"退出登录"按钮
+     * - 系统自动注销过期会话
+     * - 管理员强制用户退出后的页面处理
+     * </p>
+     *
+     * <p>
+     * 实现说明：
+     * - 先清理所有登录状态（Cookie和缓存）
+     * - 然后重定向到配置的注销页面
+     * - 如果未配置注销页面，则返回错误信息
      * </p>
      * 
      * @param request  HTTP请求对象

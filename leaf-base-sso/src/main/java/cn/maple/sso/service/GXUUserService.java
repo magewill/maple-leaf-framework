@@ -19,6 +19,81 @@ import cn.hutool.core.lang.Dict;
  * - 登出处理应清理所有会话状态
  * </p>
  *
+ * <p>
+ * 性能优化建议：
+ * - 实现合理的缓存策略，减少重复验证
+ * - 采用异步处理登录日志记录
+ * - 使用延迟加载获取用户详细信息
+ * - 定期清理过期的Token和会话数据
+ * </p>
+ *
+ * <p>
+ * 使用示例：
+ * <pre>
+ * @Service
+ * public class UserServiceImpl implements GXUUserService {
+ *     @Autowired
+ *     private UserRepository userRepository;
+ *     
+ *     @Autowired
+ *     private TokenService tokenService;
+ *     
+ *     @Override
+ *     public Dict verifyUserToken(String token) {
+ *         // 1. 验证Token格式
+ *         if (!TokenValidator.isValidFormat(token)) {
+ *             return Dict.create();
+ *         }
+ *         
+ *         // 2. 验证Token签名
+ *         if (!tokenService.verifySignature(token)) {
+ *             return Dict.create();
+ *         }
+ *         
+ *         // 3. 解析Token获取用户信息
+ *         Dict userInfo = tokenService.parseToken(token);
+ *         Long userId = userInfo.getLong("userId");
+ *         
+ *         // 4. 验证用户状态
+ *         if (!userRepository.isUserActive(userId)) {
+ *             return Dict.create();
+ *         }
+ *         
+ *         return userInfo;
+ *     }
+ *     
+ *     @Override
+ *     public String login(Dict loginParam) {
+ *         String username = loginParam.getStr("username");
+ *         String password = loginParam.getStr("password");
+ *         
+ *         // 1. 验证用户名密码
+ *         User user = userRepository.findByUsername(username);
+ *         if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
+ *             return "";
+ *         }
+ *         
+ *         // 2. 检查用户状态
+ *         if (user.isLocked() || user.isDisabled()) {
+ *             return "";
+ *         }
+ *         
+ *         // 3. 生成Token
+ *         Dict tokenData = Dict.create()
+ *             .set("userId", user.getId())
+ *             .set("username", user.getUsername())
+ *             .set("roles", user.getRoles());
+ *             
+ *         // 4. 记录登录日志
+ *         logService.recordLogin(user.getId(), "成功登录");
+ *         
+ *         // 5. 返回生成的Token
+ *         return tokenService.generateToken(tokenData);
+ *     }
+ * }
+ * </pre>
+ * </p>
+ *
  * @author britton britton@126.com
  * @since 2021-09-16
  */
@@ -31,6 +106,21 @@ public interface GXUUserService {
      * - Token签名验证
      * - Token过期验证
      * - 用户状态验证
+     * </p>
+     *
+     * <p>
+     * 安全建议：
+     * - 使用非对称加密算法验证Token签名
+     * - 实现Token过期机制，建议有效期不超过24小时
+     * - 考虑实现Token黑名单机制，处理已注销但未过期的Token
+     * - 验证用户账号状态，确保已禁用/锁定的用户无法通过Token验证
+     * </p>
+     *
+     * <p>
+     * 性能考虑：
+     * - 缓存验证结果，减少重复验证
+     * - 使用轻量级的Token格式，如JWT
+     * - 对验证失败的情况快速返回，避免不必要的处理
      * </p>
      *
      * @param token 用户token字符串
@@ -57,6 +147,21 @@ public interface GXUUserService {
      * - 考虑实现多因素认证机制
      * </p>
      *
+     * <p>
+     * 高级安全特性：
+     * - 异地登录检测：记录并分析用户登录IP和地理位置
+     * - 设备指纹验证：验证登录设备是否为用户常用设备
+     * - 风险评分系统：根据登录行为计算风险分数，对高风险登录要求额外验证
+     * - 登录行为分析：检测异常的登录时间、频率等模式
+     * </p>
+     *
+     * <p>
+     * 性能优化：
+     * - 使用异步方式记录登录日志
+     * - 采用缓存减少数据库查询
+     * - 对登录参数验证采用快速失败策略
+     * </p>
+     *
      * @param loginParam 登录参数，包含用户名、密码等认证信息
      * @return 登录成功返回有效的Token字符串，失败返回空字符串
      */
@@ -77,6 +182,21 @@ public interface GXUUserService {
      * - 实现类应进行权限检查，确保只有授权用户可以访问数据
      * - 敏感字段（如密码）应在返回前移除
      * - 考虑数据脱敏处理（如手机号、邮箱部分隐藏）
+     * </p>
+     *
+     * <p>
+     * 数据安全处理：
+     * - 对敏感个人信息进行脱敏处理，如手机号显示为 138****8888
+     * - 根据用户角色和权限过滤返回字段，实现数据访问控制
+     * - 记录敏感数据访问日志，用于安全审计
+     * - 考虑实现字段级别的加密存储和解密展示
+     * </p>
+     *
+     * <p>
+     * 性能优化：
+     * - 实现多级缓存策略，减少数据库访问
+     * - 使用延迟加载获取不常用的用户信息
+     * - 考虑使用数据库索引优化查询性能
      * </p>
      *
      * @param userId 要查询的用户ID
@@ -100,6 +220,21 @@ public interface GXUUserService {
      * - 确保所有会话状态和缓存数据被完全清除
      * - 实现Token黑名单机制，防止已登出的Token被重用
      * - 考虑在多设备登录场景下的处理策略
+     * </p>
+     *
+     * <p>
+     * 完整登出策略：
+     * - 单设备登出：仅使当前设备的Token失效
+     * - 全设备登出：使用户所有设备的Token都失效
+     * - 选择性登出：允许用户选择要登出的设备
+     * - 自动登出：超过指定时间未活动自动登出
+     * </p>
+     *
+     * <p>
+     * 最佳实践：
+     * - 在分布式系统中，确保所有节点都能识别已登出的Token
+     * - 使用消息队列通知相关服务用户已登出
+     * - 定期清理过期的Token黑名单记录，避免存储膨胀
      * </p>
      */
     default void loginOut() {

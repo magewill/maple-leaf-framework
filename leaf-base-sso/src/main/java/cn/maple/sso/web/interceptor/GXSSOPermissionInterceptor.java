@@ -21,19 +21,42 @@ import java.lang.reflect.Method;
 import java.util.Objects;
 
 /**
- * 权限拦截器（必须在 sso 拦截器之后执行）
  * <p>
- * 该拦截器负责对已登录用户的权限进行验证，主要功能包括：
- * 1. 基于URL的权限验证
- * 2. 基于注解的权限验证
- * 3. 处理无权限访问的情况
+ * 权限拦截器（必须在 SSO 拦截器之后执行）
  * </p>
+ * 
  * <p>
- * 安全说明：
- * - 支持多种权限验证策略
- * - 提供灵活的权限控制配置
- * - 对无权限访问进行统一处理
- * - 支持AJAX和普通HTTP请求的差异化处理
+ * 该拦截器负责对已登录用户的权限进行验证，是SSO系统权限控制的核心组件。
+ * 主要功能包括：
+ * 1. 基于URL的权限验证 - 通过请求路径判断用户是否有权限访问
+ * 2. 基于注解的权限验证 - 通过方法上的@GXPermissionAnnotation注解控制访问权限
+ * 3. 处理无权限访问的情况 - 返回403错误或重定向到指定页面
+ * 4. 支持灵活的权限控制策略 - 可配置无注解方法的默认处理行为
+ * </p>
+ * 
+ * <p>
+ * 工作流程：
+ * 1. 拦截请求并获取当前用户的Token信息
+ * 2. 根据配置决定使用URL验证还是注解验证方式
+ * 3. 调用GXSSOAuthorization接口进行具体的权限验证
+ * 4. 对验证失败的请求进行统一处理
+ * </p>
+ * 
+ * <p>
+ * 安全特性：
+ * - 多层次权限验证 - 同时支持URL和注解两种验证方式，提供更精细的权限控制
+ * - 差异化响应处理 - 区分AJAX请求和普通HTTP请求，提供更友好的用户体验
+ * - 可配置的权限策略 - 通过nothingAnnotationPass属性控制无注解方法的默认行为
+ * - 统一的错误处理 - 对无权限访问提供一致的响应，增强系统安全性
+ * - 与SSO系统无缝集成 - 利用Token中的用户信息进行权限判断，简化开发
+ * </p>
+ * 
+ * <p>
+ * 使用建议：
+ * - 对安全要求高的接口，建议同时使用URL验证和注解验证
+ * - 对公共接口，可以使用@GXPermissionAnnotation(action=GXAction.Skip)跳过验证
+ * - 生产环境建议设置nothingAnnotationPass为false，采用白名单策略
+ * - 建议配置illegalUrl，为无权限访问提供友好的错误页面
  * </p>
  *
  * @author britton britton@126.com
@@ -45,8 +68,12 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
     /**
      * 非法请求重定向URL
      * <p>
-     * 当用户无权限访问某资源时，如果该值不为空，则重定向到此URL
-     * 如果为空，则返回403错误码
+     * 当用户无权限访问某资源时，系统的处理方式：
+     * - 如果该值不为空，则重定向到此URL，通常是一个"无权限访问"的提示页面
+     * - 如果为空，则直接返回403错误码和错误信息
+     * </p>
+     * <p>
+     * 建议配置此项，提供更友好的用户体验，特别是对于非AJAX请求
      * </p>
      */
     private String illegalUrl;
@@ -54,8 +81,14 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
     /**
      * 无注解情况下的权限控制策略
      * <p>
-     * 当为true时，没有权限注解的方法默认放行
-     * 当为false时，没有权限注解的方法默认拦截
+     * 控制对没有添加@GXPermissionAnnotation注解的方法的默认处理行为：
+     * - true: 默认放行，适用于大部分方法都不需要权限控制的场景（黑名单模式）
+     * - false: 默认拦截，适用于大部分方法都需要权限控制的场景（白名单模式）
+     * </p>
+     * <p>
+     * 安全建议：
+     * - 开发环境可设置为true，便于调试
+     * - 生产环境建议设置为false，采用白名单策略，更安全
      * </p>
      */
     private boolean nothingAnnotationPass = true;
@@ -63,23 +96,28 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
     /**
      * 用户权限验证
      * <p>
-     * 拦截器的主要入口方法，在Controller处理之前调用
+     * 拦截器的主要入口方法，在Controller处理之前调用，负责权限验证的核心逻辑。
      * 主要流程：
-     * 1. 检查处理器是否为HandlerMethod类型
-     * 2. 获取当前请求的Token
-     * 3. 验证用户是否有权限访问
-     * 4. 对无权限访问进行处理
+     * 1. 检查处理器是否为HandlerMethod类型（只对Controller方法进行验证）
+     * 2. 获取当前请求的Token，包含用户身份和权限信息
+     * 3. 调用isVerification方法验证用户是否有权限访问
+     * 4. 对无权限访问调用unauthorizedAccess方法进行处理
+     * </p>
+     * <p>
+     * 特殊处理：
+     * - 非HandlerMethod类型的处理器（如静态资源）默认放行
+     * - Token为空的情况默认放行（因为已经过登录拦截器验证）
      * </p>
      * <p>
      * 安全说明：
-     * - 只对HandlerMethod类型的处理器进行权限验证
-     * - 如果Token为空，默认放行（因为已经过登录拦截器验证）
-     * - 通过isVerification方法进行具体的权限验证
+     * - 与登录拦截器配合使用，确保已登录用户的权限控制
+     * - 提供统一的权限验证入口，便于审计和监控
+     * - 对验证失败的请求进行安全的处理，防止信息泄露
      * </p>
      *
      * @param request  HTTP请求对象
      * @param response HTTP响应对象
-     * @param handler  处理器对象
+     * @param handler  处理器对象，通常是Controller中的方法
      * @return 如果验证通过返回true，否则返回false
      * @throws Exception 如果处理过程中发生错误
      */
@@ -107,20 +145,27 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
     /**
      * 判断权限是否合法
      * <p>
+     * 根据系统配置和注解信息，选择合适的权限验证策略。
      * 支持两种权限验证方式：
-     * 1. 基于请求URL的权限验证
-     * 2. 基于方法注解的权限验证
+     * 1. 基于请求URL的权限验证 - 通过GXSSOAuthorization接口验证用户是否有权限访问当前URL
+     * 2. 基于方法注解的权限验证 - 检查方法上的@GXPermissionAnnotation注解并验证权限
+     * </p>
+     * <p>
+     * 注解验证的处理逻辑：
+     * - 如果注解的action为Skip，直接放行
+     * - 如果注解指定了权限值，调用GXSSOAuthorization接口验证用户是否拥有该权限
+     * - 如果方法没有注解，根据nothingAnnotationPass属性决定是否放行
      * </p>
      * <p>
      * 安全说明：
-     * - URL权限验证依赖于GXSSOAuthorization接口的实现
-     * - 注解权限验证支持Skip操作和具体权限值验证
-     * - 无注解情况下的处理由nothingAnnotationPass属性控制
+     * - URL权限验证依赖于GXSSOAuthorization接口的实现，支持自定义权限规则
+     * - 注解权限验证支持细粒度的方法级权限控制
+     * - 通过配置nothingAnnotationPass属性，可以实现黑名单或白名单模式
      * </p>
      *
      * @param request 请求对象
      * @param handler 处理器对象
-     * @param token   用户Token
+     * @param token   用户Token，包含用户身份和权限信息
      * @return 如果权限验证通过返回true，否则返回false
      */
     protected boolean isVerification(HttpServletRequest request, Object handler, Dict token) {
@@ -156,15 +201,22 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
     /**
      * 无权限访问处理
      * <p>
-     * 根据请求类型（AJAX或普通HTTP）提供不同的响应：
-     * 1. AJAX请求返回403状态码和JSON错误信息
-     * 2. 普通HTTP请求根据illegalUrl配置决定是返回403错误还是重定向
+     * 当用户权限验证失败时，根据请求类型提供不同的响应处理：
+     * 1. AJAX请求 - 返回403状态码和JSON格式的错误信息，便于前端处理
+     * 2. 普通HTTP请求 - 根据illegalUrl配置决定是返回403错误还是重定向到指定页面
+     * </p>
+     * <p>
+     * 实现细节：
+     * - 使用GXHttpUtil.isAjax方法判断是否为AJAX请求
+     * - 对AJAX请求返回JSON格式的错误信息
+     * - 对普通HTTP请求，如果配置了illegalUrl则重定向，否则返回403错误
      * </p>
      * <p>
      * 安全说明：
-     * - 对AJAX请求和普通HTTP请求进行差异化处理
-     * - 提供统一的错误响应格式
-     * - 支持配置重定向URL
+     * - 对不同类型的请求提供差异化处理，提升用户体验
+     * - 统一的错误响应格式，便于前端处理
+     * - 支持配置重定向URL，可以提供更友好的错误页面
+     * - 记录无权限访问日志，便于安全审计和问题排查
      * </p>
      *
      * @param request  请求对象
@@ -195,29 +247,34 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
     /**
      * 获取权限验证实现类
      * <p>
-     * 从Spring容器中获取GXSSOAuthorization接口的实现类
+     * 从Spring容器中获取GXSSOAuthorization接口的实现类，用于执行具体的权限验证逻辑。
+     * 如果容器中没有找到实现类，则抛出异常。
      * </p>
      * <p>
-     * 安全说明：
-     * - 确保权限验证实现类存在
-     * - 提供明确的错误信息
+     * 实现说明：
+     * - 使用GXSpringContextUtils工具类从Spring容器获取Bean
+     * - 如果找不到实现类，抛出明确的异常信息
+     * - 支持自定义GXSSOAuthorization实现，增强系统灵活性
      * </p>
      *
-     * @return GXSSOAuthorization接口实现类
-     * @throws GXBusinessException 当未找到实现类时抛出异常
+     * @return GXSSOAuthorization接口的实现类
+     * @throws GXBusinessException 如果找不到GXSSOAuthorization的实现类
      */
-    public GXSSOAuthorization getAuthorization() {
+    protected GXSSOAuthorization getAuthorization() {
         GXSSOAuthorization authorization = GXSpringContextUtils.getBean(GXSSOAuthorization.class);
-        if (Objects.isNull(authorization)) {
-            throw new GXBusinessException("请实现GXSSOAuthorization接口,并将其放入Spring容器中");
+        if (authorization == null) {
+            throw new GXBusinessException("未找到GXSSOAuthorization接口的实现类");
         }
         return authorization;
     }
 
     /**
      * 获取非法请求重定向URL
+     * <p>
+     * 返回配置的无权限访问重定向URL，用于unauthorizedAccess方法中的重定向处理。
+     * </p>
      *
-     * @return 重定向URL
+     * @return 非法请求重定向URL
      */
     public String getIllegalUrl() {
         return illegalUrl;
@@ -225,8 +282,16 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
 
     /**
      * 设置非法请求重定向URL
+     * <p>
+     * 配置当用户无权限访问时的重定向URL，通常指向一个"无权限访问"的提示页面。
+     * </p>
+     * <p>
+     * 使用建议：
+     * - 建议在生产环境中配置此项，提供更友好的用户体验
+     * - URL应当是一个静态页面或不需要权限验证的控制器方法
+     * </p>
      *
-     * @param illegalUrl 重定向URL
+     * @param illegalUrl 非法请求重定向URL
      */
     public void setIllegalUrl(String illegalUrl) {
         this.illegalUrl = illegalUrl;
@@ -234,8 +299,11 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
 
     /**
      * 获取无注解情况下的权限控制策略
+     * <p>
+     * 返回当前配置的nothingAnnotationPass值，用于isVerification方法中的权限判断。
+     * </p>
      *
-     * @return 当为true时放行，为false时拦截
+     * @return 无注解情况下是否放行
      */
     public boolean isNothingAnnotationPass() {
         return nothingAnnotationPass;
@@ -243,8 +311,18 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
 
     /**
      * 设置无注解情况下的权限控制策略
+     * <p>
+     * 配置对没有添加@GXPermissionAnnotation注解的方法的默认处理行为：
+     * - true: 默认放行，适用于大部分方法都不需要权限控制的场景（黑名单模式）
+     * - false: 默认拦截，适用于大部分方法都需要权限控制的场景（白名单模式）
+     * </p>
+     * <p>
+     * 安全建议：
+     * - 开发环境可设置为true，便于调试
+     * - 生产环境建议设置为false，采用白名单策略，更安全
+     * </p>
      *
-     * @param nothingAnnotationPass 当为true时放行，为false时拦截
+     * @param nothingAnnotationPass 无注解情况下是否放行
      */
     public void setNothingAnnotationPass(boolean nothingAnnotationPass) {
         this.nothingAnnotationPass = nothingAnnotationPass;

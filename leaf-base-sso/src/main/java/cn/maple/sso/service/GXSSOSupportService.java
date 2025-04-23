@@ -45,12 +45,70 @@ import java.util.Objects;
  * </p>
  * 
  * <p>
+ * 性能优化策略：
+ * 1. 缓存利用 - 优先从请求属性中获取已验证的Token，减少重复解密和验证
+ * 2. 延迟验证 - 仅在必要时执行完整的验证流程
+ * 3. 快速失败 - 对无效Token快速返回，避免不必要的处理
+ * 4. 插件化设计 - 支持按需加载额外的验证和处理逻辑
+ * 5. 异常处理优化 - 捕获并记录异常，确保系统稳定性
+ * </p>
+ * 
+ * <p>
  * 使用场景：
  * 1. 多系统单点登录集成
  * 2. 分布式系统的统一身份认证
  * 3. 前后端分离架构中的用户认证
  * 4. API服务的Token验证
  * 5. 移动应用的用户会话管理
+ * </p>
+ * 
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 在自定义SSO服务中继承此类
+ * @Service
+ * public class CustomSSOSupportService extends GXSSOSupportService {
+ *     // 自定义Token验证逻辑
+ *     @Override
+ *     protected Dict checkIpBrowser(HttpServletRequest request, Dict ssoToken) {
+ *         // 先调用父类方法进行基本验证
+ *         Dict token = super.checkIpBrowser(request, ssoToken);
+ *         if (token.isEmpty()) {
+ *             return Dict.create();
+ *         }
+ *         
+ *         // 添加自定义的验证逻辑
+ *         // 例如：验证用户是否有权限访问特定资源
+ *         Long userId = token.getLong("userId");
+ *         String requestUri = request.getRequestURI();
+ *         if (!userPermissionService.hasPermission(userId, requestUri)) {
+ *             log.warn("用户{}尝试访问未授权资源: {}", userId, requestUri);
+ *             return Dict.create(); // 返回空Dict表示验证失败
+ *         }
+ *         
+ *         return token; // 返回原Token表示验证通过
+ *     }
+ *     
+ *     // 自定义Cookie生成逻辑
+ *     @Override
+ *     protected Cookie generateCookie(HttpServletRequest request, Dict token) {
+ *         Cookie cookie = super.generateCookie(request, token);
+ *         
+ *         // 添加自定义的Cookie属性
+ *         // 例如：根据不同的用户角色设置不同的Cookie有效期
+ *         String userRole = token.getStr("role", "");
+ *         if ("admin".equals(userRole)) {
+ *             // 管理员Cookie有效期较短，增强安全性
+ *             cookie.setMaxAge(1800); // 30分钟
+ *         } else if ("vip".equals(userRole)) {
+ *             // VIP用户Cookie有效期较长，提升体验
+ *             cookie.setMaxAge(86400); // 24小时
+ *         }
+ *         
+ *         return cookie;
+ *     }
+ * }
+ * </pre>
  * </p>
  * 
  * <p>
@@ -66,6 +124,20 @@ public abstract class GXSSOSupportService {
     /**
      * 获取SSO系统配置
      * 
+     * <p>
+     * 返回SSO系统的全局配置对象，包含所有配置参数。
+     * 配置参数通常从配置文件（如application.yml）中加载。
+     * </p>
+     * 
+     * <p>
+     * 配置项包括：
+     * - Cookie相关设置（名称、路径、域名、过期时间等）
+     * - 缓存相关设置（缓存实现、过期时间等）
+     * - 安全相关设置（是否验证IP、浏览器等）
+     * - 插件相关设置（启用的插件列表）
+     * - 页面相关设置（登录页URL、注销页URL等）
+     * </p>
+     * 
      * @return SSO配置对象，包含系统所有配置参数
      */
     public GXSSOProperties getConfig() {
@@ -79,6 +151,20 @@ public abstract class GXSSOSupportService {
      * <p>
      * 从请求属性中获取Token，此属性通常在过滤器或拦截器中设置
      * 此方法主要用于业务系统中获取已验证的Token，避免重复解密
+     * </p>
+     *
+     * <p>
+     * 性能优化说明：
+     * - 避免重复解密和验证Token，提高系统性能
+     * - 在请求处理链中，Token只需要验证一次
+     * - 后续的业务处理可以直接使用已验证的Token
+     * </p>
+     *
+     * <p>
+     * 使用场景：
+     * - 在Controller中获取当前登录用户信息
+     * - 在业务逻辑中进行权限检查
+     * - 在日志记录中添加用户标识
      * </p>
      *
      * @param request HTTP请求对象
@@ -97,6 +183,20 @@ public abstract class GXSSOSupportService {
      * 2. 从缓存中查询对应的Token数据
      * 3. 验证缓存Token与请求Token的一致性
      * 4. 处理缓存宕机等异常情况
+     * </p>
+     *
+     * <p>
+     * 安全考虑：
+     * - 验证Token的一致性，防止伪造或篡改
+     * - 处理缓存宕机情况，提供降级策略
+     * - 支持踢出用户功能，使已登录的Token失效
+     * </p>
+     *
+     * <p>
+     * 性能优化：
+     * - 使用高效的缓存实现，如Redis
+     * - 合理设置缓存过期时间，平衡安全性和性能
+     * - 对缓存操作进行异常处理，提高系统稳定性
      * </p>
      *
      * @param request HTTP请求对象
@@ -154,6 +254,20 @@ public abstract class GXSSOSupportService {
      * - 记录详细日志，便于问题排查
      * </p>
      *
+     * <p>
+     * 适用场景：
+     * - 浏览器环境：从Cookie中获取Token
+     * - API调用：从请求头中获取Token
+     * - 混合应用：同时支持两种方式
+     * </p>
+     *
+     * <p>
+     * 安全建议：
+     * - 在API场景中，建议使用Bearer认证方式传递Token
+     * - 确保Token在传输过程中使用HTTPS加密
+     * - 对于敏感操作，考虑增加额外的身份验证
+     * </p>
+     *
      * @param request    HTTP请求对象
      * @param cookieName Cookie名称，用于从Cookie中查找Token
      * @return 解析后的Token数据，如果不存在则返回空Dict
@@ -184,6 +298,21 @@ public abstract class GXSSOSupportService {
      * <p>
      * 这些验证可以有效防止Token被盗用的风险，提高系统安全性
      * 验证是否启用可通过配置控制，便于不同环境和场景的灵活应用
+     * </p>
+     *
+     * <p>
+     * 安全增强建议：
+     * - 对于高安全要求的系统，建议同时启用IP和浏览器验证
+     * - 考虑实现基于地理位置的验证，检测异常登录地点
+     * - 对于移动应用，可增加设备指纹验证
+     * - 实现登录行为分析，检测异常的访问模式
+     * </p>
+     *
+     * <p>
+     * 配置灵活性：
+     * - IP验证可通过配置开启或关闭
+     * - 浏览器验证可通过配置开启或关闭
+     * - 可根据不同的环境和安全需求调整验证策略
      * </p>
      *
      * @param request  HTTP请求对象
@@ -222,6 +351,20 @@ public abstract class GXSSOSupportService {
      * 完整的安全验证应使用getSSOToken方法
      * </p>
      *
+     * <p>
+     * 性能优化说明：
+     * - 优先从请求属性中获取，避免重复解析
+     * - 只有在必要时才执行Token解析操作
+     * - 记录详细日志，便于问题排查和性能分析
+     * </p>
+     *
+     * <p>
+     * 使用场景：
+     * - 在多个组件中需要访问Token信息
+     * - 在不需要完整安全验证的场景中获取基本用户信息
+     * - 作为其他Token处理方法的基础方法
+     * </p>
+     *
      * @param request HTTP请求对象
      * @return 解析后的Token数据，如果不存在则返回null
      */
@@ -252,6 +395,22 @@ public abstract class GXSSOSupportService {
      * - 可设置Secure标志，要求Cookie仅通过HTTPS传输
      * - 支持动态设置Cookie的有效期
      * - 对localhost域名特殊处理，避免开发环境问题
+     * </p>
+     *
+     * <p>
+     * 安全增强建议：
+     * - 在生产环境中启用Secure标志，要求HTTPS传输
+     * - 合理设置Cookie的域名范围，避免跨域风险
+     * - 对敏感系统，设置较短的Cookie有效期
+     * - 考虑实现Cookie轮换机制，定期更新Cookie
+     * - 在支持的环境中，设置SameSite属性防止CSRF攻击
+     * </p>
+     *
+     * <p>
+     * 兼容性说明：
+     * - 对于localhost域名，某些浏览器可能无法正确设置Cookie
+     * - 不同浏览器对Cookie属性的支持可能有所不同
+     * - 移动应用和桌面应用可能需要特殊处理Cookie
      * </p>
      *
      * @param request 请求对象
@@ -304,6 +463,22 @@ public abstract class GXSSOSupportService {
      * - 确保服务端和客户端的登录状态同时清除
      * - 支持特殊的踢出用户标记处理
      * - 对缓存操作失败进行重试，提高可靠性
+     * </p>
+     *
+     * <p>
+     * 完整注销策略：
+     * - 删除服务端缓存中的Token记录
+     * - 执行所有注册的SSO插件的注销逻辑
+     * - 清除客户端Cookie，使客户端会话失效
+     * - 对操作失败进行重试，确保注销成功
+     * - 支持特殊的踢出用户标记处理
+     * </p>
+     *
+     * <p>
+     * 分布式环境考虑：
+     * - 确保所有节点都能识别用户已注销
+     * - 考虑使用消息队列通知相关服务用户已注销
+     * - 实现Token黑名单机制，防止已注销的Token被重用
      * </p>
      *
      * @param request  HTTP请求对象
