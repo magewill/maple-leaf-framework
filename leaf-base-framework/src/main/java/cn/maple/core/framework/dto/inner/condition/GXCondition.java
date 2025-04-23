@@ -16,6 +16,43 @@ import java.util.concurrent.atomic.AtomicLong;
  * 该类为SQL条件构建提供基础功能，支持参数化查询以防止SQL注入。
  * 所有条件类型都应继承此类并实现特定的条件逻辑。
  * </p>
+ * 
+ * <p>
+ * 安全特性：
+ * - 使用MyBatis参数化查询机制(#{})，而非字符串拼接，彻底防止SQL注入
+ * - 使用AtomicLong生成唯一参数名，确保线程安全
+ * - 自动处理表别名，防止字段名冲突
+ * - 安全处理null值，避免空指针异常
+ * - 参数值与SQL语句分离，提高安全性
+ * - 支持函数表达式，自动识别并安全处理
+ * </p>
+ * 
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 创建等值条件（WHERE user.username = 'admin'）
+ * GXCondition<?> eqCondition = new GXConditionEQ("user", "username", "admin");
+ * 
+ * // 2. 创建LIKE条件（WHERE user.email LIKE '%@example.com'）
+ * GXCondition<?> likeCondition = new GXConditionLike("user", "email", "%@example.com");
+ * 
+ * // 3. 创建IN条件（WHERE user.status IN (1, 2, 3)）
+ * GXCondition<?> inCondition = new GXConditionIN("user", "status", Arrays.asList(1, 2, 3));
+ * 
+ * // 4. 创建函数表达式条件（WHERE DATE(user.create_time) = '2023-01-01'）
+ * GXCondition<?> funcCondition = new GXConditionEQ("user", "DATE(create_time)", "2023-01-01");
+ * 
+ * // 5. 将条件添加到条件列表
+ * List<GXCondition<?>> conditions = Arrays.asList(eqCondition, likeCondition, inCondition, funcCondition);
+ * 
+ * // 6. 创建查询参数并执行查询
+ * GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+ *     .tableName("user")
+ *     .condition(conditions)
+ *     .build();
+ * String sql = GXBaseBuilder.findByCondition(queryParam);
+ * </pre>
+ * </p>
  *
  * @param <T> 字段值的类型参数
  * @author 塵子曦

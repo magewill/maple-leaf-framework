@@ -37,6 +37,36 @@ import java.util.stream.Collectors;
  * 所有方法都经过SQL注入防护处理，确保生成的SQL语句安全可靠。
  * 使用MyBatis的参数化查询机制(#{})防止SQL注入攻击。
  * </p>
+ * 
+ * <p>
+ * 安全特性：
+ * - 所有SQL操作都使用参数化查询（#{paramName}），而非字符串拼接
+ * - 自动处理特殊字符，无需手动转义
+ * - 条件值自动进行null检查，防止空值异常
+ * - 自动添加软删除条件，防止误操作已删除数据
+ * </p>
+ * 
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 创建查询条件
+ * GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+ *     .tableName("user")
+ *     .tableNameAlias("u")
+ *     .columns(CollUtil.newHashSet("id", "username", "email"))
+ *     .condition(Arrays.asList(
+ *         new GXConditionEQ("u", "status", 1),
+ *         new GXConditionLike("u", "username", "%admin%")
+ *     ))
+ *     .build();
+ * 
+ * // 2. 生成查询SQL
+ * String sql = GXBaseBuilder.findByCondition(queryParam);
+ * 
+ * // 3. 使用MyBatis执行SQL
+ * List<Dict> result = baseMapper.findByCondition(queryParam);
+ * </pre>
+ * </p>
  *
  * @author 塵子曦
  */
@@ -49,10 +79,15 @@ public interface GXBaseBuilder {
 
     /**
      * 更新实体字段和虚拟字段
+     * <p>
+     * 该方法根据条件更新表中的字段值。所有更新操作都使用参数化查询，确保SQL注入安全。
+     * 方法会自动添加updated_at字段的更新，并自动处理软删除逻辑（is_deleted=0条件）。
+     * </p>
      *
-     * @param dbQueryParamInnerDto 查询条件
-     * @param fieldList            数据列表
-     * @return String
+     * @param dbQueryParamInnerDto 查询条件，包含表名、条件等信息，不能为null
+     * @param fieldList            要更新的字段列表，每个字段都是GXUpdateField的子类实例，不能为null
+     * @return 生成的SQL语句
+     * @throws GXBusinessException 当条件为空时抛出异常
      */
     static String updateFieldByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> fieldList) {
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
@@ -76,9 +111,13 @@ public interface GXBaseBuilder {
 
     /**
      * 判断给定条件的值是否存在
+     * <p>
+     * 该方法用于检查数据库中是否存在满足指定条件的记录。
+     * 内部会将查询限制为只返回一条记录，并且只查询常量1，以提高查询效率。
+     * </p>
      *
-     * @param dbQueryParamInnerDto 查询条件
-     * @return String
+     * @param dbQueryParamInnerDto 查询条件，包含表名、条件等信息，不能为null
+     * @return 生成的SQL语句
      */
     static String checkRecordIsExists(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         dbQueryParamInnerDto.setLimit(1);
@@ -88,9 +127,20 @@ public interface GXBaseBuilder {
 
     /**
      * 通过条件获取数据列表
+     * <p>
+     * 该方法根据查询参数构建完整的SELECT查询语句，支持字段选择、表别名、JOIN、WHERE条件、
+     * GROUP BY、HAVING、ORDER BY和LIMIT等SQL功能。所有条件都使用参数化查询处理，防止SQL注入。
+     * </p>
+     * <p>
+     * 安全特性：
+     * - 所有条件值通过参数化查询（#{paramName}）传递，而非直接拼接SQL
+     * - 自动处理表别名，防止字段名冲突
+     * - 自动添加软删除条件（is_deleted=0），除非显式排除
+     * - 条件值为null时会抛出异常，避免意外的全表查询
+     * </p>
      *
-     * @param dbQueryParamInnerDto 查询条件
-     * @return SQL语句
+     * @param dbQueryParamInnerDto 查询条件，包含表名、字段、条件、排序等信息，不能为null
+     * @return 生成的SQL语句
      */
     static String findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         Set<String> columns = dbQueryParamInnerDto.getColumns();
@@ -162,9 +212,13 @@ public interface GXBaseBuilder {
 
     /**
      * 处理JOIN表
+     * <p>
+     * 该方法处理SQL查询中的JOIN操作，支持LEFT JOIN、RIGHT JOIN和INNER JOIN。
+     * 可以通过AND和OR条件组合复杂的JOIN条件。
+     * </p>
      *
-     * @param sql   SQL语句
-     * @param joins joins信息
+     * @param sql   SQL对象，用于构建SQL语句，不能为null
+     * @param joins JOIN信息列表，包含JOIN类型、表名、条件等，不能为null
      */
     static void handleSQLJoin(SQL sql, List<GXJoinDto> joins) {
         joins.forEach(join -> {
@@ -210,9 +264,20 @@ public interface GXBaseBuilder {
 
     /**
      * 通过条件获取数据列表
+     * <p>
+     * 该方法根据查询参数构建完整的SELECT查询语句，支持字段选择、表别名、JOIN、WHERE条件、
+     * GROUP BY、HAVING、ORDER BY和LIMIT等SQL功能。所有条件都使用参数化查询处理，防止SQL注入。
+     * </p>
+     * <p>
+     * 安全特性：
+     * - 所有条件值通过参数化查询（#{paramName}）传递，而非直接拼接SQL
+     * - 自动处理表别名，防止字段名冲突
+     * - 自动添加软删除条件（is_deleted=0），除非显式排除
+     * - 条件值为null时会抛出异常，避免意外的全表查询
+     * </p>
      *
-     * @param dbQueryParamInnerDto 查询条件
-     * @return SQL语句
+     * @param dbQueryParamInnerDto 查询条件，包含表名、字段、条件、排序等信息，不能为null
+     * @return 生成的SQL语句
      */
     static String findOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         int limit = Optional.ofNullable(dbQueryParamInnerDto.getLimit()).orElse(1);
@@ -225,9 +290,16 @@ public interface GXBaseBuilder {
 
     /**
      * 处理SQL语句的Where条件
+     * <p>
+     * 该方法处理SQL查询的WHERE条件部分，将条件列表转换为SQL WHERE子句。
+     * 所有条件都使用参数化查询处理，确保SQL注入安全。方法会检查条件值是否为null，
+     * 如果为null且不是NULL条件，则抛出异常，防止意外的全表操作。
+     * </p>
      *
-     * @param sql       SQL对象
-     * @param condition 条件
+     * @param sql       SQL对象，用于构建SQL语句，不能为null
+     * @param condition 条件列表，可以为null或空列表
+     * @return 参数映射，包含所有条件的参数名和值
+     * @throws GXDBConditionException 当条件值为null时抛出异常
      */
     static Map<String, Object> handleSQLCondition(SQL sql, List<GXCondition<?>> condition) {
         Map<String, Object> paramMap = new HashMap<>();
@@ -257,10 +329,16 @@ public interface GXBaseBuilder {
 
     /**
      * 根据条件软(逻辑)删除
+     * <p>
+     * 该方法执行软删除操作，即更新记录的is_deleted字段为主键值，而不是物理删除记录。
+     * 同时会更新deleted_at字段为当前时间戳，并可以选择性地更新其他字段。
+     * 所有更新操作都使用参数化查询，确保SQL注入安全。
+     * </p>
      *
-     * @param dbQueryParamInnerDto 查询条件
-     * @param updateFieldList      软删除时需要同时更新的字段
-     * @return SQL语句
+     * @param dbQueryParamInnerDto 查询条件，包含表名、条件等信息，不能为null
+     * @param updateFieldList      软删除时需要同时更新的字段列表，可以为null或空列表
+     * @return 生成的SQL语句
+     * @throws GXBusinessException 当条件为空或表没有主键时抛出异常
      */
     static String deleteSoftCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> updateFieldList) {
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
@@ -302,10 +380,16 @@ public interface GXBaseBuilder {
     }
 
     /**
-     * 根据条件删除
+     * 根据条件删除（物理删除）
+     * <p>
+     * 该方法执行物理删除操作，从数据库中永久删除符合条件的记录。
+     * 所有条件都使用参数化查询处理，确保SQL注入安全。
+     * 注意：此操作不可逆，删除后数据无法恢复，请谨慎使用。
+     * </p>
      *
-     * @param dbQueryParamInnerDto 查询条件
-     * @return SQL语句
+     * @param dbQueryParamInnerDto 查询条件，包含表名、条件等信息，不能为null
+     * @return 生成的SQL语句
+     * @throws GXBusinessException 当条件为空时抛出异常
      */
     static String deleteCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();

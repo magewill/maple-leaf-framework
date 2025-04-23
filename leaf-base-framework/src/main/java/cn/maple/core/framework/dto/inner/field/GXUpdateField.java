@@ -14,6 +14,41 @@ import java.util.concurrent.atomic.AtomicLong;
  * 该类为SQL更新操作提供基础功能，支持参数化查询以防止SQL注入。
  * 所有更新字段类型都应继承此类并实现特定的字段值处理逻辑。
  * </p>
+ * 
+ * <p>
+ * 安全特性：
+ * - 使用MyBatis参数化查询机制(#{})，而非字符串拼接，彻底防止SQL注入
+ * - 使用AtomicLong生成唯一参数名，确保线程安全
+ * - 自动转换字段名为下划线格式，统一命名规范
+ * - 安全处理null值，避免空指针异常
+ * - 参数值与SQL语句分离，提高安全性
+ * </p>
+ * 
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 创建字符串类型的更新字段
+ * GXUpdateField<?> nameField = new GXUpdateStrField("user", "userName", "张三");
+ * 
+ * // 2. 创建整数类型的更新字段
+ * GXUpdateField<?> statusField = new GXUpdateIntegerField("user", "status", 1);
+ * 
+ * // 3. 将字段添加到更新列表
+ * List<GXUpdateField<?>> updateFields = Arrays.asList(nameField, statusField);
+ * 
+ * // 4. 创建更新条件
+ * List<GXCondition<?>> conditions = Arrays.asList(
+ *     new GXConditionEQ("user", "id", 100)
+ * );
+ * 
+ * // 5. 执行更新操作
+ * GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+ *     .tableName("user")
+ *     .condition(conditions)
+ *     .build();
+ * String sql = GXBaseBuilder.updateFieldByCondition(queryParam, updateFields);
+ * </pre>
+ * </p>
  *
  * @param <T> 字段值的类型参数
  * @author 塵子曦

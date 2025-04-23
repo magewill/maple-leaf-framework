@@ -47,12 +47,46 @@ import java.util.*;
  * - 合理管理资源，避免内存泄漏
  * - 使用事务注解确保数据一致性
  * - 防止SQL注入攻击，保护数据库安全
+ * - 自动处理null值和空集合，避免NullPointerException
+ * - 使用Optional类型安全处理可能为空的值
  * </p>
  * <p>
  * 线程安全特性：
  * - 使用@Transactional注解确保事务的原子性和隔离性
  * - 避免共享可变状态，确保方法执行的线程安全
  * - 使用不可变对象和线程安全的集合类
+ * - 使用AtomicLong等线程安全的计数器生成唯一标识
+ * - 通过参数化查询避免并发修改导致的SQL注入风险
+ * </p>
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 创建查询条件
+ * GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+ *     .tableName("user")
+ *     .tableNameAlias("u")
+ *     .columns(CollUtil.newHashSet("id", "username", "email"))
+ *     .condition(Arrays.asList(
+ *         new GXConditionEQ("u", "status", 1),
+ *         new GXConditionLike("u", "username", "%admin%")
+ *     ))
+ *     .page(1)
+ *     .pageSize(10)
+ *     .build();
+ * 
+ * // 2. 分页查询
+ * GXPaginationResDto<Dict> result = myBatisDao.paginate(queryParam);
+ * 
+ * // 3. 更新数据
+ * List<GXUpdateField<?>> updateFields = Arrays.asList(
+ *     new GXUpdateStrField("user", "username", "newUsername"),
+ *     new GXUpdateIntegerField("user", "status", 2)
+ * );
+ * List<GXCondition<?>> conditions = Arrays.asList(
+ *     new GXConditionEQ("user", "id", 1)
+ * );
+ * Integer affected = myBatisDao.updateFieldByCondition("user", updateFields, conditions);
+ * </pre>
  * </p>
  * 
  * @param <M> Mapper类型，必须继承自GXBaseMapper，提供基础的数据库操作方法
@@ -76,8 +110,18 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
      * 如果Mapper中未定义paginate方法，将抛出业务异常。
      * </p>
      * <p>
-     * 内存安全：自动处理空值情况，避免空指针异常
-     * 线程安全：方法不依赖共享状态，可安全地在多线程环境中调用
+     * 内存安全特性：
+     * - 自动处理空值情况，避免空指针异常
+     * - 使用GXDBCommonUtils工具类安全构建分页对象
+     * - 通过反射安全调用方法，避免直接访问可能不存在的方法
+     * - 自动处理查询字段为空的情况，提供默认值
+     * - 安全转换分页结果，确保类型一致性
+     * </p>
+     * <p>
+     * 线程安全特性：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 使用局部变量存储中间结果，避免状态共享
+     * - 通过反射机制安全访问方法，避免并发问题
      * </p>
      *
      * @param dbQueryParamInnerDto 查询条件，包含分页信息、查询字段等，不能为null
@@ -153,10 +197,22 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
      * <p>
      * 该方法根据指定的条件更新表中的数据。更新操作在事务中执行，确保数据一致性。
      * 方法会验证条件是否为空，如果为空则抛出业务异常，防止误操作导致全表更新。
+     * 所有更新操作都使用参数化查询，确保SQL注入安全。
      * </p>
      * <p>
-     * 内存安全：验证输入参数，防止空指针异常
-     * 线程安全：使用@Transactional注解确保事务的原子性和隔离性
+     * 内存安全特性：
+     * - 验证输入参数，防止空指针异常
+     * - 使用GXUpdateField类型安全地处理更新字段
+     * - 条件验证确保不会发生全表更新
+     * - 使用参数化查询避免SQL注入风险
+     * - 安全处理返回值，确保类型一致性
+     * </p>
+     * <p>
+     * 线程安全特性：
+     * - 使用@Transactional注解确保事务的原子性和隔离性
+     * - 事务回滚机制确保异常情况下数据一致性
+     * - 方法参数为不可变对象或值传递，避免共享状态
+     * - 通过参数化查询避免并发修改导致的SQL注入风险
      * </p>
      *
      * @param tableName 表名，不能为null或空字符串

@@ -52,6 +52,8 @@ import java.util.Set;
  * - 使用断言确保关键参数不为空，提前捕获潜在问题
  * - 合理管理资源，避免资源泄漏和内存溢出
  * - 安全处理异常，确保异常情况下资源能够正确释放
+ * - 使用Optional和安全的类型转换，避免类型转换异常
+ * - 自动处理null值和空集合，提供默认值防止异常
  * </p>
  * <p>
  * 线程安全特性：
@@ -60,6 +62,8 @@ import java.util.Set;
  * - 使用不可变对象和线程安全的集合类
  * - 通过参数验证和防御性编程确保多线程环境下的安全性
  * - 遵循线程封闭原则，避免跨线程共享可变对象
+ * - 使用线程安全的日志记录机制
+ * - 通过Assert断言机制在方法入口处快速失败，避免执行不安全的操作
  * </p>
  * <p>
  * 安全编码实践：
@@ -68,6 +72,44 @@ import java.util.Set;
  * - 输入验证确保数据完整性和安全性
  * - 异常处理机制确保系统在异常情况下能够优雅降级
  * - 日志记录关键操作，便于安全审计和问题排查
+ * - 使用业务异常（GXBusinessException）区分业务逻辑错误和系统错误
+ * - 条件判断前置，确保操作安全性
+ * </p>
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 创建Repository实现类
+ * @Service
+ * public class UserRepository extends GXMyBatisRepository<UserMapper, UserEntity, UserDao, Long> {
+ *     // 可以添加特定于业务的方法
+ *     public List<Dict> findActiveUsers() {
+ *         List<GXCondition<?>> conditions = Arrays.asList(
+ *             new GXConditionEQ("user", "status", 1)
+ *         );
+ *         return findByCondition("user", conditions);
+ *     }
+ * }
+ * 
+ * // 2. 在服务层使用Repository
+ * @Service
+ * public class UserService {
+ *     @Autowired
+ *     private UserRepository userRepository;
+ *     
+ *     public Dict getUserById(Long id) {
+ *         return userRepository.findOneById("user", id);
+ *     }
+ *     
+ *     public Long createOrUpdateUser(UserEntity user) {
+ *         return userRepository.updateOrCreate(user);
+ *     }
+ *     
+ *     public GXPaginationResDto<Dict> getUserList(int page, int pageSize) {
+ *         List<GXCondition<?>> conditions = new ArrayList<>();
+ *         return userRepository.paginate("user", page, pageSize, conditions, null);
+ *     }
+ * }
+ * </pre>
  * </p>
  *
  * @param <M>  Mapper类型，必须继承自GXBaseMapper，提供基础的数据库操作方法
@@ -98,6 +140,33 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
      * <p>
      * 该方法会先验证实体对象的有效性，然后根据条件更新或创建数据。
      * 如果数据库中已存在符合条件的记录，则更新该记录；否则创建新记录。
+     * 所有操作都在事务中执行，确保数据一致性。
+     * </p>
+     * <p>
+     * 安全特性：
+     * - 使用Assert断言确保条件不为null，防止意外操作
+     * - 使用GXValidatorUtils验证实体对象，确保数据完整性
+     * - 委托给底层DAO层处理事务，确保数据一致性
+     * - 自动处理主键条件，简化操作流程
+     * - 安全的类型转换，确保返回值类型正确
+     * </p>
+     * <p>
+     * 使用示例：
+     * <pre>
+     * // 创建实体对象
+     * UserEntity user = new UserEntity();
+     * user.setUsername("newUser");
+     * user.setEmail("user@example.com");
+     * user.setStatus(1);
+     * 
+     * // 定义更新条件（如果存在则更新，不存在则创建）
+     * List<GXCondition<?>> conditions = Arrays.asList(
+     *     new GXConditionEQ("user", "username", "newUser")
+     * );
+     * 
+     * // 执行保存或更新操作
+     * Long userId = repository.updateOrCreate(user, conditions);
+     * </pre>
      * </p>
      *
      * @param entity    需要更新或者保存的数据实体，不能为null
@@ -134,6 +203,34 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
      * <p>
      * 该方法根据查询参数获取符合条件的所有数据记录。
      * 支持复杂查询条件、字段筛选、排序等操作。
+     * 所有查询都使用参数化查询，确保SQL注入安全。
+     * </p>
+     * <p>
+     * 安全特性：
+     * - 参数验证确保查询参数的有效性
+     * - 使用参数化查询（#{paramName}）防止SQL注入
+     * - 自动处理表别名，防止字段名冲突
+     * - 自动添加软删除条件（is_deleted=0），除非显式排除
+     * - 安全处理返回结果，确保类型一致性
+     * - 委托给底层DAO层处理事务，确保数据一致性
+     * </p>
+     * <p>
+     * 使用示例：
+     * <pre>
+     * // 创建查询条件
+     * GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+     *     .tableName("user")
+     *     .tableNameAlias("u")
+     *     .columns(CollUtil.newHashSet("id", "username", "email"))
+     *     .condition(Arrays.asList(
+     *         new GXConditionEQ("u", "status", 1),
+     *         new GXConditionLike("u", "username", "%admin%")
+     *     ))
+     *     .build();
+     * 
+     * // 执行查询
+     * List<Dict> result = repository.findByCondition(queryParam);
+     * </pre>
      * </p>
      *
      * @param dbQueryParamInnerDto 查询条件对象，包含表名、条件、字段等信息，不能为null
