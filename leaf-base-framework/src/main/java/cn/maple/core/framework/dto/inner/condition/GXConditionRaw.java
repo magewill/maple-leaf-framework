@@ -5,6 +5,35 @@ import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 import lombok.extern.log4j.Log4j2;
 
+/**
+ * 原始SQL条件实现类
+ * <p>
+ * 该类用于处理需要直接使用原始SQL片段的特殊场景，例如复杂的函数调用或特定数据库语法
+ * 由于直接使用原始SQL存在SQL注入风险，该类实现了严格的安全检查机制
+ * <p>
+ * 安全特性：
+ * 1. 对输入的SQL片段进行SQL注入检查
+ * 2. 记录警告日志，提醒开发者注意潜在风险
+ * 3. 对特殊字符进行转义处理
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 创建一个原始SQL条件（谨慎使用！）
+ * GXConditionRaw condition = new GXConditionRaw("DATE(created_at) = CURDATE()");
+ * String whereClause = condition.whereString(); 
+ * // 结果: DATE(created_at) = CURDATE()
+ * 
+ * // 在实际应用中与查询构建器结合使用
+ * GXModelQueryParamDto paramDto = new GXModelQueryParamDto();
+ * paramDto.addCondition(condition);
+ * List<UserEntity> users = mapper.findByCondition(paramDto);
+ * </pre>
+ * <p>
+ * 安全警告：
+ * 1. 仅在绝对必要时使用此类，优先考虑参数化查询
+ * 2. 确保传入的SQL片段不包含用户输入，或已经过严格的验证和转义
+ * 3. 使用此类可能会绕过框架的SQL注入防护机制，增加安全风险
+ */
 @Log4j2
 public class GXConditionRaw extends GXCondition<String> {
     public GXConditionRaw(String value) {

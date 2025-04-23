@@ -24,6 +24,45 @@ import java.lang.reflect.Parameter;
  * 它记录方法的调用参数、返回结果和执行耗时，便于性能分析和问题排查。
  * 通过集成分布式追踪ID，可以在微服务环境中追踪完整的调用链。
  * </p>
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 在方法上使用@GXStopWatch注解
+ * @GXStopWatch
+ * public UserDto getUserById(Long userId) {
+ *     // 方法实现...
+ *     return userDto;
+ * }
+ * 
+ * // 2. 在类上使用@GXStopWatch注解，监控类中所有方法
+ * @GXStopWatch
+ * @Service
+ * public class UserServiceImpl implements UserService {
+ *     // 类中所有方法都会被监控
+ * }
+ * </pre>
+ * </p>
+ * <p>
+ * 日志输出示例：
+ * <pre>
+ * // 方法调用开始时记录参数
+ * traceId 3a7c82bf-98e1-4a59-a513-9c5a75de4751 main : 调用UserServiceImpl.getUserById方法的请求参数 ---- > {"userId":123}
+ * 
+ * // 方法调用结束时记录执行时间
+ * traceId 3a7c82bf-98e1-4a59-a513-9c5a75de4751 main : 调用UserServiceImpl.getUserById方法总共运行15毫秒(0秒)
+ * 
+ * // 方法调用结束时记录返回结果
+ * traceId 3a7c82bf-98e1-4a59-a513-9c5a75de4751 main : 调用UserServiceImpl.getUserById方法的响应数据 ---- > {"id":123,"name":"张三"}
+ * </pre>
+ * </p>
+ * <p>
+ * 性能优化特点：
+ * <ul>
+ *   <li>使用条件日志输出，避免不必要的字符串拼接和对象序列化</li>
+ *   <li>异常处理机制确保目标方法异常不会被吞噬</li>
+ *   <li>通过@Order注解确保在其他切面之前执行，准确测量方法执行时间</li>
+ * </ul>
+ * </p>
  * 
  * @author britton@126.com
  * @since 2021-10-19 15:23

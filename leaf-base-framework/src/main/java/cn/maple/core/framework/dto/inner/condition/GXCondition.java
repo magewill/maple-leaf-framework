@@ -57,6 +57,31 @@ import java.util.concurrent.atomic.AtomicLong;
  * @param <T> 字段值的类型参数
  * @author 塵子曦
  */
+/**
+ * 数据库查询条件的抽象基类
+ * <p>
+ * 该类实现了安全的参数化查询条件构建，通过MyBatis的#{paramName}机制防止SQL注入
+ * 支持各种条件操作（等于、大于、小于、LIKE等），并可以处理不同数据类型
+ * <p>
+ * 安全特性：
+ * 1. 使用参数化查询而非字符串拼接，有效防止SQL注入攻击
+ * 2. 通过原子计数器生成唯一参数名，避免参数名冲突
+ * 3. 支持表达式和函数条件，同时保持参数化处理
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 创建一个等值查询条件
+ * GXConditionEQ condition = new GXConditionEQ("user_table", "age", 18);
+ * String whereClause = condition.whereString(); 
+ * // 结果: user_table.age = #{dbQueryParamInnerDto.paramMap.condition_age_1}
+ * 
+ * // 在实际应用中与查询构建器结合使用
+ * GXBaseMapper<UserEntity> mapper = ...;
+ * GXModelQueryParamDto paramDto = new GXModelQueryParamDto();
+ * paramDto.addCondition(condition);
+ * List<UserEntity> users = mapper.findByCondition(paramDto);
+ * </pre>
+ */
 public abstract class GXCondition<T> implements Serializable {
     /**
      * 参数计数器，用于生成唯一的参数名
@@ -125,6 +150,21 @@ public abstract class GXCondition<T> implements Serializable {
 
     public abstract String getOp();
 
+    /**
+     * 生成WHERE条件的SQL片段
+     * <p>
+     * 该方法根据条件类型、字段表达式和操作符，构建安全的WHERE条件：
+     * 1. 检查操作符是否为空或特殊值（如忽略数据过滤条件标记）
+     * 2. 根据是否有表别名，构建适当的字段引用
+     * 3. 使用MyBatis参数化查询语法（#{paramName}）引用参数值
+     * <p>
+     * 安全特性：
+     * - 使用参数化查询而非字符串拼接，有效防止SQL注入攻击
+     * - 使用CharSequenceUtil.format进行字符串格式化，避免直接拼接
+     * - 参数值通过paramMap传递，而不是直接嵌入SQL中
+     * 
+     * @return 完整的WHERE条件SQL片段，如 "table.field = #{dbQueryParamInnerDto.paramMap.param1}"
+     */
     public String whereString() {
         String opStr = getOp();
         if (CharSequenceUtil.isEmpty(opStr) && CharSequenceUtil.equals(opStr, GXDataSourceConstant.IGNORE_DATA_FILTER_CONDITION_OP_VALUE)) {

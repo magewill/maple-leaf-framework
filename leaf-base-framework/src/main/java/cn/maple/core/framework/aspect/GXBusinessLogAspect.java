@@ -23,8 +23,65 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * 业务日志切面
  * <p>
- * 用于拦截标记了{@link GXBusinessLog}注解的方法，记录业务操作日志
- * 该切面是线程安全的，不会对被拦截方法的执行造成线程安全问题
+ * 用于拦截标记了{@link GXBusinessLog}注解的方法，记录业务操作日志。
+ * 该切面是线程安全的，不会对被拦截方法的执行造成线程安全问题。
+ * 记录的日志信息包括：业务名称、业务描述、方法名、请求参数、客户端IP、执行时间、请求时间和用户名。
+ * </p>
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 在方法上使用@GXBusinessLog注解
+ * @GXBusinessLog(name = "用户登录", description = "用户登录系统")
+ * public LoginResultDto login(LoginRequestDto loginRequest) {
+ *     // 方法实现...
+ *     return loginResultDto;
+ * }
+ * 
+ * // 2. 在类上使用@GXBusinessLog注解，为类中所有方法提供默认的业务日志信息
+ * @GXBusinessLog(name = "用户管理")
+ * @RestController
+ * @RequestMapping("/api/users")
+ * public class UserController {
+ *     
+ *     // 使用类上定义的业务名称
+ *     @GetMapping("/{id}")
+ *     public UserDto getUser(@PathVariable Long id) {
+ *         // 方法实现...
+ *     }
+ *     
+ *     // 覆盖类上定义的业务名称
+ *     @GXBusinessLog(name = "创建用户", description = "创建新用户")
+ *     @PostMapping
+ *     public UserDto createUser(@RequestBody UserCreateDto userCreateDto) {
+ *         // 方法实现...
+ *     }
+ * }
+ * </pre>
+ * </p>
+ * <p>
+ * 日志记录流程：
+ * <ol>
+ *   <li>方法执行前记录开始时间</li>
+ *   <li>执行目标方法并捕获可能的异常</li>
+ *   <li>方法执行后计算执行时间</li>
+ *   <li>收集业务日志所需的信息（业务名称、描述、方法名、参数等）</li>
+ *   <li>通过GXBusinessLogService保存日志信息</li>
+ * </ol>
+ * </p>
+ * <p>
+ * 异常处理策略：
+ * <ul>
+ *   <li>目标方法抛出的异常会被记录并继续向上抛出，不会被吞噬</li>
+ *   <li>日志记录过程中的异常会被捕获并记录，不影响主业务流程</li>
+ * </ul>
+ * </p>
+ * <p>
+ * 线程安全保证：
+ * <ul>
+ *   <li>使用AtomicReference保证结果在多线程环境下的安全访问</li>
+ *   <li>每个请求的日志信息相互独立，不共享状态</li>
+ *   <li>通过Ordered接口确保切面的执行顺序</li>
+ * </ul>
  * </p>
  *
  * @author maple

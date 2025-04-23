@@ -22,18 +22,34 @@ import java.util.Set;
 /**
  * 请求参数验证切面
  * <p>
- * 用于拦截标记了@GetMapping注解的方法，对请求参数进行自动验证
- * 该切面是线程安全的，使用了线程安全的验证器实例
+ * 用于拦截标记了@GetMapping注解的方法，对请求参数进行自动验证。
+ * 该切面是线程安全的，使用了线程安全的验证器实例。
  * </p>
- *
- * @author maple
- */
-
-/**
- * 请求参数验证切面
  * <p>
- * 用于拦截标记了@GetMapping注解的方法，对请求参数进行自动验证
- * 该切面是线程安全的，使用了线程安全的验证器实例
+ * 使用示例：
+ * <pre>
+ * 
+ * // 1. 在Controller方法上添加@GetMapping注解
+ * @GetMapping("/user/{id}")
+ * public ResponseEntity<UserDto> getUser(
+ *     @PathVariable("id") @NotNull Long id,
+ *     @RequestParam(required = false) @Size(min = 3, max = 50) String name
+ * ) {
+ *     // 方法实现...
+ *     return ResponseEntity.ok(userDto);
+ * }
+ * 
+ * // 2. 参数验证失败时会抛出GXBeanValidateException异常
+ * // 3. 可以通过全局异常处理器统一处理验证异常
+ * </pre>
+ * </p>
+ * <p>
+ * 优点：
+ * <ul>
+ *   <li>自动验证所有标记了@GetMapping的方法参数，无需手动调用验证逻辑</li>
+ *   <li>统一的验证异常处理，提供友好的错误信息</li>
+ *   <li>线程安全设计，适用于高并发环境</li>
+ * </ul>
  * </p>
  *
  * @author maple
@@ -55,11 +71,10 @@ public class GXValidateRequestParamAspect implements Ordered {
 
     /**
      * 定义请求参数验证切点
-     * 拦截标记了@GetMapping注解的方法
-     */
-    /**
-     * 定义请求参数验证切点
-     * 拦截标记了@GetMapping注解的方法
+     * <p>
+     * 拦截标记了@GetMapping注解的方法，实现对GET请求参数的自动验证
+     * 可以根据需要扩展到其他类型的请求方法，如POST、PUT等
+     * </p>
      */
     @Pointcut("@annotation(org.springframework.web.bind.annotation.GetMapping)")
     public void requestParamValidate() {
@@ -69,19 +84,17 @@ public class GXValidateRequestParamAspect implements Ordered {
     /**
      * 请求参数验证环绕通知
      * <p>
-     * 在目标方法执行前验证请求参数是否符合约束条件
-     * 该方法是线程安全的，每个请求都有独立的执行上下文
+     * 在目标方法执行前验证请求参数是否符合约束条件。
+     * 该方法是线程安全的，每个请求都有独立的执行上下文。
+     * 验证失败时会抛出GXBeanValidateException异常，包含详细的验证错误信息。
      * </p>
-     *
-     * @param point 切点对象，包含目标方法的信息和参数
-     * @return 目标方法的执行结果
-     * @throws Throwable 如果参数验证失败或目标方法执行异常
-     */
-    /**
-     * 请求参数验证环绕通知
      * <p>
-     * 在目标方法执行前验证请求参数是否符合约束条件
-     * 该方法是线程安全的，每个请求都有独立的执行上下文
+     * 验证流程：
+     * 1. 获取目标方法的签名和参数信息
+     * 2. 从Spring容器中获取目标类的实例
+     * 3. 使用验证器对方法参数进行验证
+     * 4. 如果验证失败，收集错误信息并抛出异常
+     * 5. 验证通过则执行目标方法并返回结果
      * </p>
      *
      * @param point 切点对象，包含目标方法的信息和参数

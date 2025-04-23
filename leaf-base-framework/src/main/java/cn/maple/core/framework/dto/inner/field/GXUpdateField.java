@@ -53,6 +53,38 @@ import java.util.concurrent.atomic.AtomicLong;
  * @param <T> 字段值的类型参数
  * @author 塵子曦
  */
+/**
+ * 数据库字段更新操作的抽象基类
+ * <p>
+ * 该类实现了安全的参数化字段更新操作，通过MyBatis的#{paramName}机制防止SQL注入
+ * 支持各种数据类型的字段更新，包括字符串、数字、JSON等
+ * <p>
+ * 安全特性：
+ * 1. 使用参数化更新而非字符串拼接，有效防止SQL注入攻击
+ * 2. 通过原子计数器生成唯一参数名，避免参数名冲突
+ * 3. 自动处理表别名和字段名，支持多表更新场景
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 创建一个字符串字段更新
+ * GXUpdateStrField updateField = new GXUpdateStrField("", "username", "张三");
+ * String updateClause = updateField.updateString(); 
+ * // 结果: username = #{dbQueryParamInnerDto.paramMap.update_username_1}
+ * 
+ * // 带表别名的字段更新
+ * GXUpdateStrField updateField = new GXUpdateStrField("user", "username", "张三");
+ * String updateClause = updateField.updateString();
+ * // 结果: user.username = #{dbQueryParamInnerDto.paramMap.update_username_1}
+ * 
+ * // 在实际应用中与更新构建器结合使用
+ * GXBaseMapper<UserEntity> mapper = ...;
+ * GXModelQueryParamDto paramDto = new GXModelQueryParamDto();
+ * paramDto.addUpdateField(new GXUpdateStrField("", "username", "张三"));
+ * paramDto.addUpdateField(new GXUpdateNumberField("", "age", 25));
+ * paramDto.addCondition(new GXConditionEQ("", "id", 1001));
+ * mapper.updateByCondition(paramDto);
+ * </pre>
+ */
 public abstract class GXUpdateField<T> implements Serializable {
     /**
      * 参数计数器，用于生成唯一的参数名
@@ -113,9 +145,22 @@ public abstract class GXUpdateField<T> implements Serializable {
 
     /**
      * 生成更新字段的SQL片段
-     * 使用MyBatis参数化查询方式，防止SQL注入
+     * <p>
+     * 该方法根据字段名和表别名，构建安全的字段更新SQL片段：
+     * 1. 检查是否有表别名，构建适当的字段引用
+     * 2. 使用MyBatis参数化查询语法（#{paramName}）引用参数值
+     * <p>
+     * 安全特性：
+     * - 使用参数化更新而非字符串拼接，有效防止SQL注入攻击
+     * - 使用CharSequenceUtil.format进行字符串格式化，避免直接拼接
+     * - 字段值通过paramMap传递，而不是直接嵌入SQL中
+     * - 字段名已经在构造函数中转换为下划线格式，确保命名规范一致
+     * <p>
+     * 性能与安全平衡：
+     * - 参数化查询虽然会增加少量性能开销，但大幅提高了安全性
+     * - 对于批量操作，参数化查询还可以利用数据库的预编译缓存提高性能
      *
-     * @return SQL片段
+     * @return 完整的字段更新SQL片段，如 "field = #{dbQueryParamInnerDto.paramMap.param1}"
      */
     public String updateString() {
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {

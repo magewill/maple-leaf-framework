@@ -28,8 +28,67 @@ import java.util.concurrent.locks.Lock;
 /**
  * 缓存失效切面
  * <p>
- * 用于拦截标记了{@link GXCacheEvict}注解的方法，实现方法执行后清除指定缓存的功能
- * 该切面是线程安全的，使用了分布式锁机制确保缓存清除的原子性
+ * 用于拦截标记了{@link GXCacheEvict}注解的方法，实现方法执行后清除指定缓存的功能。
+ * 该切面是线程安全的，使用了分布式锁机制确保缓存清除的原子性。
+ * 通过缓存失效机制可以确保数据更新后，相关缓存能够及时清除，避免数据不一致问题。
+ * </p>
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 在方法上使用@GXCacheEvict注解
+ * @GXCacheEvict(cacheKey = "user:detail:#userId")
+ * public boolean updateUserInfo(Long userId, UserUpdateDto updateDto) {
+ *     // 方法实现，更新用户信息...
+ *     // 方法执行成功后会自动清除对应的缓存
+ *     return true;
+ * }
+ * 
+ * // 2. 在类上使用@GXCacheEvict注解，为类中所有方法提供默认的缓存失效配置
+ * @GXCacheEvict(cacheKey = "product")
+ * @Service
+ * public class ProductServiceImpl implements ProductService {
+ *     
+ *     // 使用类上定义的缓存键前缀，最终缓存键为"product:update"
+ *     public boolean update(ProductUpdateDto productDto) {
+ *         // 方法实现，更新产品信息...
+ *         return true;
+ *     }
+ *     
+ *     // 自定义缓存键，支持参数引用，最终缓存键为"product:123:detail"
+ *     @GXCacheEvict(cacheKey = "product:#productId:detail")
+ *     public boolean updateProductDetail(Long productId, ProductDetailDto detailDto) {
+ *         // 方法实现，更新产品详情...
+ *         return true;
+ *     }
+ * }
+ * </pre>
+ * </p>
+ * <p>
+ * 缓存键生成规则：
+ * <ol>
+ *   <li>支持静态文本：如 "user:list"</li>
+ *   <li>支持参数引用：如 "user:#userId" 引用方法参数</li>
+ *   <li>支持参数属性引用：如 "user:#user.id" 引用参数的属性</li>
+ *   <li>支持多部分组合：如 "user:#userId:detail:#type"</li>
+ *   <li>如果未指定cacheKey，默认使用 "类名:方法名" 作为缓存键</li>
+ * </ol>
+ * </p>
+ * <p>
+ * 缓存失效实现要求：
+ * <ul>
+ *   <li>目标类需要实现 evictCacheData 方法用于清除指定的缓存</li>
+ *   <li>系统需要提供 GXBaseCacheLockService 的实现类用于获取分布式锁</li>
+ *   <li>只有当方法执行成功且返回结果不为null时才会触发缓存清除</li>
+ * </ul>
+ * </p>
+ * <p>
+ * 性能与安全特点：
+ * <ul>
+ *   <li>使用分布式锁确保在分布式环境中缓存清除的原子性</li>
+ *   <li>使用ConcurrentHashMap缓存解析后的表达式，提高性能</li>
+ *   <li>异常处理机制确保缓存清除异常不影响主业务流程</li>
+ *   <li>锁的获取和释放使用try-finally结构确保锁一定会被释放</li>
+ * </ul>
  * </p>
  *
  * @author maple

@@ -27,8 +27,63 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 缓存切面
  * <p>
- * 用于拦截标记了{@link GXCacheable}注解的方法，实现方法返回值的缓存功能
- * 该切面是线程安全的，使用了线程安全的反射和缓存键生成机制
+ * 用于拦截标记了{@link GXCacheable}注解的方法，实现方法返回值的缓存功能。
+ * 该切面是线程安全的，使用了线程安全的反射和缓存键生成机制。
+ * 通过缓存机制可以显著提高频繁调用且计算成本较高的方法的性能。
+ * </p>
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 在方法上使用@GXCacheable注解
+ * @GXCacheable(cacheKey = "user:detail:#userId", retType = UserDto.class)
+ * public UserDto getUserDetail(Long userId) {
+ *     // 方法实现，只有在缓存未命中时才会执行...
+ *     return userDto;
+ * }
+ * 
+ * // 2. 在类上使用@GXCacheable注解，为类中所有方法提供默认的缓存配置
+ * @GXCacheable(cacheKey = "product")
+ * @Service
+ * public class ProductServiceImpl implements ProductService {
+ *     
+ *     // 使用类上定义的缓存键前缀，最终缓存键为"product:getById"
+ *     public ProductDto getById(Long id) {
+ *         // 方法实现...
+ *     }
+ *     
+ *     // 自定义缓存键，支持参数引用，最终缓存键为"product:detail:123"
+ *     @GXCacheable(cacheKey = "product:detail:#productId")
+ *     public ProductDetailDto getProductDetail(Long productId) {
+ *         // 方法实现...
+ *     }
+ * }
+ * </pre>
+ * </p>
+ * <p>
+ * 缓存键生成规则：
+ * <ol>
+ *   <li>支持静态文本：如 "user:list"</li>
+ *   <li>支持参数引用：如 "user:#userId" 引用方法参数</li>
+ *   <li>支持参数属性引用：如 "user:#user.id" 引用参数的属性</li>
+ *   <li>支持多部分组合：如 "user:#userId:detail:#type"</li>
+ *   <li>如果未指定cacheKey，默认使用 "类名:方法名" 作为缓存键</li>
+ * </ol>
+ * </p>
+ * <p>
+ * 缓存实现要求：
+ * <ul>
+ *   <li>目标类需要实现 getDataFromCache 方法用于从缓存获取数据</li>
+ *   <li>目标类需要实现 setCacheData 方法用于将数据存入缓存</li>
+ *   <li>可以通过 retType 和 methodName 属性指定返回值类型转换</li>
+ * </ul>
+ * </p>
+ * <p>
+ * 性能优化特点：
+ * <ul>
+ *   <li>使用ConcurrentHashMap缓存解析后的表达式，提高性能</li>
+ *   <li>线程安全设计，适用于高并发环境</li>
+ *   <li>异常处理机制确保缓存操作异常不影响主业务流程</li>
+ * </ul>
  * </p>
  *
  * @author maple

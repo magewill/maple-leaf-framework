@@ -33,10 +33,73 @@ import java.util.List;
  *   <li>委托给GXResponseBodyAdviceService进行实际业务处理</li>
  * </ul>
  * </p>
+ * 
  * <p>
  * 该类实现了ResponseBodyAdvice接口，通过重写其方法来实现响应拦截和处理。
  * 通过@RestControllerAdvice注解，使其对所有RestController的响应生效。
  * </p>
+ * 
+ * <p>使用场景：</p>
+ * <ul>
+ *   <li>统一响应格式处理：将不同格式的返回值统一转换为标准响应格式</li>
+ *   <li>响应数据加密：对敏感数据进行加密处理</li>
+ *   <li>添加通用响应头：如跨域头、安全头等</li>
+ *   <li>响应数据脱敏：对手机号、身份证等敏感信息进行脱敏</li>
+ *   <li>统一异常处理：配合全局异常处理器使用</li>
+ * </ul>
+ * 
+ * <p>使用示例：</p>
+ * <pre>
+ * // 1. 默认使用方式 - 无需额外配置，框架会自动注册并使用默认实现
+ * 
+ * // 2. 自定义响应处理服务 - 实现GXResponseBodyAdviceService接口
+ * @Service
+ * public class CustomResponseBodyAdviceService implements GXResponseBodyAdviceService {
+ *     @Override
+ *     public boolean supports(MethodParameter returnType, Class converterType) {
+ *         // 自定义判断逻辑，决定是否需要处理该响应
+ *         return true; // 处理所有响应
+ *     }
+ * 
+ *     @Override
+ *     public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType selectedContentType,
+ *                                  Class<? extends HttpMessageConverter<?>> selectedConverterType,
+ *                                  ServerHttpRequest request, ServerHttpResponse response) {
+ *         // 如果已经是标准响应格式，则直接返回
+ *         if (body instanceof GXResultUtils) {
+ *             return body;
+ *         }
+ *         
+ *         // 对于String类型特殊处理，避免类型转换异常
+ *         if (body instanceof String) {
+ *             return JSONUtil.toJsonStr(GXResultUtils.success(body));
+ *         }
+ *         
+ *         // 其他类型统一包装为标准响应格式
+ *         return GXResultUtils.success(body);
+ *     }
+ * 
+ *     @Override
+ *     public List<String> buildCookies() {
+ *         // 自定义Cookie构建逻辑
+ *         ResponseCookie cookie = ResponseCookie.from("token", "your-token-value")
+ *                 .maxAge(3600) // 1小时过期
+ *                 .httpOnly(true)
+ *                 .secure(true)
+ *                 .path("/")
+ *                 .sameSite(Cookie.SameSite.STRICT.attributeValue())
+ *                 .build();
+ *         return CollUtil.newArrayList(cookie.toString());
+ *     }
+ * }
+ * </pre>
+ * 
+ * <p>安全性考虑：</p>
+ * <ul>
+ *   <li>Cookie安全：默认设置httpOnly=true防止XSS攻击，使用SameSite=LAX防止CSRF攻击</li>
+ *   <li>数据脱敏：敏感数据在返回前应进行适当脱敏处理</li>
+ *   <li>错误信息：生产环境应避免返回详细的错误堆栈信息</li>
+ * </ul>
  *
  * @author maple
  * @see GXResponseBodyAdviceService 实际业务处理服务接口
