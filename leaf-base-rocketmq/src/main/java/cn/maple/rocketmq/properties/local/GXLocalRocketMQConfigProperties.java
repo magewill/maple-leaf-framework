@@ -2,7 +2,6 @@ package cn.maple.rocketmq.properties.local;
 
 import cn.maple.core.framework.factory.GXYamlPropertySourceFactory;
 import lombok.Data;
-import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
 import org.springframework.boot.context.properties.ConfigurationProperties;

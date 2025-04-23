@@ -1,7 +1,7 @@
 package cn.maple.extension.test.customer.client;
 
-import cn.maple.extension.test.customer.domain.CustomerType;
 import cn.maple.core.framework.dto.GXBaseDto;
+import cn.maple.extension.test.customer.domain.CustomerType;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 

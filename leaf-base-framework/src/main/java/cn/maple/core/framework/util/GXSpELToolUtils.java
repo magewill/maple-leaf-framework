@@ -4,6 +4,7 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ClassUtil;
 import cn.hutool.core.util.ReflectUtil;
+import jakarta.validation.constraints.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.expression.EvaluationContext;
@@ -13,7 +14,6 @@ import org.springframework.expression.spel.SpelEvaluationException;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
 
-import jakarta.validation.constraints.NotNull;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Map;

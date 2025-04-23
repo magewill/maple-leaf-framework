@@ -1,7 +1,6 @@
 package cn.maple.sso.properties.local;
 
 import cn.maple.core.framework.factory.GXYamlPropertySourceFactory;
-import cn.maple.sso.properties.GXSSOProperties;
 import cn.maple.sso.properties.GXUrlWhiteListsConfigProperties;
 import lombok.Data;
 import lombok.EqualsAndHashCode;

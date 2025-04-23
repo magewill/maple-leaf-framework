@@ -3,10 +3,9 @@ package cn.maple.extension;
 import cn.hutool.http.HttpStatus;
 import cn.maple.extension.exception.GXExtensionException;
 import cn.maple.extension.register.GXAbstractComponentExecutor;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-
-import jakarta.annotation.Resource;
 
 /**
  * GXExtensionExecutor 扩展执行器

@@ -3,12 +3,12 @@ package cn.maple.core.framework.config.cache;
 import cn.hutool.core.collection.CollUtil;
 import cn.maple.core.framework.properties.GXCaffeineCacheManagerProperties;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.stereotype.Component;
 
-import jakarta.annotation.Resource;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 

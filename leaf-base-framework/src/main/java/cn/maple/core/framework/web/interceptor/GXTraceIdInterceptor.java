@@ -1,11 +1,11 @@
 package cn.maple.core.framework.web.interceptor;
 
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
-import org.springframework.stereotype.Component;
-
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.constraints.NotNull;
+import org.springframework.stereotype.Component;
+
 import java.util.Optional;
 
 /**

@@ -2,10 +2,10 @@ package cn.maple.sso.captcha;
 
 import cn.maple.sso.enums.GXRandomType;
 import cn.maple.sso.utils.GXRandomUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.Data;
 import lombok.experimental.Accessors;
 
-import jakarta.servlet.http.HttpServletRequest;
 import java.awt.*;
 import java.io.IOException;
 import java.io.OutputStream;

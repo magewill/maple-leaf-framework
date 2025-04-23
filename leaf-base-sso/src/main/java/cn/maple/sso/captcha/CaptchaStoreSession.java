@@ -2,7 +2,6 @@ package cn.maple.sso.captcha;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
-import java.util.Objects;
 
 /**
  * <p>

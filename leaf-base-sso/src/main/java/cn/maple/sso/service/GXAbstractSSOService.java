@@ -4,19 +4,19 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.http.HttpStatus;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
+import cn.maple.core.framework.util.GXCookieHelperUtil;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.sso.cache.GXSSOCache;
 import cn.maple.sso.enums.GXTokenFlag;
 import cn.maple.sso.plugins.GXSSOPlugin;
-import cn.maple.core.framework.util.GXCookieHelperUtil;
 import cn.maple.sso.utils.GXHttpUtil;
 import cn.maple.sso.utils.GXIpHelperUtil;
 import cn.maple.sso.utils.GXRandomUtil;
-import lombok.extern.slf4j.Slf4j;
-
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
+
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;

@@ -2,10 +2,10 @@ package cn.maple.core.framework.filter;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
-import org.springframework.web.filter.AbstractRequestLoggingFilter;
-
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotNull;
+import org.springframework.web.filter.AbstractRequestLoggingFilter;
+
 import java.util.Optional;
 
 /**

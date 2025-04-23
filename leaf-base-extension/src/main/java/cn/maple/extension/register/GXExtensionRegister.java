@@ -5,6 +5,7 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXLoggerUtils;
 import cn.maple.extension.*;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.core.annotation.AnnotationUtils;
@@ -12,7 +13,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.ClassUtils;
 import org.springframework.util.ObjectUtils;
 
-import jakarta.annotation.Resource;
 import java.util.Arrays;
 import java.util.Objects;
 

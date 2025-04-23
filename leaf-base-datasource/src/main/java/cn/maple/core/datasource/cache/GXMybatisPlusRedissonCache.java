@@ -1,7 +1,6 @@
 package cn.maple.core.datasource.cache;
 
 import cn.hutool.core.annotation.AnnotationUtil;
-import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.redisson.services.GXRedissonCacheService;

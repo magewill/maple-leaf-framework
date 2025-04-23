@@ -1,13 +1,12 @@
 package cn.maple.extension.test.customer.app;
 
+import cn.maple.core.framework.util.GXResultUtils;
 import cn.maple.extension.test.customer.client.AddCustomerCmd;
 import cn.maple.extension.test.customer.client.CustomerDto;
 import cn.maple.extension.test.customer.client.CustomerService;
 import cn.maple.extension.test.customer.client.GetOneCustomerQry;
-import cn.maple.core.framework.util.GXResultUtils;
-import org.springframework.stereotype.Service;
-
 import jakarta.annotation.Resource;
+import org.springframework.stereotype.Service;
 
 @Service
 public class CustomerServiceImpl implements CustomerService {

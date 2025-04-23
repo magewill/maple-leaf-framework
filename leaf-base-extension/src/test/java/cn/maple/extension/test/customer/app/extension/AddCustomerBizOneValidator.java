@@ -1,11 +1,11 @@
 package cn.maple.extension.test.customer.app.extension;
 
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.extension.GXExtension;
 import cn.maple.extension.test.customer.app.extension.point.AddCustomerValidatorExtPoint;
 import cn.maple.extension.test.customer.client.AddCustomerCmd;
 import cn.maple.extension.test.customer.client.GXConstants;
 import cn.maple.extension.test.customer.domain.CustomerType;
-import cn.maple.core.framework.exception.GXBusinessException;
 import org.springframework.stereotype.Component;
 
 @GXExtension(bizId = GXConstants.BIZ_1)

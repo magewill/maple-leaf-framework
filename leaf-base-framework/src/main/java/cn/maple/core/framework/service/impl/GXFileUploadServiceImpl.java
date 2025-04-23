@@ -3,7 +3,6 @@ package cn.maple.core.framework.service.impl;
 import cn.hutool.core.date.DatePattern;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.core.util.RandomUtil;
 import cn.maple.core.framework.controller.GXBase64DecodedMultipartFile;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.service.GXFileUploadService;

@@ -1,10 +1,10 @@
 package cn.maple.extension.test.customer.domain;
 
+import cn.maple.core.framework.ddd.annotation.GXDomainEntity;
 import cn.maple.extension.GXBizScenario;
 import cn.maple.extension.GXExtensionExecutor;
 import cn.maple.extension.test.customer.domain.rule.CustomerRuleExtPoint;
 import cn.maple.extension.test.customer.infrastructure.CustomerRepository;
-import cn.maple.core.framework.ddd.annotation.GXDomainEntity;
 import lombok.Data;
 
 @GXDomainEntity

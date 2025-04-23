@@ -1,7 +1,6 @@
 package cn.maple.sso.utils;
 
 import cn.hutool.crypto.SecureUtil;
-
 import jakarta.servlet.http.HttpServletRequest;
 
 /**

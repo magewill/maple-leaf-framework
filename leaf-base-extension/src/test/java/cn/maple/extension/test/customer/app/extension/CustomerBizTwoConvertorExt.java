@@ -6,9 +6,8 @@ import cn.maple.extension.test.customer.client.AddCustomerCmd;
 import cn.maple.extension.test.customer.client.GXConstants;
 import cn.maple.extension.test.customer.domain.CustomerEntity;
 import cn.maple.extension.test.customer.domain.SourceType;
-import org.springframework.stereotype.Component;
-
 import jakarta.annotation.Resource;
+import org.springframework.stereotype.Component;
 
 @GXExtension(bizId = GXConstants.BIZ_2)
 @Component

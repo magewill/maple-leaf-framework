@@ -1,18 +1,17 @@
 package cn.maple.extension;
 
+import cn.maple.core.framework.util.GXResultUtils;
 import cn.maple.extension.test.customer.client.AddCustomerCmd;
 import cn.maple.extension.test.customer.client.CustomerDto;
 import cn.maple.extension.test.customer.client.CustomerService;
 import cn.maple.extension.test.customer.client.GXConstants;
 import cn.maple.extension.test.customer.domain.CustomerType;
-import cn.maple.core.framework.util.GXResultUtils;
+import jakarta.annotation.Resource;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
-
-import jakarta.annotation.Resource;
 
 @RunWith(SpringJUnit4ClassRunner.class)
 @SpringBootTest(classes = ExtTestApplication.class)

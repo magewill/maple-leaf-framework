@@ -2,6 +2,8 @@ package cn.maple.extension.register;
 
 import cn.maple.extension.GXBizScenario;
 import cn.maple.extension.GXExtensionCoordinate;
+import cn.maple.extension.GXExtensionExecutor;
+import cn.maple.extension.GXExtensionPoint;
 
 import java.util.function.Consumer;
 import java.util.function.Function;

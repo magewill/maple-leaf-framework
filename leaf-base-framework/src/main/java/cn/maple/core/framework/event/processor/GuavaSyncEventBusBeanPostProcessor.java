@@ -3,13 +3,13 @@ package cn.maple.core.framework.event.processor;
 import cn.hutool.core.util.ReflectUtil;
 import com.google.common.eventbus.EventBus;
 import com.google.common.eventbus.Subscribe;
+import jakarta.annotation.Resource;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-import jakarta.annotation.Resource;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;

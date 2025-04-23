@@ -4,10 +4,10 @@ import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.extension.GXExtension;
 import cn.maple.extension.GXExtensionPoint;
 import cn.maple.extension.GXExtensions;
-import org.springframework.stereotype.Component;
-
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
+import org.springframework.stereotype.Component;
+
 import java.util.Map;
 
 /**

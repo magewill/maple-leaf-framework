@@ -1,7 +1,6 @@
 package cn.maple.sso.plugins;
 
 import cn.hutool.core.lang.Dict;
-
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 

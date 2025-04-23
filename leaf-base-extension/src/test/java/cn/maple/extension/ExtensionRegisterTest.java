@@ -1,13 +1,11 @@
 package cn.maple.extension;
 
 import cn.maple.extension.register.*;
-import cn.maple.extension.register.GXExtensionRegister;
+import jakarta.annotation.Resource;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
-
-import jakarta.annotation.Resource;
 
 @RunWith(SpringJUnit4ClassRunner.class)
 @SpringBootTest(classes = ExtTestApplication.class)

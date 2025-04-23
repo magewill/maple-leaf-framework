@@ -5,10 +5,10 @@ import cn.hutool.http.HttpStatus;
 import cn.hutool.json.JSONConfig;
 import cn.hutool.json.JSONUtil;
 import cn.maple.sso.properties.GXSSOProperties;
-import lombok.extern.slf4j.Slf4j;
-
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
+
 import java.io.*;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
