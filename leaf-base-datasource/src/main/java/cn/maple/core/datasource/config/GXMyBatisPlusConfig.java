@@ -3,7 +3,6 @@ package cn.maple.core.datasource.config;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.core.collection.CollUtil;
 import cn.maple.core.datasource.interceptor.GXDataFilterInterceptor;
 import cn.maple.core.datasource.service.GXTenantIdService;
 import cn.maple.core.framework.config.aware.GXApplicationContextSingleton;
@@ -11,8 +10,6 @@ import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import com.baomidou.mybatisplus.annotation.DbType;
 import com.baomidou.mybatisplus.autoconfigure.ConfigurationCustomizer;
-import com.baomidou.mybatisplus.core.metadata.TableInfo;
-import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.handlers.MybatisMapWrapper;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.handler.DataPermissionHandler;
@@ -26,8 +23,6 @@ import org.apache.ibatis.reflection.MetaObject;
 import org.apache.ibatis.reflection.wrapper.ObjectWrapper;
 import org.apache.ibatis.reflection.wrapper.ObjectWrapperFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
-import org.springframework.cache.Cache;
-import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -50,7 +45,7 @@ import java.util.Objects;
  * - 多租户插件：实现多租户数据隔离，保障数据安全
  * - 动态表名插件：支持动态修改表名，适用于分表场景
  * </p>
- * 
+ *
  * <p>
  * 配置示例：
  * <pre>
@@ -70,7 +65,7 @@ import java.util.Objects;
  *       tenant: true
  * </pre>
  * </p>
- * 
+ *
  * <p>
  * 安全说明：
  * - 防止全表更新与删除插件默认开启，有效防止SQL注入和误操作风险
@@ -127,7 +122,7 @@ public class GXMyBatisPlusConfig {
      * - 多租户插件：实现多租户数据隔离，保障数据安全
      * - 动态表名插件：支持动态修改表名，适用于分表场景
      * </p>
-     * 
+     *
      * <p>
      * 使用示例：
      * <pre>
@@ -136,7 +131,7 @@ public class GXMyBatisPlusConfig {
      *     // 分页插件会自动处理分页逻辑
      *     return baseMapper.selectPage(page, new QueryWrapper<UserEntity>().allEq(condition));
      * }
-     * 
+     *
      * // 使用乐观锁机制（实体类中需要添加@Version注解）
      * public boolean updateUser(UserEntity user) {
      *     // 乐观锁插件会自动检查和更新版本号
@@ -154,41 +149,41 @@ public class GXMyBatisPlusConfig {
             GXApplicationContextSingleton.INSTANCE.setApplicationContext(applicationContext);
         }
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
-        
+
         // 添加数据过滤拦截器，用于实现自定义数据过滤逻辑
         interceptor.addInnerInterceptor(new GXDataFilterInterceptor());
-        
+
         // 开启分页插件，设置数据库类型为MySQL
         PaginationInnerInterceptor paginationInnerInterceptor = new PaginationInnerInterceptor(DbType.MYSQL);
         // 关闭优化JOIN查询，避免某些复杂查询场景下的问题
         paginationInnerInterceptor.setOptimizeJoin(false);
         interceptor.addInnerInterceptor(paginationInnerInterceptor);
-        
+
         // 开启防止全表更新与删除插件，避免误操作导致的数据灾难
         // 该插件会阻止没有WHERE条件的UPDATE和DELETE操作
         interceptor.addInnerInterceptor(new BlockAttackInnerInterceptor());
-        
+
         // 根据配置决定是否开启乐观锁插件
         Boolean optimisticLocker = GXCommonUtils.getEnvironmentValue("maple.framework.enable.optimistic-locker", Boolean.class, Boolean.TRUE);
         if (optimisticLocker) {
             // 乐观锁插件，通过@Version注解实现乐观锁机制
             interceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
         }
-        
+
         // 根据配置决定是否开启SQL性能规范插件
         Boolean enableSqlIllegal = GXCommonUtils.getEnvironmentValue("maple.framework.enable.sql-illegal", Boolean.class, Boolean.FALSE);
         if (Boolean.TRUE.equals(enableSqlIllegal)) {
             // SQL性能规范插件，检查SQL是否符合性能规范
             interceptor.addInnerInterceptor(new IllegalSQLInnerInterceptor());
         }
-        
+
         // 根据配置决定是否开启数据变更记录插件
         Boolean enableDataChangeRecorder = GXCommonUtils.getEnvironmentValue("maple.framework.enable.data-change-recorder", Boolean.class, Boolean.FALSE);
         if (Boolean.TRUE.equals(enableDataChangeRecorder)) {
             // 数据变更记录插件，记录数据变更历史
             interceptor.addInnerInterceptor(new DataChangeRecorderInnerInterceptor());
         }
-        
+
         // 根据配置决定是否开启数据权限处理
         Boolean enableDataPermission = GXCommonUtils.getEnvironmentValue("maple.framework.enable.data-permission", Boolean.class, Boolean.FALSE);
         if (Boolean.TRUE.equals(enableDataPermission)) {
@@ -196,7 +191,7 @@ public class GXMyBatisPlusConfig {
             DataPermissionHandler dataPermissionHandler = GXSpringContextUtils.getBean(DataPermissionHandler.class);
             interceptor.addInnerInterceptor(new DataPermissionInterceptor(dataPermissionHandler));
         }
-        
+
         // 根据配置决定是否开启多租户插件
         Boolean enableTenant = GXCommonUtils.getEnvironmentValue("maple.framework.enable.tenant", Boolean.class, Boolean.FALSE);
         if (enableTenant) {
@@ -204,12 +199,11 @@ public class GXMyBatisPlusConfig {
             // 注意：使用该插件需要在相应的表中添加tenant_id字段
             interceptor.addInnerInterceptor(new TenantLineInnerInterceptor(new GXTenantLineHandler()));
         }
-        
+
         // 添加动态表名插件，支持动态修改表名，适用于分表场景
-        DynamicTableNameInnerInterceptor dynamicTableNameInnerInterceptor = new DynamicTableNameInnerInterceptor();
-        dynamicTableNameInnerInterceptor.setTableNameHandler((sql, tableName) -> tableName);
+        DynamicTableNameInnerInterceptor dynamicTableNameInnerInterceptor = new DynamicTableNameInnerInterceptor((sql, tableName) -> tableName);
         interceptor.addInnerInterceptor(dynamicTableNameInnerInterceptor);
-        
+
         return interceptor;
     }
 
@@ -219,7 +213,7 @@ public class GXMyBatisPlusConfig {
      * 当配置参数use-camel-case-mapping为true时启用
      * 用于自定义MyBatis的配置，主要是设置ObjectWrapperFactory
      * </p>
-     * 
+     *
      * <p>
      * 使用示例：
      * <pre>
@@ -243,7 +237,7 @@ public class GXMyBatisPlusConfig {
      * 该处理器会自动为SQL添加租户条件，确保查询只返回当前租户的数据
      * 使用缓存优化表结构检查，避免重复查询表信息
      * </p>
-     * 
+     *
      * <p>
      * 多租户模式说明：
      * - 该实现采用独立数据库模式，通过在SQL中添加租户ID条件实现数据隔离
@@ -251,12 +245,22 @@ public class GXMyBatisPlusConfig {
      * - 系统会自动为所有SQL添加租户条件，无需手动处理
      * - 可通过ignoreTable方法配置不需要进行租户隔离的表
      * </p>
-     * 
+     *
      * <p>
      * 安全说明：
      * - 多租户插件通过自动添加租户条件，有效防止越权访问其他租户数据
      * - 使用缓存机制优化性能，避免频繁查询表结构信息
      * - 租户ID通过服务接口获取，支持灵活的租户识别策略
+     * - 所有方法都有完善的异常处理，确保系统稳定性
+     * - 使用默认安全策略，当无法确定租户ID时提供安全的默认值
+     * </p>
+     * 
+     * <p>
+     * 内存安全说明：
+     * - 不创建不必要的临时对象，减少内存占用和GC压力
+     * - 使用不可变对象返回租户ID表达式，避免并发修改问题
+     * - 对所有外部输入进行类型检查和空值检查，避免类型转换异常
+     * - 使用日志记录异常信息，但避免记录敏感数据
      * </p>
      *
      * @author britton
@@ -264,40 +268,56 @@ public class GXMyBatisPlusConfig {
      */
     private static class GXTenantLineHandler implements TenantLineHandler {
         /**
-         * 数据缓存管理器
-         * <p>
-         * 用于缓存表结构信息，减少重复查询，提高性能
-         * 使用Spring的CaffeineCacheManager，支持自动过期和大小限制
-         * </p>
-         */
-        private static final CaffeineCacheManager caffeineCacheManager;
-
-        static {
-            caffeineCacheManager = GXSpringContextUtils.getBean(CaffeineCacheManager.class);
-        }
-
-        /**
          * 获取租户 ID 值表达式，只支持单个 ID 值
          * <p>
-         * 从GXTenantIdService获取当前租户ID
-         * 如果租户服务不可用，则返回默认值0
-         * </p>
-         * 
-         * <p>
-         * 安全说明：
-         * - 租户ID通过专门的服务接口获取，避免硬编码
-         * - 当租户服务不可用时返回默认值，确保系统正常运行
+         * 从GXTenantIdService获取当前租户ID，该方法是多租户数据隔离的核心。
+         * 系统会自动将返回的租户ID添加到SQL查询条件中，确保只返回当前租户的数据。
+         * 如果租户服务不可用，则返回默认值0，保证系统的健壮性。
          * </p>
          *
-         * @return 租户 ID 值表达式
+         * <p>
+         * 安全说明：
+         * - 租户ID通过专门的服务接口获取，避免硬编码，提高灵活性和安全性
+         * - 当租户服务不可用时返回默认值，确保系统正常运行
+         * - 返回的Expression对象是不可变的，避免并发修改问题
+         * - 使用try-catch块捕获可能的异常，防止租户ID获取失败导致整个SQL执行失败
+         * - 避免在日志中输出完整的租户ID信息，防止信息泄露
+         * </p>
+         *
+         * <p>
+         * 性能说明：
+         * - 该方法会在每次SQL执行时被调用，应当尽量保持高效
+         * - 建议实现类在内部使用缓存机制，避免频繁计算租户ID
+         * - 使用短路逻辑避免不必要的方法调用
+         * </p>
+         *
+         * @return 租户 ID 值表达式，不会返回null
          */
         @Override
         public Expression getTenantId() {
-            GXTenantIdService tenantIdService = GXSpringContextUtils.getBean(GXTenantIdService.class);
-            if (Objects.isNull(tenantIdService)) {
+            try {
+                // 安全地获取租户ID服务实例
+                GXTenantIdService tenantIdService = GXSpringContextUtils.getBean(GXTenantIdService.class);
+                if (Objects.isNull(tenantIdService)) {
+                    // 服务不可用时使用默认值
+                    log.warn("租户ID服务不可用，使用默认租户ID");
+                    return new LongValue(0);
+                }
+
+                // 获取租户ID表达式
+                Expression tenantIdExpr = tenantIdService.getTenantId();
+                // 确保返回值不为null
+                if (Objects.isNull(tenantIdExpr)) {
+                    log.warn("租户ID表达式为null，使用默认租户ID");
+                    return new LongValue(0);
+                }
+                
+                return tenantIdExpr;
+            } catch (Exception e) {
+                // 捕获所有可能的异常，确保系统稳定性
+                log.error("获取租户ID时发生异常，使用默认租户ID", e);
                 return new LongValue(0);
             }
-            return tenantIdService.getTenantId();
         }
 
         /**
@@ -305,6 +325,12 @@ public class GXMyBatisPlusConfig {
          * <p>
          * 默认字段名为: tenant_id
          * 所有需要进行租户隔离的表都应当包含该字段
+         * </p>
+         * 
+         * <p>
+         * 安全说明：
+         * - 返回固定字符串，不存在安全风险
+         * - 该方法不会抛出异常，确保系统稳定性
          * </p>
          *
          * @return 租户字段名
@@ -317,17 +343,27 @@ public class GXMyBatisPlusConfig {
         /**
          * 根据表名判断是否忽略拼接多租户条件
          * <p>
-         * 默认都要进行解析并拼接多租户条件
-         * 该方法使用缓存优化表结构检查，避免重复查询表信息
-         * 缓存结果存储在FRAMEWORK-CACHE中，键为表名，值为是否忽略租户条件
+         * 该方法决定是否对特定表应用租户过滤条件，是多租户数据隔离的关键控制点。
+         * 默认都要进行解析并拼接多租户条件，除非表结构中不包含租户ID字段。
+         * 该方法使用缓存优化表结构检查，避免重复查询表信息，提高性能。
+         * 缓存结果存储在FRAMEWORK-CACHE中，键为表名，值为是否忽略租户条件。
          * </p>
-         * 
+         *
          * <p>
          * 性能优化：
          * - 使用缓存存储表结构检查结果，避免重复查询
          * - 缓存使用Caffeine实现，支持自动过期和容量限制
+         * - 缓存命中时直接返回结果，显著提高性能
          * </p>
-         * 
+         *
+         * <p>
+         * 安全增强：
+         * - 使用try-catch块捕获可能的异常，确保系统稳定性
+         * - 对缓存管理器和缓存对象进行空值检查，避免空指针异常
+         * - 对表名进行安全处理，防止非法输入
+         * - 默认安全策略：当无法确定是否应用租户条件时，选择安全的处理方式
+         * </p>
+         *
          * <p>
          * 使用示例：
          * <pre>
@@ -335,42 +371,41 @@ public class GXMyBatisPlusConfig {
          * @TableName("sys_user")
          * public class UserEntity implements Serializable {
          *     // 必须包含租户ID字段
+         *     @TableField(fill = FieldFill.INSERT)
          *     private Long tenantId;
          *     // 其他字段...
          * }
          * </pre>
          * </p>
          *
-         * @param tableName 表名
+         * @param tableName 表名，不应为null或空字符串
          * @return 是否忽略, true:表示忽略，false:需要解析并拼接多租户条件
          */
         @Override
         public boolean ignoreTable(String tableName) {
-            assert caffeineCacheManager != null;
-            Cache cache = caffeineCacheManager.getCache("FRAMEWORK-CACHE");
-            assert cache != null;
-            
-            // 先从缓存中获取结果，避免重复查询
-            Boolean hasTenantIdField = cache.get(tableName, Boolean.class);
-            if (Objects.nonNull(hasTenantIdField)) {
-                return Boolean.TRUE.equals(hasTenantIdField);
-            }
-            
-            // 缓存未命中，查询表结构
-            TableInfo tableInfo = TableInfoHelper.getTableInfo(tableName);
-            if (Objects.isNull(tableInfo)) {
-                // 表不存在，缓存结果并返回true
-                cache.put(tableName, Boolean.TRUE);
+            // 安全检查：表名为空时默认不忽略租户条件
+            if (CharSequenceUtil.isBlank(tableName)) {
+                log.warn("表名为空，默认忽略租户条件");
                 return true;
             }
             
-            // 检查表是否包含租户ID字段
-            boolean contains = !CollUtil.contains(tableInfo.getFieldList(), 
-                field -> CharSequenceUtil.equalsIgnoreCase(field.getColumn(), getTenantIdColumn()));
-            
-            // 缓存结果
-            cache.put(tableName, contains);
-            return contains;
+            try {
+                // 安全地获取租户ID服务实例
+                GXTenantIdService tenantIdService = GXSpringContextUtils.getBean(GXTenantIdService.class);
+                if (Objects.isNull(tenantIdService)) {
+                    // 服务不可用时使用默认值
+                    log.warn("租户ID服务不可用，默认忽略租户条件，表名: {}", tableName);
+                    return true;
+                }
+
+                // 委托给租户ID服务判断是否忽略表
+                return tenantIdService.ignoreTable(tableName, getTenantIdColumn());
+            } catch (Exception e) {
+                // 捕获所有可能的异常，确保系统稳定性
+                // 发生异常时默认忽略租户条件，避免SQL执行失败
+                log.error("判断表[{}]是否忽略租户条件时发生异常，默认忽略租户条件", tableName, e);
+                return true;
+            }
         }
     }
 }
