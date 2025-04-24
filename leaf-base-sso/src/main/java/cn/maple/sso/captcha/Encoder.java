@@ -7,65 +7,30 @@ import java.io.OutputStream;
  * <p>
  * Gif 编码器
  * </p>
- * 
- * <p>
- * 该类负责将图像数据编码为GIF格式，支持以下功能：
- * 1. 图像压缩编码
- * 2. 数据块处理
- * 3. LZW压缩算法实现
- * 4. 高效的内存使用
- * </p>
- * 
- * <p>
- * 安全说明：
- * - 使用高效的LZW压缩算法减少内存占用
- * - 采用分块写入方式，避免一次性大量内存分配
- * - 使用固定大小的缓冲区，防止内存溢出
- * - 安全处理输出流，确保数据完整性
- * - 优化哈希表使用，提高编码效率
- * </p>
- * 
- * <p>
- * 性能优化：
- * - 使用预分配的缓冲区减少内存分配
- * - 采用高效的哈希算法加速编码过程
- * - 优化像素数据处理，减少CPU使用
- * - 分块写入数据，降低内存峰值使用
- * </p>
- * 
- * <p>
- * 内部实现基于LZW（Lempel-Ziv-Welch）压缩算法，该算法是GIF格式的标准压缩方式。
- * 编码过程中使用哈希表存储已处理的像素序列，通过查表方式提高压缩效率。
- * </p>
  *
  * @author britton britton@126.com
  * @since 2021-09-16
  */
 public class Encoder {
-    static final int BITS = 12;
 
+    static final int BITS = 12;
     /**
      * 80% 占用率
      */
     static final int H_SIZE = 5003;
-
     private static final int EOF = -1;
-
     /**
      * number of bits/code
      */
     int nBits;
-
     /**
      * user settable max # bits/code
      */
     int maxBits = BITS;
-
     /**
      * maximum code, given n_bits
      */
     int maxCode;
-
     /**
      * should NEVER generate this code
      */
