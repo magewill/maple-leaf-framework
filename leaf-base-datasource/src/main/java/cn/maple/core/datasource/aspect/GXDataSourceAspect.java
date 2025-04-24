@@ -178,7 +178,7 @@ public class GXDataSourceAspect {
      */
     @Pointcut("@annotation(cn.maple.core.datasource.annotation.GXDataSource) || " +
             "@within(cn.maple.core.datasource.annotation.GXDataSource) || " +
-            "target(cn.maple.core.datasource.repository.GXMyBatisRepository+) || " +
+            "execution(public * cn.maple.core.datasource.repository.GXMyBatisRepository+.*(..)) || " +
             "execution(public * cn.maple.core.datasource.service.GXMyBatisBaseService.*(..)) ")
     public void dataSourcePointCut() {
         // 这是切点标记，用于拦截需要进行数据源切换的方法调用
