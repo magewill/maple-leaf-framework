@@ -32,6 +32,63 @@ import java.util.List;
  * 该切面用于拦截GXBaseMapper接口的deleteSoftCondition方法调用，实现软删除操作的事件发布。
  * 软删除是指通过更新标记字段（如is_deleted=1）而非物理删除数据的操作方式。
  * 该切面会在软删除操作执行后，根据Mapper上的GXMyBatisListener注解配置发布相应的同步或异步事件。
+ * </p>
+ * 
+ * <p>使用示例：</p>
+ * <pre>
+ * // 1. 在Mapper接口上添加监听器注解
+ * @GXMyBatisListener(listenerClazz = UserDeleteListener.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+ * public interface UserMapper extends GXBaseMapper<UserEntity> {
+ *     // 接口方法...
+ * }
+ * 
+ * // 2. 实现监听器处理软删除事件
+ * @Component
+ * public class UserDeleteListener implements GXMybatisListenerService {
+ *     @EventListener(condition = "#event.eventName == 'SYNC_DELETE_SOFT'")
+ *     public void handleSoftDeleteEvent(GXMyBatisModelDeleteSoftEvent<Dict> event) {
+ *         Dict source = event.getSource();
+ *         Dict conditionFieldData = source.getDict("conditionFieldData");
+ *         Dict updateFieldData = source.getDict("updateFieldData");
+ *         // 处理软删除事件...
+ *     }
+ * }
+ * 
+ * // 3. 调用软删除方法
+ * @Service
+ * public class UserServiceImpl implements UserService {
+ *     @Autowired
+ *     private UserMapper userMapper;
+ *     
+ *     public void softDeleteUser(Long userId) {
+ *         GXBaseQueryParamInnerDto queryParam = new GXBaseQueryParamInnerDto();
+ *         queryParam.addCondition(new GXCondition<>("id", userId));
+ *         
+ *         List<GXUpdateField<?>> updateFields = new ArrayList<>();
+ *         updateFields.add(new GXUpdateField<>("is_deleted", 1));
+ *         updateFields.add(new GXUpdateField<>("deleted_at", new Date()));
+ *         
+ *         userMapper.deleteSoftCondition(queryParam, updateFields);
+ *         // 此时会自动触发软删除事件
+ *     }
+ * }
+ * </pre>
+ * 
+ * <p>工作原理：</p>
+ * <ol>
+ *   <li>通过AOP拦截GXBaseMapper接口的deleteSoftCondition方法调用</li>
+ *   <li>执行原始的软删除操作</li>
+ *   <li>提取软删除操作的条件和更新字段信息</li>
+ *   <li>根据Mapper上的GXMyBatisListener注解配置发布相应的事件</li>
+ *   <li>监听器可以监听并处理这些事件，执行额外的业务逻辑</li>
+ * </ol>
+ * 
+ * <p>内存安全：</p>
+ * <ol>
+ *   <li>使用Dict对象存储数据，避免直接操作原始对象引用，防止内存泄漏</li>
+ *   <li>使用局部变量存储中间结果，避免跨方法引用导致的内存泄漏</li>
+ *   <li>事件发布后不保留对原始数据的引用，确保GC能正常回收不再使用的对象</li>
+ * </ol>
  */
 @Aspect
 @Component
@@ -103,31 +160,78 @@ public class GXMyBatisPlusDeleteSoftAspect {
      * 内存安全考虑：
      * 1. 使用局部变量存储中间结果，避免跨方法引用导致的内存泄漏
      * 2. 事件发布后不保留对原始数据的引用，确保GC能正常回收不再使用的对象
+     * 3. 避免重复发布事件，提高系统性能
+     * </p>
      *
      * @param point 切点对象，包含被拦截的方法信息和参数
      */
     private void publishEvent(ProceedingJoinPoint point) {
-        Type[] myBatisMapper = AopUtils.getTargetClass(point.getTarget()).getInterfaces();
-        for (Type type : myBatisMapper) {
-            Class<Mapper> mapper = convertTypeToMapper(type);
-            if (ObjectUtil.isNotNull(mapper)) {
+        try {
+            // 获取目标对象的Mapper接口类型
+            Type[] myBatisMapper = AopUtils.getTargetClass(point.getTarget()).getInterfaces();
+            boolean eventPublished = false; // 标记是否已发布事件，避免重复发布
+            
+            for (Type type : myBatisMapper) {
+                // 转换为Mapper接口类
+                Class<Mapper> mapper = convertTypeToMapper(type);
+                if (ObjectUtil.isNull(mapper)) {
+                    continue; // 转换失败，跳过当前接口
+                }
+                
+                // 获取Mapper上的监听器注解
                 GXMyBatisListener myBatisListener = AnnotationUtil.getAnnotation(mapper, GXMyBatisListener.class);
                 if (ObjectUtil.isNull(myBatisListener)) {
-                    return;
+                    log.debug("Mapper接口{}未配置GXMyBatisListener注解，跳过事件发布", mapper.getName());
+                    continue; // 未配置监听器，跳过当前接口
                 }
+                
+                // 如果已经发布过事件，避免重复发布
+                if (eventPublished) {
+                    log.debug("已为当前操作发布过事件，跳过重复发布");
+                    break;
+                }
+                
+                // 处理参数，提取软删除操作的条件和更新字段信息
                 Dict source = handlePointArgs(type, point);
-                Class<? extends GXMybatisListenerService> aClass = myBatisListener.listenerClazz();
+                if (source.isEmpty()) {
+                    log.warn("提取软删除参数失败，跳过事件发布");
+                    continue;
+                }
+                
+                // 获取监听器类和事件类型
+                Class<? extends GXMybatisListenerService> listenerClass = myBatisListener.listenerClazz();
                 String eventType = GXModelEventNamingEnums.SYNC_DELETE_SOFT.getEventType();
                 String eventName = GXModelEventNamingEnums.SYNC_DELETE_SOFT.getEventName();
                 String runType = myBatisListener.runType();
+                
+                // 根据运行类型确定事件类型（同步/异步）
                 if (runType.equals(GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
                     eventType = GXModelEventNamingEnums.ASYNC_DELETE_SOFT.getEventType();
                     eventName = GXModelEventNamingEnums.ASYNC_DELETE_SOFT.getEventName();
                 }
-                Dict eventParam = Dict.create().set("listenerClazzName", aClass.getSimpleName()).set("listenerClazz", aClass);
-                GXMyBatisModelDeleteSoftEvent<Dict> deleteSoftEvent = new GXMyBatisModelDeleteSoftEvent<>(source, eventType, eventParam, eventName);
+                
+                // 创建事件参数
+                Dict eventParam = Dict.create()
+                    .set("listenerClazzName", listenerClass.getSimpleName())
+                    .set("listenerClazz", listenerClass);
+                
+                // 创建并发布事件
+                log.debug("发布{}事件，监听器: {}", eventName, listenerClass.getSimpleName());
+                GXMyBatisModelDeleteSoftEvent<Dict> deleteSoftEvent = 
+                    new GXMyBatisModelDeleteSoftEvent<>(source, eventType, eventParam, eventName);
                 GXEventPublisherUtils.publishEvent(deleteSoftEvent);
+                
+                // 标记已发布事件
+                eventPublished = true;
+                log.debug("软删除事件发布成功");
             }
+            
+            if (!eventPublished) {
+                log.debug("未找到合适的监听器配置，软删除事件未发布");
+            }
+        } catch (Exception e) {
+            // 捕获并记录异常，但不影响原始方法的执行结果
+            log.error("发布软删除事件时发生异常: {}", e.getMessage(), e);
         }
     }
 
