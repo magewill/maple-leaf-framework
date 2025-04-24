@@ -16,7 +16,41 @@ import java.util.Map;
  * 获取Spring Bean、判断Bean的特性、获取环境配置以及注册单例Bean等操作。
  * 该类通过GXApplicationContextSingleton枚举单例获取ApplicationContext实例。
  * </p>
- *
+ * <p>
+ * 线程安全说明：
+ * - 所有方法均为静态方法，无需创建实例
+ * - ApplicationContext本身是线程安全的
+ * - 日志记录使用线程安全的SLF4J实现
+ * - 适合在多线程环境下使用
+ * </p>
+ * <p>
+ * 性能优化：
+ * - 使用单例模式获取ApplicationContext，避免重复查找
+ * - 异常处理时只记录必要信息，减少日志开销
+ * - 提供类型安全的泛型方法，减少类型转换
+ * </p>
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 获取指定类型的Bean
+ * UserService userService = GXSpringContextUtils.getBean(UserService.class);
+ * 
+ * // 2. 获取指定名称的Bean
+ * UserService userService = GXSpringContextUtils.getBean("userServiceImpl", UserService.class);
+ * 
+ * // 3. 判断Bean是否存在
+ * boolean exists = GXSpringContextUtils.containsBean("userService");
+ * 
+ * // 4. 获取环境配置
+ * Environment env = GXSpringContextUtils.getEnvironment();
+ * String serverPort = env.getProperty("server.port");
+ * 
+ * // 5. 注册单例Bean
+ * UserService userService = new UserServiceImpl();
+ * GXSpringContextUtils.registerSingleton("customUserService", userService);
+ * </pre>
+ * </p>
+ * 
  * @author maple
  */
 public class GXSpringContextUtils {

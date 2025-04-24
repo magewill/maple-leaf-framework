@@ -11,8 +11,47 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Caffeine缓存工具类
- * 提供了同步和异步缓存的创建和获取方法
- * 所有缓存实例都是单例的，按照缓存名称进行区分
+ * <p>
+ * 提供了同步和异步缓存的创建和获取方法，支持多种缓存类型：
+ * 1. 普通Cache - 基本的键值对缓存
+ * 2. LoadingCache - 支持自动加载的缓存
+ * 3. AsyncCache - 异步操作的缓存
+ * 4. AsyncLoadingCache - 支持异步自动加载的缓存
+ * </p>
+ * <p>
+ * 线程安全说明：
+ * - 所有缓存实例都存储在线程安全的ConcurrentHashMap中
+ * - 缓存实例创建时使用了双重检查锁定模式，确保单例
+ * - Caffeine本身是线程安全的，适合在高并发环境下使用
+ * - 所有缓存操作都是原子的，无需额外同步
+ * </p>
+ * <p>
+ * 性能优化：
+ * - 缓存实例按名称复用，避免重复创建
+ * - 支持从配置中读取缓存参数，实现动态配置
+ * - 提供批量清除方法，优化内存管理
+ * </p>
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 获取基本缓存
+ * Cache<String, User> userCache = GXCaffeineCacheUtils.getCaffeineCache("userCache");
+ * userCache.put("user1", new User("张三"));
+ * User user = userCache.getIfPresent("user1");
+ * 
+ * // 2. 使用自动加载的缓存
+ * LoadingCache<String, User> loadingCache = GXCaffeineCacheUtils.getCaffeineCache("userCache", 
+ *     key -> userService.findByUsername(key));
+ * User user = loadingCache.get("user1"); // 如果缓存中没有，会自动调用加载函数
+ * 
+ * // 3. 使用异步缓存
+ * AsyncCache<String, User> asyncCache = GXCaffeineCacheUtils.getAsyncCaffeine("userCache");
+ * CompletableFuture<User> future = asyncCache.get("user1", key -> userService.findByUsernameAsync(key));
+ * 
+ * // 4. 清除缓存
+ * GXCaffeineCacheUtils.clearCache("userCache");
+ * </pre>
+ * </p>
  */
 public class GXCaffeineCacheUtils {
     private static final Map<String, Cache<?, ?>> CACHE_MAP = new ConcurrentHashMap<>();
