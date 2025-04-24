@@ -7,24 +7,44 @@ package cn.maple.core.framework.dto.inner.condition.func;
  * CONCAT函数将多个字符串连接成一个字符串，常用于构建复杂的模糊查询条件。
  * </p>
  * 
+ * <p>安全特性：</p>
+ * <ul>
+ *   <li>使用MyBatis参数化查询机制(#{})，防止SQL注入攻击</li>
+ *   <li>查询值自动添加到paramMap中，而非直接拼接到SQL中</li>
+ *   <li>LIKE查询的通配符(%)在参数中处理，避免手动拼接带来的安全风险</li>
+ * </ul>
+ * 
+ * <p>性能优化：</p>
+ * <ul>
+ *   <li>使用参数化查询允许数据库优化执行计划</li>
+ *   <li>仅在值后添加%，实现右模糊查询，提高索引利用效率</li>
+ * </ul>
+ * 
  * <p>使用示例：</p>
  * <pre>
  * // 示例1：连接用户名和手机号进行模糊查询
+ * // 假设需要查询用户名或手机号以"张"开头的记录
  * GXConditionFuncConcat condition = new GXConditionFuncConcat(
- *     "t_user", "CONCAT(username, '-', mobile)", "张三", "username", "mobile");
+ *     "t_user", "CONCAT(username, '-', mobile)", "张", "username", "mobile");
+ * // 生成SQL片段：concat(t_user.username,t_user.mobile) LIKE #{dbQueryParamInnerDto.paramMap.condition_xxx}
+ * // 参数值会被设置为"张%"，实现右模糊查询
  * 
  * // 示例2：连接多个字段进行模糊查询
+ * // 假设需要查询产品名称或产品代码以"A001"开头的记录
  * GXConditionFuncConcat condition = new GXConditionFuncConcat(
  *     "t_product", "CONCAT(product_name, '-', product_code)", "A001", 
  *     "product_name", "product_code");
+ * // 生成SQL片段：concat(t_product.product_name,t_product.product_code) LIKE #{dbQueryParamInnerDto.paramMap.condition_xxx}
+ * // 参数值会被设置为"A001%"，实现右模糊查询
  * 
- * // 将条件添加到查询参数中
- * List&lt;GXCondition&lt;?&gt;&gt; conditions = new ArrayList<>();
+ * // 示例3：将条件添加到查询参数中并执行查询
+ * List<GXCondition<?>> conditions = new ArrayList<>();
  * conditions.add(condition);
  * GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
- *     .tableName("t_user")
+ *     .tableName("t_product")
  *     .condition(conditions)
  *     .build();
+ * List<ProductEntity> products = productMapper.findByCondition(queryParam);
  * </pre>
  * 
  * @author 塵子曦

@@ -15,6 +15,22 @@ import java.util.stream.Collectors;
  * JSON_CONTAINS函数返回1（真）如果目标JSON文档包含指定的值，或者0（假）如果不包含。
  * </p>
  * 
+ * <p>安全特性：</p>
+ * <ul>
+ *   <li>使用MyBatis参数化查询机制(#{})，彻底防止SQL注入</li>
+ *   <li>JSON值和路径通过参数化方式传递，不直接拼接到SQL中</li>
+ *   <li>使用CAST(#{param} AS JSON)确保参数被正确处理为JSON类型</li>
+ *   <li>表名和字段名使用反引号(``)包裹，防止SQL关键字冲突</li>
+ *   <li>自动处理不同类型的JSON值（字符串、数字等），避免格式错误</li>
+ * </ul>
+ * 
+ * <p>性能优化：</p>
+ * <ul>
+ *   <li>参数化查询允许数据库缓存执行计划</li>
+ *   <li>JSON路径表达式优化，提高JSON查询效率</li>
+ *   <li>使用Stream API高效处理JSON数组元素</li>
+ * </ul>
+ * 
  * <p>使用示例：</p>
  * <pre>
  * // 示例1：检查tags字段是否包含指定的标签列表
@@ -22,23 +38,30 @@ import java.util.stream.Collectors;
  * tagList.add("技术");
  * tagList.add("Java");
  * GXConditionFuncJsonContains condition = new GXConditionFuncJsonContains("t_article", "tags", tagList);
+ * // 生成SQL片段：JSON_CONTAINS(`t_article`.`tags`->#{dbQueryParamInnerDto.paramMap.condition_xxx_path}, CAST(#{dbQueryParamInnerDto.paramMap.condition_xxx} AS JSON))
+ * // 参数值会被设置为JSON数组：["技术","Java"]
  * 
  * // 示例2：检查user_info字段中的特定路径是否包含指定值
  * Dict dict = Dict.create().set("name", "张三").set("age", 25);
  * GXConditionFuncJsonContains condition = new GXConditionFuncJsonContains("t_user", "user_info", dict, "profile");
+ * // 生成SQL片段：JSON_CONTAINS(`t_user`.`user_info`->#{dbQueryParamInnerDto.paramMap.condition_xxx_path}, CAST(#{dbQueryParamInnerDto.paramMap.condition_xxx} AS JSON))
+ * // 参数值会被设置为JSON对象：[{"name":"张三","age":25}]
+ * // 路径参数会被设置为：$.profile
  * 
  * // 示例3：检查JSON对象中是否包含特定键值对
  * Dict userInfo = Dict.create().set("name", "张三");
  * GXConditionFuncJsonContains condition = new GXConditionFuncJsonContains("t_user", "ext", userInfo);
- * // 生成的SQL类似于：JSON_CONTAINS(ext, JSON_OBJECT("name", "张三"))
+ * // 生成SQL片段：JSON_CONTAINS(`t_user`.`ext`->#{dbQueryParamInnerDto.paramMap.condition_xxx_path}, CAST(#{dbQueryParamInnerDto.paramMap.condition_xxx} AS JSON))
+ * // 参数值会被设置为JSON对象：[{"name":"张三"}]
  * 
- * // 将条件添加到查询参数中
- * List&lt;GXCondition&lt;?&gt;&gt; conditions = new ArrayList<>();
+ * // 示例4：将条件添加到查询参数中并执行查询
+ * List<GXCondition<?>> conditions = new ArrayList<>();
  * conditions.add(condition);
  * GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
  *     .tableName("t_user")
  *     .condition(conditions)
  *     .build();
+ * List<UserEntity> users = userMapper.findByCondition(queryParam);
  * </pre>
  * 
  * @author 塵子曦
