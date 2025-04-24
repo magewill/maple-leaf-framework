@@ -15,18 +15,43 @@ import java.util.UUID;
  * 
  * <p>
  * 该工具类提供各种随机数据生成功能，包括：
- * 1. 随机字母数字混合字符串
- * 2. 纯数字随机字符串
- * 3. 随机汉字生成
- * 4. 随机颜色生成
- * 5. UUID生成
+ * 1. 随机字母数字混合字符串 - 用于验证码、临时密码等
+ * 2. 纯数字随机字符串 - 用于数字验证码、随机ID等
+ * 3. 随机汉字生成 - 用于中文验证码、测试数据等
+ * 4. 随机颜色生成 - 用于图形验证码背景、UI元素等
+ * 5. UUID生成 - 用于唯一标识符、会话ID等
  * </p>
  * 
  * <p>
- * 安全说明：
- * - 使用SecureRandom作为备选随机数生成器，提供更高的安全性
- * - 支持自定义字符集，增强灵活性
- * - 提供多种随机数据格式，满足不同场景需求
+ * 安全特性：
+ * 1. 提供标准Random和SecureRandom两种实现
+ * 2. 安全敏感场景（密码、令牌等）建议使用Secure系列方法
+ * 3. 支持自定义字符集，增强灵活性和安全性
+ * 4. 完善的参数验证，防止非法输入
+ * 5. 线程安全设计，可在并发环境下使用
+ * </p>
+ * 
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 生成6位数字验证码
+ * String verificationCode = GXRandomUtil.getNumber(6);
+ * // 或使用安全版本
+ * String secureCode = GXRandomUtil.getSecureNumber(6);
+ * 
+ * // 2. 生成8位随机密码（字母数字混合）
+ * String password = GXRandomUtil.getCharacterAndNumber(8);
+ * 
+ * // 3. 生成不带连字符的UUID
+ * String uuid = GXRandomUtil.get32UUID();
+ * 
+ * // 4. 生成4个随机汉字
+ * String chineseChars = GXRandomUtil.getChinese(null, 4);
+ * 
+ * // 5. 生成随机颜色（用于验证码背景）
+ * int[][] rgbArr = {{255,200,200}, {200,255,200}, {200,200,255}};
+ * Color randomColor = GXRandomUtil.getColor(rgbArr);
+ * </pre>
  * </p>
  *
  * @author britton birtton@126.com

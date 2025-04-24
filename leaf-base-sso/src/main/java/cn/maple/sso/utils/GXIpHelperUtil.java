@@ -12,10 +12,37 @@ import java.net.UnknownHostException;
  * 获取IP地址工具类
  * </p>
  * 
+ * <p>
  * 用于处理客户端IP地址获取、验证等操作，主要应用于：
- * 1. 获取HTTP请求的真实客户端IP，处理代理服务器转发的情况
- * 2. 判断IP是否为本地IP
- * 3. 在SSO系统中用于IP绑定验证，增强安全性
+ * 1. 获取HTTP请求的真实客户端IP - 处理代理服务器转发的情况
+ * 2. 判断IP是否为本地IP - 区分内部请求和外部请求
+ * 3. 在SSO系统中用于IP绑定验证 - 增强安全性，防止会话劫持
+ * </p>
+ * 
+ * <p>
+ * 安全特性：
+ * 1. 多级代理处理 - 从X-Forwarded-For等头信息中提取真实客户端IP
+ * 2. 本地IP识别 - 支持识别并特殊处理本地请求
+ * 3. 异常处理 - 完善的错误处理确保系统稳定性
+ * 4. 格式规范化 - 确保返回标准格式的IP地址
+ * </p>
+ * 
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 获取客户端真实IP地址
+ * String clientIp = GXIpHelperUtil.getIpAddr(request);
+ * 
+ * // 2. 判断是否为本地IP
+ * boolean isLocal = GXIpHelperUtil.isLocalIp("127.0.0.1");
+ * 
+ * // 3. 获取服务器本地IP
+ * String serverIp = GXIpHelperUtil.LOCAL_IP;
+ * 
+ * // 4. 获取服务器主机名
+ * String hostName = GXIpHelperUtil.HOST_NAME;
+ * </pre>
+ * </p>
  *
  * @author britton birtton@126.com
  * @since 2021-09-16

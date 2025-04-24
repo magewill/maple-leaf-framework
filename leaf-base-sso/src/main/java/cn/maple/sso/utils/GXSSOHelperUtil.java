@@ -28,14 +28,50 @@ import java.util.*;
  * SSO 帮助类
  * </p>
  * 
+ * <p>
  * 提供SSO（单点登录）系统的核心工具方法，包括：
- * 1. SSO配置管理
- * 2. SSO服务初始化
- * 3. Cookie操作
- * 4. Token获取和解析
- * 5. 登录状态管理
+ * 1. SSO配置管理 - 获取和设置全局配置
+ * 2. SSO服务初始化 - 懒加载方式初始化服务实例
+ * 3. Cookie操作 - 安全地设置和清理包含用户信息的Cookie
+ * 4. Token获取和解析 - 从请求中提取和验证Token
+ * 5. 登录状态管理 - 处理用户登录、注销和会话控制
+ * </p>
  * 
+ * <p>
+ * 安全特性：
+ * 1. 防会话固定攻击 - 支持登录时重新生成会话标识
+ * 2. Token加密存储 - 确保敏感信息不被窃取
+ * 3. 多重验证机制 - 结合IP、浏览器信息和缓存验证
+ * 4. 完善的异常处理 - 防止解析错误导致系统不稳定
+ * 5. 敏感信息脱敏 - 日志记录时自动隐藏敏感字段
+ * </p>
+ * 
+ * <p>
  * 该类是SSO系统的门面(Facade)，为外部系统提供统一的接口
+ * </p>
+ * 
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 用户登录，设置登录信息到Cookie
+ * Dict userInfo = Dict.create()
+ *     .set("userId", 10001L)
+ *     .set("username", "张三")
+ *     .set("roles", "admin,user");
+ * GXSSOHelperUtil.setCookie(request, response, userInfo, true); // true表示防会话固定攻击
+ * 
+ * // 2. 获取当前登录用户信息
+ * Dict currentUser = GXSSOHelperUtil.getSSOToken(request);
+ * Long userId = currentUser.getLong("userId");
+ * String username = currentUser.getStr("username");
+ * 
+ * // 3. 用户注销
+ * GXSSOHelperUtil.clearLogin(request, response);
+ * 
+ * // 4. 管理员强制某用户下线
+ * GXSSOHelperUtil.kickLogin(10001L);
+ * </pre>
+ * </p>
  *
  * @author britton britton@126.com
  * @since 2021-09-16

@@ -19,14 +19,50 @@ import java.util.Map;
  * HTTP工具类
  * </p>
  * 
+ * <p>
  * 提供HTTP请求处理的通用方法，主要用于：
- * 1. AJAX请求处理和响应
- * 2. URL编解码和参数处理
- * 3. 请求重定向
- * 4. 请求类型判断
- * 5. 请求内容获取
+ * 1. AJAX请求处理和响应 - 判断AJAX请求并返回JSON格式数据
+ * 2. URL编解码和参数处理 - 安全地处理URL参数和返回地址
+ * 3. 请求重定向 - 执行HTTP重定向并处理异常
+ * 4. 请求类型判断 - 识别GET/POST等请求方法
+ * 5. 请求内容获取 - 读取请求体和构建完整URL
+ * </p>
  * 
- * 在SSO系统中用于处理登录、注销等HTTP交互
+ * <p>
+ * 安全特性：
+ * 1. URL编码处理 - 防止URL注入和XSS攻击
+ * 2. 异常处理 - 完善的错误处理确保系统稳定性
+ * 3. 资源释放 - 使用try-with-resources确保资源正确关闭
+ * 4. 参数验证 - 对输入参数进行严格检查
+ * 5. 日志记录 - 记录关键操作和错误信息
+ * </p>
+ * 
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 判断是否为AJAX请求
+ * boolean isAjax = GXHttpUtil.isAjax(request);
+ * 
+ * // 2. 返回AJAX错误响应
+ * GXHttpUtil.ajaxStatus(response, HttpStatus.HTTP_UNAUTHORIZED, "未授权的访问");
+ * 
+ * // 3. 获取编码后的完整URL
+ * String encodedUrl = GXHttpUtil.getQueryString(request, "UTF-8");
+ * 
+ * // 4. 构建带返回地址的URL
+ * String returnUrl = GXHttpUtil.encodeRetURL("http://example.com/login", "returnUrl", "http://example.com/profile");
+ * 
+ * // 5. 执行重定向
+ * GXHttpUtil.sendRedirect(response, "http://example.com/login");
+ * 
+ * // 6. 获取请求体内容
+ * String payload = GXHttpUtil.requestPlayload(request);
+ * </pre>
+ * </p>
+ * 
+ * <p>
+ * 在SSO系统中用于处理登录、注销等HTTP交互，确保安全和一致的用户体验
+ * </p>
  *
  * @author britton birtton@126.com
  * @since 2021-09-16
