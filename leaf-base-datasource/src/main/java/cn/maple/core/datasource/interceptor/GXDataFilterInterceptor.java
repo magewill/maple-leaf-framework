@@ -27,13 +27,13 @@ import java.util.Objects;
  * 该拦截器实现了MyBatis-Plus的InnerInterceptor接口，用于在SQL执行前动态添加数据权限过滤条件。
  * 配合@GXDataFilter注解使用，实现基于用户权限的数据行级访问控制。
  * </p>
- * 
+ *
  * <p>工作原理：</p>
  * <p>1. 通过ThreadLocal获取当前线程的数据过滤条件</p>
  * <p>2. 使用JSqlParser解析原始SQL语句</p>
  * <p>3. 将数据过滤条件动态添加到SQL的WHERE子句中</p>
  * <p>4. 重写原始SQL语句</p>
- * 
+ *
  * <p>使用示例：</p>
  * <pre>
  * // 1. 在Spring配置中注册拦截器
@@ -47,20 +47,20 @@ import java.util.Objects;
  *         return interceptor;
  *     }
  * }
- * 
+ *
  * // 2. 在Service方法上使用@GXDataFilter注解
  * @GXDataFilter(tableAlias = "t", userIdFieldNames = {"creator_id"})
  * public List<UserEntity> getUserList(Map<String, Object> params) {
  *     return baseDao.selectByMap(params);
  * }
  * </pre>
- * 
+ *
  * <p>线程安全说明：</p>
  * <p>本拦截器是线程安全的，因为：</p>
  * <p>1. 不维护任何可变状态</p>
  * <p>2. 通过ThreadLocal隔离不同线程的数据</p>
  * <p>3. 所有操作都基于方法参数</p>
- * 
+ *
  * @author 塵渊 britton@126.com
  */
 @Slf4j
@@ -127,17 +127,17 @@ public class GXDataFilterInterceptor implements InnerInterceptor {
         try {
             // 解析SQL语句
             Select select = (Select) CCJSqlParserUtil.parse(originalSql);
-            PlainSelect plainSelect = (PlainSelect) select.getSelectBody();
+            PlainSelect plainSelect = select.getPlainSelect();
 
             // 获取原WHERE条件
             Expression expression = plainSelect.getWhere();
             // 创建数据过滤条件
             StringValue stringValue = new StringValue("'" + scope.getSqlFilter() + "'");
-            
+
             // 如果原SQL没有WHERE条件，直接设置过滤条件
             if (expression == null) {
                 plainSelect.setWhere(stringValue);
-            } 
+            }
             // 如果原SQL有WHERE条件，使用AND连接原条件和过滤条件
             else {
                 AndExpression andExpression = new AndExpression(expression, stringValue);
