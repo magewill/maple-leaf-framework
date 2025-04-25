@@ -15,12 +15,66 @@ import java.util.concurrent.TimeUnit;
 /**
  * 异步事件总线中心
  * <p>
- * 提供基于Guava EventBus的异步事件发布-订阅功能
- * 使用自定义线程池处理事件，提高系统吞吐量
- * 该类是线程安全的，可在多线程环境下使用
+ * 提供基于Guava EventBus的异步事件发布-订阅功能，使用自定义线程池处理事件，提高系统吞吐量。
+ * 该类是线程安全的，可在多线程环境下使用。异步事件处理适用于不需要立即响应的场景，如日志记录、
+ * 发送通知、数据统计等。
+ * </p>
+ *
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 定义事件类
+ * public class UserCreatedEvent {
+ *     private final User user;
+ *
+ *     public UserCreatedEvent(User user) {
+ *         this.user = user;
+ *     }
+ *
+ *     public User getUser() {
+ *         return user;
+ *     }
+ * }
+ *
+ * // 2. 定义事件订阅者
+ * public class UserEventListener {
+ *
+ *     // 构造函数中注册到事件总线
+ *     public UserEventListener() {
+ *         AsyncEventBusCenter.register(this);
+ *     }
+ *
+ *     // 使用@Subscribe注解标记事件处理方法
+ *     @Subscribe
+ *     public void handleUserCreated(UserCreatedEvent event) {
+ *         User user = event.getUser();
+ *         // 异步处理用户创建事件，如发送欢迎邮件等
+ *         System.out.println("异步处理用户创建事件: " + user.getUsername());
+ *     }
+ *
+ *     // 在对象销毁时取消注册
+ *     public void destroy() {
+ *         AsyncEventBusCenter.unregister(this);
+ *     }
+ * }
+ *
+ * // 3. 发布事件
+ * User newUser = new User("张三", "zhangsan@example.com");
+ * AsyncEventBusCenter.post(new UserCreatedEvent(newUser));
+ * </pre>
+ * </p>
+ *
+ * <p>
+ * 性能与安全说明：
+ * 1. 线程池参数已针对一般应用场景优化，可根据实际需求调整
+ * 2. 事件处理方法应避免长时间阻塞，以免占用线程池资源
+ * 3. 事件处理方法应捕获并处理异常，避免影响其他事件的处理
+ * 4. 事件对象应尽量保持简单，避免包含大量数据或复杂对象引用
  * </p>
  *
  * @author maple
+ * @see com.google.common.eventbus.Subscribe 用于标记事件处理方法的注解
+ * @see SyncEventBusCenter 同步事件总线中心，用于需要同步处理的场景
  */
 @SuppressWarnings("unused")
 @Slf4j
