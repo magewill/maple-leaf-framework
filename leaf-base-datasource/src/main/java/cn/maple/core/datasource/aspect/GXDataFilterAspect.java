@@ -23,7 +23,7 @@ import java.util.Objects;
  * 在方法执行前根据用户权限动态添加SQL过滤条件，实现数据权限控制。
  * 支持超级管理员不受数据权限限制的特性。
  * </p>
- * 
+ *
  * <p>使用示例：</p>
  * <pre>
  * // 1. 在Service方法上使用
@@ -31,41 +31,41 @@ import java.util.Objects;
  * public List<UserEntity> getUserList(Map<String, Object> params) {
  *     return baseDao.selectByMap(params);
  * }
- * 
+ *
  * // 2. 在自定义Mapper方法上使用
  * @GXDataFilter(tableAlias = "t", deptIdFieldNames = {"department_id"})
  * List<OrderEntity> getOrdersByDept(Map<String, Object> params);
- * 
+ *
  * // 3. 同时过滤用户ID和部门ID
  * @GXDataFilter(tableAlias = "o", userIdFieldNames = {"creator_id"}, deptIdFieldNames = {"dept_id"})
  * List<OrderEntity> getMyDeptOrders(Map<String, Object> params);
- * 
+ *
  * // 4. 在复杂查询中使用
  * @GXDataFilter(tableAlias = "u", userIdFieldNames = {"u.creator_id"})
  * @Select("SELECT u.*, d.name as dept_name FROM sys_user u LEFT JOIN sys_dept d ON u.dept_id = d.id WHERE u.status = 1")
  * List<UserDetailVO> getUserDetailList();
- * 
+ *
  * // 5. 实现GXDataScopeService接口
  * @Service
  * public class DataScopeServiceImpl implements GXDataScopeService {
  *     @Autowired
  *     private UserService userService;
- *     
+ *
  *     @Override
  *     public boolean isSuperAdmin() {
  *         // 判断当前用户是否为超级管理员的逻辑
  *         return SecurityUtils.getCurrentUser().isSuperAdmin();
  *     }
- *     
+ *
  *     @Override
  *     public String getSqlFilter(GXDataFilter dataFilter, JoinPoint joinPoint) {
  *         // 获取当前用户ID
  *         Long userId = SecurityUtils.getCurrentUserId();
- *         
+ *
  *         // 构建SQL过滤条件
  *         StringBuilder sqlFilter = new StringBuilder();
  *         String tableAlias = dataFilter.tableAlias();
- *         
+ *
  *         // 添加用户ID过滤条件
  *         String[] userIdFields = dataFilter.userIdFieldNames();
  *         if (userIdFields.length > 0) {
@@ -79,15 +79,15 @@ import java.util.Objects;
  *             }
  *             sqlFilter.append(")");
  *         }
- *         
+ *
  *         // 添加部门ID过滤条件
  *         // ...
- *         
+ *
  *         return sqlFilter.toString();
  *     }
  * }
  * </pre>
- * 
+ *
  * <p>工作原理：</p>
  * <ol>
  *   <li>通过AOP拦截标记了@GXDataFilter注解的方法</li>
@@ -96,7 +96,7 @@ import java.util.Objects;
  *   <li>MyBatis拦截器在执行SQL前会从ThreadLocal获取过滤条件并添加到SQL中</li>
  *   <li>方法执行完成后自动清理ThreadLocal，防止内存泄漏</li>
  * </ol>
- * 
+ *
  * <p>内存安全：</p>
  * <ol>
  *   <li>使用ThreadLocal存储线程相关的数据过滤条件，确保线程隔离</li>
@@ -104,7 +104,7 @@ import java.util.Objects;
  *   <li>使用不可变对象存储过滤条件，避免并发修改问题</li>
  *   <li>在所有可能的执行路径上都确保清理ThreadLocal资源，包括正常执行和异常情况</li>
  * </ol>
- * 
+ *
  * <p>性能优化：</p>
  * <ol>
  *   <li>对超级管理员用户快速返回，避免不必要的SQL过滤条件构建</li>
@@ -112,7 +112,7 @@ import java.util.Objects;
  *   <li>只在必要时才创建和存储过滤条件，减少ThreadLocal操作</li>
  *   <li>日志记录使用debug级别，在生产环境可关闭以提高性能</li>
  * </ol>
- * 
+ *
  * <p>安全注意事项：</p>
  * <ol>
  *   <li>SQL过滤条件的生成应防止SQL注入攻击，建议使用参数化查询</li>
@@ -150,7 +150,7 @@ public class GXDataFilterAspect {
      * 2. 清理操作是幂等的，即使多次调用也不会有副作用
      * 3. 在使用线程池的场景下，清理ThreadLocal尤为重要，否则可能导致线程复用时数据混淆
      * </p>
-     * 
+     *
      * <p>执行流程：</p>
      * <ol>
      *   <li>从ThreadLocal中获取数据过滤条件</li>
@@ -170,7 +170,7 @@ public class GXDataFilterAspect {
             log.trace("正常执行完成，未发现数据过滤条件，执行预防性清理");
         }
     }
-    
+
     /**
      * 方法异常抛出后的处理
      * <p>
@@ -184,7 +184,7 @@ public class GXDataFilterAspect {
      * 2. 清理操作本身不应抛出异常，以免干扰主异常的传播
      * 3. 记录详细日志，便于问题排查
      * </p>
-     * 
+     *
      * <p>执行流程：</p>
      * <ol>
      *   <li>使用try-catch包裹清理逻辑，确保清理过程中的异常不会影响主异常的传播</li>
@@ -219,7 +219,7 @@ public class GXDataFilterAspect {
      * 超级管理员不受数据权限限制，直接跳过过滤条件设置
      * 该方法是线程安全的，每个请求都有独立的ThreadLocal存储空间
      * </p>
-     * 
+     *
      * <p>执行流程：</p>
      * <ol>
      *   <li>获取数据权限服务实现类，如果未找到则抛出异常</li>
@@ -227,6 +227,23 @@ public class GXDataFilterAspect {
      *   <li>获取SQL过滤条件，如果为空则跳过数据过滤</li>
      *   <li>创建数据过滤对象并存入ThreadLocal中</li>
      *   <li>记录应用数据过滤条件的日志</li>
+     * </ol>
+     *
+     * <p>安全特性：</p>
+     * <ol>
+     *   <li>使用ThreadLocal存储线程相关的数据过滤条件，确保线程隔离</li>
+     *   <li>SQL过滤条件通过GXDataScopeService接口获取，支持参数化查询</li>
+     *   <li>异常处理机制确保即使发生错误也不会影响应用正常运行</li>
+     *   <li>日志记录关键操作，便于问题排查和安全审计</li>
+     *   <li>超级管理员检查机制，避免不必要的数据过滤操作</li>
+     * </ol>
+     *
+     * <p>SQL注入防护：</p>
+     * <ol>
+     *   <li>过滤条件应使用MyBatis的参数化查询语法(#{param})，而非直接拼接值</li>
+     *   <li>GXDataScopeService实现类应确保返回的SQL片段已经过安全处理</li>
+     *   <li>避免在过滤条件中包含用户直接输入的未经处理的字符串</li>
+     *   <li>使用JSqlParser进行SQL解析和重构，而非简单字符串拼接</li>
      * </ol>
      *
      * @param point 切点对象，包含目标方法的相关信息
@@ -240,12 +257,14 @@ public class GXDataFilterAspect {
             log.error("数据权限过滤失败：未找到GXDataScopeService接口实现类");
             throw new GXBusinessException(CharSequenceUtil.format("请实现{}接口", GXDataScopeService.class.getName()));
         }
-        
+
         // 判断当前用户是否为超级管理员
         boolean isSuperAdmin = dataScopeService.isSuperAdmin();
         MethodSignature signature = (MethodSignature) point.getSignature();
         String methodName = signature.getDeclaringTypeName() + "." + signature.getName();
-        
+
+        log.trace("开始处理数据权限过滤，方法: {}", methodName);
+
         // 如果是超级管理员，则不进行数据过滤
         if (isSuperAdmin) {
             log.debug("超级管理员访问，跳过数据权限过滤: {}", methodName);
@@ -256,11 +275,20 @@ public class GXDataFilterAspect {
         try {
             // 获取SQL过滤条件
             String sqlFilter = getSqlFilter(point);
+            // 安全检查：确保SQL过滤条件不为空
             if (CharSequenceUtil.isEmpty(sqlFilter)) {
                 log.debug("未获取到SQL过滤条件，跳过数据权限过滤: {}", methodName);
                 return;
             }
-            
+
+            // SQL注入防护检查：警告可能的SQL注入风险
+            if (sqlFilter.contains("'") || sqlFilter.contains(";")
+                    || sqlFilter.toLowerCase().contains("delete ")
+                    || sqlFilter.toLowerCase().contains("update ")
+                    || sqlFilter.toLowerCase().contains("drop ")) {
+                log.warn("SQL过滤条件可能存在注入风险，请确保使用参数化查询: {}", sqlFilter);
+            }
+
             // 创建数据过滤对象并存入ThreadLocal
             GXDataFilterInnerDto dataScope = new GXDataFilterInnerDto(sqlFilter);
             GXDataFilterThreadLocalUtils.setDataFilterInnerDto(dataScope);
@@ -278,7 +306,7 @@ public class GXDataFilterAspect {
      * 该方法通过反射获取方法上的注解信息，然后调用GXDataScopeService接口的实现类获取SQL过滤条件
      * 内存安全考虑：使用局部变量存储中间结果，避免跨方法引用导致的内存泄漏
      * </p>
-     * 
+     *
      * <p>执行流程：</p>
      * <ol>
      *   <li>通过反射获取目标方法</li>

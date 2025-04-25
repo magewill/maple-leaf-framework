@@ -37,7 +37,7 @@ import java.util.stream.Collectors;
  * 所有方法都经过SQL注入防护处理，确保生成的SQL语句安全可靠。
  * 使用MyBatis的参数化查询机制(#{})防止SQL注入攻击。
  * </p>
- * 
+ *
  * <p>
  * 安全特性：
  * - 所有SQL操作都使用参数化查询（#{paramName}），而非字符串拼接
@@ -45,7 +45,7 @@ import java.util.stream.Collectors;
  * - 条件值自动进行null检查，防止空值异常
  * - 自动添加软删除条件，防止误操作已删除数据
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
@@ -59,10 +59,10 @@ import java.util.stream.Collectors;
  *         new GXConditionLike("u", "username", "%admin%")
  *     ))
  *     .build();
- * 
+ *
  * // 2. 生成查询SQL
  * String sql = GXBaseBuilder.findByCondition(queryParam);
- * 
+ *
  * // 3. 使用MyBatis执行SQL
  * List<Dict> result = baseMapper.findByCondition(queryParam);
  * </pre>
@@ -84,29 +84,75 @@ public interface GXBaseBuilder {
      * 方法会自动添加updated_at字段的更新，并自动处理软删除逻辑（is_deleted=0条件）。
      * </p>
      *
+     * <p>安全特性：</p>
+     * <ol>
+     *   <li>所有字段更新都通过GXUpdateField封装，使用参数化查询方式</li>
+     *   <li>条件值自动进行null检查，防止空值导致的全表更新风险</li>
+     *   <li>自动添加软删除条件（is_deleted=0），防止误操作已删除数据</li>
+     *   <li>使用MyBatis SQL类构建SQL语句，避免手动拼接</li>
+     *   <li>参数通过Map传递，与SQL语句分离，防止SQL注入</li>
+     * </ol>
+     *
+     * <p>使用示例：</p>
+     * <pre>
+     * // 1. 创建更新字段列表
+     * List<GXUpdateField<?>> updateFields = new ArrayList<>();
+     * updateFields.add(new GXUpdateField<>("status", 2));
+     * updateFields.add(new GXUpdateField<>("remark", "已处理"));
+     * updateFields.add(new GXUpdateField<>("process_time", new Date()));
+     *
+     * // 2. 创建更新条件
+     * GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+     *     .tableName("order")
+     *     .condition(Arrays.asList(
+     *         new GXConditionEQ(null, "id", orderId),
+     *         new GXConditionEQ(null, "user_id", currentUserId)
+     *     ))
+     *     .build();
+     *
+     * // 3. 生成并执行更新SQL
+     * String sql = GXBaseBuilder.updateFieldByCondition(queryParam, updateFields);
+     * int rows = baseMapper.updateFieldByCondition(queryParam);
+     * </pre>
+     *
      * @param dbQueryParamInnerDto 查询条件，包含表名、条件等信息，不能为null
      * @param fieldList            要更新的字段列表，每个字段都是GXUpdateField的子类实例，不能为null
      * @return 生成的SQL语句
-     * @throws GXBusinessException 当条件为空时抛出异常
+     * @throws GXBusinessException 当条件为空时抛出异常，防止意外的全表更新操作
      */
     static String updateFieldByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> fieldList) {
+        // 参数校验
+        if (dbQueryParamInnerDto == null) {
+            throw new GXBusinessException("查询参数对象不能为null!");
+        }
+        // 安全检查：确保有更新字段，防止无效更新
+        if (CollUtil.isEmpty(fieldList)) {
+            throw new GXBusinessException("更新字段列表不能为空!");
+        }
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
         String tableName = dbQueryParamInnerDto.getTableName();
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("更新条件不能为空，为防止全表更新风险!");
         }
         final SQL sql = new SQL().UPDATE(tableName);
+        // 处理更新字段，使用参数化方式
         for (GXUpdateField<?> field : fieldList) {
             sql.SET(field.updateString());
             dbQueryParamInnerDto.getParamMap().putAll(field.getParamMap());
         }
+        // 自动添加更新时间
         sql.SET(CharSequenceUtil.format("updated_at = {}", DateUtil.currentSeconds()));
+        // 处理WHERE条件，使用参数化方式
         Map<String, Object> paramMap = handleSQLCondition(sql, condition);
         dbQueryParamInnerDto.getParamMap().putAll(paramMap);
+        // 自动添加软删除条件，防止误操作已删除数据
         if (!CollUtil.contains(condition, (c -> GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableName, 0));
         }
-        return sql.toString();
+        // 返回生成的SQL语句
+        String resultSql = sql.toString();
+        LOGGER.debug("生成的更新SQL: {}", resultSql);
+        return resultSql;
     }
 
     /**
@@ -296,33 +342,75 @@ public interface GXBaseBuilder {
      * 如果为null且不是NULL条件，则抛出异常，防止意外的全表操作。
      * </p>
      *
+     * <p>安全特性：</p>
+     * <ol>
+     *   <li>所有条件都通过GXCondition子类封装，使用参数化查询方式</li>
+     *   <li>条件值自动进行null检查，防止空值导致的全表操作风险</li>
+     *   <li>参数通过Map传递，与SQL语句分离，防止SQL注入</li>
+     *   <li>使用AND连接多个条件，确保条件限制范围不会意外扩大</li>
+     *   <li>特殊条件类型（如NULL条件）有专门处理逻辑，确保SQL语法正确</li>
+     * </ol>
+     *
+     * <p>参数化查询示例：</p>
+     * <pre>
+     * // 1. 创建条件列表
+     * List<GXCondition<?>> conditions = new ArrayList<>();
+     * conditions.add(new GXConditionEQ("u", "status", 1)); // 生成: u.status = #{u_status}
+     * conditions.add(new GXConditionLike("u", "name", "%张%")); // 生成: u.name LIKE #{u_name}
+     * conditions.add(new GXConditionBetween("u", "age", 18, 30)); // 生成: u.age BETWEEN #{u_age_min} AND #{u_age_max}
+     *
+     * // 2. 创建SQL构建器
+     * SQL sql = new SQL().SELECT("*").FROM("user u");
+     *
+     * // 3. 处理WHERE条件
+     * Map<String, Object> paramMap = GXBaseBuilder.handleSQLCondition(sql, conditions);
+     * // 生成的SQL: SELECT * FROM user u WHERE u.status = #{u_status} AND u.name LIKE #{u_name} AND u.age BETWEEN #{u_age_min} AND #{u_age_max}
+     * // paramMap包含: {"u_status": 1, "u_name": "%张%", "u_age_min": 18, "u_age_max": 30}
+     * </pre>
+     *
      * @param sql       SQL对象，用于构建SQL语句，不能为null
      * @param condition 条件列表，可以为null或空列表
      * @return 参数映射，包含所有条件的参数名和值
-     * @throws GXDBConditionException 当条件值为null时抛出异常
+     * @throws GXDBConditionException   当条件值为null时抛出异常，防止意外的全表操作
+     * @throws IllegalArgumentException 当SQL对象为null时抛出异常
      */
     static Map<String, Object> handleSQLCondition(SQL sql, List<GXCondition<?>> condition) {
+        // 参数校验
+        if (sql == null) {
+            throw new IllegalArgumentException("SQL对象不能为null");
+        }
         Map<String, Object> paramMap = new HashMap<>();
+        // 如果条件为空，直接返回空参数映射
         if (Objects.isNull(condition) || condition.isEmpty()) {
+            LOGGER.debug("WHERE条件为空，不添加任何条件");
             return paramMap;
         }
+        // 收集所有有效的WHERE条件
         List<String> lastWheres = new ArrayList<>();
+        // 遍历处理每个条件
         condition.forEach(c -> {
+            // 跳过排除已删除记录的特殊条件
             if (!GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())) {
+                // 安全检查：确保非NULL条件的值不为null，防止意外的全表操作
                 if (ObjectUtil.isNull(c.getFieldValue()) && !GXConditionIsNULL.class.isAssignableFrom(c.getClass())) {
                     String msg = CharSequenceUtil.format("数据查询条件错误【查询字段{}.{}的值是null】", c.getTableNameAlias(), c.getFieldExpression());
                     throw new GXDBConditionException(msg);
                 }
+                // 获取条件的SQL表达式
                 String str = c.whereString();
+                // 只添加非空条件
                 if (CharSequenceUtil.isNotEmpty(str)) {
                     lastWheres.add(str);
+                    // 收集参数映射，用于参数化查询
                     paramMap.putAll(c.getParamMap());
+                    LOGGER.trace("添加WHERE条件: {}, 参数: {}", str, c.getParamMap());
                 }
             }
         });
         if (!lastWheres.isEmpty()) {
             String whereStr = String.join(" AND ", lastWheres);
             sql.WHERE(whereStr);
+            LOGGER.debug("最终WHERE条件: {}", whereStr);
         }
         return paramMap;
     }

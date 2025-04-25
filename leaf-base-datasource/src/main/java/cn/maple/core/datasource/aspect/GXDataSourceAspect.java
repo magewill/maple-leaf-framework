@@ -95,7 +95,75 @@ import java.util.stream.Collectors;
  *     }
  * }
  * </pre>
+ * <p>
+ * 5. 事务管理与数据源切换结合：
+ * <pre>
+ * @Service
+ * @GXDataSource("master") // 默认使用主库
+ * public class OrderServiceImpl implements OrderService {
+ *     @Autowired
+ *     private OrderRepository orderRepository;
+ *     @Autowired
+ *     private ProductRepository productRepository;
  *
+ *     // 事务方法使用主库
+ *     @Transactional(rollbackFor = Exception.class)
+ *     public void createOrder(OrderDTO orderDTO) {
+ *         // 创建订单（写操作）
+ *         OrderEntity order = convertToEntity(orderDTO);
+ *         orderRepository.insert(order);
+ *
+ *         // 更新库存（写操作）
+ *         productRepository.updateStock(orderDTO.getProductId(), orderDTO.getQuantity());
+ *     }
+ *
+ *     // 查询方法切换到从库
+ *     @GXDataSource("slave")
+ *     public List<OrderEntity> getRecentOrders(Long userId) {
+ *         return orderRepository.findRecentByUserId(userId);
+ *     }
+ * }
+ * </pre>
+ * <p>
+ * 6. 分库场景（按业务领域分库）：
+ * <pre>
+ * // 用户服务使用用户库
+ * @Service
+ * @GXDataSource("user_db")
+ * public class UserServiceImpl implements UserService {
+ *     // 用户相关操作
+ * }
+ *
+ * // 订单服务使用订单库
+ * @Service
+ * @GXDataSource("order_db")
+ * public class OrderServiceImpl implements OrderService {
+ *     // 订单相关操作
+ * }
+ *
+ * // 支付服务使用支付库
+ * @Service
+ * @GXDataSource("payment_db")
+ * public class PaymentServiceImpl implements PaymentService {
+ *     // 支付相关操作
+ * }
+ * </pre>
+ * <p>
+ * 7. 多租户场景（动态数据源）：
+ * <pre>
+ * @Service
+ * public class MultiTenantServiceImpl implements MultiTenantService {
+ *     @Autowired
+ *     private TenantRepository tenantRepository;
+ *
+ *     // 根据租户ID动态切换数据源
+ *     @GXDataSource("#tenantId")
+ *     public TenantData getTenantData(String tenantId) {
+ *         // 使用租户特定的数据源执行操作
+ *         return tenantRepository.findByTenantId(tenantId);
+ *     }
+ * }
+ * </pre>
  * <p>
  * 内存安全优化：
  * 1. 使用基于软引用(SoftReference)的缓存机制，在内存不足时允许JVM回收缓存对象
@@ -105,6 +173,16 @@ import java.util.stream.Collectors;
  * 5. 缓存条目使用不可变对象，保证线程安全
  * 6. 使用基于时间的缓存淘汰策略，优先清理最早创建的缓存条目
  * 7. 定期记录缓存命中率统计信息，便于性能监控和调优
+ * 8. 采用栈结构管理数据源切换，支持嵌套调用场景
+ * 9. 异常处理机制确保在所有执行路径上正确恢复数据源
+ * 10. 使用AtomicInteger等线程安全的计数器，避免并发更新问题
+ * <p>
+ * 性能优化建议：
+ * 1. 合理设置缓存大小，根据应用规模和类数量调整MAX_CACHE_SIZE
+ * 2. 避免频繁切换数据源，尽量在较粗粒度的级别（如类级别）设置数据源
+ * 3. 定期监控缓存命中率，根据实际情况调整缓存策略
+ * 4. 在高并发场景下，考虑使用更细粒度的锁或无锁算法优化性能
+ * 5. 对于频繁访问但很少变化的类，可以考虑使用更强引用的缓存机制
  */
 @Aspect
 @Component
@@ -201,6 +279,7 @@ public class GXDataSourceAspect {
      * 2. 采用软引用机制，在内存压力大时允许JVM回收缓存对象
      * 3. 统计缓存命中率，便于监控和调优
      * 4. 递归查找时优先使用缓存结果，减少递归深度
+     * 5. 增强异常处理，确保在异常情况下也能返回有效结果
      *
      * @param targetClass 目标类
      * @return 数据源缓存条目，包含是否需要切换数据源和数据源值
@@ -311,7 +390,7 @@ public class GXDataSourceAspect {
             if (currentCount > MAX_CACHE_SIZE * 0.9) {
                 log.warn("数据源注解缓存大小({})接近限制({}), 即将触发清理", currentCount, MAX_CACHE_SIZE);
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             // 捕获并记录异常，但不影响主流程
             log.error("缓存数据源注解信息时发生异常: {}", e.getMessage(), e);
         }
@@ -413,7 +492,7 @@ public class GXDataSourceAspect {
                             MAX_CACHE_SIZE, oldestEntries.size(), CACHE_COUNT.get());
                 }
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             // 捕获并记录异常，但不影响主流程
             log.error("数据源缓存清理过程中发生异常: {}", e.getMessage(), e);
         }
@@ -447,6 +526,7 @@ public class GXDataSourceAspect {
             throw new IllegalArgumentException("切点对象不能为null");
         }
 
+        // 验证切点签名类型
         if (!(point.getSignature() instanceof MethodSignature signature)) {
             log.error("切点签名类型不是MethodSignature，无法执行数据源切换");
             return point.proceed();
@@ -456,8 +536,9 @@ public class GXDataSourceAspect {
         Method method = signature.getMethod();
         String methodName = method.getName();
         String className = targetClass.getName();
+        String threadName = Thread.currentThread().getName();
 
-        log.trace("开始处理数据源切换，类: {}, 方法: {}", className, methodName);
+        log.trace("开始处理数据源切换，，线程: {},类: {}, 方法: {}", threadName, className, methodName);
 
         // 检查是否需要切换数据源
         boolean needSwitchDataSource = false;
@@ -482,8 +563,6 @@ public class GXDataSourceAspect {
             }
         }
 
-        // 如果需要切换数据源，则进行切换
-        String threadName = Thread.currentThread().getName();
         if (needSwitchDataSource) {
             // 获取当前数据源，用于日志记录
             String previousDataSource = GXDynamicContextHolder.peek();

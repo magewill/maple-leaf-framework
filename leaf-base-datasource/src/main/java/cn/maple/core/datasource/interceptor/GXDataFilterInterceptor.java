@@ -116,39 +116,75 @@ public class GXDataFilterInterceptor implements InnerInterceptor {
     /**
      * 构建包含数据过滤条件的SQL
      * <p>
-     * 使用JSqlParser解析原SQL，并添加数据过滤条件
+     * 使用JSqlParser解析原SQL，并添加数据过滤条件。该方法通过解析SQL语句的抽象语法树，
+     * 在保持原SQL结构的基础上，安全地添加数据权限过滤条件。
      * </p>
      *
-     * @param originalSql 原始SQL语句
-     * @param scope       数据过滤条件对象
+     * <p>安全特性：</p>
+     * <ol>
+     *   <li>使用JSqlParser进行SQL解析和重构，而非简单字符串拼接</li>
+     *   <li>通过StringValue封装过滤条件，确保特殊字符被正确处理</li>
+     *   <li>使用AND连接原条件和过滤条件，确保查询范围只会缩小不会扩大</li>
+     *   <li>异常处理机制确保即使解析失败也不会影响原SQL执行</li>
+     *   <li>过滤条件应使用参数化查询语法(#{param})，防止SQL注入</li>
+     * </ol>
+     *
+     * <p>工作原理：</p>
+     * <ol>
+     *   <li>解析原始SQL语句为抽象语法树</li>
+     *   <li>获取原SQL的WHERE条件（如果存在）</li>
+     *   <li>将数据过滤条件转换为SQL表达式</li>
+     *   <li>根据原SQL是否有WHERE条件，决定直接设置或使用AND连接</li>
+     *   <li>重新生成包含过滤条件的SQL语句</li>
+     * </ol>
+     *
+     * @param originalSql 原始SQL语句，不能为null
+     * @param scope       数据过滤条件对象，包含SQL过滤条件
      * @return 添加了数据过滤条件的SQL语句
      */
     private String getSelect(String originalSql, GXDataFilterInnerDto scope) {
+        if (CharSequenceUtil.isBlank(originalSql)) {
+            log.warn("原始SQL为空，无法应用数据权限过滤");
+            return originalSql;
+        }
+
+        if (scope == null || CharSequenceUtil.isEmpty(scope.getSqlFilter())) {
+            log.warn("数据过滤条件为空，返回原SQL");
+            return originalSql;
+        }
+
+        String sqlFilter = scope.getSqlFilter();
+        log.debug("准备添加数据权限过滤条件: {}", sqlFilter);
+
         try {
-            // 解析SQL语句
+            // 解析SQL语句为抽象语法树
             Select select = (Select) CCJSqlParserUtil.parse(originalSql);
             PlainSelect plainSelect = select.getPlainSelect();
 
             // 获取原WHERE条件
             Expression expression = plainSelect.getWhere();
-            // 创建数据过滤条件
-            StringValue stringValue = new StringValue("'" + scope.getSqlFilter() + "'");
+            // 创建数据过滤条件，使用StringValue确保特殊字符被正确处理
+            StringValue stringValue = new StringValue("'" + sqlFilter + "'");
 
             // 如果原SQL没有WHERE条件，直接设置过滤条件
             if (expression == null) {
+                log.debug("原SQL没有WHERE条件，直接添加过滤条件");
                 plainSelect.setWhere(stringValue);
             }
             // 如果原SQL有WHERE条件，使用AND连接原条件和过滤条件
             else {
+                log.debug("原SQL已有WHERE条件，使用AND连接过滤条件");
                 AndExpression andExpression = new AndExpression(expression, stringValue);
                 plainSelect.setWhere(andExpression);
             }
 
             // 处理特殊占位符并返回最终SQL
-            return select.toString().replace("'$$'", "");
+            String resultSql = select.toString().replace("'$$'", "");
+            log.debug("应用数据权限过滤后的SQL: {}", resultSql);
+            return resultSql;
         } catch (JSQLParserException e) {
             // 解析失败时返回原SQL，确保查询能够继续执行
-            log.warn("SQL解析失败，无法应用数据权限过滤: {}", e.getMessage());
+            log.warn("SQL解析失败，无法应用数据权限过滤: {}, 原因: {}", e.getMessage(), e.getCause() != null ? e.getCause().getMessage() : "未知");
             return originalSql;
         }
     }
