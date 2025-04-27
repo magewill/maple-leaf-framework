@@ -33,11 +33,11 @@ import java.util.Map;
  * // 在Spring Boot应用中自动装配
  * @Autowired
  * private ObjectMapper objectMapper;
- * 
+ *
  * // 使用配置的ObjectMapper进行序列化
  * String json = objectMapper.writeValueAsString(someObject);
  * </pre>
- * 
+ *
  * @author britton chen <britton@126.com>
  */
 @Component
@@ -64,6 +64,25 @@ public class GXFrameworkConfig {
     public ObjectMapper objectMapper(Jackson2ObjectMapperBuilder builder) {
         final ObjectMapper objectMapper = builder.createXmlMapper(false).build();
         final SerializerProvider serializerProvider = objectMapper.getSerializerProvider();
+        // 1. 首先，我们创建了一个匿名内部类，实现了JsonSerializer接口。
+        // 2. 然后，我们重写了serialize()方法，该方法在序列化时被调用。
+        // 3. 在serialize()方法中，我们首先获取了当前字段的名称，
+        //    然后使用jsonGenerator.currentValue()方法获取当前值。  
+        // 4. 接着，我们判断了当前值是否为null。如果是null，
+        //    我们使用jsonGenerator.writeNull()方法将null值写入JSON。
+        // 5. 如果当前值不为null，我们使用field.getType()方法获取字段的类型。
+        // 6. 然后，我们使用if-else语句判断字段类型。
+        // 7. 如果字段类型是CharSequence（如String），
+        //    我们使用jsonGenerator.writeString("")方法将空字符串写入JSON。 
+        // 8. 如果字段类型是Collection（如List），
+        //    我们使用jsonGenerator.writeStartArray()和jsonGenerator.writeEndArray()方法将空数组写入JSON。
+        // 9. 如果字段类型是Map（如HashMap），
+        //    我们使用jsonGenerator.writeStartObject()和jsonGenerator.writeEndObject()方法将空对象写入JSON。    
+        // 10. 如果字段类型是其他类型，我们使用jsonGenerator.writeNull()方法将null值写入JSON。
+        // 11. 最后，我们返回配置好的ObjectMapper实例。
+        // 这样，我们就完成了对ObjectMapper的配置，
+        // 并实现了对null值的自定义处理策略。
+        // 注：如果字段类型是其他类型，我们使用jsonGenerator.writeNull()方法将null值写入JSON。
         serializerProvider.setNullValueSerializer(new JsonSerializer<>() {
             @Override
             public void serialize(Object o, JsonGenerator jsonGenerator, SerializerProvider serializerProvider) throws IOException {
@@ -76,7 +95,7 @@ public class GXFrameworkConfig {
                             jsonGenerator.writeNull();
                             return;
                         }
-                        
+
                         // 反射获取字段类型
                         Field field = currentValue.getClass().getDeclaredField(fieldName);
                         if (CharSequence.class.isAssignableFrom(field.getType())) {
@@ -128,6 +147,12 @@ public class GXFrameworkConfig {
     @Bean
     public LocalValidatorFactoryBean localValidatorFactoryBean() {
         LocalValidatorFactoryBean bean = new LocalValidatorFactoryBean();
+        // 1. 首先，我们创建了一个LocalValidatorFactoryBean实例。
+        // 2. 然后，我们使用getValidationPropertyMap()方法获取一个Map对象，
+        //    该Map对象用于存储验证器的属性。
+        // 3. 接着，我们使用put()方法将"hibernate.validator.fail_fast"属性设置为"true"。
+        // 4. 最后，我们返回配置好的LocalValidatorFactoryBean实例。
+        // 这样，我们就完成了对验证器的配置，将快速失败模式设置为"true"。
         bean.getValidationPropertyMap().put("hibernate.validator.fail_fast", "true");
         return bean;
     }
