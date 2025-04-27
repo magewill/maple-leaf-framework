@@ -92,28 +92,28 @@ import java.util.Objects;
  * public class UserEntity implements Serializable {
  *     @TableId
  *     private Long id;
- *     
+ *
  *     private String username;
- *     
+ *
  *     private String email;
- *     
+ *
  *     // 乐观锁版本号字段
  *     @Version
  *     private Integer version;
- *     
+ *
  *     // 多租户字段
  *     private Long tenantId;
  * }
- * 
+ *
  * // 2. 在Service中使用
  * @Service
  * public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> implements UserService {
- *     
+ *
  *     // 分页查询（自动应用租户隔离和数据权限）
  *     public IPage<UserEntity> getUserList(Page<UserEntity> page, Map<String, Object> params) {
  *         return baseMapper.selectPage(page, new QueryWrapper<UserEntity>().allEq(params));
  *     }
- *     
+ *
  *     // 更新（自动应用乐观锁和租户隔离）
  *     public boolean updateUser(UserEntity user) {
  *         return updateById(user); // 版本号不匹配时会更新失败
@@ -208,19 +208,6 @@ public class GXMyBatisPlusConfig {
         }
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
 
-        // 添加数据过滤拦截器，用于实现自定义数据过滤逻辑
-        interceptor.addInnerInterceptor(new GXDataFilterInterceptor());
-
-        // 开启分页插件，设置数据库类型为MySQL
-        PaginationInnerInterceptor paginationInnerInterceptor = new PaginationInnerInterceptor(DbType.MYSQL);
-        // 关闭优化JOIN查询，避免某些复杂查询场景下的问题
-        paginationInnerInterceptor.setOptimizeJoin(false);
-        interceptor.addInnerInterceptor(paginationInnerInterceptor);
-
-        // 开启防止全表更新与删除插件，避免误操作导致的数据灾难
-        // 该插件会阻止没有WHERE条件的UPDATE和DELETE操作
-        interceptor.addInnerInterceptor(new BlockAttackInnerInterceptor());
-
         // 根据配置决定是否开启乐观锁插件
         Boolean optimisticLocker = GXCommonUtils.getEnvironmentValue("maple.framework.enable.optimistic-locker", Boolean.class, Boolean.TRUE);
         if (optimisticLocker) {
@@ -244,9 +231,22 @@ public class GXMyBatisPlusConfig {
             interceptor.addInnerInterceptor(new TenantLineInnerInterceptor(new GXTenantLineHandler()));
         }
 
+        // 添加数据过滤拦截器，用于实现自定义数据过滤逻辑
+        interceptor.addInnerInterceptor(new GXDataFilterInterceptor());
+
+        // 开启防止全表更新与删除插件，避免误操作导致的数据灾难
+        // 该插件会阻止没有WHERE条件的UPDATE和DELETE操作
+        interceptor.addInnerInterceptor(new BlockAttackInnerInterceptor());
+
         // 添加动态表名插件，支持动态修改表名，适用于分表场景
         DynamicTableNameInnerInterceptor dynamicTableNameInnerInterceptor = new DynamicTableNameInnerInterceptor((sql, tableName) -> tableName);
         interceptor.addInnerInterceptor(dynamicTableNameInnerInterceptor);
+
+        // 开启分页插件，设置数据库类型为MySQL
+        PaginationInnerInterceptor paginationInnerInterceptor = new PaginationInnerInterceptor(DbType.MYSQL);
+        // 关闭优化JOIN查询，避免某些复杂查询场景下的问题
+        paginationInnerInterceptor.setOptimizeJoin(false);
+        interceptor.addInnerInterceptor(paginationInnerInterceptor);
 
         return interceptor;
     }
