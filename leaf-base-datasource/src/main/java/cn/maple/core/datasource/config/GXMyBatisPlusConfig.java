@@ -208,19 +208,18 @@ public class GXMyBatisPlusConfig {
         }
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
 
-        // 根据配置决定是否开启乐观锁插件
-        Boolean optimisticLocker = GXCommonUtils.getEnvironmentValue("maple.framework.enable.optimistic-locker", Boolean.class, Boolean.TRUE);
-        if (optimisticLocker) {
-            // 乐观锁插件，通过@Version注解实现乐观锁机制
-            interceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
-        }
-
         // 根据配置决定是否开启数据权限处理
         Boolean enableDataPermission = GXCommonUtils.getEnvironmentValue("maple.framework.enable.data-permission", Boolean.class, Boolean.FALSE);
         if (Boolean.TRUE.equals(enableDataPermission)) {
             // 获取数据权限处理器并添加到拦截器中
             DataPermissionHandler dataPermissionHandler = GXSpringContextUtils.getBean(DataPermissionHandler.class);
             interceptor.addInnerInterceptor(new DataPermissionInterceptor(dataPermissionHandler));
+        }
+
+        if (Boolean.FALSE.equals(enableDataPermission)) {
+            log.info("添加GXDataFilterInterceptor拦截器");
+            // 添加数据过滤拦截器，用于实现自定义数据过滤逻辑
+            interceptor.addInnerInterceptor(new GXDataFilterInterceptor());
         }
 
         // 根据配置决定是否开启多租户插件
@@ -231,13 +230,6 @@ public class GXMyBatisPlusConfig {
             interceptor.addInnerInterceptor(new TenantLineInnerInterceptor(new GXTenantLineHandler()));
         }
 
-        // 添加数据过滤拦截器，用于实现自定义数据过滤逻辑
-        interceptor.addInnerInterceptor(new GXDataFilterInterceptor());
-
-        // 开启防止全表更新与删除插件，避免误操作导致的数据灾难
-        // 该插件会阻止没有WHERE条件的UPDATE和DELETE操作
-        interceptor.addInnerInterceptor(new BlockAttackInnerInterceptor());
-
         // 添加动态表名插件，支持动态修改表名，适用于分表场景
         DynamicTableNameInnerInterceptor dynamicTableNameInnerInterceptor = new DynamicTableNameInnerInterceptor((sql, tableName) -> tableName);
         interceptor.addInnerInterceptor(dynamicTableNameInnerInterceptor);
@@ -247,6 +239,17 @@ public class GXMyBatisPlusConfig {
         // 关闭优化JOIN查询，避免某些复杂查询场景下的问题
         paginationInnerInterceptor.setOptimizeJoin(false);
         interceptor.addInnerInterceptor(paginationInnerInterceptor);
+
+        // 根据配置决定是否开启乐观锁插件
+        Boolean optimisticLocker = GXCommonUtils.getEnvironmentValue("maple.framework.enable.optimistic-locker", Boolean.class, Boolean.TRUE);
+        if (optimisticLocker) {
+            // 乐观锁插件，通过@Version注解实现乐观锁机制
+            interceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
+        }
+
+        // 开启防止全表更新与删除插件，避免误操作导致的数据灾难
+        // 该插件会阻止没有WHERE条件的UPDATE和DELETE操作
+        interceptor.addInnerInterceptor(new BlockAttackInnerInterceptor());
 
         return interceptor;
     }
