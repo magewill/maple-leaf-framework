@@ -47,6 +47,7 @@ public class GXFilterConfig {
      * @return 配置好的FilterRegistrationBean实例
      */
     @Bean
+    @ConditionalOnExpression("${maple.framework.web.filter.xss-filter.enabled:true}")
     public FilterRegistrationBean<GXXssFilter> xssFilterRegistration() {
         FilterRegistrationBean<GXXssFilter> registration = new FilterRegistrationBean<>();
         // 只处理原始请求，不处理转发和包含的请求
@@ -87,7 +88,7 @@ public class GXFilterConfig {
      * @return 配置好的FilterRegistrationBean实例
      */
     @Bean
-    @ConditionalOnExpression("${maple.web.filter.request-context-filter.enabled:false}")
+    @ConditionalOnExpression("${maple.framework.web.filter.request-context-filter.enabled:false}")
     RequestContextFilter requestContextFilter() {
         log.info("RequestContextFilter已配置，子线程也可以获取上下文对象");
         RequestContextFilter filter = new RequestContextFilter();
@@ -119,7 +120,7 @@ public class GXFilterConfig {
      * @return 配置好的FilterRegistrationBean实例
      */
     @Bean
-    @ConditionalOnExpression("${maple.web.filter.servlet-request-path-filter.enabled:false}")
+    @ConditionalOnExpression("${maple.framework.web.filter.servlet-request-path-filter.enabled:false}")
     ServletRequestPathFilter servletRequestPathFilter() {
         log.info("ServletRequestPathFilter已配置，子线程也可以获取请求路径");
         ServletRequestPathFilter filter = new ServletRequestPathFilter();
@@ -147,7 +148,7 @@ public class GXFilterConfig {
      * @return 配置好的FilterRegistrationBean实例
      */
     @Bean
-    @ConditionalOnExpression("${maple.web.filter.commons-request-logging-filter.enabled:false}")
+    @ConditionalOnExpression("${maple.framework.web.filter.commons-request-logging-filter.enabled:false}")
     CommonsRequestLoggingFilter commonsRequestLoggingFilter() {
         log.info("CommonsRequestLoggingFilter已配置，请求日志会被记录");
         CommonsRequestLoggingFilter filter = new CommonsRequestLoggingFilter();

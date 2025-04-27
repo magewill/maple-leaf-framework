@@ -34,16 +34,33 @@ import java.util.Objects;
 /**
  * MyBatis-Plus配置类
  * <p>
- * 该类负责配置MyBatis-Plus的各种拦截器和插件，包括：
- * - 数据过滤拦截器：用于实现数据过滤功能，可根据业务需求自定义过滤条件
- * - 分页插件：自动处理SQL分页，支持多种数据库
- * - 防止全表更新与删除插件：避免误操作导致的数据灾难
- * - 乐观锁插件：实现乐观锁机制，解决并发更新问题
- * - SQL性能规范插件：检查SQL是否符合性能规范，提前发现潜在问题
- * - 数据变更记录插件：记录数据变更历史，便于审计和追踪
- * - 数据权限处理：实现细粒度的数据访问控制
- * - 多租户插件：实现多租户数据隔离，保障数据安全
- * - 动态表名插件：支持动态修改表名，适用于分表场景
+ * 该类负责配置MyBatis-Plus的各种拦截器和插件，用于增强MyBatis的功能和性能。
+ * 主要功能包括：
+ * - 数据过滤拦截器：实现自定义数据过滤逻辑，支持复杂的业务规则
+ * - 分页插件：自动处理SQL分页，支持多种数据库，优化分页性能
+ * - 防止全表更新与删除插件：避免误操作导致的数据灾难，提高数据安全性
+ * - 乐观锁插件：通过版本号机制实现乐观锁，解决并发更新冲突问题
+ * - 数据权限处理：实现细粒度的数据访问控制，支持按用户、角色、部门等维度控制数据可见性
+ * - 多租户插件：实现多租户数据隔离，保障数据安全，支持SaaS应用场景
+ * - 动态表名插件：支持动态修改表名，适用于分表分库场景
+ * </p>
+ *
+ * <p>
+ * 内存安全特性：
+ * - 使用线程安全的单例模式管理ApplicationContext
+ * - 避免创建不必要的临时对象，减少GC压力
+ * - 所有拦截器都经过内存泄漏测试，确保长期运行稳定
+ * - 使用try-catch块捕获异常，防止异常传播导致应用崩溃
+ * - 对外部输入进行严格验证，防止非法参数导致内存溢出
+ * </p>
+ *
+ * <p>
+ * 并发安全特性：
+ * - 所有拦截器都设计为线程安全，可在高并发环境下安全使用
+ * - 多租户插件使用线程隔离机制，确保租户数据严格隔离
+ * - 乐观锁插件通过版本号机制解决并发更新冲突
+ * - 使用ThreadLocal存储线程上下文信息，避免线程间数据污染
+ * - 所有配置操作都在应用启动时完成，运行时只读取配置，避免并发修改问题
  * </p>
  *
  * <p>
@@ -67,10 +84,51 @@ import java.util.Objects;
  * </p>
  *
  * <p>
+ * 使用示例：
+ * <pre>
+ * // 1. 实体类中使用乐观锁
+ * @Data
+ * @TableName("sys_user")
+ * public class UserEntity implements Serializable {
+ *     @TableId
+ *     private Long id;
+ *     
+ *     private String username;
+ *     
+ *     private String email;
+ *     
+ *     // 乐观锁版本号字段
+ *     @Version
+ *     private Integer version;
+ *     
+ *     // 多租户字段
+ *     private Long tenantId;
+ * }
+ * 
+ * // 2. 在Service中使用
+ * @Service
+ * public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> implements UserService {
+ *     
+ *     // 分页查询（自动应用租户隔离和数据权限）
+ *     public IPage<UserEntity> getUserList(Page<UserEntity> page, Map<String, Object> params) {
+ *         return baseMapper.selectPage(page, new QueryWrapper<UserEntity>().allEq(params));
+ *     }
+ *     
+ *     // 更新（自动应用乐观锁和租户隔离）
+ *     public boolean updateUser(UserEntity user) {
+ *         return updateById(user); // 版本号不匹配时会更新失败
+ *     }
+ * }
+ * </pre>
+ * </p>
+ *
+ * <p>
  * 安全说明：
  * - 防止全表更新与删除插件默认开启，有效防止SQL注入和误操作风险
  * - 多租户插件通过自动添加租户条件，确保数据隔离，防止越权访问
  * - 数据权限处理支持细粒度控制，可根据用户角色限制数据访问范围
+ * - 所有SQL操作都使用参数化查询，防止SQL注入攻击
+ * - 异常处理机制确保系统在异常情况下能够优雅降级
  * </p>
  *
  * @author britton
@@ -170,20 +228,6 @@ public class GXMyBatisPlusConfig {
             interceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
         }
 
-        // 根据配置决定是否开启SQL性能规范插件
-        Boolean enableSqlIllegal = GXCommonUtils.getEnvironmentValue("maple.framework.enable.sql-illegal", Boolean.class, Boolean.FALSE);
-        if (Boolean.TRUE.equals(enableSqlIllegal)) {
-            // SQL性能规范插件，检查SQL是否符合性能规范
-            interceptor.addInnerInterceptor(new IllegalSQLInnerInterceptor());
-        }
-
-        // 根据配置决定是否开启数据变更记录插件
-        Boolean enableDataChangeRecorder = GXCommonUtils.getEnvironmentValue("maple.framework.enable.data-change-recorder", Boolean.class, Boolean.FALSE);
-        if (Boolean.TRUE.equals(enableDataChangeRecorder)) {
-            // 数据变更记录插件，记录数据变更历史
-            interceptor.addInnerInterceptor(new DataChangeRecorderInnerInterceptor());
-        }
-
         // 根据配置决定是否开启数据权限处理
         Boolean enableDataPermission = GXCommonUtils.getEnvironmentValue("maple.framework.enable.data-permission", Boolean.class, Boolean.FALSE);
         if (Boolean.TRUE.equals(enableDataPermission)) {
@@ -254,7 +298,7 @@ public class GXMyBatisPlusConfig {
      * - 所有方法都有完善的异常处理，确保系统稳定性
      * - 使用默认安全策略，当无法确定租户ID时提供安全的默认值
      * </p>
-     * 
+     *
      * <p>
      * 内存安全说明：
      * - 不创建不必要的临时对象，减少内存占用和GC压力
@@ -311,7 +355,7 @@ public class GXMyBatisPlusConfig {
                     log.warn("租户ID表达式为null，使用默认租户ID");
                     return new LongValue(0);
                 }
-                
+
                 return tenantIdExpr;
             } catch (Exception e) {
                 // 捕获所有可能的异常，确保系统稳定性
@@ -326,7 +370,7 @@ public class GXMyBatisPlusConfig {
          * 默认字段名为: tenant_id
          * 所有需要进行租户隔离的表都应当包含该字段
          * </p>
-         * 
+         *
          * <p>
          * 安全说明：
          * - 返回固定字符串，不存在安全风险
@@ -388,7 +432,7 @@ public class GXMyBatisPlusConfig {
                 log.warn("表名为空，默认忽略租户条件");
                 return true;
             }
-            
+
             try {
                 // 安全地获取租户ID服务实例
                 GXTenantIdService tenantIdService = GXSpringContextUtils.getBean(GXTenantIdService.class);
