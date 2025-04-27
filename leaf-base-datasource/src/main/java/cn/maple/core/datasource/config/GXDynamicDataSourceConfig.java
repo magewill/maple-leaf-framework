@@ -48,41 +48,6 @@ import java.util.Optional;
  * - 反射操作使用同步机制，避免并发问题
  * - 数据源创建过程是线程安全的，不会因为并发访问导致问题
  * </p>
- * 
- * <p>
- * 配置说明：
- * 在application.yml中配置多数据源：
- * <pre>
- * spring:
- *   datasource:
- *     dynamic:
- *       datasource:
- *         # 主库配置
- *         master:
- *           driver-class-name: com.mysql.cj.jdbc.Driver
- *           url: jdbc:mysql://localhost:3306/master_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
- *           username: root
- *           password: root
- *           # Druid连接池特有配置
- *           initial-size: 10
- *           max-active: 100
- *           min-idle: 10
- *           max-wait: 60000
- *         # 从库配置
- *         slave:
- *           driver-class-name: com.mysql.cj.jdbc.Driver
- *           url: jdbc:mysql://localhost:3307/slave_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
- *           username: root
- *           password: root
- *         # 其他业务库配置
- *         order:
- *           driver-class-name: com.mysql.cj.jdbc.Driver
- *           url: jdbc:mysql://localhost:3308/order_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
- *           username: root
- *           password: root
- * </pre>
- * </p>
- * 
  * <p>
  * 使用示例1：在启动类上指定默认数据源
  * <pre>
