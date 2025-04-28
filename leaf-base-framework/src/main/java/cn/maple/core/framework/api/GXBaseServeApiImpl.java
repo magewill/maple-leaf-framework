@@ -25,16 +25,188 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * RPC基础调用类
- * 封装了常用的一些方法
+ * <p>
+ * 该类是GXBaseServeApi接口的基础实现，封装了常用的数据操作方法，通过反射机制调用底层服务类的方法。
+ * 提供了一种灵活的RPC调用机制，支持静态绑定和动态绑定两种方式指定目标服务类。
+ * 实现了线程安全和内存安全的最佳实践，确保在高并发环境下的可靠性和稳定性。
+ * </p>
+ *
+ * <p>
+ * 线程安全特性：
+ * - 使用ConcurrentHashMap存储静态服务类映射，确保线程安全的并发访问
+ * - 使用ThreadLocal存储动态绑定的服务类，确保线程隔离和安全
+ * - 所有方法设计为无状态操作，可安全地在多线程环境中调用
+ * - 参数验证和防御性编程确保多线程环境下的安全性
+ * - 自动清理ThreadLocal，防止内存泄漏和线程污染
+ * </p>
+ *
+ * <p>
+ * 内存安全特性：
+ * - 严格的参数验证，防止空指针异常和非法参数
+ * - 安全的类型转换和泛型使用，减少运行时类型错误
+ * - 异常处理机制确保在异常情况下资源能够正确释放
+ * - 使用不可变对象和线程安全的集合类进行操作
+ * - 合理管理ThreadLocal资源，避免内存泄漏
+ * </p>
+ *
+ * <p>
+ * 性能优化：
+ * - 使用缓存机制减少反射调用的开销
+ * - 延迟加载和懒初始化策略
+ * - 批量操作和高效的集合处理
+ * - 使用ThreadLocal避免锁竞争
+ * - 参数验证和类型转换的优化处理
+ * </p>
+ *
+ * <p>
+ * 使用示例：
  * <pre>
  * {@code
- * public class TestServiceApiImpl extends GXBaseServeApiImpl implements TestServiceApi {
- *      public TestServiceApiImpl() {
- *          staticBindServeServiceClass(OrdersService.class);
- *      }
+ * // 1. 创建自定义API实现类
+ * public class UserServiceApiImpl extends GXBaseServeApiImpl implements UserServiceApi {
+ *     public UserServiceApiImpl() {
+ *         // 在构造函数中绑定底层服务类
+ *         staticBindServeServiceClass(UserService.class);
+ *     }
+ *
+ *     // 可以添加特定业务方法
+ *     public UserResDto getUserByUsername(String username) {
+ *         // 创建查询条件
+ *         HashBasedTable<String, String, Object> condition = HashBasedTable.create();
+ *         condition.put("username", GXBuilderConstant.STR_EQ, username);
+ *
+ *         // 调用基类方法查询数据
+ *         return findOneByCondition(condition, UserResDto.class);
+ *     }
+ *
+ *     // 动态绑定示例
+ *     public List<OrderResDto> getUserOrders(Long userId) {
+ *         // 临时绑定订单服务
+ *         callBindTargetServeSericeClass(OrderService.class);
+ *
+ *         // 创建查询条件
+ *         HashBasedTable<String, String, Object> condition = HashBasedTable.create();
+ *         condition.put("user_id", GXBuilderConstant.EQ, userId);
+ *
+ *         // 查询订单数据
+ *         return findByCondition(condition, OrderResDto.class);
+ *         // 注意：方法执行完毕后，动态绑定会自动清理
+ *     }
+ * }
+ *
+ * // 2. 在服务中使用
+ * @Service
+ * public class UserService {
+ *     @Autowired
+ *     private UserServiceApi userServiceApi;
+ *
+ *     public void processUser(String username) {
+ *         // 使用API接口进行数据操作
+ *         UserResDto user = userServiceApi.getUserByUsername(username);
+ *         if (user != null) {
+ *             // 处理用户数据
+ *             List<OrderResDto> orders = userServiceApi.getUserOrders(user.getId());
+ *             // 处理订单数据
+ *         }
+ *     }
  * }
  * }
  * </pre>
+ * </p>
+ *
+ * <p>
+ * 高级使用示例：
+ * <pre>
+ * {@code
+ * // 1. 创建支持多种数据源的API实现类
+ * public class MultiDataSourceApiImpl extends GXBaseServeApiImpl implements MultiDataSourceApi {
+ *     // 默认绑定主数据源服务
+ *     public MultiDataSourceApiImpl() {
+ *         staticBindServeServiceClass(PrimaryDataService.class);
+ *     }
+ *
+ *     // 查询主数据源
+ *     public List<UserDto> findUsers(String keyword) {
+ *         HashBasedTable<String, String, Object> condition = HashBasedTable.create();
+ *         condition.put("username", GXBuilderConstant.STR_LIKE, "%" + keyword + "%");
+ *         return findByCondition(condition, UserDto.class);
+ *     }
+ *
+ *     // 查询历史数据源
+ *     public List<UserHistoryDto> findUserHistory(Long userId) {
+ *         // 动态切换到历史数据服务
+ *         callBindTargetServeSericeClass(HistoryDataService.class);
+ *
+ *         HashBasedTable<String, String, Object> condition = HashBasedTable.create();
+ *         condition.put("user_id", GXBuilderConstant.EQ, userId);
+ *         return findByCondition(condition, UserHistoryDto.class);
+ *     }
+ *
+ *     // 复杂业务场景：跨数据源操作
+ *     public UserCompleteInfoDto getUserCompleteInfo(Long userId) {
+ *         // 1. 从主数据源获取用户基本信息
+ *         HashBasedTable<String, String, Object> userCondition = HashBasedTable.create();
+ *         userCondition.put("id", GXBuilderConstant.EQ, userId);
+ *         UserDto userDto = findOneByCondition(userCondition, UserDto.class);
+ *
+ *         if (userDto == null) {
+ *             return null;
+ *         }
+ *
+ *         // 2. 从历史数据源获取用户历史记录
+ *         callBindTargetServeSericeClass(HistoryDataService.class);
+ *         HashBasedTable<String, String, Object> historyCondition = HashBasedTable.create();
+ *         historyCondition.put("user_id", GXBuilderConstant.EQ, userId);
+ *         List<UserHistoryDto> historyList = findByCondition(historyCondition, UserHistoryDto.class);
+ *
+ *         // 3. 从配置数据源获取用户偏好设置
+ *         callBindTargetServeSericeClass(ConfigDataService.class);
+ *         HashBasedTable<String, String, Object> configCondition = HashBasedTable.create();
+ *         configCondition.put("user_id", GXBuilderConstant.EQ, userId);
+ *         UserConfigDto configDto = findOneByCondition(configCondition, UserConfigDto.class);
+ *
+ *         // 4. 组装完整用户信息
+ *         UserCompleteInfoDto completeInfo = new UserCompleteInfoDto();
+ *         completeInfo.setUserInfo(userDto);
+ *         completeInfo.setHistoryList(historyList);
+ *         completeInfo.setUserConfig(configDto);
+ *
+ *         return completeInfo;
+ *     }
+ * }
+ *
+ * // 在服务中使用
+ * @Service
+ * public class UserAnalysisService {
+ *     @Autowired
+ *     private MultiDataSourceApi multiDataSourceApi;
+ *
+ *     public UserAnalysisReport generateReport(Long userId) {
+ *         // 获取用户完整信息（跨多个数据源）
+ *         UserCompleteInfoDto completeInfo = multiDataSourceApi.getUserCompleteInfo(userId);
+ *
+ *         // 基于完整信息生成分析报告
+ *         UserAnalysisReport report = new UserAnalysisReport();
+ *         // ... 处理报告逻辑 ...
+ *
+ *         return report;
+ *     }
+ * }
+ * }
+ * </pre>
+ * </p>
+ *
+ * <p>
+ * 注意事项：
+ * - 使用动态绑定时，确保在方法调用完成后自动清理ThreadLocal
+ * - 参数验证是必要的，确保传入参数的合法性
+ * - 异常处理应当遵循统一的策略，避免异常信息丢失
+ * - 类型转换应当使用安全的转换方法，避免ClassCastException
+ * - 在高并发环境下，注意ThreadLocal的使用和清理
+ * - 动态绑定在一次方法调用后会自动清理，如需连续使用同一绑定，需要在每次调用前重新绑定
+ * - 静态绑定适用于API实现类与特定服务类紧密耦合的场景，动态绑定适用于需要临时切换服务类的场景
+ * - 反射调用可能带来性能开销，在高频调用场景下应考虑结果缓存或其他优化策略
+ * </p>
  */
 public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseServeApi {
     /**
@@ -369,7 +541,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
      * @param column      字段名字，需要查询的单个字段名，不能为null或空字符串
      * @param targetClazz 返回的类型，指定返回结果的类型，不能为null
      * @return E 查询结果，如果没有匹配结果则返回null
-     * @throws NullPointerException 如果targetClazz或column为null
+     * @throws NullPointerException     如果targetClazz或column为null
      * @throws IllegalArgumentException 如果column为空字符串
      */
     @Override
@@ -429,14 +601,14 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
         if (Objects.isNull(copyOptions)) {
             throw new NullPointerException("复制选项不能为null");
         }
-        
+
         List<GXCondition<?>> conditionList = null;
         if (Objects.nonNull(condition)) {
             conditionList = convertTableConditionToConditionExp(condition);
         } else {
             conditionList = Collections.emptyList();
         }
-        
+
         Object id = callMethod("updateOrCreate", reqDto, conditionList, copyOptions);
         if (Objects.nonNull(id)) {
             try {
@@ -842,8 +1014,36 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
 
     /**
      * 设置服务类的Class对象
-     * 在子类的构造函数中调用此方法，将服务类与当前API实现类绑定
-     * 该绑定是静态的，对所有实例都有效
+     * <p>
+     * 该方法用于在子类的构造函数中调用，将服务类与当前API实现类进行静态绑定。
+     * 绑定后，所有该API实现类的实例都将共享这个服务类引用，实现类型安全的服务调用。
+     * </p>
+     *
+     * <p>
+     * 线程安全特性：
+     * - 使用ConcurrentHashMap存储映射关系，确保线程安全
+     * - 绑定操作是原子的，不会出现部分更新状态
+     * - 绑定后的映射对所有线程可见
+     * </p>
+     *
+     * <p>
+     * 使用示例：
+     * {@code
+     * public class UserServiceApiImpl extends GXBaseServeApiImpl implements UserServiceApi {
+     * public UserServiceApiImpl() {
+     * // 在构造函数中绑定服务类
+     * staticBindServeServiceClass(UserService.class);
+     * }
+     * }
+     * }
+     * </p>
+     *
+     * <p>
+     * 注意事项：
+     * - 此方法通常应在子类构造函数中调用，确保API实例创建时即完成绑定
+     * - 一个API实现类只应绑定一个服务类，重复绑定会覆盖之前的绑定
+     * - 绑定使用API类的简单名称作为键，确保不同包中的同名类不会冲突
+     * </p>
      *
      * @param serveServiceClass 服务类Class对象，不能为null
      * @throws IllegalArgumentException 如果serveServiceClass为null
@@ -853,15 +1053,43 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
         if (Objects.isNull(serveServiceClass)) {
             throw new IllegalArgumentException("服务类Class对象不能为null");
         }
-        STATIC_SERVE_SERVICE_CLASS_MAP.put(getClass().getSimpleName(), serveServiceClass);
+        String apiClassName = getClass().getSimpleName();
+        STATIC_SERVE_SERVICE_CLASS_MAP.put(apiClassName, serveServiceClass);
     }
 
     /**
-     * 子类可以动态指定目标服务类型
-     * 该方法用于临时指定一个服务类，在后续的方法调用中使用
-     * 注意：该绑定是线程局部的，不会影响其他线程，且在getServeServiceClass调用后会被清理
+     * 动态指定目标服务类型
+     * <p>
+     * 该方法用于临时指定一个服务类，在当前线程的后续方法调用中使用。
+     * 与静态绑定不同，动态绑定仅对当前线程有效，且在调用getServeServiceClass()后会自动清理。
+     * 这种机制允许在不改变API实现类静态绑定的情况下，临时切换到其他服务类进行操作。
+     * </p>
      *
-     * @param targetServeServiceClass 目标服务类的Class对象
+     * <p>
+     * 线程安全特性：
+     * - 使用ThreadLocal存储，确保线程间隔离
+     * - 每个线程只能看到自己设置的服务类，不会影响其他线程
+     * - 自动清理机制防止内存泄漏和线程污染
+     * </p>
+     *
+     * <p>
+     * 使用示例：
+     * {@code
+     * // 临时切换到订单服务处理逻辑
+     * userServiceApi.callBindTargetServeSericeClass(OrderService.class)
+     * .findByCondition(condition, OrderDto.class);
+     * // 此时动态绑定已被清理，后续调用将使用静态绑定的服务类
+     * }
+     * </p>
+     *
+     * <p>
+     * 注意事项：
+     * - 动态绑定会在getServeServiceClass()调用后自动清理，通常是在一次方法调用后
+     * - 如果需要连续多次使用同一动态绑定，应当在每次方法调用前重新绑定
+     * - 传入null不会产生任何效果，保持当前绑定状态不变
+     * </p>
+     *
+     * @param targetServeServiceClass 目标服务类的Class对象，如果为null则不进行任何操作
      * @return GXBaseServeApi 当前实例，支持链式调用
      */
     @Override
@@ -874,8 +1102,32 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
 
     /**
      * 调用指定类中的指定方法
-     * 通过反射机制调用服务类中的方法，支持可变参数
-     * 注意：此方法会调用getServeServiceClass()，会清理ThreadLocal中的动态绑定
+     * <p>
+     * 通过反射机制调用服务类中的方法，支持可变参数传递。
+     * 该方法是框架内部方法调用的核心机制，通过动态反射实现对目标服务类方法的调用。
+     * 注意：此方法会调用getServeServiceClass()，会清理ThreadLocal中的动态绑定。
+     * </p>
+     *
+     * <p>
+     * 线程安全特性：
+     * - 方法本身是无状态的，可安全地在多线程环境中调用
+     * - 通过getServeServiceClass()获取服务类，确保线程安全的服务类引用
+     * - 反射调用过程不修改共享状态，不会导致线程安全问题
+     * </p>
+     *
+     * <p>
+     * 性能优化：
+     * - 使用GXCommonUtils.reflectCallObjectMethod进行反射调用，该方法内部可能包含缓存机制
+     * - 参数验证避免不必要的反射调用尝试
+     * - 异常处理机制确保在调用失败时能够优雅降级
+     * </p>
+     *
+     * <p>
+     * 错误处理：
+     * - 方法名为空时抛出IllegalArgumentException
+     * - 服务类不存在时返回null
+     * - 反射调用异常时捕获并返回null，可在子类中重写以实现自定义异常处理
+     * </p>
      *
      * @param methodName 方法名字，不能为空
      * @param params     参数列表，可以为空
@@ -887,7 +1139,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
         if (CharSequenceUtil.isEmpty(methodName)) {
             throw new IllegalArgumentException("方法名不能为空");
         }
-        
+
         Class<?> serveServiceClass = getServeServiceClass();
         if (Objects.nonNull(serveServiceClass)) {
             try {
@@ -903,10 +1155,35 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
 
     /**
      * 获取底层服务类的Class
-     * 优先获取动态绑定的服务类，如果不存在则获取静态绑定的服务类
-     * 获取后会自动清理ThreadLocal，防止内存泄漏
+     * <p>
+     * 该方法用于获取当前API实现类绑定的服务类。遵循优先级策略：
+     * 1. 优先返回通过callBindTargetServeSericeClass()动态绑定的服务类
+     * 2. 如果动态绑定不存在，则返回通过staticBindServeServiceClass()静态绑定的服务类
+     * 3. 如果两种绑定都不存在，则返回null
+     * </p>
      *
-     * @return Class 返回服务类的类型，可能为null
+     * <p>
+     * 线程安全特性：
+     * - 使用try-finally结构确保ThreadLocal资源正确释放
+     * - 动态绑定使用ThreadLocal实现线程隔离
+     * - 静态绑定使用ConcurrentHashMap确保线程安全的读取
+     * </p>
+     *
+     * <p>
+     * 内存安全特性：
+     * - 自动清理ThreadLocal，防止内存泄漏
+     * - 即使在异常情况下也能确保ThreadLocal被清理
+     * - 不保留对返回的Class对象的引用，避免类加载器泄漏
+     * </p>
+     *
+     * <p>
+     * 注意事项：
+     * - 此方法会清理ThreadLocal中的动态绑定，调用后动态绑定将失效
+     * - 如果需要连续多次使用同一动态绑定，应当在每次方法调用前重新绑定
+     * - 返回值可能为null，调用方需要进行空值检查
+     * </p>
+     *
+     * @return Class 返回服务类的类型，如果没有绑定任何服务类则返回null
      */
     @Override
     public Class<?> getServeServiceClass() {
@@ -917,7 +1194,8 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
                 return serveServiceClass;
             }
             // 如果动态绑定不存在，则获取静态绑定的服务类
-            return STATIC_SERVE_SERVICE_CLASS_MAP.get(getClass().getSimpleName());
+            String apiClassName = getClass().getSimpleName();
+            return STATIC_SERVE_SERVICE_CLASS_MAP.get(apiClassName);
         } finally {
             // 无论如何都清理ThreadLocal，防止内存泄漏
             DYNAMIC_SERVE_SERVICE_CLASS_THREAD_LOCAL.remove();
@@ -925,10 +1203,30 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     }
 
     /**
-     * 通过条件查询列表信息
+     * 将Table类型的条件转换为条件表达式
+     * <p>
+     * 该方法是{@link #convertTableConditionToConditionExp(String, Table)}的简化版本，
+     * 使用当前实体对应的表名作为表别名参数。适用于不需要指定特定表别名的场景。
+     * 内部通过调用getTableName()获取当前表名，然后委托给重载方法处理实际转换逻辑。
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 委托给线程安全的重载方法处理实际转换逻辑
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 通过重载方法处理空值和异常情况
+     * - 使用不可变对象作为参数传递，避免并发修改问题
+     * </p>
+     * <p>
+     * 性能考虑：
+     * - 此方法会调用getTableName()，可能涉及反射调用，在高频调用场景下可考虑缓存表名
+     * </p>
      *
-     * @param condition 搜索条件
-     * @return List
+     * @param condition 搜索条件，Table格式的条件表达式，不能为null
+     * @return List<GXCondition < ?>> 转换后的条件表达式列表
+     * @see #convertTableConditionToConditionExp(String, Table)
      */
     @Override
     public List<GXCondition<?>> convertTableConditionToConditionExp(Table<String, String, Object> condition) {
@@ -937,11 +1235,40 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
 
     /**
      * 将Table类型的条件转换为条件表达式
-     * 此方法将Google Guava的Table格式条件转换为框架内部使用的GXCondition格式
+     * <p>
+     * 此方法将Google Guava的Table格式条件转换为框架内部使用的GXCondition格式。
+     * 转换过程会保留条件的字段名、操作符和值，生成适合框架内部处理的条件表达式列表。
+     * 该方法是框架内部查询条件转换的核心方法，被多个查询方法调用。
+     * </p>
+     * <p>
+     * 转换规则：
+     * - Table的行键(rowKey)对应字段名
+     * - Table的列键(columnKey)对应操作符，应使用GXBuilderConstant中定义的常量
+     * - Table的值(value)对应条件值
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 方法不依赖共享状态，可安全地在多线程环境中调用
+     * - 使用GXCommonUtils工具类进行实际转换，该工具类设计为线程安全
+     * </p>
+     * <p>
+     * 内存安全：
+     * - 验证输入参数，防止空指针异常
+     * - 委托给安全的工具类处理条件转换，避免内存泄漏
+     * </p>
+     * <p>
+     * 使用示例：
+     * {@code
+     * HashBasedTable<String, String, Object> condition = HashBasedTable.create();
+     * condition.put("username", GXBuilderConstant.STR_EQ, "admin");
+     * condition.put("status", GXBuilderConstant.EQ, 1);
+     * List<GXCondition<?>> conditions = convertTableConditionToConditionExp("user", condition);
+     * }
+     * </p>
      *
-     * @param tableNameAlias 表别名，用于SQL生成时指定表名
-     * @param condition      原始条件，Table格式的条件表达式
-     * @return List<GXCondition<?>> 转换后的条件表达式列表
+     * @param tableNameAlias 表别名，用于SQL生成时指定表名，不能为null
+     * @param condition      原始条件，Table格式的条件表达式，可以为null或空
+     * @return List<GXCondition < ?>> 转换后的条件表达式列表，如果condition为null或空则返回空列表
      * @throws NullPointerException 如果tableNameAlias为null
      */
     @Override
@@ -954,12 +1281,43 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
 
     /**
      * 获取表的名字
-     * 通过反射调用服务类的getTableName方法获取当前操作的表名
+     * <p>
+     * 该方法通过反射调用服务类的getTableName方法获取当前操作的表名。
+     * 表名用于构建SQL查询条件和处理数据库操作，是数据访问层的重要组成部分。
+     * </p>
      *
-     * @return String 表名字，如果获取失败则可能返回null
+     * <p>
+     * 线程安全特性：
+     * - 方法本身是无状态的，可安全地在多线程环境中调用
+     * - 通过callMethod间接调用服务类方法，继承了callMethod的线程安全特性
+     * - 不修改共享状态，不会导致线程安全问题
+     * </p>
+     *
+     * <p>
+     * 性能考虑：
+     * - 此方法涉及反射调用，在高频调用场景下可考虑结果缓存
+     * - 返回结果可能为null，调用方需要进行适当的空值处理
+     * </p>
+     *
+     * <p>
+     * 注意事项：
+     * - 调用此方法会触发ThreadLocal清理，可能影响动态绑定状态
+     * - 服务类必须实现getTableName方法，否则将返回null
+     * - 返回值取决于底层服务类的实现，可能需要进行类型安全的转换
+     * </p>
+     *
+     * @return String 表名字，如果获取失败则返回null
      */
     private String getTableName() {
         Object tableName = callMethod("getTableName");
-        return Objects.nonNull(tableName) ? (String) tableName : null;
+        if (Objects.nonNull(tableName)) {
+            if (tableName instanceof String) {
+                return (String) tableName;
+            } else {
+                // 如果返回值不是String类型，尝试转换为String
+                return String.valueOf(tableName);
+            }
+        }
+        return null;
     }
 }

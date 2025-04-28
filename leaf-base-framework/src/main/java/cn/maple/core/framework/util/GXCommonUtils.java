@@ -87,7 +87,24 @@ import java.util.stream.Collectors;
  * List<UserDTO> userDTOs = GXCommonUtils.convertSourceListToTargetList(userEntities, UserDTO.class, "process", options);
  *
  * // 5. 反射调用
+ * // 5.1 基本反射调用
  * Object result = GXCommonUtils.reflectCallObjectMethod(userService, "findById", 1L);
+ *
+ * // 5.2 调用带有复杂参数的方法
+ * Map<String, Object> params = new HashMap<>();
+ * params.put("id", 100);
+ * params.put("status", "active");
+ * List<User> users = (List<User>) GXCommonUtils.reflectCallObjectMethod(userService, "findByParams", params);
+ *
+ * // 5.3 使用默认方法名调用
+ * // 等同于调用 processor.customizeProcess(inputData)
+ * Object result = GXCommonUtils.reflectCallObjectMethod(processor, null, inputData);
+ *
+ * // 5.4 性能优化的反射调用
+ * // 首次调用会缓存方法，后续调用相同方法时性能显著提升
+ * for (int i = 0; i < 1000; i++) {
+ *     GXCommonUtils.reflectCallObjectMethod(service, "process", "data" + i);
+ * }
  *
  * // 6. 数据加密
  * String encrypted = GXCommonUtils.encryptedData(Dict.create().set("userId", 1), "secretKey", 3600);
@@ -924,18 +941,28 @@ public class GXCommonUtils {
      * 使用示例：
      * <pre>
      * {@code
-     * // 调用对象的有参方法
+     * // 1. 调用对象的有参方法
      * User user = new User();
      * Object result = GXCommonUtils.reflectCallObjectMethod(user, "setName", "张三");
      *
-     * // 调用对象的无参方法
+     * // 2. 调用对象的无参方法
      * String name = (String) GXCommonUtils.reflectCallObjectMethod(user, "getName");
+     *
+     * // 3. 调用带有复杂参数的方法
+     * Map<String, Object> params = new HashMap<>();
+     * params.put("id", 100);
+     * params.put("status", "active");
+     * Object result = GXCommonUtils.reflectCallObjectMethod(service, "findByParams", params);
+     *
+     * // 4. 使用默认方法名调用
+     * Object result = GXCommonUtils.reflectCallObjectMethod(processor, null, inputData);
+     * // 等同于调用 processor.customizeProcess(inputData)
      * }
      * </pre>
      * </p>
      *
      * @param object     要调用其方法的对象，不能为null
-     * @param methodName 要调用的方法名，如果为空则使用默认方法名
+     * @param methodName 要调用的方法名，如果为空则使用默认方法名(customizeProcess)
      * @param params     方法参数，可变参数，可以为null
      * @param <R>        对象类型
      * @return 方法调用的返回值，如果方法不存在或调用失败则返回null
@@ -962,16 +989,19 @@ public class GXCommonUtils {
 
         try {
             // 构建参数类型数组
-            Class<?>[] classes = new Class<?>[params.length];
+            Class<?>[] paramTypes = new Class<?>[params.length];
             for (int i = 0; i < params.length; i++) {
                 if (Objects.nonNull(params[i])) {
-                    classes[i] = params[i].getClass();
+                    paramTypes[i] = params[i].getClass();
+                } else {
+                    // 对于null参数，使用Object.class作为类型占位符
+                    paramTypes[i] = Object.class;
                 }
             }
 
             // 查找匹配的方法（使用同步块保护方法查找过程，避免并发问题）
-            Method method = ReflectUtil.getMethod(object.getClass(), methodName, classes);
-            if (Objects.isNull(method) && classes.length == 0) {
+            Method method = ReflectUtil.getMethod(object.getClass(), methodName, paramTypes);
+            if (Objects.isNull(method) && paramTypes.length == 0) {
                 // 尝试查找无参方法
                 method = ReflectUtil.getMethodByName(object.getClass(), methodName);
             }

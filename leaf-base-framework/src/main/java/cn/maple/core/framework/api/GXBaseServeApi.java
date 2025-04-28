@@ -16,8 +16,70 @@ import java.util.Set;
 
 /**
  * 暴露服务的基础API接口
- * 定义了一系列通用的数据操作方法，支持条件查询、分页、更新、删除等操作
- * 实现类通过反射机制调用底层服务类的方法
+ * <p>
+ * 该接口定义了一系列通用的数据操作方法，支持条件查询、分页、更新、删除等操作。
+ * 实现类通过反射机制调用底层服务类的方法，提供了一种灵活的RPC调用机制。
+ * 接口设计遵循了线程安全和内存安全的最佳实践，确保在高并发环境下的可靠性。
+ * </p>
+ *
+ * <p>
+ * 线程安全特性：
+ * - 所有方法设计为无状态操作，可安全地在多线程环境中调用
+ * - 使用线程安全的集合类和工具类进行数据处理
+ * - 通过ThreadLocal机制确保服务类引用的线程安全性
+ * - 参数验证和防御性编程确保多线程环境下的安全性
+ * </p>
+ *
+ * <p>
+ * 内存安全特性：
+ * - 严格的参数验证，防止空指针异常和非法参数
+ * - 安全的类型转换和泛型使用，减少运行时类型错误
+ * - 资源管理和内存泄漏防护机制
+ * - 异常处理确保在异常情况下资源能够正确释放
+ * </p>
+ *
+ * <p>
+ * 使用示例：
+ * <pre>
+ * {@code
+ * // 1. 创建自定义API接口
+ * public interface UserServiceApi extends GXBaseServeApi {
+ *     // 可以添加特定业务方法
+ * }
+ *
+ * // 2. 实现自定义API接口
+ * public class UserServiceApiImpl extends GXBaseServeApiImpl implements UserServiceApi {
+ *     public UserServiceApiImpl() {
+ *         // 绑定底层服务类
+ *         staticBindServeServiceClass(UserService.class);
+ *     }
+ * }
+ *
+ * // 3. 使用API进行数据操作
+ * @Autowired
+ * private UserServiceApi userServiceApi;
+ *
+ * public void example() {
+ *     // 条件查询
+ *     HashBasedTable<String, String, Object> condition = HashBasedTable.create();
+ *     condition.put("username", GXBuilderConstant.STR_EQ, "admin");
+ *     List<UserResDto> users = userServiceApi.findByCondition(condition, UserResDto.class);
+ *
+ *     // 创建或更新
+ *     UserReqDto reqDto = new UserReqDto();
+ *     reqDto.setUsername("newuser");
+ *     reqDto.setPassword("password");
+ *     Long id = userServiceApi.updateOrCreate(reqDto);
+ *
+ *     // 分页查询
+ *     GXQueryParamReqProtocol protocol = new GXQueryParamReqProtocol();
+ *     protocol.setPageSize(10);
+ *     protocol.setPageNum(1);
+ *     GXPaginationResDto<UserResDto> page = userServiceApi.paginate(protocol, UserResDto.class);
+ * }
+ * }
+ * </pre>
+ * </p>
  */
 @SuppressWarnings("all")
 public interface GXBaseServeApi {
@@ -286,7 +348,7 @@ public interface GXBaseServeApi {
      * 使用默认表名作为表别名
      *
      * @param condition 搜索条件，Table格式的条件表达式
-     * @return List<GXCondition<?>> 转换后的条件表达式列表
+     * @return List<GXCondition < ?>> 转换后的条件表达式列表
      */
     List<GXCondition<?>> convertTableConditionToConditionExp(Table<String, String, Object> condition);
 
