@@ -2,7 +2,6 @@ package cn.maple.core.framework.util;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
-import cn.hutool.core.bean.copier.IJSONTypeConverter;
 import cn.hutool.core.codec.Base64;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
@@ -12,13 +11,15 @@ import cn.hutool.core.exceptions.UtilException;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.Validator;
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.core.util.*;
+import cn.hutool.core.util.ClassUtil;
+import cn.hutool.core.util.ObjectUtil;
+import cn.hutool.core.util.ReUtil;
+import cn.hutool.core.util.ReflectUtil;
 import cn.hutool.http.*;
-import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.constant.GXDataSourceConstant;
-import cn.maple.core.framework.dto.GXBaseData;
+import cn.maple.core.framework.convert.GXDataConvert;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.exception.GXBeanValidateException;
 import cn.maple.core.framework.exception.GXBusinessException;
@@ -34,7 +35,6 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.lang.reflect.Type;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -156,72 +156,19 @@ public class GXCommonUtils {
      */
     @Getter
     private static final CopyOptions defaultCopyOptions = CopyOptions.create().setIgnoreError(true).setConverter((type, value) -> {
-        // 空值安全处理
-        if (null == value) {
-            return null;
-        }
-
-        try {
-            // 获取目标类型
-            Class<?> targetClazz = TypeUtil.getClass(type);
-            if (targetClazz == null) {
-                return value; // 如果无法确定目标类型，则返回原值
-            }
-
-            // 处理JSON字符串到String类型的转换
-            String valueStr = value.toString();
-            if (JSONUtil.isTypeJSON(valueStr) && targetClazz.isAssignableFrom(String.class)) {
-                return value;
-            }
-
-            // 处理JSON对象到GXBaseData子类的转换
-            if (JSONUtil.isTypeJSONObject(valueStr) && TypeToken.of(targetClazz).isSubtypeOf(GXBaseData.class)) {
-                return JSONUtil.toBean(valueStr, targetClazz);
-            }
-
-            // 处理JSON数组到List<自定义类型>的转换
-            if (JSONUtil.isTypeJSONArray(valueStr) && targetClazz.isAssignableFrom(List.class)) {
-                Class<?> componentType = targetClazz.getComponentType();
-                if (ObjectUtil.isNull(componentType)) {
-                    Type actualTypeArgument = TypeUtil.getTypeArgument(type, 0);
-                    if (ObjectUtil.isNull(actualTypeArgument)) {
-                        return value;
-                    }
-                    componentType = (Class<?>) actualTypeArgument;
-                }
-                return JSONUtil.toList(JSONUtil.toJsonStr(value), componentType);
-            }
-
-            // 处理JSON数组到GXBaseData子类列表的转换
-            if (JSONUtil.isTypeJSONArray(valueStr) && TypeToken.of(targetClazz).isSubtypeOf(GXBaseData.class)) {
-                return JSONUtil.toList(valueStr, targetClazz);
-            }
-
-            // 处理实现了IJSONTypeConverter接口的对象
-            if (value instanceof IJSONTypeConverter) {
-                return ((IJSONTypeConverter) value).toBean(ObjectUtil.defaultIfNull(type, Object.class));
-            }
-
-            // 尝试使用Hutool的转换工具进行转换
-            Object convertedValue = Convert.convertWithCheck(type, value, null, true);
-            if (Objects.nonNull(convertedValue)) {
-                return convertedValue;
-            }
-
-            // 对于非集合类型的目标类，直接返回原值
-            if (!(targetClazz.isAssignableFrom(Dict.class) || targetClazz.isAssignableFrom(JSONObject.class) || targetClazz.isAssignableFrom(List.class) || targetClazz.isAssignableFrom(Set.class) || targetClazz.isAssignableFrom(Map.class))) {
-                return value;
-            }
-
-            // 尝试使用自定义方法进行字符串到目标类型的转换
-            return convertStrToTarget(valueStr, targetClazz);
-        } catch (Exception e) {
-            LOG.warn("类型转换异常: {}", e.getMessage());
-            return value; // 转换失败时返回原值，确保程序不会因转换异常而崩溃
-        }
+        GXDataConvert dataConvert = new GXDataConvert();
+        return dataConvert.convert(type, value);
     });
 
+    /**
+     * 私有构造函数，防止实例化
+     * <p>
+     * 工具类应该设计为静态方法的集合，不需要实例化
+     * </p>
+     */
     private GXCommonUtils() {
+        // 防止通过反射实例化
+        throw new AssertionError("不能实例化 GXCommonUtils 工具类");
     }
 
     /**
@@ -266,7 +213,7 @@ public class GXCommonUtils {
         try {
             boolean simpleValueType = ClassUtil.isSimpleValueType(clazzType);
             if (simpleValueType) {
-                final R envValue = GXSpringContextUtils.getEnvironment().getProperty(key, clazzType);
+                final R envValue = Objects.requireNonNull(GXSpringContextUtils.getEnvironment()).getProperty(key, clazzType);
                 if (null == envValue) {
                     return getClassDefaultValue(clazzType);
                 }
@@ -331,7 +278,7 @@ public class GXCommonUtils {
         }
 
         try {
-            final R envValue = GXSpringContextUtils.getEnvironment().getProperty(key, clazzType);
+            final R envValue = Objects.requireNonNull(GXSpringContextUtils.getEnvironment()).getProperty(key, clazzType);
             if (null == envValue) {
                 return defaultValue;
             }
@@ -369,7 +316,7 @@ public class GXCommonUtils {
      */
     public static String getActiveProfile() {
         try {
-            String[] activeProfiles = GXSpringContextUtils.getEnvironment().getActiveProfiles();
+            String[] activeProfiles = Objects.requireNonNull(GXSpringContextUtils.getEnvironment()).getActiveProfiles();
             if (activeProfiles.length > 0) {
                 return activeProfiles[0];
             }
