@@ -204,7 +204,7 @@ public class GXHutoolDataConvert {
             }
 
             // 处理基本类型的包装类型转换（如Integer到int）
-            if (ClassUtil.isBasicType(targetClazz)) {
+            if (ClassUtil.isBasicType(targetClazz) && targetClazz.isInstance(value)) {
                 LOG.debug("基本类型的包装类型转换: {} -> {}", value.getClass().getName(), targetClazz.getName());
                 return value;
             }
