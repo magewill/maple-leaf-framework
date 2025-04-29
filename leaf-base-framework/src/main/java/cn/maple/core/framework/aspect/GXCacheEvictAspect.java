@@ -160,11 +160,11 @@ public class GXCacheEvictAspect {
             
             // 如果方法执行成功且结果不为空，则清除缓存
             if (Objects.nonNull(proceed)) {
-                // 获取分布式锁，确保缓存清除的原子性
-                Lock cacheLock = getCacheLock(cacheKey);
+                GXBaseCacheLockService cacheLockService = GXSpringContextUtils.getBean(GXBaseCacheLockService.class);
+                assert cacheLockService != null;
                 try {
                     log.debug("获取缓存锁: {}", cacheKey);
-                    cacheLock.lock();
+                    cacheLockService.tryLock(cacheKey);
                     log.debug("清除缓存: {}", cacheKey);
                     // 调用目标对象的evictCacheData方法清除缓存
                     GXCommonUtils.reflectCallObjectMethod(point.getTarget(), "evictCacheData", cacheKey, args);
@@ -173,7 +173,7 @@ public class GXCacheEvictAspect {
                     // 缓存清除异常不应影响主业务流程
                 } finally {
                     // 确保锁一定会被释放
-                    cacheLock.unlock();
+                    cacheLockService.releaseLock(cacheKey);
                     log.debug("释放缓存锁: {}", cacheKey);
                 }
             }
@@ -308,33 +308,5 @@ public class GXCacheEvictAspect {
         
         log.warn("未找到匹配的参数: {}", targetParamName);
         return null;
-    }
-
-    /**
-     * 获取缓存锁
-     * <p>
-     * 通过缓存锁服务获取指定名称的分布式锁
-     * 使用分布式锁确保在分布式环境中缓存清除操作的原子性
-     * </p>
-     *
-     * @param lockName 锁的名字，通常是缓存键
-     * @return Lock 分布式锁对象
-     * @throws GXBusinessException 如果无法获取锁服务或锁对象
-     */
-    @SuppressWarnings("all")
-    private Lock getCacheLock(String lockName) {
-        GXBaseCacheLockService lockService = GXSpringContextUtils.getBean(GXBaseCacheLockService.class);
-        if (lockService == null) {
-            log.error("未找到GXBaseCacheLockService的实现类");
-            throw new GXBusinessException("缓存锁服务不可用");
-        }
-        
-        Lock lock = lockService.getLock(lockName);
-        if (lock == null) {
-            log.error("无法为{}获取锁对象", lockName);
-            throw new GXBusinessException("无法获取缓存锁: " + lockName);
-        }
-        
-        return lock;
     }
 }
