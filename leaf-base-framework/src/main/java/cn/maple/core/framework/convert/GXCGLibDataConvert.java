@@ -305,7 +305,7 @@ public class GXCGLibDataConvert implements Converter {
                 if (Map.class.isAssignableFrom(targetClass)) {
                     // Bean转Map
                     LOG.trace("将Bean {}转换为Map", sourceClass.getName());
-                    return BeanUtil.beanToMap(sourceValue);
+                    return BeanUtil.toBean(sourceValue, targetClass);
                 } else {
                     // Bean转Bean
                     LOG.trace("深度复制Bean {} 到 {}", sourceClass.getName(), targetClass.getName());
