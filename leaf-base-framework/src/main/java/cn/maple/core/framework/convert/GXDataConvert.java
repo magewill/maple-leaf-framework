@@ -28,7 +28,7 @@ import java.util.*;
  * 本工具类提供了一系列高性能、类型安全的数据转换方法，用于在不同数据类型之间进行智能转换。
  * 所有转换方法都经过内存安全和异常安全的处理，确保在各种复杂场景下的稳定性和可靠性。
  * </p>
- * 
+ *
  * <p>
  * 主要功能特性：
  * 1. 基本类型和包装类型的安全转换 - 确保类型转换的准确性和安全性
@@ -39,7 +39,7 @@ import java.util.*;
  * 6. 日期时间类型的转换 - 灵活处理各种日期时间格式
  * 7. 泛型支持 - 完整支持复杂泛型类型的转换
  * </p>
- * 
+ *
  * <p>
  * 内存安全特性：
  * 1. 空值安全处理 - 所有方法对null值进行安全处理，防止NullPointerException
@@ -48,7 +48,7 @@ import java.util.*;
  * 4. 资源优化 - 最小化对象创建，减少内存使用和垃圾回收压力
  * 5. 边界检查 - 对集合和数组进行边界检查，防止越界访问
  * </p>
- * 
+ *
  * <p>
  * 性能优化特性：
  * 1. 类型检查优化 - 快速判断源类型和目标类型的兼容性，避免不必要的转换
@@ -57,7 +57,7 @@ import java.util.*;
  * 4. 异常处理优化 - 精细化的异常处理，减少异常栈的生成开销
  * 5. 集合预分配 - 为集合类型预分配合适的初始容量，减少扩容操作
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
@@ -77,13 +77,13 @@ import java.util.*;
  * // 集合类型转换
  * List<Integer> list = (List<Integer>) GXDataConvertUtils.convert(
  *     new TypeReference<List<Integer>>(){}.getType(), "[1,2,3]");
- * 
+ *
  * // Dict对象转换为实体类
  * Dict userDict = Dict.create().set("name", "张三").set("age", 30);
  * User user = GXDataConvertUtils.convert(User.class, userDict);
  * </pre>
  * </p>
- * 
+ *
  * @author britton
  * @since 1.0.0
  */
@@ -95,7 +95,7 @@ public class GXDataConvert {
      * </p>
      */
     private final Logger LOG = LoggerFactory.getLogger(GXDataConvert.class);
-    
+
     /**
      * 私有构造函数，防止实例化
      * <p>
@@ -136,7 +136,7 @@ public class GXDataConvert {
      * @param value 需要转换的值，可以是任意对象
      * @return 转换后的目标类型对象，如果转换失败则返回原始值
      */
-    public  Object convert(Type type, Object value) {
+    public Object convert(Type type, Object value) {
         // 空值安全处理：如果输入为null，则返回null
         if (value == null) {
             return null;
@@ -165,7 +165,7 @@ public class GXDataConvert {
             return value; // 转换失败时返回原始值
         }
     }
-    
+
     /**
      * 根据目标类型和源对象类型选择专用的转换路径
      * <p>
@@ -178,7 +178,7 @@ public class GXDataConvert {
      * @param value       需要转换的值
      * @return 转换后的对象
      */
-    private  Object convertBySpecializedPath(Type type, Class<?> targetClazz, Object value) {
+    private Object convertBySpecializedPath(Type type, Class<?> targetClazz, Object value) {
         // 处理枚举类型转换
         if (targetClazz.isEnum()) {
             LOG.debug("检测到枚举类型转换需求: {} -> {}", value.getClass().getName(), targetClazz.getName());
@@ -245,8 +245,8 @@ public class GXDataConvert {
      * @param value       需要转换的值，可以是字符串或数字
      * @return 转换后的枚举对象，如果转换失败则返回null
      */
-    @SuppressWarnings({"rawtypes","unchecked"})
-    private  Object handleEnumConversion(Class<?> targetClazz, Object value) {
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private Object handleEnumConversion(Class<?> targetClazz, Object value) {
         // 处理字符串到枚举的转换
         if (value instanceof String) {
             try {
@@ -256,7 +256,7 @@ public class GXDataConvert {
                 LOG.warn("枚举转换失败: {} 不是 {} 的有效枚举值", value, targetClazz.getName());
                 return null;
             }
-        } 
+        }
         // 处理数字到枚举的转换（通过序号）
         else if (value instanceof Number) {
             try {
@@ -267,14 +267,14 @@ public class GXDataConvert {
                 if (index >= 0 && index < enumConstants.length) {
                     return enumConstants[index];
                 } else {
-                    LOG.warn("枚举序号越界: 索引 {} 超出 {} 的有效范围 [0, {}]", 
+                    LOG.warn("枚举序号越界: 索引 {} 超出 {} 的有效范围 [0, {}]",
                             index, targetClazz.getName(), enumConstants.length - 1);
                 }
             } catch (Exception e) {
                 LOG.warn("通过序号转换枚举失败: {}", e.getMessage());
             }
         } else {
-            LOG.debug("不支持将类型 [{}] 转换为枚举类型 [{}]", 
+            LOG.debug("不支持将类型 [{}] 转换为枚举类型 [{}]",
                     value != null ? value.getClass().getName() : "null", targetClazz.getName());
         }
         return null; // 如果转换不可能，则返回null
@@ -299,11 +299,10 @@ public class GXDataConvert {
      * @param value       需要转换的值，可以是Date、Calendar、String或Number
      * @return 转换后的日期/时间对象，如果转换失败则返回null
      */
-    private  Object handleDateTimeConversion(Class<?> targetClazz, Object value) {
+    private Object handleDateTimeConversion(Class<?> targetClazz, Object value) {
         try {
             // 如果值已经是日期类型
-            if (value instanceof Date) {
-                Date dateValue = (Date) value;
+            if (value instanceof Date dateValue) {
                 if (targetClazz == Date.class) {
                     return dateValue; // Date到Date，直接返回
                 } else if (targetClazz == Calendar.class) {
@@ -314,8 +313,7 @@ public class GXDataConvert {
                 }
             }
             // 如果值是日历类型
-            else if (value instanceof Calendar) {
-                Calendar calValue = (Calendar) value;
+            else if (value instanceof Calendar calValue) {
                 if (targetClazz == Calendar.class) {
                     return calValue; // Calendar到Calendar，直接返回
                 } else if (targetClazz == Date.class) {
@@ -324,13 +322,12 @@ public class GXDataConvert {
                 }
             }
             // 如果值是字符串类型，尝试解析为日期
-            else if (value instanceof String) {
-                String strValue = (String) value;
+            else if (value instanceof String strValue) {
                 if (strValue.isEmpty()) {
                     LOG.debug("日期字符串为空，返回null");
                     return null;
                 }
-                
+
                 // 使用Hutool的DateUtil进行日期解析（支持多种日期格式）
                 Date date = DateUtil.parse(strValue);
                 if (date != null) {
@@ -359,7 +356,7 @@ public class GXDataConvert {
                     return calendar;
                 }
             }
-            
+
             // 尝试使用Hutool的通用转换作为最后的尝试
             LOG.debug("尝试使用通用转换工具转换日期/时间类型");
             return Convert.convert(targetClazz, value);
@@ -390,7 +387,7 @@ public class GXDataConvert {
      * @param valueStr    需要转换的字符串值
      * @return 转换后的对象，如果转换失败则返回原始字符串
      */
-    private  Object handleStringConversion(Type type, Class<?> targetClazz, String valueStr) {
+    private Object handleStringConversion(Type type, Class<?> targetClazz, String valueStr) {
         // 处理JSON对象字符串（形如 {"key":"value"}）
         if (JSONUtil.isTypeJSONObject(valueStr)) {
             LOG.debug("检测到JSON对象字符串，进行JSON对象转换");
@@ -440,44 +437,122 @@ public class GXDataConvert {
      * @param valueStr    JSON对象字符串，形如 {"key":"value"}
      * @return 转换后的目标类型对象，如果转换失败则可能返回null
      */
-    private  Object handleJsonObjectConversion(Class<?> targetClazz, String valueStr) {
+    private Object handleJsonObjectConversion(Class<?> targetClazz, String valueStr) {
         try {
-            // 处理转换为GXBaseData子类（框架特定类型）
-            // 首先检查目标类型是否是框架基础数据类型的子类
-            if (TypeToken.of(targetClazz).isSubtypeOf(GXBaseData.class)) {
-                LOG.debug("将JSON转换为GXBaseData子类: {}", targetClazz.getName());
-                return JSONUtil.toBean(valueStr, targetClazz);
+            // 根据目标类型选择不同的转换策略
+            if (isGXBaseDataType(targetClazz)) {
+                return convertToGXBaseData(targetClazz, valueStr);
+            } else if (isDictType(targetClazz)) {
+                return convertToDict(valueStr);
+            } else if (isJSONObjectType(targetClazz)) {
+                return convertToJSONObject(valueStr);
+            } else if (isMapType(targetClazz)) {
+                return convertToMap(valueStr);
+            } else {
+                // 处理转换为其他JavaBean类型（通过属性映射）
+                return convertToJavaBean(targetClazz, valueStr);
             }
-            
-            // 处理转换为Dict类型（键值对容器）
-            // Dict是一种类似Map的数据结构，常用于存储键值对数据
-            if (targetClazz.isAssignableFrom(Dict.class)) {
-                LOG.debug("将JSON转换为Dict类型");
-                return JSONUtil.toBean(valueStr, Dict.class);
-            }
-            
-            // 处理转换为JSONObject类型（JSON对象）
-            // 如果目标类型是JSONObject或其子类，直接解析为JSONObject
-            if (targetClazz.isAssignableFrom(JSONObject.class)) {
-                LOG.debug("将JSON转换为JSONObject类型");
-                return JSONUtil.parseObj(valueStr);
-            }
-            
-            // 处理转换为Map类型（键值对映射）
-            // 如果目标类型是Map或其子类接口，转换为Map实现
-            if (targetClazz.isAssignableFrom(Map.class)) {
-                LOG.debug("将JSON转换为Map类型");
-                return JSONUtil.toBean(valueStr, Map.class);
-            }
-            
-            // 处理转换为其他JavaBean类型（通过属性映射）
-            // 对于其他普通JavaBean类型，通过属性名映射进行转换
-            LOG.debug("将JSON转换为JavaBean类型: {}", targetClazz.getName());
-            return JSONUtil.toBean(valueStr, targetClazz);
         } catch (Exception e) {
             LOG.warn("JSON对象转换异常: {} -> {}", e.getClass().getName(), e.getMessage());
             return null; // 转换失败时返回null
         }
+    }
+
+    /**
+     * 检查目标类型是否为GXBaseData或其子类
+     *
+     * @param targetClazz 目标类型
+     * @return 如果是GXBaseData或其子类返回true，否则返回false
+     */
+    private boolean isGXBaseDataType(Class<?> targetClazz) {
+        return TypeToken.of(targetClazz).isSubtypeOf(GXBaseData.class);
+    }
+
+    /**
+     * 将JSON字符串转换为GXBaseData子类对象
+     *
+     * @param targetClazz GXBaseData子类的Class对象
+     * @param valueStr    JSON字符串
+     * @return 转换后的GXBaseData子类对象
+     */
+    private Object convertToGXBaseData(Class<?> targetClazz, String valueStr) {
+        LOG.debug("将JSON转换为GXBaseData子类: {}", targetClazz.getName());
+        return JSONUtil.toBean(valueStr, targetClazz);
+    }
+
+    /**
+     * 检查目标类型是否为Dict类型
+     *
+     * @param targetClazz 目标类型
+     * @return 如果是Dict类型返回true，否则返回false
+     */
+    private boolean isDictType(Class<?> targetClazz) {
+        return targetClazz.isAssignableFrom(Dict.class);
+    }
+
+    /**
+     * 将JSON字符串转换为Dict对象
+     *
+     * @param valueStr JSON字符串
+     * @return 转换后的Dict对象
+     */
+    private Object convertToDict(String valueStr) {
+        LOG.debug("将JSON转换为Dict类型");
+        return JSONUtil.toBean(valueStr, Dict.class);
+    }
+
+    /**
+     * 检查目标类型是否为JSONObject类型
+     *
+     * @param targetClazz 目标类型
+     * @return 如果是JSONObject类型返回true，否则返回false
+     */
+    private boolean isJSONObjectType(Class<?> targetClazz) {
+        return targetClazz.isAssignableFrom(JSONObject.class);
+    }
+
+    /**
+     * 将JSON字符串转换为JSONObject对象
+     *
+     * @param valueStr JSON字符串
+     * @return 转换后的JSONObject对象
+     */
+    private Object convertToJSONObject(String valueStr) {
+        LOG.debug("将JSON转换为JSONObject类型");
+        return JSONUtil.parseObj(valueStr);
+    }
+
+    /**
+     * 检查目标类型是否为Map类型
+     *
+     * @param targetClazz 目标类型
+     * @return 如果是Map类型返回true，否则返回false
+     */
+    private boolean isMapType(Class<?> targetClazz) {
+        return targetClazz.isAssignableFrom(Map.class);
+    }
+
+    /**
+     * 将JSON字符串转换为Map对象
+     *
+     * @param valueStr JSON字符串
+     * @return 转换后的Map对象
+     */
+    private Object convertToMap(String valueStr) {
+        LOG.debug("将JSON转换为Map类型");
+        return JSONUtil.toBean(valueStr, Map.class);
+    }
+
+    /**
+     * 将JSON字符串转换为JavaBean对象
+     *
+     * @param targetClazz JavaBean类型的Class对象
+     * @param valueStr    JSON字符串
+     * @return 转换后的JavaBean对象
+     */
+    private Object convertToJavaBean(Class<?> targetClazz, String valueStr) {
+        LOG.debug("将JSON转换为JavaBean类型: {}", targetClazz.getName());
+        return JSONUtil.toBean(valueStr, targetClazz);
     }
 
     /**
@@ -513,53 +588,122 @@ public class GXDataConvert {
      * @param valueStr    JSON数组字符串，形如 [1,2,3] 或 [{"name":"张三"},{"name":"李四"}]
      * @return 转换后的集合或数组对象，如果不支持的类型则返回null
      */
-    private  Object handleJsonArrayConversion(Type type, Class<?> targetClazz, String valueStr) {
+    private Object handleJsonArrayConversion(Type type, Class<?> targetClazz, String valueStr) {
         try {
-            // 处理转换为List类型（有序集合）
-            if (targetClazz.isAssignableFrom(List.class)) {
-                // 尝试获取List的泛型参数类型（如List<User>中的User.class）
-                Class<?> componentType = getComponentType(type, 0);
-                LOG.debug("将JSON数组转换为List<{}>类型", componentType != null ? componentType.getSimpleName() : "Dict");
-                
-                // 如果能确定元素类型，则使用该类型进行转换；否则默认使用Dict作为元素类型
-                // Dict是一种通用的键值对容器，适合存储结构不确定的JSON对象
-                return componentType != null ? 
-                       JSONUtil.toList(valueStr, componentType) : 
-                       JSONUtil.toList(valueStr, Dict.class);
+            // 根据目标类型选择不同的转换策略
+            if (isListType(targetClazz)) {
+                return convertJsonArrayToList(type, valueStr);
+            } else if (isSetType(targetClazz)) {
+                return convertJsonArrayToSet(type, valueStr);
+            } else if (isArrayType(targetClazz)) {
+                return convertJsonArrayToArray(targetClazz, valueStr);
             }
-            
-            // 处理转换为Set类型（无序不重复集合）
-            if (targetClazz.isAssignableFrom(Set.class)) {
-                // 尝试获取Set的泛型参数类型（如Set<User>中的User.class）
-                Class<?> componentType = getComponentType(type, 0);
-                LOG.debug("将JSON数组转换为Set<{}>类型", componentType != null ? componentType.getSimpleName() : "Dict");
-                
-                // 先转换为List，再转换为Set，这样可以复用List的转换逻辑
-                // 同时HashSet构造函数会自动去除重复元素
-                List<?> list = componentType != null ? 
-                             JSONUtil.toList(valueStr, componentType) : 
-                             JSONUtil.toList(valueStr, Dict.class);
-                return new HashSet<>(list);
-            }
-            
-            // 处理转换为数组类型
-            if (targetClazz.isArray()) {
-                // 获取数组的元素类型（如User[]中的User.class）
-                Class<?> componentType = targetClazz.getComponentType();
-                LOG.debug("将JSON数组转换为{}[]类型", componentType.getSimpleName());
-                
-                // 先转换为List，再转换为特定类型的数组
-                // 这种方式可以处理任意类型的数组，包括基本类型和对象类型
-                List<?> list = JSONUtil.toList(valueStr, componentType);
-                return list.toArray((Object[]) java.lang.reflect.Array.newInstance(componentType, list.size()));
-            }
-            
+
             LOG.debug("不支持将JSON数组转换为类型: {}", targetClazz.getName());
             return null; // 不支持的类型返回null
         } catch (Exception e) {
             LOG.warn("JSON数组转换异常: {} -> {}", e.getClass().getName(), e.getMessage());
             return null; // 转换失败时返回null
         }
+    }
+
+    /**
+     * 检查目标类型是否为List类型
+     *
+     * @param targetClazz 目标类型
+     * @return 如果是List类型返回true，否则返回false
+     */
+    private boolean isListType(Class<?> targetClazz) {
+        return targetClazz.isAssignableFrom(List.class);
+    }
+
+    /**
+     * 将JSON数组字符串转换为List集合
+     * <p>
+     * 该方法尝试获取List的泛型参数类型，并根据该类型将JSON数组转换为对应的List集合。
+     * 如果无法确定泛型类型，则默认使用Dict作为元素类型。
+     * </p>
+     *
+     * @param type     目标类型，可能包含泛型信息
+     * @param valueStr JSON数组字符串
+     * @return 转换后的List集合
+     */
+    private Object convertJsonArrayToList(Type type, String valueStr) {
+        // 尝试获取List的泛型参数类型（如List<User>中的User.class）
+        Class<?> componentType = getComponentType(type, 0);
+        LOG.debug("将JSON数组转换为List<{}>类型", componentType != null ? componentType.getSimpleName() : "Dict");
+
+        // 如果能确定元素类型，则使用该类型进行转换；否则默认使用Dict作为元素类型
+        // Dict是一种通用的键值对容器，适合存储结构不确定的JSON对象
+        return componentType != null ?
+                JSONUtil.toList(valueStr, componentType) :
+                JSONUtil.toList(valueStr, Dict.class);
+    }
+
+    /**
+     * 检查目标类型是否为Set类型
+     *
+     * @param targetClazz 目标类型
+     * @return 如果是Set类型返回true，否则返回false
+     */
+    private boolean isSetType(Class<?> targetClazz) {
+        return targetClazz.isAssignableFrom(Set.class);
+    }
+
+    /**
+     * 将JSON数组字符串转换为Set集合
+     * <p>
+     * 该方法先将JSON数组转换为List集合，然后再将List转换为Set集合，
+     * 这样可以复用List的转换逻辑，同时HashSet构造函数会自动去除重复元素。
+     * </p>
+     *
+     * @param type     目标类型，可能包含泛型信息
+     * @param valueStr JSON数组字符串
+     * @return 转换后的Set集合
+     */
+    private Object convertJsonArrayToSet(Type type, String valueStr) {
+        // 尝试获取Set的泛型参数类型（如Set<User>中的User.class）
+        Class<?> componentType = getComponentType(type, 0);
+        LOG.debug("将JSON数组转换为Set<{}>类型", componentType != null ? componentType.getSimpleName() : "Dict");
+
+        // 先转换为List，再转换为Set，这样可以复用List的转换逻辑
+        // 同时HashSet构造函数会自动去除重复元素
+        List<?> list = componentType != null ?
+                JSONUtil.toList(valueStr, componentType) :
+                JSONUtil.toList(valueStr, Dict.class);
+        return new HashSet<>(list);
+    }
+
+    /**
+     * 检查目标类型是否为数组类型
+     *
+     * @param targetClazz 目标类型
+     * @return 如果是数组类型返回true，否则返回false
+     */
+    private boolean isArrayType(Class<?> targetClazz) {
+        return targetClazz.isArray();
+    }
+
+    /**
+     * 将JSON数组字符串转换为数组
+     * <p>
+     * 该方法先将JSON数组转换为List集合，然后再将List转换为特定类型的数组。
+     * 这种方式可以处理任意类型的数组，包括基本类型和对象类型。
+     * </p>
+     *
+     * @param targetClazz 目标数组类型
+     * @param valueStr    JSON数组字符串
+     * @return 转换后的数组
+     */
+    private Object convertJsonArrayToArray(Class<?> targetClazz, String valueStr) {
+        // 获取数组的元素类型（如User[]中的User.class）
+        Class<?> componentType = targetClazz.getComponentType();
+        LOG.debug("将JSON数组转换为{}[]类型", componentType.getSimpleName());
+
+        // 先转换为List，再转换为特定类型的数组
+        // 这种方式可以处理任意类型的数组，包括基本类型和对象类型
+        List<?> list = JSONUtil.toList(valueStr, componentType);
+        return list.toArray((Object[]) java.lang.reflect.Array.newInstance(componentType, list.size()));
     }
 
     /**
@@ -588,60 +732,110 @@ public class GXDataConvert {
      * @param sourceCollection 源集合，任意Collection类型的实例
      * @return 转换后的集合或数组，如果不支持的类型则返回null
      */
-    private  Object handleCollectionConversion(Type type, Class<?> targetClazz, Collection<?> sourceCollection) {
-        // 处理转换为List类型（有序集合）
-        if (targetClazz.isAssignableFrom(List.class)) {
-            // 尝试获取List的泛型参数类型
-            Class<?> componentType = getComponentType(type, 0);
-            if (componentType != null) {
-                LOG.debug("将集合转换为List<{}>类型", componentType.getSimpleName());
-                // 预分配容量，减少扩容操作
-                List<Object> resultList = new ArrayList<>(sourceCollection.size());
-                // 对集合中的每个元素进行类型转换
-                for (Object item : sourceCollection) {
-                    Object convertedItem = convert(componentType, item);
-                    resultList.add(convertedItem != null ? convertedItem : item);
-                }
-                return resultList;
-            }
-            LOG.debug("将集合直接转换为List类型（不转换元素类型）");
-            return new ArrayList<>(sourceCollection);
+    private Object handleCollectionConversion(Type type, Class<?> targetClazz, Collection<?> sourceCollection) {
+        // 根据目标类型选择不同的转换策略
+        if (isListType(targetClazz)) {
+            return convertCollectionToList(type, sourceCollection);
+        } else if (isSetType(targetClazz)) {
+            return convertCollectionToSet(type, sourceCollection);
+        } else if (isArrayType(targetClazz)) {
+            return convertCollectionToArray(targetClazz, sourceCollection);
         }
-        // 处理转换为Set类型（无序不重复集合）
-        if (targetClazz.isAssignableFrom(Set.class)) {
-            // 尝试获取Set的泛型参数类型
-            Class<?> componentType = getComponentType(type, 0);
-            if (componentType != null) {
-                LOG.debug("将集合转换为Set<{}>类型", componentType.getSimpleName());
-                // 预分配容量，减少扩容操作
-                Set<Object> resultSet = new HashSet<>(sourceCollection.size());
-                // 对集合中的每个元素进行类型转换
-                for (Object item : sourceCollection) {
-                    Object convertedItem = convert(componentType, item);
-                    resultSet.add(convertedItem != null ? convertedItem : item);
-                }
-                return resultSet;
-            }
-            LOG.debug("将集合直接转换为Set类型（不转换元素类型）");
-            return new HashSet<>(sourceCollection);
-        }
-        // 处理转换为数组类型
-        if (targetClazz.isArray()) {
-            // 获取数组的元素类型
-            Class<?> componentType = targetClazz.getComponentType();
-            LOG.debug("将集合转换为{}[]类型", componentType.getSimpleName());
-            // 预分配容量，减少扩容操作
-            List<Object> resultList = new ArrayList<>(sourceCollection.size());
-            // 对集合中的每个元素进行类型转换
-            for (Object item : sourceCollection) {
-                Object convertedItem = convert(componentType, item);
-                resultList.add(convertedItem != null ? convertedItem : item);
-            }
-            // 转换为特定类型的数组
-            return resultList.toArray((Object[]) java.lang.reflect.Array.newInstance(componentType, resultList.size()));
-        }
+
         LOG.debug("不支持将集合转换为类型: {}", targetClazz.getName());
         return null; // 不支持的类型返回null
+    }
+
+    /**
+     * 将集合转换为List类型
+     * <p>
+     * 该方法尝试获取List的泛型参数类型，并根据该类型将源集合转换为对应的List集合。
+     * 如果能确定元素类型，则对集合中的每个元素进行类型转换；否则直接复制集合元素。
+     * </p>
+     *
+     * @param type             目标类型，可能包含泛型信息
+     * @param sourceCollection 源集合
+     * @return 转换后的List集合
+     */
+    private Object convertCollectionToList(Type type, Collection<?> sourceCollection) {
+        // 尝试获取List的泛型参数类型
+        Class<?> componentType = getComponentType(type, 0);
+        if (componentType != null) {
+            LOG.debug("将集合转换为List<{}>类型", componentType.getSimpleName());
+            return convertCollectionWithComponentType(sourceCollection, componentType, new ArrayList<>(sourceCollection.size()));
+        }
+        LOG.debug("将集合直接转换为List类型（不转换元素类型）");
+        return new ArrayList<>(sourceCollection);
+    }
+
+    /**
+     * 将集合转换为Set类型
+     * <p>
+     * 该方法尝试获取Set的泛型参数类型，并根据该类型将源集合转换为对应的Set集合。
+     * 如果能确定元素类型，则对集合中的每个元素进行类型转换；否则直接复制集合元素。
+     * </p>
+     *
+     * @param type             目标类型，可能包含泛型信息
+     * @param sourceCollection 源集合
+     * @return 转换后的Set集合
+     */
+    private Object convertCollectionToSet(Type type, Collection<?> sourceCollection) {
+        // 尝试获取Set的泛型参数类型
+        Class<?> componentType = getComponentType(type, 0);
+        if (componentType != null) {
+            LOG.debug("将集合转换为Set<{}>类型", componentType.getSimpleName());
+            return convertCollectionWithComponentType(sourceCollection, componentType, new HashSet<>(sourceCollection.size()));
+        }
+        LOG.debug("将集合直接转换为Set类型（不转换元素类型）");
+        return new HashSet<>(sourceCollection);
+    }
+
+    /**
+     * 将集合转换为数组类型
+     * <p>
+     * 该方法获取数组的元素类型，并根据该类型将源集合转换为对应的数组。
+     * 先将集合转换为List，再将List转换为特定类型的数组。
+     * </p>
+     *
+     * @param targetClazz      目标数组类型
+     * @param sourceCollection 源集合
+     * @return 转换后的数组
+     */
+    private Object convertCollectionToArray(Class<?> targetClazz, Collection<?> sourceCollection) {
+        // 获取数组的元素类型
+        Class<?> componentType = targetClazz.getComponentType();
+        LOG.debug("将集合转换为{}[]类型", componentType.getSimpleName());
+
+        // 预分配容量，减少扩容操作
+        List<Object> resultList = new ArrayList<>(sourceCollection.size());
+        // 对集合中的每个元素进行类型转换
+        for (Object item : sourceCollection) {
+            Object convertedItem = convert(componentType, item);
+            resultList.add(convertedItem != null ? convertedItem : item);
+        }
+        // 转换为特定类型的数组
+        return resultList.toArray((Object[]) java.lang.reflect.Array.newInstance(componentType, resultList.size()));
+    }
+
+    /**
+     * 根据组件类型转换集合元素
+     * <p>
+     * 该方法对集合中的每个元素进行类型转换，并将转换后的元素添加到目标集合中。
+     * 如果转换失败（返回null），则使用原始元素。
+     * </p>
+     *
+     * @param sourceCollection 源集合
+     * @param componentType    目标元素类型
+     * @param targetCollection 目标集合
+     * @return 转换后的集合
+     */
+    private Collection<Object> convertCollectionWithComponentType(Collection<?> sourceCollection, Class<?> componentType, Collection<Object> targetCollection) {
+        // 对集合中的每个元素进行类型转换
+        for (Object item : sourceCollection) {
+            Object convertedItem = convert(componentType, item);
+            targetCollection.add(convertedItem != null ? convertedItem : item);
+        }
+        return targetCollection;
     }
 
     /**
@@ -668,45 +862,81 @@ public class GXDataConvert {
      * @param sourceArray 源数组
      * @return 转换后的集合，如果不支持的类型则返回null
      */
-    private  Object handleArrayConversion(Type type, Class<?> targetClazz, Object[] sourceArray) {
-        // 处理转换为List类型（有序集合）
-        if (targetClazz.isAssignableFrom(List.class)) {
-            // 尝试获取List的泛型参数类型
-            Class<?> componentType = getComponentType(type, 0);
-            if (componentType != null) {
-                LOG.debug("将数组转换为List<{}>类型", componentType.getSimpleName());
-                // 预分配容量，减少扩容操作
-                List<Object> resultList = new ArrayList<>(sourceArray.length);
-                // 对数组中的每个元素进行类型转换
-                for (Object item : sourceArray) {
-                    Object convertedItem = convert(componentType, item);
-                    resultList.add(convertedItem != null ? convertedItem : item);
-                }
-                return resultList;
-            }
-            LOG.debug("将数组直接转换为List类型（不转换元素类型）");
-            return CollUtil.newArrayList(sourceArray);
+    private Object handleArrayConversion(Type type, Class<?> targetClazz, Object[] sourceArray) {
+        // 根据目标类型选择不同的转换策略
+        if (isListType(targetClazz)) {
+            return convertArrayToList(type, sourceArray);
+        } else if (isSetType(targetClazz)) {
+            return convertArrayToSet(type, sourceArray);
         }
-        // 处理转换为Set类型（无序不重复集合）
-        if (targetClazz.isAssignableFrom(Set.class)) {
-            // 尝试获取Set的泛型参数类型
-            Class<?> componentType = getComponentType(type, 0);
-            if (componentType != null) {
-                LOG.debug("将数组转换为Set<{}>类型", componentType.getSimpleName());
-                // 预分配容量，减少扩容操作
-                Set<Object> resultSet = new HashSet<>(sourceArray.length);
-                // 对数组中的每个元素进行类型转换
-                for (Object item : sourceArray) {
-                    Object convertedItem = convert(componentType, item);
-                    resultSet.add(convertedItem != null ? convertedItem : item);
-                }
-                return resultSet;
-            }
-            LOG.debug("将数组直接转换为Set类型（不转换元素类型）");
-            return CollUtil.newHashSet(sourceArray);
-        }
+
         LOG.debug("不支持将数组转换为类型: {}", targetClazz.getName());
         return null; // 不支持的类型返回null
+    }
+
+    /**
+     * 将数组转换为List类型
+     * <p>
+     * 该方法尝试获取List的泛型参数类型，并根据该类型将源数组转换为对应的List集合。
+     * 如果能确定元素类型，则对数组中的每个元素进行类型转换；否则直接复制数组元素。
+     * </p>
+     *
+     * @param type        目标类型，可能包含泛型信息
+     * @param sourceArray 源数组
+     * @return 转换后的List集合
+     */
+    private Object convertArrayToList(Type type, Object[] sourceArray) {
+        // 尝试获取List的泛型参数类型
+        Class<?> componentType = getComponentType(type, 0);
+        if (componentType != null) {
+            LOG.debug("将数组转换为List<{}>类型", componentType.getSimpleName());
+            return convertArrayWithComponentType(sourceArray, componentType, new ArrayList<>(sourceArray.length));
+        }
+        LOG.debug("将数组直接转换为List类型（不转换元素类型）");
+        return CollUtil.newArrayList(sourceArray);
+    }
+
+    /**
+     * 将数组转换为Set类型
+     * <p>
+     * 该方法尝试获取Set的泛型参数类型，并根据该类型将源数组转换为对应的Set集合。
+     * 如果能确定元素类型，则对数组中的每个元素进行类型转换；否则直接复制数组元素。
+     * </p>
+     *
+     * @param type        目标类型，可能包含泛型信息
+     * @param sourceArray 源数组
+     * @return 转换后的Set集合
+     */
+    private Object convertArrayToSet(Type type, Object[] sourceArray) {
+        // 尝试获取Set的泛型参数类型
+        Class<?> componentType = getComponentType(type, 0);
+        if (componentType != null) {
+            LOG.debug("将数组转换为Set<{}>类型", componentType.getSimpleName());
+            return convertArrayWithComponentType(sourceArray, componentType, new HashSet<>(sourceArray.length));
+        }
+        LOG.debug("将数组直接转换为Set类型（不转换元素类型）");
+        return CollUtil.newHashSet(sourceArray);
+    }
+
+    /**
+     * 根据组件类型转换数组元素
+     * <p>
+     * 该方法对数组中的每个元素进行类型转换，并将转换后的元素添加到目标集合中。
+     * 如果转换失败（返回null），则使用原始元素。
+     * </p>
+     *
+     * @param sourceArray      源数组
+     * @param componentType    目标元素类型
+     * @param targetCollection 目标集合
+     * @return 转换后的集合
+     */
+    private Collection<Object> convertArrayWithComponentType(Object[] sourceArray, Class<?> componentType, Collection<Object> targetCollection) {
+        // 对数组中的每个元素进行类型转换
+        for (Object item : sourceArray) {
+            Object convertedItem = convert(componentType, item);
+            targetCollection.add(convertedItem != null ? convertedItem : item);
+        }
+        return targetCollection;
     }
 
     /**
@@ -727,7 +957,7 @@ public class GXDataConvert {
      * @param <T>    目标类型的泛型参数
      * @return 转换后的目标类型对象，如果转换失败则返回null
      */
-    public  <T> T convert(Class<T> tClass, Dict value) {
+    public <T> T convert(Class<T> tClass, Dict value) {
         // 空值安全处理
         if (value == null) {
             return null;
@@ -736,6 +966,7 @@ public class GXDataConvert {
             // 从Spring容器获取ObjectMapper实例
             ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
             // 使用Jackson进行对象转换
+            assert objectMapper != null;
             return objectMapper.convertValue(value, tClass);
         } catch (Exception e) {
             LOG.warn("Dict转换为{}失败: {}", tClass.getName(), e.getMessage());
@@ -770,7 +1001,7 @@ public class GXDataConvert {
      * @param sourceMap   源Map对象
      * @return 转换后的对象，如果不支持的类型则返回null
      */
-    private  Object handleMapConversion(Type type, Class<?> targetClazz, Map<?, ?> sourceMap) {
+    private Object handleMapConversion(Type type, Class<?> targetClazz, Map<?, ?> sourceMap) {
         // 处理转换为Dict类型（键值对容器）
         if (targetClazz.isAssignableFrom(Dict.class)) {
             LOG.debug("将Map转换为Dict类型");
@@ -835,7 +1066,7 @@ public class GXDataConvert {
      * @param index 泛型参数的索引，从0开始（例如，对于Map<K,V>，0表示K，1表示V）
      * @return 组件类型的Class对象，如果未找到则返回null
      */
-    private  Class<?> getComponentType(Type type, int index) {
+    private Class<?> getComponentType(Type type, int index) {
         // 使用Hutool工具获取泛型参数类型
         Type actualTypeArgument = TypeUtil.getTypeArgument(type, index);
         // 将Type转换为Class对象

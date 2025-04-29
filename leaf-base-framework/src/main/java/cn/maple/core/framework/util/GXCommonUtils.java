@@ -20,10 +20,12 @@ import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.constant.GXDataSourceConstant;
 import cn.maple.core.framework.convert.GXDataConvert;
+import cn.maple.core.framework.dto.GXBaseData;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.exception.GXBeanValidateException;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXConvertException;
+import cn.maple.core.framework.util.cglib.GXCglibUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -544,19 +546,35 @@ public class GXCommonUtils {
      * 将任意对象转换为指定类型的对象
      * <p>
      * 该方法提供了强大的对象转换功能，支持以下特性：
-     * 1. 自动处理简单类型和数组类型
-     * 2. 智能处理字符串类型的JSON数据
-     * 3. 支持自定义转换规则和额外参数
-     * 4. 自动调用目标对象的自定义处理方法和验证方法
+     * 1. 自动处理简单类型和数组类型 - 对于简单类型直接返回源对象
+     * 2. 智能处理字符串类型的JSON数据 - 自动解析JSON字符串为Dict或List
+     * 3. 支持自定义转换规则和额外参数 - 通过CopyOptions和extraData实现灵活转换
+     * 4. 自动调用目标对象的自定义处理方法和验证方法 - 支持转换后的自定义处理和验证
+     * 5. 特殊处理GXBaseData类型 - 使用CGLIB进行高效复制
      * </p>
      * <p>
      * 转换流程：
-     * 1. 检查源对象和目标类型
-     * 2. 对于简单类型或数组类型，直接返回源对象
-     * 3. 对于字符串类型的JSON数据，先转换为Dict或List
-     * 4. 创建目标类型的实例，并复制属性
-     * 5. 调用目标对象的自定义处理方法（如果指定）
-     * 6. 调用目标对象的验证方法
+     * 1. 检查源对象和目标类型 - 验证参数有效性
+     * 2. 对于简单类型或数组类型，直接返回源对象 - 避免不必要的转换
+     * 3. 对于字符串类型的JSON数据，先转换为Dict或List - 智能处理JSON格式
+     * 4. 创建目标类型的实例，并复制属性 - 使用反射和BeanUtil
+     * 5. 调用目标对象的自定义处理方法（如果指定）- 支持自定义逻辑
+     * 6. 调用目标对象的验证方法 - 确保转换结果的有效性
+     * </p>
+     * <p>
+     * 内存安全特性：
+     * 1. 严格的参数验证 - 防止空指针异常和非法参数
+     * 2. 安全的类型转换 - 使用TypeToken和ClassUtil进行类型检查
+     * 3. 异常安全处理 - 捕获并包装所有异常，提供详细错误信息
+     * 4. 资源管理 - 避免创建不必要的对象，减少内存占用
+     * 5. 防御性编程 - 对所有可能为null的对象进行检查
+     * </p>
+     * <p>
+     * 线程安全特性：
+     * 1. 无状态设计 - 方法不依赖共享状态，可在多线程环境中安全调用
+     * 2. 本地变量 - 所有变量都是方法内的局部变量，避免线程间干扰
+     * 3. 不可变参数 - 不修改输入参数，确保线程安全
+     * 4. 安全的工具类调用 - 使用线程安全的工具类和方法
      * </p>
      * <p>
      * 使用示例：
@@ -576,17 +594,38 @@ public class GXCommonUtils {
      * CopyOptions options = CopyOptions.create().setIgnoreNullValue(true);
      * Dict extraData = Dict.create().set("tenant", "system");
      * PersonResDto dto = convertSourceToTarget(req, PersonResDto.class, "customerProcess", options, extraData);
+     *
+     * // 示例4：转换JSON字符串为对象
+     * String jsonStr = "{\"id\":1,\"name\":\"测试用户\",\"roles\":[\"admin\",\"user\"]}";
+     * UserDto userDto = convertSourceToTarget(jsonStr, UserDto.class, null, null);
+     *
+     * // 示例5：批量转换（结合convertSourceListToTargetList方法）
+     * List<UserEntity> userEntities = userService.findAll();
+     * List<UserDto> userDtos = convertSourceListToTargetList(userEntities, UserDto.class);
+     *
+     * // 示例6：处理特殊类型转换
+     * CopyOptions customOptions = CopyOptions.create()
+     *     .setIgnoreNullValue(true)
+     *     .setConverter((type, value) -> {
+     *         // 自定义日期格式转换
+     *         if (type.equals(Date.class) && value instanceof String) {
+     *             return DateUtil.parse((String) value);
+     *         }
+     *         return value;
+     *     });
+     * OrderDto orderDto = convertSourceToTarget(orderMap, OrderDto.class, null, customOptions);
      * }
      * </pre>
      * </p>
      *
-     * @param source      源对象，可以为任意类型，包括简单类型、数组、集合、Map等
-     * @param tClass      目标对象类型，不能为null
-     * @param methodName  转换后需要调用的目标对象方法名，可以为null，为null时使用默认方法名
-     * @param copyOptions 复制选项，可以设置自定义的TypeConvert来自定义转换规则，可以为null
-     * @param extraData   额外参数，会传递给methodName指定的方法，可以为null
+     * @param source      源对象，可以为任意类型，包括简单类型、数组、集合、Map等，可以为null
+     * @param tClass      目标对象类型，不能为null，否则抛出IllegalArgumentException异常
+     * @param methodName  转换后需要调用的目标对象方法名，可以为null，为null时使用默认方法名（customizeProcess）
+     * @param copyOptions 复制选项，可以设置自定义的TypeConvert来自定义转换规则，可以为null，为null时使用默认选项
+     * @param extraData   额外参数，会传递给methodName指定的方法，可以为null，为null时创建空Dict
      * @return 转换后的目标对象，如果源对象为null则返回null
-     * @throws GXConvertException 如果转换过程中发生异常
+     * @throws GXConvertException       如果转换过程中发生异常，包括但不限于：无法创建目标类型实例、属性复制失败、自定义处理方法调用失败等
+     * @throws IllegalArgumentException 如果目标类型为null
      */
     @SuppressWarnings("unchecked")
     public static <S, T> T convertSourceToTarget(S source, Class<T> tClass, String methodName, CopyOptions copyOptions, Object extraData) {
@@ -635,7 +674,16 @@ public class GXCommonUtils {
             }
 
             // 复制属性
-            BeanUtil.copyProperties(tmpSource, target, copyOptions);
+            if (TypeToken.of(source.getClass()).isSubtypeOf(GXBaseData.class)) {
+                LOG.info("使用CGLIB进行高效复制!!");
+                GXCglibUtils.copy(tmpSource, target, (value, type, context) -> {
+                    GXDataConvert dataConvert = new GXDataConvert();
+                    return dataConvert.convert(type, value);
+                });
+            } else {
+                LOG.info("使用BeanUtil进行属性复制!!");
+                BeanUtil.copyProperties(tmpSource, target, copyOptions);
+            }
 
             // 调用自定义处理方法（如果指定）
             if (CharSequenceUtil.isNotEmpty(methodName)) {
@@ -650,18 +698,27 @@ public class GXCommonUtils {
             // 异常处理，提取根本原因
             LOG.error("对象转换失败: 源类型[{}], 目标类型[{}], 错误: {}",
                     source.getClass().getName(), tClass.getName(), e.getMessage());
-            //Throwable throwable = Optional.ofNullable(Optional.ofNullable(e.getCause().getCause()).orElse(e.getCause())).orElse(e);
-            Throwable throwable = e.getCause();
-            if (ObjectUtil.isNotNull(throwable)) {
-                if (ObjectUtil.isNotNull(throwable.getCause())) {
-                    throwable = throwable.getCause();
+
+            // 提取异常的根本原因，最多向下追溯两层
+            Throwable rootCause = e;
+            if (ObjectUtil.isNotNull(e.getCause())) {
+                rootCause = e.getCause();
+                if (ObjectUtil.isNotNull(rootCause.getCause())) {
+                    rootCause = rootCause.getCause();
                 }
-            } else {
-                throwable = e;
             }
 
-            throw new GXConvertException("对象转换失败: " + throwable.getMessage(), throwable);
-            //throw Convert.convert(RuntimeException.class, throwable);
+            // 记录详细的异常堆栈信息（仅在DEBUG级别）
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("对象转换异常详细信息:", e);
+            }
+
+            // 包装为GXConvertException并抛出，保留原始异常信息
+            String errorMessage = CharSequenceUtil.format("对象转换失败: 源类型[{}]转换为目标类型[{}]时发生错误: {}",
+                    source.getClass().getSimpleName(),
+                    tClass.getSimpleName(),
+                    rootCause.getMessage());
+            throw new GXConvertException(errorMessage, rootCause);
         }
     }
 
@@ -686,6 +743,41 @@ public class GXCommonUtils {
      * @param methodName  需要调用的方法名字
      * @param copyOptions 复制选项
      * @return 目标对象
+     */
+    /**
+     * 将任意对象转换为指定类型的对象（简化版本，使用空Dict作为额外参数）
+     * <p>
+     * 该方法是{@link #convertSourceToTarget(Object, Class, String, CopyOptions, Object)}的简化版本，
+     * 使用空Dict作为额外参数。适用于不需要传递额外参数的场景。
+     * </p>
+     * <p>
+     * 内存安全特性：
+     * 1. 创建空Dict作为默认参数，避免null值
+     * 2. 委托给完整版本方法处理，确保一致的安全特性
+     * </p>
+     * <p>
+     * 线程安全特性：
+     * 1. 无状态设计，可在多线程环境中安全调用
+     * 2. 使用线程安全的Dict.create()创建空字典
+     * </p>
+     * <p>
+     * 使用示例：
+     * <pre>
+     * {@code
+     * // 将实体对象转换为DTO，不需要额外参数
+     * UserEntity entity = userRepository.findById(1L);
+     * UserDto dto = convertSourceToTarget(entity, UserDto.class, "process", null);
+     * }
+     * </pre>
+     * </p>
+     *
+     * @param source      源对象，可以为任意类型，包括简单类型、数组、集合、Map等，可以为null
+     * @param tClass      目标对象类型，不能为null，否则抛出IllegalArgumentException异常
+     * @param methodName  转换后需要调用的目标对象方法名，可以为null，为null时使用默认方法名
+     * @param copyOptions 复制选项，可以设置自定义的TypeConvert来自定义转换规则，可以为null
+     * @return 转换后的目标对象，如果源对象为null则返回null
+     * @throws GXConvertException 如果转换过程中发生异常
+     * @see #convertSourceToTarget(Object, Class, String, CopyOptions, Object) 完整版本的方法
      */
     public static <S, T> T convertSourceToTarget(S source, Class<T> tClass, String methodName, CopyOptions copyOptions) {
         return convertSourceToTarget(source, tClass, methodName, copyOptions, Dict.create());
