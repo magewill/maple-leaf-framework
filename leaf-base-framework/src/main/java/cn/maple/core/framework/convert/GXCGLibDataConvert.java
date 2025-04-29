@@ -20,7 +20,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 通用CGLIB转换器实现，支持所有Java类型的深度转换，包括集合和映射中的嵌套复杂对象。
+ * 通用CGLIB转换器实现，支持所有Java类型的深度转换，包括集合和映射中的嵌套复杂对象
  * <p>
  * 该转换器处理以下类型：
  * 1. 基本类型和包装类型（如int、Integer、double、Double等）
@@ -52,22 +52,19 @@ import java.util.concurrent.ConcurrentHashMap;
  * 使用示例：
  * <pre>
  * // 1. 基本使用方式
- * // 创建源对象
  * UserEntity source = new UserEntity();
  * source.setId(1L);
  * source.setUsername("张三");
  * source.setRoles(Arrays.asList("admin", "user"));
  * source.setAttributes(Map.of("department", "技术部", "level", 3));
  *
- * // 创建目标对象
  * UserDTO target = new UserDTO();
  *
- * // 创建BeanCopier并使用GXDataCglibConvert进行属性转换
+ * // 创建BeanCopier并使用GXCGLibDataConvert进行属性转换
  * BeanCopier copier = BeanCopier.create(UserEntity.class, UserDTO.class, true);
- * copier.copy(source, target, new GXDataCglibConvert(UserDTO.class, target));
+ * copier.copy(source, target, new GXCGLibDataConvert(UserDTO.class));
  *
  * // 2. 处理复杂嵌套对象
- * // 源对象包含嵌套的集合和对象
  * OrderEntity order = new OrderEntity();
  * order.setOrderId("ORD20230101");
  * order.setItems(List.of(
@@ -76,19 +73,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * ));
  * order.setCustomer(new CustomerEntity("customer123", "李四", "13800138000"));
  *
- * // 目标DTO对象
  * OrderDTO orderDTO = new OrderDTO();
  *
- * // 使用GXDataCglibConvert进行深度转换
+ * // 使用GXCGLibDataConvert进行深度转换
  * BeanCopier orderCopier = BeanCopier.create(OrderEntity.class, OrderDTO.class, true);
- * orderCopier.copy(order, orderDTO, new GXDataCglibConvert(OrderDTO.class, orderDTO));
+ * orderCopier.copy(order, orderDTO, new GXCGLibDataConvert(OrderDTO.class));
  *
  * // 3. 处理JSON字符串转换
  * String jsonData = "{\"name\":\"王五\",\"age\":30,\"skills\":[\"Java\",\"Spring\",\"MySQL\"]}";
  * UserProfile profile = new UserProfile();
  *
  * // 设置JSON字符串到对象属性（会自动解析）
- * BeanUtil.setProperty(profile, "data", jsonData, CopyOptions.create().setConverter(new GXDataCglibConvert(UserProfile.class, profile)));
+ * BeanUtil.setProperty(profile, "data", jsonData, CopyOptions.create().setConverter(new GXCGLibDataConvert(UserProfile.class)));
  *
  * // 4. 与GXCglibUtils结合使用
  * List<ProductEntity> products = getProductList(); // 假设这是获取产品列表的方法
@@ -96,10 +92,35 @@ import java.util.concurrent.ConcurrentHashMap;
  *     .map(p -> {
  *         ProductDTO dto = new ProductDTO();
  *         BeanCopier copier = BeanCopier.create(ProductEntity.class, ProductDTO.class, true);
- *         copier.copy(p, dto, new GXDataCglibConvert(ProductDTO.class, dto));
+ *         copier.copy(p, dto, new GXCGLibDataConvert(ProductDTO.class));
  *         return dto;
  *     })
  *     .collect(Collectors.toList());
+ *
+ * // 5. 处理复杂的泛型集合转换
+ * List<Map<String, List<OrderItemEntity>>> complexSource = getComplexData();
+ * List<Map<String, List<OrderItemDTO>>> complexTarget = new ArrayList<>();
+ *
+ * // 使用GXCGLibDataConvert处理复杂泛型结构
+ * BeanCopier complexCopier = BeanCopier.create(complexSource.getClass(), complexTarget.getClass(), true);
+ * complexCopier.copy(complexSource, complexTarget, new GXCGLibDataConvert(complexTarget.getClass()));
+ *
+ * // 6. 处理枚举类型转换
+ * class UserStatus {
+ *     private UserStatusEnum status;
+ *     // getter和setter
+ * }
+ *
+ * UserStatus source = new UserStatus();
+ * source.setStatus(UserStatusEnum.ACTIVE);
+ *
+ * // 字符串到枚举的自动转换
+ * Map<String, Object> map = new HashMap<>();
+ * map.put("status", "ACTIVE");
+ *
+ * UserStatus target = new UserStatus();
+ * BeanUtil.fillBeanWithMap(map, target, true, CopyOptions.create().setConverter(new GXCGLibDataConvert(UserStatus.class)));
+ * // 此时 target.getStatus() == UserStatusEnum.ACTIVE
  * </pre>
  * </p>
  */
@@ -139,12 +160,26 @@ public class GXCGLibDataConvert implements Converter {
     /**
      * 构造函数
      * <p>
-     * 创建转换器实例并预缓存目标类的字段信息
+     * 创建转换器实例并预缓存目标类的字段信息。该构造函数只需要目标类型参数，
+     * 会自动缓存目标类的字段信息和泛型类型信息，显著提高后续转换性能。
+     * </p>
+     * <p>
+     * 性能优化：
+     * 1. 预缓存字段元数据，减少运行时反射开销
+     * 2. 预缓存泛型类型信息，加速集合和Map的元素类型推断
+     * </p>
+     * <p>
+     * 线程安全：
+     * 使用ConcurrentHashMap存储缓存，确保在多线程环境下安全访问
      * </p>
      *
      * @param targetClass 目标类型，不能为null
+     * @throws IllegalArgumentException 如果targetClass为null
      */
     public GXCGLibDataConvert(Class<?> targetClass) {
+        if (targetClass == null) {
+            throw new IllegalArgumentException("目标类型不能为null");
+        }
         preCacheFields(targetClass);
     }
 
@@ -160,15 +195,14 @@ public class GXCGLibDataConvert implements Converter {
      * BeanCopier实例的开销，同时保证了在高并发环境下的安全性。
      * </p>
      *
-     * @param sourceClass  源类型，不能为null
-     * @param targetClass  目标类型，不能为null
-     * @param useConverter 是否使用转换器，true表示在复制过程中使用转换器
+     * @param sourceClass 源类型，不能为null
+     * @param targetClass 目标类型，不能为null
      * @return 缓存的或新创建的BeanCopier实例
      */
-    private BeanCopier getBeanCopier(Class<?> sourceClass, Class<?> targetClass, boolean useConverter) {
+    private BeanCopier getBeanCopier(Class<?> sourceClass, Class<?> targetClass) {
         return beanCopierCache
                 .computeIfAbsent(sourceClass, k -> new ConcurrentHashMap<>())
-                .computeIfAbsent(targetClass, k -> BeanCopier.create(sourceClass, targetClass, useConverter));
+                .computeIfAbsent(targetClass, k -> BeanCopier.create(sourceClass, targetClass, true));
     }
 
     /**
@@ -190,9 +224,24 @@ public class GXCGLibDataConvert implements Converter {
      * 8. 通用转换 - 使用Hutool的Convert工具作为兜底方案
      * </p>
      * <p>
-     * 异常处理：
-     * 所有转换过程中的异常都会被捕获并记录，确保转换过程不会因异常而中断。
-     * 在转换失败时，方法会返回null而不是抛出异常，保证调用方的稳定性。
+     * 性能优化：
+     * 1. 使用类型判断的短路逻辑，优先处理常见类型
+     * 2. 对于复杂对象，利用缓存的BeanCopier实例避免重复创建
+     * 3. 智能处理集合和数组的转换，减少内存分配
+     * 4. 使用日志级别控制，仅在需要时输出详细日志
+     * </p>
+     * <p>
+     * 内存安全：
+     * 1. 所有转换过程中的异常都会被捕获并记录，确保转换过程不会因异常而中断
+     * 2. 在转换失败时，方法会返回null而不是抛出异常，保证调用方的稳定性
+     * 3. 对于集合类型，创建新的集合实例而不是修改原有集合
+     * 4. 安全处理类型不兼容的情况，避免类型转换异常
+     * </p>
+     * <p>
+     * 线程安全：
+     * 1. 使用线程安全的缓存机制
+     * 2. 无状态的转换逻辑，可以安全地在多线程环境中调用
+     * 3. 使用不可变对象和线程安全的集合类进行操作
      * </p>
      *
      * @param sourceValue 源值，可以是任意类型的对象
@@ -201,44 +250,38 @@ public class GXCGLibDataConvert implements Converter {
      * @return 转换后的目标类型对象，如果转换失败则返回null
      */
     @Override
+    @SuppressWarnings("unchecked")
     public Object convert(Object sourceValue, Class targetClass, Object context) {
         // 空值安全处理
         if (sourceValue == null) {
             LOG.trace("源值为null，返回目标类型{}的null值", targetClass.getName());
             return null;
         }
-
         // 获取源值的类型
         Class<?> sourceClass = sourceValue.getClass();
-
         // 从上下文中提取属性名（通常是setter方法名）
         String propertyName = (context instanceof String) ? getPropertyName((String) context) : null;
         LOG.trace("尝试转换: 源类型 [{}], 目标类型 [{}], 属性 [{}]",
                 sourceClass.getName(), targetClass.getName(), propertyName != null ? propertyName : "N/A (上下文: " + context + ")");
-
         try {
             // 1. 处理枚举类型转换
             if (targetClass.isEnum()) {
                 return handleEnumConversion(targetClass, sourceValue);
             }
-
             // 2. 处理日期/时间类型转换（使用Hutool）
             if (Date.class.isAssignableFrom(targetClass) || Calendar.class.isAssignableFrom(targetClass)
                     || java.time.temporal.Temporal.class.isAssignableFrom(targetClass)) {
                 LOG.trace("处理日期/时间转换到{}", targetClass.getName());
                 return Convert.convert(targetClass, sourceValue);
             }
-
             // 3. 处理字符串源值转换
             if (sourceValue instanceof CharSequence) {
                 return handleStringSourceConversion(targetClass, propertyName, sourceValue.toString(), context);
             }
-
             // 4. 处理集合源值转换（List, Set）-> 目标（List, Set, Array）
             if (sourceValue instanceof Collection<?>) {
                 return handleCollectionSourceConversion(targetClass, propertyName, (Collection<?>) sourceValue, context);
             }
-
             // 5. 处理数组源值转换 -> 目标（List, Set, Array）
             if (sourceClass.isArray()) {
                 // 区分处理对象数组和基本类型数组
@@ -250,12 +293,10 @@ public class GXCGLibDataConvert implements Converter {
                     return Convert.convertWithCheck(targetClass, sourceValue, null, false); // 转换失败时返回null而不抛出异常
                 }
             }
-
             // 6. 处理Map源值转换 -> 目标（Map, Bean）
             if (sourceValue instanceof Map<?, ?>) {
                 return handleMapSourceConversion(targetClass, propertyName, (Map<?, ?>) sourceValue, context);
             }
-
             // 7. 处理复杂对象（JavaBean）源值转换 -> 目标（Map, Bean）
             // 检查源和目标是否可能是JavaBean（非基本类型、非包装类型、非字符串、非集合、非Map、非数组、非日期、非枚举等）
             if (isComplexBean(sourceClass) && (isComplexBean(targetClass) || Map.class.isAssignableFrom(targetClass))) {
@@ -271,8 +312,9 @@ public class GXCGLibDataConvert implements Converter {
                     Object targetInstance = ReflectUtil.newInstanceIfPossible(targetClass);
                     if (targetInstance != null) {
                         // 递归使用CGLIB BeanCopier，传递*this*转换器
-                        org.springframework.cglib.beans.BeanCopier copier = getBeanCopier(sourceClass, targetClass, true);
-                        copier.copy(sourceValue, targetInstance, this); // 使用'this'作为转换器
+                        org.springframework.cglib.beans.BeanCopier copier = getBeanCopier(sourceClass, targetClass);
+                        // 使用this作为转换器
+                        copier.copy(sourceValue, targetInstance, this);
                         return targetInstance;
                     } else {
                         LOG.warn("无法实例化目标Bean类: {}", targetClass.getName());
@@ -280,7 +322,6 @@ public class GXCGLibDataConvert implements Converter {
                     }
                 }
             }
-
             // 8. 使用Hutool的通用转换作为兜底方案
             LOG.trace("使用Hutool Convert作为兜底方案: {} -> {}", sourceClass.getName(), targetClass.getName());
             // 使用convertWithCheck进行更好的错误处理，但不立即抛出异常
@@ -295,11 +336,10 @@ public class GXCGLibDataConvert implements Converter {
                 LOG.trace("Hutool Convert成功转换: {} -> {}", sourceClass.getName(), targetClass.getName());
                 return convertedValue;
             }
-
             LOG.warn("无法将类型 [{}] 转换为 [{}] (属性 [{}])，返回null",
                     sourceClass.getName(), targetClass.getName(), propertyName != null ? propertyName : "N/A");
-            return null; // 所有尝试都失败后返回null
-
+            // 所有尝试都失败后返回null
+            return null;
         } catch (Exception e) {
             LOG.warn("转换属性 [{}] 从 {} 到 {} 时出错: {} - {}",
                     propertyName != null ? propertyName : "N/A",
@@ -319,14 +359,24 @@ public class GXCGLibDataConvert implements Converter {
      * 显著减少后续转换过程中的反射开销。对于复杂对象和集合类型的转换尤其有效。
      * </p>
      * <p>
-     * 性能优化：
-     * 1. 使用ConcurrentHashMap存储缓存，确保线程安全
-     * 2. 只缓存有意义的类型，跳过基本类型、数组、枚举等
-     * 3. 利用Hutool的ReflectUtil获取包括继承字段在内的所有字段
+     * 工作原理：
+     * 1. 首先检查类型是否需要缓存（跳过基本类型、数组、接口等）
+     * 2. 使用Hutool的ReflectUtil获取包括继承字段在内的所有字段
+     * 3. 缓存字段对象和字段的泛型类型信息到线程安全的Map中
+     * 4. 安全处理异常，确保初始化过程不会中断
      * </p>
      * <p>
-     * 异常处理：
-     * 捕获并记录所有反射过程中的异常，确保初始化过程不会因异常而中断
+     * 性能优化：
+     * 1. 使用ConcurrentHashMap存储缓存，确保线程安全且高效
+     * 2. 只缓存有意义的类型，跳过基本类型、数组、枚举等简单类型
+     * 3. 利用Hutool的ReflectUtil获取包括继承字段在内的所有字段，避免手动递归
+     * 4. 使用条件判断避免重复缓存已存在的字段
+     * </p>
+     * <p>
+     * 内存安全：
+     * 1. 对类型进行严格检查，避免对不适合缓存的类型进行处理
+     * 2. 捕获并记录所有反射过程中的异常，确保初始化过程不会因异常而中断
+     * 3. 使用线程安全的集合存储缓存数据，避免并发修改问题
      * </p>
      *
      * @param clazz 要缓存字段的类，不能为null
@@ -340,18 +390,24 @@ public class GXCGLibDataConvert implements Converter {
         }
         try {
             // 使用ReflectUtil获取包括继承字段在内的所有字段
-            for (Field field : ReflectUtil.getFields(clazz)) {
-                if (!fieldCache.containsKey(field.getName())) {
+            Field[] fields = ReflectUtil.getFields(clazz);
+            LOG.trace("为类 {} 缓存 {} 个字段", clazz.getName(), fields.length);
+            for (Field field : fields) {
+                String fieldName = field.getName();
+                if (!fieldCache.containsKey(fieldName)) {
                     // 缓存字段对象
-                    fieldCache.put(field.getName(), field);
+                    fieldCache.put(fieldName, field);
                     // 缓存字段的泛型类型信息
-                    genericTypeCache.put(field.getName(), field.getGenericType());
+                    genericTypeCache.put(fieldName, field.getGenericType());
+                    LOG.trace("缓存字段: {}，类型: {}", fieldName, field.getGenericType());
                 }
             }
             // ReflectUtil.getFields已经处理了继承字段，不需要递归处理父类
-            // preCacheFields(clazz.getSuperclass());
         } catch (Exception e) {
-            LOG.warn("为类{}预缓存字段时失败: {}", clazz.getName(), e.getMessage());
+            LOG.warn("为类 {} 预缓存字段时失败: {}", clazz.getName(), e.getMessage());
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("预缓存字段异常详情:", e);
+            }
         }
     }
 
@@ -359,7 +415,8 @@ public class GXCGLibDataConvert implements Converter {
      * 从setter方法名中提取属性名
      * <p>
      * 该方法根据JavaBean规范，从setter方法名（如setUserName）中提取实际的属性名（如userName）。
-     * 处理了各种特殊情况，包括单字母属性名和特殊大写缩写（如URL）。
+     * 处理了各种特殊情况，包括单字母属性名和特殊大写缩写（如URL）。这是CGLIB转换过程中的
+     * 关键步骤，因为CGLIB在调用转换器时会传入setter方法名作为上下文信息。
      * </p>
      * <p>
      * 处理规则：
@@ -368,22 +425,43 @@ public class GXCGLibDataConvert implements Converter {
      * 3. 大写缩写（setURL）：保持大写（URL）
      * 4. 非标准名称：原样返回
      * </p>
+     * <p>
+     * 实现细节：
+     * 1. 首先检查方法名是否以"set"开头且长度大于3
+     * 2. 然后根据第四个字符（即set后的第一个字符）的大小写情况进行不同处理
+     * 3. 如果第四个字符后面的字符是小写，或者方法名长度为4（如setA），则将第四个字符转为小写
+     * 4. 如果第四个字符后面的字符是大写（如setURL），则保持第四个字符的大小写不变
+     * 5. 对于不符合setter命名规范的方法名，直接返回原始名称
+     * </p>
+     * <p>
+     * 安全性考虑：
+     * 1. 在处理前检查字符串长度，避免索引越界异常
+     * 2. 使用安全的字符串操作方法，避免可能的字符编码问题
+     * 3. 对非标准命名的方法提供合理的降级处理
+     * </p>
      *
      * @param setterName setter方法名，如"setUserName"、"setURL"等
      * @return 提取的属性名，如"userName"、"URL"等
      */
     private String getPropertyName(String setterName) {
+        // 安全检查：确保setterName不为null
+        if (setterName == null) {
+            LOG.warn("传入的setter方法名为null，无法提取属性名");
+            return "";
+        }
+        // 检查是否是标准的setter方法名（以set开头且长度大于3）
         if (setterName.startsWith("set") && setterName.length() > 3) {
-            // 处理可能的单字母属性名
+            // 处理可能的单字母属性名或标准属性名
             if (setterName.length() == 4 || Character.isLowerCase(setterName.charAt(4))) {
                 // 例如：setA -> a 或 setUserName -> userName
                 return setterName.substring(3, 4).toLowerCase() + setterName.substring(4);
             } else {
-                // 避免改变第二个字符为大写的情况（例如：setURL -> URL）
+                // 处理首字母大写的特殊情况（例如：setURL -> URL）
                 return setterName.substring(3);
             }
         }
         // 如果上下文不是标准的setter名称，则原样返回
+        LOG.trace("非标准setter方法名: {}, 原样返回", setterName);
         return setterName;
     }
 
@@ -550,6 +628,7 @@ public class GXCGLibDataConvert implements Converter {
             // Hutool的JSONUtil.toBean可能不直接支持泛型Map，需要手动解析或使用更强大的JSON库
             try {
                 // 常见做法是先解析为Map<String, Object>
+                @SuppressWarnings("unchecked")
                 Map<String, Object> intermediateMap = JSONUtil.toBean(jsonObjectStr, Map.class);
                 // 然后根据需要进行转换（或调用handleMapSourceConversion处理）
                 if (targetClass.isAssignableFrom(Map.class) && (keyType == null || keyType == String.class) && (valueType == null || valueType == Object.class)) {
@@ -619,8 +698,7 @@ public class GXCGLibDataConvert implements Converter {
      */
     private Object handleJsonArrayStringConversion(Class<?> targetClass, String jsonArrayStr, String propertyName, Object context) {
         LOG.trace("将JSON数组字符串转换为{}", targetClass.getName());
-        Type targetComponentType = null;
-
+        Type targetComponentType;
         // 确定目标元素类型
         if (Collection.class.isAssignableFrom(targetClass)) {
             // 对于集合类型，获取泛型参数类型
@@ -636,14 +714,11 @@ public class GXCGLibDataConvert implements Converter {
             LOG.warn("无法将JSON数组字符串转换为非集合/非数组类型: {}", targetClass.getName());
             return null;
         }
-
         try {
             // 使用Hutool JSONUtil将JSON数组解析为List<元素类型>
             List<?> parsedList = JSONUtil.toList(jsonArrayStr, TypeUtil.getClass(targetComponentType));
-
             // 确保列表元素类型正确（JSONUtil可能对嵌套结构返回JSONObject/JSONArray）
             // 并将解析后的列表转换为最终目标类型（List、Set、Array）
-
             // 根据目标类型创建合适的集合
             Collection<Object> resultCollection = null;
             if (List.class.isAssignableFrom(targetClass) || targetClass.equals(Collection.class)) {
@@ -651,12 +726,11 @@ public class GXCGLibDataConvert implements Converter {
             } else if (Set.class.isAssignableFrom(targetClass)) {
                 resultCollection = new LinkedHashSet<>(parsedList.size()); // 可能需要保持顺序
             } else if (targetClass.isArray()) {
-                // 数组类型在元素转换后处理
+                // todo 数组类型在元素转换后处理
             } else {
                 LOG.warn("不支持的目标集合类型，无法进行JSON数组转换: {}", targetClass.getName());
                 return null;
             }
-
             // 转换每个元素
             List<Object> convertedList = new ArrayList<>(parsedList.size());
             for (Object item : parsedList) {
@@ -667,7 +741,6 @@ public class GXCGLibDataConvert implements Converter {
                     resultCollection.add(convertedItem);
                 }
             }
-
             // 根据目标类型返回合适的结果
             if (targetClass.isArray()) {
                 LOG.trace("将转换后的列表转换为类型{}的数组", targetComponentType);
@@ -681,13 +754,11 @@ public class GXCGLibDataConvert implements Converter {
                 // 返回集合类型
                 return resultCollection;
             }
-
         } catch (Exception e) {
             LOG.warn("无法将JSON数组字符串转换为{}: {}", targetClass.getName(), e.getMessage());
             return null;
         }
     }
-
 
     /**
      * 处理集合类型源值的转换
@@ -717,10 +788,10 @@ public class GXCGLibDataConvert implements Converter {
      * @param context          上下文信息，通常是setter方法名
      * @return 转换后的目标类型对象，如果转换失败则可能返回null
      */
+    @SuppressWarnings("unchecked")
     private Object handleCollectionSourceConversion(Class<?> targetClass, String propertyName, Collection<?> sourceCollection, Object context) {
         LOG.trace("Handling Collection source (size {}) conversion to {} for property {}", sourceCollection.size(), targetClass.getName(), propertyName);
-        Type targetComponentType = null;
-
+        Type targetComponentType;
         // 确定目标组件类型 (List<TargetElement>, Set<TargetElement>, TargetElement[])
         if (Collection.class.isAssignableFrom(targetClass)) {
             targetComponentType = getGenericTypeArgumentForTarget(propertyName, targetClass, 0);
@@ -734,14 +805,12 @@ public class GXCGLibDataConvert implements Converter {
             LOG.trace("目标既不是集合也不是数组，回退到Hutool Convert处理集合源值");
             return Convert.convertWithCheck(targetClass, sourceCollection, null, false);
         }
-
         Class<?> targetComponentClass = TypeUtil.getClass(targetComponentType);
         if (targetComponentClass == null) {
             LOG.warn("无法确定属性{}的目标组件类类型", propertyName);
-            targetComponentClass = Object.class; // 回退到Object类型
+            // 回退到Object类型
+            targetComponentClass = Object.class;
         }
-
-
         Collection<Object> resultCollection = null;
         if (targetClass.equals(List.class) || targetClass.equals(Collection.class) || targetClass.equals(ArrayList.class)) {
             resultCollection = new ArrayList<>(sourceCollection.size());
@@ -762,9 +831,7 @@ public class GXCGLibDataConvert implements Converter {
                 resultCollection = new ArrayList<>(sourceCollection.size());
             }
         }
-
         List<Object> tempListForArray = targetClass.isArray() ? new ArrayList<>(sourceCollection.size()) : null;
-
         // 遍历源集合并转换每个元素
         int index = 0;
         for (Object sourceItem : sourceCollection) {
@@ -772,7 +839,6 @@ public class GXCGLibDataConvert implements Converter {
             // 提供null上下文，因为setter上下文不适用于元素
             LOG.trace("转换集合元素 #{} 从 {} 到 {}", index, sourceItem != null ? sourceItem.getClass().getName() : "null", targetComponentClass.getName());
             Object convertedItem = convert(sourceItem, targetComponentClass, null);
-
             if (resultCollection != null) {
                 resultCollection.add(convertedItem);
             }
@@ -781,10 +847,10 @@ public class GXCGLibDataConvert implements Converter {
             }
             index++;
         }
-
         // 如果目标是数组，创建并填充它
         if (targetClass.isArray()) {
             LOG.trace("将临时列表转换为类型为 {} 的数组", targetComponentClass.getName());
+            assert tempListForArray != null;
             Object resultArray = Array.newInstance(targetComponentClass, tempListForArray.size());
             for (int i = 0; i < tempListForArray.size(); i++) {
                 // 我们已经转换了项目，只需要处理如果Array.set需要它的潜在null值
@@ -877,9 +943,9 @@ public class GXCGLibDataConvert implements Converter {
      * @param context      上下文信息，通常是setter方法名
      * @return 转换后的目标类型对象，如果转换失败则可能返回null
      */
+    @SuppressWarnings("unchecked")
     private Object handleMapSourceConversion(Class<?> targetClass, String propertyName, Map<?, ?> sourceMap, Object context) {
         LOG.trace("处理Map源值(大小 {})转换到 {} 属性 {}", sourceMap.size(), targetClass.getName(), propertyName);
-
         // 情况1: Map -> Bean
         if (isComplexBean(targetClass)) {
             LOG.trace("将Map转换为Bean: {}", targetClass.getName());
@@ -887,7 +953,6 @@ public class GXCGLibDataConvert implements Converter {
             CopyOptions options = CopyOptions.create().setConverter(GXHutoolDataConvert::staticConvert);
             return BeanUtil.toBean(sourceMap, targetClass, options);
         }
-
         // 情况2: Map -> Map
         if (Map.class.isAssignableFrom(targetClass)) {
             // 确定目标Map的键和值类型
@@ -895,12 +960,9 @@ public class GXCGLibDataConvert implements Converter {
             Type targetValueType = getGenericTypeArgumentForTarget(propertyName, targetClass, 1);
             Class<?> targetKeyClass = TypeUtil.getClass(targetKeyType);
             Class<?> targetValueClass = TypeUtil.getClass(targetValueType);
-
             if (targetKeyClass == null) targetKeyClass = Object.class;
             if (targetValueClass == null) targetValueClass = Object.class;
-
             LOG.trace("目标Map类型: 键={}, 值={}", targetKeyClass.getName(), targetValueClass.getName());
-
             Map<Object, Object> resultMap;
             // 实例化目标Map类型
             if (targetClass.equals(Map.class) || targetClass.equals(HashMap.class)) {
@@ -923,38 +985,30 @@ public class GXCGLibDataConvert implements Converter {
                     resultMap = new HashMap<>(sourceMap.size());
                 }
             }
-
-
             // 遍历源Map并转换键/值
             for (Map.Entry<?, ?> entry : sourceMap.entrySet()) {
                 Object sourceKey = entry.getKey();
                 Object sourceValue = entry.getValue();
-
                 // 转换键
                 LOG.trace("转换Map键从 {} 到 {}", sourceKey != null ? sourceKey.getClass().getName() : "null", targetKeyClass.getName());
                 Object convertedKey = convert(sourceKey, targetKeyClass, null); // 键没有特定上下文
-
                 // 转换值
                 LOG.trace("转换Map值从 {} 到 {}", sourceValue != null ? sourceValue.getClass().getName() : "null", targetValueClass.getName());
                 Object convertedValue = convert(sourceValue, targetValueClass, null); // 值没有特定上下文
-
                 // 处理TreeMap要求Comparable键但转换结果不是Comparable的潜在问题
                 if (resultMap instanceof TreeMap && !(convertedKey instanceof Comparable)) {
                     LOG.warn("转换后的键类型 {} 不是Comparable，这可能导致TreeMap出现问题，键: {}",
                             convertedKey != null ? convertedKey.getClass().getName() : "null", convertedKey);
                     // 可选择跳过、抛出异常或使用toString表示
                 }
-
                 resultMap.put(convertedKey, convertedValue);
             }
             return resultMap;
         }
-
         // 情况3: Map -> 其他类型？不太可能，回退到Hutool Convert
         LOG.trace("目标既不是Bean也不是Map，回退到Hutool Convert处理Map源值");
         return Convert.convertWithCheck(targetClass, sourceMap, null, false);
     }
-
 
     /**
      * 获取目标属性的泛型组件类型
@@ -984,18 +1038,16 @@ public class GXCGLibDataConvert implements Converter {
     private Type getGenericTypeArgumentForTarget(String propertyName, Class<?> targetType, int index) {
         if (propertyName == null) {
             LOG.trace("无法在没有属性名的情况下解析目标{}的泛型类型", targetType.getName());
-            return null; // 没有属性上下文无法解析
+            // 没有属性上下文无法解析
+            return null;
         }
-
         // 1. 首先尝试缓存（基于初始目标类的字段）
         Type genericFieldType = genericTypeCache.get(propertyName);
         LOG.trace("属性'{}'的泛型类型缓存查找结果: {}", propertyName, genericFieldType);
-
         // 2. 如果缓存未命中或不匹配目标类型结构，尝试对特定目标类型进行反射
         // （如果targetType只是List.class而没有上下文，这可能不太准确）
         // 然而，CGLIB通常通过`convert`中的主要'targetClass'参数提供特定的目标字段/setter类型。
         // 如果缓存的类型似乎适合目标结构，我们可以使用它进行优化。
-
         if (genericFieldType instanceof ParameterizedType pType) {
             // 检查缓存字段的原始类型是否匹配预期的集合/映射类型
             if (targetType.isAssignableFrom((Class<?>) pType.getRawType())) {
@@ -1012,7 +1064,6 @@ public class GXCGLibDataConvert implements Converter {
         } else {
             LOG.trace("属性'{}'的缓存类型不是参数化类型: {}", propertyName, genericFieldType);
         }
-
         // 3. 备选方案：尝试再次直接在'initialTargetClass'上查找字段？
         // 这假设propertyName属于顶级bean，这通常是正确的。
         Field field = fieldCache.get(propertyName);
@@ -1028,20 +1079,8 @@ public class GXCGLibDataConvert implements Converter {
                 }
             }
         }
-
         LOG.warn("无法解析目标类型{}上属性'{}'在索引{}处的泛型类型参数。返回null。", targetType.getName(), propertyName, index);
-        return null; // 表示解析失败
+        // 表示解析失败
+        return null;
     }
-
-    // Keep original methods for reference if needed, but they are superseded by getGenericTypeArgumentForTarget
-    /*
-    private Class<?> getGenericComponentType(String propertyName) {
-        Type genericType = getGenericTypeArgumentForTarget(propertyName, Collection.class, 0); // Assuming target is collection
-        return TypeUtil.getClass(genericType);
-    }
-
-    private Type getGenericTypeArgument(String propertyName, int index) {
-        return getGenericTypeArgumentForTarget(propertyName, Map.class, index); // Assuming target is map
-    }
-    */
 }
