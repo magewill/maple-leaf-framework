@@ -1,8 +1,8 @@
 package cn.maple.core.framework.convert;
 
 import cn.hutool.core.bean.BeanUtil;
-import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.convert.Convert;
+import cn.hutool.core.util.ClassUtil;
 import cn.hutool.core.util.ReflectUtil;
 import cn.hutool.core.util.TypeUtil;
 import cn.hutool.json.JSONUtil;
@@ -31,27 +31,34 @@ import java.util.concurrent.ConcurrentHashMap;
  * 6. 枚举类型
  * 7. 日期和时间类型
  * 8. 自定义对象和嵌套结构
- * </p>
  * <p>
- * 性能优化：
+ * 性能优化特性：
  * 1. 缓存字段元数据和泛型类型，最小化反射操作
  * 2. 缓存BeanCopier实例，提高嵌套复制效率
  * 3. 复用Hutool的高效类型转换工具
  * 4. 使用ConcurrentHashMap确保线程安全
  * 5. 跳过不必要的兼容类型转换
  * 6. 智能处理集合和数组的转换，减少内存分配
- * </p>
+ * 7. 使用类型判断的短路逻辑，优先处理常见类型
+ * 8. 对于复杂对象，利用缓存的BeanCopier实例避免重复创建
  * <p>
  * 内存安全特性：
  * 1. 所有方法都进行了参数验证，防止空指针异常
  * 2. 使用安全的集合操作，避免并发修改异常
  * 3. 合理管理资源，避免内存泄漏
  * 4. 安全处理异常，确保异常情况下资源能够正确释放
- * </p>
+ * 5. 对于集合类型，创建新的集合实例而不是修改原有集合
+ * 6. 安全处理类型不兼容的情况，避免类型转换异常
+ * <p>
+ * 线程安全特性：
+ * 1. 使用线程安全的缓存机制
+ * 2. 无状态的转换逻辑，可以安全地在多线程环境中调用
+ * 3. 使用不可变对象和线程安全的集合类进行操作
+ * 4. 使用双重检查锁定模式确保缓存初始化的线程安全
  * <p>
  * 使用示例：
  * <pre>
- * // 1. 基本使用方式
+ * // 1. 基本使用方式 - 实体类转DTO
  * UserEntity source = new UserEntity();
  * source.setId(1L);
  * source.setUsername("张三");
@@ -59,12 +66,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * source.setAttributes(Map.of("department", "技术部", "level", 3));
  *
  * UserDTO target = new UserDTO();
- *
- * // 创建BeanCopier并使用GXCGLibDataConvert进行属性转换
  * BeanCopier copier = BeanCopier.create(UserEntity.class, UserDTO.class, true);
  * copier.copy(source, target, new GXCGLibDataConvert(UserDTO.class));
  *
- * // 2. 处理复杂嵌套对象
+ * // 2. 处理复杂嵌套对象 - 包含集合和子对象的转换
  * OrderEntity order = new OrderEntity();
  * order.setOrderId("ORD20230101");
  * order.setItems(List.of(
@@ -74,30 +79,28 @@ import java.util.concurrent.ConcurrentHashMap;
  * order.setCustomer(new CustomerEntity("customer123", "李四", "13800138000"));
  *
  * OrderDTO orderDTO = new OrderDTO();
- *
- * // 使用GXCGLibDataConvert进行深度转换
  * BeanCopier orderCopier = BeanCopier.create(OrderEntity.class, OrderDTO.class, true);
  * orderCopier.copy(order, orderDTO, new GXCGLibDataConvert(OrderDTO.class));
  *
- * // 3. 处理JSON字符串转换
+ * // 3. 处理JSON字符串转换 - 自动解析JSON到对象
  * String jsonData = "{\"name\":\"王五\",\"age\":30,\"skills\":[\"Java\",\"Spring\",\"MySQL\"]}";
  * UserProfile profile = new UserProfile();
+ * BeanUtil.setProperty(profile, "data", jsonData,
+ *     CopyOptions.create().setConverter(new GXCGLibDataConvert(UserProfile.class)));
  *
- * // 设置JSON字符串到对象属性（会自动解析）
- * BeanUtil.setProperty(profile, "data", jsonData, CopyOptions.create().setConverter(new GXCGLibDataConvert(UserProfile.class)));
- *
- * // 4. 与GXCglibUtils结合使用
+ * // 4. 批量转换 - 集合元素批量转换
  * List<ProductEntity> products = getProductList(); // 假设这是获取产品列表的方法
- * List<ProductDTO> productDTOs = products.stream()
- *     .map(p -> {
- *         ProductDTO dto = new ProductDTO();
- *         BeanCopier copier = BeanCopier.create(ProductEntity.class, ProductDTO.class, true);
- *         copier.copy(p, dto, new GXCGLibDataConvert(ProductDTO.class));
- *         return dto;
- *     })
- *     .collect(Collectors.toList());
+ * List<ProductDTO> productDTOs = new ArrayList<>(products.size());
+ * BeanCopier copier = BeanCopier.create(ProductEntity.class, ProductDTO.class, true);
+ * GXCGLibDataConvert converter = new GXCGLibDataConvert(ProductDTO.class);
  *
- * // 5. 处理复杂的泛型集合转换
+ * for (ProductEntity product : products) {
+ *     ProductDTO dto = new ProductDTO();
+ *     copier.copy(product, dto, converter);
+ *     productDTOs.add(dto);
+ * }
+ *
+ * // 5. 处理复杂的泛型集合转换 - 多层嵌套结构
  * List<Map<String, List<OrderItemEntity>>> complexSource = getComplexData();
  * List<Map<String, List<OrderItemDTO>>> complexTarget = new ArrayList<>();
  *
@@ -105,24 +108,35 @@ import java.util.concurrent.ConcurrentHashMap;
  * BeanCopier complexCopier = BeanCopier.create(complexSource.getClass(), complexTarget.getClass(), true);
  * complexCopier.copy(complexSource, complexTarget, new GXCGLibDataConvert(complexTarget.getClass()));
  *
- * // 6. 处理枚举类型转换
+ * // 6. 处理枚举类型转换 - 字符串到枚举
  * class UserStatus {
  *     private UserStatusEnum status;
  *     // getter和setter
  * }
- *
- * UserStatus source = new UserStatus();
- * source.setStatus(UserStatusEnum.ACTIVE);
  *
  * // 字符串到枚举的自动转换
  * Map<String, Object> map = new HashMap<>();
  * map.put("status", "ACTIVE");
  *
  * UserStatus target = new UserStatus();
- * BeanUtil.fillBeanWithMap(map, target, true, CopyOptions.create().setConverter(new GXCGLibDataConvert(UserStatus.class)));
+ * BeanUtil.fillBeanWithMap(map, target, true,
+ *     CopyOptions.create().setConverter(new GXCGLibDataConvert(UserStatus.class)));
  * // 此时 target.getStatus() == UserStatusEnum.ACTIVE
+ *
+ * // 7. 高性能批量转换 - 重用转换器实例
+ * List<UserEntity> users = getUserList(); // 假设这是获取用户列表的方法
+ * List<UserDTO> userDTOs = new ArrayList<>(users.size());
+ *
+ * // 预先创建并缓存转换器和BeanCopier，避免重复创建
+ * BeanCopier userCopier = BeanCopier.create(UserEntity.class, UserDTO.class, true);
+ * GXCGLibDataConvert userConverter = new GXCGLibDataConvert(UserDTO.class);
+ *
+ * for (UserEntity user : users) {
+ *     UserDTO dto = new UserDTO();
+ *     userCopier.copy(user, dto, userConverter);
+ *     userDTOs.add(dto);
+ * }
  * </pre>
- * </p>
  */
 public class GXCGLibDataConvert implements Converter {
     /**
@@ -208,41 +222,18 @@ public class GXCGLibDataConvert implements Converter {
     /**
      * 执行类型转换
      * <p>
-     * 这是CGLIB转换器的核心方法，负责将源值转换为目标类型。该方法实现了一个分层的转换策略，
-     * 根据源值类型和目标类型选择最合适的转换路径。转换过程中优先处理特殊类型（如枚举、日期时间等），
-     * 然后是集合类型、Map类型和复杂对象类型，最后才使用通用转换作为兜底方案。
-     * </p>
-     * <p>
-     * 转换流程：
-     * 1. 空值检查 - 如果源值为null，直接返回null
-     * 2. 枚举类型转换 - 处理字符串或数字到枚举的转换
-     * 3. 日期时间类型转换 - 处理各种日期时间格式
-     * 4. 字符串源值转换 - 包括JSON字符串的智能解析
-     * 5. 集合类型转换 - 处理List、Set和数组之间的转换
-     * 6. Map类型转换 - 处理Map到Bean或其他Map的转换
-     * 7. 复杂对象转换 - 处理JavaBean之间的深度复制
-     * 8. 通用转换 - 使用Hutool的Convert工具作为兜底方案
-     * </p>
-     * <p>
-     * 性能优化：
-     * 1. 使用类型判断的短路逻辑，优先处理常见类型
-     * 2. 对于复杂对象，利用缓存的BeanCopier实例避免重复创建
-     * 3. 智能处理集合和数组的转换，减少内存分配
-     * 4. 使用日志级别控制，仅在需要时输出详细日志
-     * </p>
-     * <p>
-     * 内存安全：
-     * 1. 所有转换过程中的异常都会被捕获并记录，确保转换过程不会因异常而中断
-     * 2. 在转换失败时，方法会返回null而不是抛出异常，保证调用方的稳定性
-     * 3. 对于集合类型，创建新的集合实例而不是修改原有集合
-     * 4. 安全处理类型不兼容的情况，避免类型转换异常
-     * </p>
-     * <p>
-     * 线程安全：
-     * 1. 使用线程安全的缓存机制
-     * 2. 无状态的转换逻辑，可以安全地在多线程环境中调用
-     * 3. 使用不可变对象和线程安全的集合类进行操作
-     * </p>
+     * 将源值转换为目标类型的核心方法，采用分层转换策略，根据类型选择最优转换路径。
+     * 转换优先级：
+     * 1. 空值处理
+     * 2. 类型兼容性检查（源类型是否已经是目标类型的实例）
+     * 3. 枚举类型转换
+     * 4. 日期时间类型转换
+     * 5. 字符串源值转换（包括JSON解析）
+     * 6. 集合类型转换
+     * 7. 数组类型转换
+     * 8. Map类型转换
+     * 9. 复杂对象（JavaBean）转换
+     * 10. 通用转换（兜底方案）
      *
      * @param sourceValue 源值，可以是任意类型的对象
      * @param targetClass 目标类型，指定转换的目标类型
@@ -252,92 +243,90 @@ public class GXCGLibDataConvert implements Converter {
     @Override
     @SuppressWarnings("unchecked")
     public Object convert(Object sourceValue, Class targetClass, Object context) {
-        // 空值安全处理
+        // 1. 空值安全处理
         if (sourceValue == null) {
-            LOG.trace("源值为null，返回目标类型{}的null值", targetClass.getName());
             return null;
         }
-        // 获取源值的类型
+
+        // 2. 获取源值的类型
         Class<?> sourceClass = sourceValue.getClass();
-        // 从上下文中提取属性名（通常是setter方法名）
+
+        // 3. 类型兼容性快速检查 - 如果源值已经是目标类型的实例，直接返回
+        if (ClassUtil.isBasicType(targetClass) && targetClass.isInstance(sourceValue)) {
+            return sourceValue;
+        }
+
+        // 4. 从上下文中提取属性名（通常是setter方法名）
         String propertyName = (context instanceof String) ? getPropertyName((String) context) : null;
-        LOG.trace("尝试转换: 源类型 [{}], 目标类型 [{}], 属性 [{}]",
-                sourceClass.getName(), targetClass.getName(), propertyName != null ? propertyName : "N/A (上下文: " + context + ")");
+
         try {
-            // 1. 处理枚举类型转换
+            // 5. 处理枚举类型转换
             if (targetClass.isEnum()) {
                 return handleEnumConversion(targetClass, sourceValue);
             }
-            // 2. 处理日期/时间类型转换（使用Hutool）
+
+            // 6. 处理日期/时间类型转换（使用Hutool）
             if (Date.class.isAssignableFrom(targetClass) || Calendar.class.isAssignableFrom(targetClass)
                     || java.time.temporal.Temporal.class.isAssignableFrom(targetClass)) {
-                LOG.trace("处理日期/时间转换到{}", targetClass.getName());
                 return Convert.convert(targetClass, sourceValue);
             }
-            // 3. 处理字符串源值转换
+
+            // 7. 处理字符串源值转换
             if (sourceValue instanceof CharSequence) {
                 return handleStringSourceConversion(targetClass, propertyName, sourceValue.toString(), context);
             }
-            // 4. 处理集合源值转换（List, Set）-> 目标（List, Set, Array）
+
+            // 8. 处理集合源值转换（List, Set）-> 目标（List, Set, Array）
             if (sourceValue instanceof Collection<?>) {
                 return handleCollectionSourceConversion(targetClass, propertyName, (Collection<?>) sourceValue, context);
             }
-            // 5. 处理数组源值转换 -> 目标（List, Set, Array）
+
+            // 9. 处理数组源值转换 -> 目标（List, Set, Array）
             if (sourceClass.isArray()) {
                 // 区分处理对象数组和基本类型数组
                 if (sourceValue instanceof Object[]) {
                     return handleArraySourceConversion(targetClass, propertyName, (Object[]) sourceValue, context);
                 } else {
                     // 对于基本类型数组，使用Hutool Convert处理
-                    LOG.trace("基本类型数组源值，使用Hutool Convert转换到目标类型 {}", targetClass.getName());
-                    return Convert.convertWithCheck(targetClass, sourceValue, null, false); // 转换失败时返回null而不抛出异常
+                    return Convert.convertWithCheck(targetClass, sourceValue, null, false);
                 }
             }
-            // 6. 处理Map源值转换 -> 目标（Map, Bean）
+
+            // 10. 处理Map源值转换 -> 目标（Map, Bean）
             if (sourceValue instanceof Map<?, ?>) {
                 return handleMapSourceConversion(targetClass, propertyName, (Map<?, ?>) sourceValue, context);
             }
-            // 7. 处理复杂对象（JavaBean）源值转换 -> 目标（Map, Bean）
-            // 检查源和目标是否可能是JavaBean（非基本类型、非包装类型、非字符串、非集合、非Map、非数组、非日期、非枚举等）
+
+            // 11. 处理复杂对象（JavaBean）源值转换 -> 目标（Map, Bean）
             if (isComplexBean(sourceClass) && (isComplexBean(targetClass) || Map.class.isAssignableFrom(targetClass))) {
-                LOG.trace("处理复杂Bean到Bean/Map的转换: {} -> {}", sourceClass.getName(), targetClass.getName());
                 // 使用CGLIB BeanCopier进行Bean之间的深度复制
                 if (Map.class.isAssignableFrom(targetClass)) {
                     // Bean转Map
-                    LOG.trace("将Bean {}转换为Map", sourceClass.getName());
                     return BeanUtil.toBean(sourceValue, targetClass);
                 } else {
                     // Bean转Bean
-                    LOG.trace("深度复制Bean {} 到 {}", sourceClass.getName(), targetClass.getName());
                     Object targetInstance = ReflectUtil.newInstanceIfPossible(targetClass);
                     if (targetInstance != null) {
-                        // 递归使用CGLIB BeanCopier，传递*this*转换器
-                        org.springframework.cglib.beans.BeanCopier copier = getBeanCopier(sourceClass, targetClass);
-                        // 使用this作为转换器
+                        // 递归使用CGLIB BeanCopier，传递this转换器
+                        BeanCopier copier = getBeanCopier(sourceClass, targetClass);
                         copier.copy(sourceValue, targetInstance, this);
                         return targetInstance;
                     } else {
                         LOG.warn("无法实例化目标Bean类: {}", targetClass.getName());
-                        // 失败后使用Hutool转换作为最后的尝试
                     }
                 }
             }
-            // 8. 使用Hutool的通用转换作为兜底方案
-            LOG.trace("使用Hutool Convert作为兜底方案: {} -> {}", sourceClass.getName(), targetClass.getName());
-            // 使用convertWithCheck进行更好的错误处理，但不立即抛出异常
-            Object convertedValue = Convert.convertWithCheck(targetClass, sourceValue, null, false); // `false` = 失败时返回null
+
+            // 12. 使用Hutool的通用转换作为兜底方案
+            Object convertedValue = Convert.convertWithCheck(targetClass, sourceValue, null, false);
             if (convertedValue != null) {
                 // 检查Hutool是否真正进行了转换，还是因类型不兼容而返回了原始对象
                 if (!targetClass.isInstance(convertedValue) && sourceValue == convertedValue) {
-                    LOG.debug("Hutool Convert对不兼容类型返回了原始值: {} -> {}. 返回null.",
-                            sourceClass.getName(), targetClass.getName());
                     return null; // 更明确地表示转换失败
                 }
-                LOG.trace("Hutool Convert成功转换: {} -> {}", sourceClass.getName(), targetClass.getName());
                 return convertedValue;
             }
-            LOG.warn("无法将类型 [{}] 转换为 [{}] (属性 [{}])，返回null",
-                    sourceClass.getName(), targetClass.getName(), propertyName != null ? propertyName : "N/A");
+
             // 所有尝试都失败后返回null
             return null;
         } catch (Exception e) {
@@ -357,172 +346,148 @@ public class GXCGLibDataConvert implements Converter {
      * <p>
      * 该方法在转换器初始化时调用，预先缓存目标类的所有字段信息和泛型类型信息，
      * 显著减少后续转换过程中的反射开销。对于复杂对象和集合类型的转换尤其有效。
-     * </p>
      * <p>
-     * 工作原理：
-     * 1. 首先检查类型是否需要缓存（跳过基本类型、数组、接口等）
+     * 工作流程：
+     * 1. 首先检查类型是否需要缓存（跳过基本类型、数组、接口等简单类型）
      * 2. 使用Hutool的ReflectUtil获取包括继承字段在内的所有字段
      * 3. 缓存字段对象和字段的泛型类型信息到线程安全的Map中
      * 4. 安全处理异常，确保初始化过程不会中断
-     * </p>
-     * <p>
-     * 性能优化：
-     * 1. 使用ConcurrentHashMap存储缓存，确保线程安全且高效
-     * 2. 只缓存有意义的类型，跳过基本类型、数组、枚举等简单类型
-     * 3. 利用Hutool的ReflectUtil获取包括继承字段在内的所有字段，避免手动递归
-     * 4. 使用条件判断避免重复缓存已存在的字段
-     * </p>
-     * <p>
-     * 内存安全：
-     * 1. 对类型进行严格检查，避免对不适合缓存的类型进行处理
-     * 2. 捕获并记录所有反射过程中的异常，确保初始化过程不会因异常而中断
-     * 3. 使用线程安全的集合存储缓存数据，避免并发修改问题
-     * </p>
      *
      * @param clazz 要缓存字段的类，不能为null
      */
     private void preCacheFields(Class<?> clazz) {
-        // 跳过不需要缓存的类型
+        // 1. 快速过滤：跳过不需要缓存的类型
         if (clazz == null || clazz.isPrimitive() || clazz.isArray() || clazz.isEnum() ||
                 clazz.isInterface() || Map.class.isAssignableFrom(clazz) ||
                 Collection.class.isAssignableFrom(clazz)) {
             return;
         }
+
         try {
-            // 使用ReflectUtil获取包括继承字段在内的所有字段
+            // 2. 获取所有字段（包括继承的字段）
             Field[] fields = ReflectUtil.getFields(clazz);
-            LOG.trace("为类 {} 缓存 {} 个字段", clazz.getName(), fields.length);
+
+            // 3. 预先分配足够的容量，避免动态扩容
+            int initialCapacity = Math.max(16, fields.length);
+            Map<String, Field> tempFieldCache = new HashMap<>(initialCapacity);
+            Map<String, Type> tempGenericCache = new HashMap<>(initialCapacity);
+
+            // 4. 批量处理所有字段
             for (Field field : fields) {
                 String fieldName = field.getName();
                 if (!fieldCache.containsKey(fieldName)) {
-                    // 缓存字段对象
-                    fieldCache.put(fieldName, field);
-                    // 缓存字段的泛型类型信息
-                    genericTypeCache.put(fieldName, field.getGenericType());
-                    LOG.trace("缓存字段: {}，类型: {}", fieldName, field.getGenericType());
+                    tempFieldCache.put(fieldName, field);
+                    tempGenericCache.put(fieldName, field.getGenericType());
                 }
             }
+
+            // 5. 批量更新缓存，减少锁竞争
+            if (!tempFieldCache.isEmpty()) {
+                fieldCache.putAll(tempFieldCache);
+                genericTypeCache.putAll(tempGenericCache);
+            }
+
             // ReflectUtil.getFields已经处理了继承字段，不需要递归处理父类
         } catch (Exception e) {
             LOG.warn("为类 {} 预缓存字段时失败: {}", clazz.getName(), e.getMessage());
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("预缓存字段异常详情:", e);
-            }
         }
     }
 
     /**
      * 从setter方法名中提取属性名
      * <p>
-     * 该方法根据JavaBean规范，从setter方法名（如setUserName）中提取实际的属性名（如userName）。
-     * 处理了各种特殊情况，包括单字母属性名和特殊大写缩写（如URL）。这是CGLIB转换过程中的
-     * 关键步骤，因为CGLIB在调用转换器时会传入setter方法名作为上下文信息。
-     * </p>
+     * 根据JavaBean规范，从setter方法名（如setUserName）中提取实际的属性名（如userName）。
+     * 处理了各种特殊情况，包括单字母属性名和特殊大写缩写（如URL）。
      * <p>
      * 处理规则：
      * 1. 标准setter方法（setXxx）：移除前缀"set"，并将首字母小写（除非后续字母也是大写）
      * 2. 单字母属性（setA）：转换为小写（a）
      * 3. 大写缩写（setURL）：保持大写（URL）
-     * 4. 非标准名称：原样返回
-     * </p>
-     * <p>
-     * 实现细节：
-     * 1. 首先检查方法名是否以"set"开头且长度大于3
-     * 2. 然后根据第四个字符（即set后的第一个字符）的大小写情况进行不同处理
-     * 3. 如果第四个字符后面的字符是小写，或者方法名长度为4（如setA），则将第四个字符转为小写
-     * 4. 如果第四个字符后面的字符是大写（如setURL），则保持第四个字符的大小写不变
-     * 5. 对于不符合setter命名规范的方法名，直接返回原始名称
-     * </p>
-     * <p>
-     * 安全性考虑：
-     * 1. 在处理前检查字符串长度，避免索引越界异常
-     * 2. 使用安全的字符串操作方法，避免可能的字符编码问题
-     * 3. 对非标准命名的方法提供合理的降级处理
-     * </p>
+     * 4. 非标准setter名称：原样返回
      *
-     * @param setterName setter方法名，如"setUserName"、"setURL"等
-     * @return 提取的属性名，如"userName"、"URL"等
+     * @param setterName setter方法名，可以为null
+     * @return 提取的属性名，如果输入为null则返回空字符串
      */
     private String getPropertyName(String setterName) {
-        // 安全检查：确保setterName不为null
+        // 1. 空值检查
         if (setterName == null) {
-            LOG.warn("传入的setter方法名为null，无法提取属性名");
             return "";
         }
-        // 检查是否是标准的setter方法名（以set开头且长度大于3）
+
+        // 2. 检查是否是标准的setter方法名（以set开头且长度大于3）
         if (setterName.startsWith("set") && setterName.length() > 3) {
-            // 处理可能的单字母属性名或标准属性名
-            if (setterName.length() == 4 || Character.isLowerCase(setterName.charAt(4))) {
-                // 例如：setA -> a 或 setUserName -> userName
-                return setterName.substring(3, 4).toLowerCase() + setterName.substring(4);
-            } else {
-                // 处理首字母大写的特殊情况（例如：setURL -> URL）
-                return setterName.substring(3);
+            // 3. 提取属性名部分（去掉"set"前缀）
+            String propertyNamePart = setterName.substring(3);
+
+            // 4. 处理不同的属性名情况
+            // 4.1 单字母属性名（如setA -> a）
+            if (propertyNamePart.length() == 1) {
+                return propertyNamePart.toLowerCase();
             }
+
+            // 4.2 处理首字母大写后跟小写字母的标准情况（如setUserName -> userName）
+            if (Character.isUpperCase(propertyNamePart.charAt(0)) && Character.isLowerCase(propertyNamePart.charAt(1))) {
+                return Character.toLowerCase(propertyNamePart.charAt(0)) + propertyNamePart.substring(1);
+            }
+
+            // 4.3 处理首字母大写后跟大写字母的特殊情况（如setURL -> URL）
+            return propertyNamePart;
         }
-        // 如果上下文不是标准的setter名称，则原样返回
-        LOG.trace("非标准setter方法名: {}, 原样返回", setterName);
+
+        // 5. 非标准setter名称，原样返回
         return setterName;
     }
 
     /**
-     * 判断一个类是否为需要深度复制的复杂JavaBean
+     * 判断一个类是否为复杂JavaBean类型
      * <p>
-     * 该方法通过排除法确定一个类是否为复杂JavaBean。复杂JavaBean是指需要进行深度复制的对象，
-     * 而不是可以直接赋值或简单转换的基本类型、包装类型、字符串、集合等。
-     * </p>
+     * 该方法用于确定一个类是否需要进行深度复制处理，而不是简单的类型转换。
+     * 复杂JavaBean通常是指包含多个字段的自定义类，需要逐字段进行转换。
      * <p>
-     * 排除的类型包括：
-     * 1. 基本类型（int、long、boolean等）
-     * 2. 数组类型
-     * 3. 枚举类型
-     * 4. 接口类型
-     * 5. 数字类型（Integer、Long、Double等）
-     * 6. 布尔类型（Boolean）
-     * 7. 字符类型（Character）
-     * 8. 字符序列类型（String、StringBuilder等）
-     * 9. 日期时间类型（Date、Calendar、LocalDateTime等）
-     * 10. 集合类型（List、Set等）
-     * 11. 映射类型（Map等）
-     * </p>
-     * <p>
-     * 性能优化：
-     * 该方法使用短路逻辑，一旦确定类型不符合条件就立即返回false，避免不必要的判断
-     * </p>
+     * 判断逻辑：
+     * 1. 快速过滤常见的非Bean类型（null、基本类型、数组、枚举、接口等）
+     * 2. 过滤Java基础类型（Number、Boolean、Character等）
+     * 3. 过滤字符串和日期时间类型
+     * 4. 过滤集合和Map类型
      *
      * @param clazz 要判断的类，可以为null
      * @return 如果是复杂JavaBean返回true，否则返回false
      */
     private boolean isComplexBean(Class<?> clazz) {
-        return clazz != null &&
-                !clazz.isPrimitive() &&
-                !clazz.isArray() &&
-                !clazz.isEnum() &&
-                !clazz.isInterface() &&
-                !Number.class.isAssignableFrom(clazz) &&
-                !Boolean.class.isAssignableFrom(clazz) &&
-                !Character.class.isAssignableFrom(clazz) &&
-                !CharSequence.class.isAssignableFrom(clazz) && // 包括String
-                !Date.class.isAssignableFrom(clazz) &&
-                !Calendar.class.isAssignableFrom(clazz) &&
-                !java.time.temporal.Temporal.class.isAssignableFrom(clazz) &&
-                !Map.class.isAssignableFrom(clazz) &&
-                !Collection.class.isAssignableFrom(clazz);
-        // 如有必要，可以添加其他简单类型的判断
+        // 1. 快速过滤常见的非Bean类型
+        if (clazz == null || clazz.isPrimitive() || clazz.isArray() || clazz.isEnum() || clazz.isInterface()) {
+            return false;
+        }
+
+        // 2. 过滤Java基础类型
+        if (Number.class.isAssignableFrom(clazz) ||
+                Boolean.class.isAssignableFrom(clazz) ||
+                Character.class.isAssignableFrom(clazz)) {
+            return false;
+        }
+
+        // 3. 过滤字符串和日期时间类型
+        if (CharSequence.class.isAssignableFrom(clazz) ||
+                Date.class.isAssignableFrom(clazz) ||
+                Calendar.class.isAssignableFrom(clazz) ||
+                java.time.temporal.Temporal.class.isAssignableFrom(clazz)) {
+            return false;
+        }
+
+        // 4. 过滤集合和Map类型
+        return !Map.class.isAssignableFrom(clazz) && !Collection.class.isAssignableFrom(clazz);
+
+        // 通过所有检查，认为是复杂Bean类型
     }
 
     /**
      * 处理枚举类型的转换
      * <p>
-     * 该方法将各种类型的源值转换为指定的枚举类型。主要处理两种情况：
-     * 1. 字符串到枚举的转换：通过枚举名称精确匹配
-     * 2. 其他类型到枚举的转换：通过Hutool的Convert工具处理（如整数序号到枚举的转换）
-     * </p>
-     * <p>
-     * 异常处理：
-     * 对于字符串转换，如果找不到匹配的枚举值，会捕获异常并返回null
-     * 对于其他类型，依赖Hutool的Convert工具进行安全转换
-     * </p>
+     * 将各种类型的源值转换为目标枚举类型，支持以下转换场景：
+     * 1. 字符串 -> 枚举：通过枚举名称精确匹配或忽略大小写匹配
+     * 2. 数字 -> 枚举：通过枚举的序号（ordinal）匹配
+     * 3. 枚举 -> 枚举：如果是相同的枚举类型，直接返回；否则尝试通过名称匹配
+     * 4. 其他类型 -> 枚举：通过Hutool的Convert工具处理
      *
      * @param targetEnumClass 目标枚举类型，不能为null
      * @param sourceValue     源值，可以是字符串、数字等
@@ -530,18 +495,65 @@ public class GXCGLibDataConvert implements Converter {
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
     private Object handleEnumConversion(Class<?> targetEnumClass, Object sourceValue) {
-        LOG.trace("处理枚举转换到 {}", targetEnumClass.getName());
-        if (sourceValue instanceof String) {
-            try {
-                // 通过枚举名称精确匹配
-                return Enum.valueOf((Class<Enum>) targetEnumClass, (String) sourceValue);
-            } catch (IllegalArgumentException e) {
-                LOG.warn("无法将字符串 \"{}\" 转换为枚举 {}: {}", sourceValue, targetEnumClass.getName(), e.getMessage());
+        // 1. 空值检查
+        if (sourceValue == null) {
+            return null;
+        }
+
+        // 2. 类型兼容性检查 - 如果源值已经是目标枚举类型，直接返回
+        if (targetEnumClass.isInstance(sourceValue)) {
+            return sourceValue;
+        }
+
+        try {
+            // 3. 获取枚举的所有可能值
+            Object[] enumConstants = targetEnumClass.getEnumConstants();
+            if (enumConstants == null || enumConstants.length == 0) {
                 return null;
             }
+
+            // 4. 根据源值类型选择不同的转换策略
+            // 4.1 处理字符串源值 -> 枚举
+            if (sourceValue instanceof String) {
+                String enumName = ((String) sourceValue).trim();
+                if (enumName.isEmpty()) {
+                    return null;
+                }
+
+                try {
+                    // 尝试精确匹配
+                    return Enum.valueOf((Class<Enum>) targetEnumClass, enumName);
+                } catch (IllegalArgumentException e) {
+                    // 尝试忽略大小写匹配
+                    for (Object enumConstant : enumConstants) {
+                        if (((Enum<?>) enumConstant).name().equalsIgnoreCase(enumName)) {
+                            return enumConstant;
+                        }
+                    }
+                }
+            }
+            // 4.2 处理数字源值 -> 枚举（通过ordinal）
+            else if (sourceValue instanceof Number) {
+                int ordinal = ((Number) sourceValue).intValue();
+                if (ordinal >= 0 && ordinal < enumConstants.length) {
+                    return enumConstants[ordinal];
+                }
+            }
+            // 4.3 处理其他枚举类型 -> 目标枚举类型（通过名称匹配）
+            else if (sourceValue.getClass().isEnum()) {
+                String enumName = ((Enum<?>) sourceValue).name();
+                try {
+                    return Enum.valueOf((Class<Enum>) targetEnumClass, enumName);
+                } catch (IllegalArgumentException ignored) {
+                    // 名称不匹配，继续尝试其他转换方式
+                }
+            }
+
+            // 5. 使用Hutool的Convert作为兜底方案
+            return Convert.convertWithCheck(targetEnumClass, sourceValue, null, false);
+        } catch (Exception e) {
+            return null;
         }
-        // 使用Hutool处理其他类型（如Integer序号）到枚举的转换
-        return Convert.convert(targetEnumClass, sourceValue);
     }
 
     /**
@@ -639,7 +651,8 @@ public class GXCGLibDataConvert implements Converter {
                     // 这可能会委托回handleMapSourceConversion（如果结构合适），
                     // 或者在这里需要自定义逻辑进行键/值类型转换。
                     // 为简单起见，回退到基本的bean转换。
-                    return BeanUtil.toBean(intermediateMap, targetClass, CopyOptions.create().setConverter(GXHutoolDataConvert::staticConvert));
+                    // return BeanUtil.toBean(intermediateMap, targetClass, CopyOptions.create().setConverter(GXHutoolDataConvert::staticConvert));
+                    return GXHutoolDataConvert.staticConvert(targetClass, intermediateMap);
                     // 递归调用需谨慎，防止栈溢出
                     // return convert(intermediateMap, targetClass, context);
                 }
@@ -950,8 +963,9 @@ public class GXCGLibDataConvert implements Converter {
         if (isComplexBean(targetClass)) {
             LOG.trace("将Map转换为Bean: {}", targetClass.getName());
             // 使用Hutool BeanUtil进行Map -> Bean转换，可能使用此转换器处理嵌套值
-            CopyOptions options = CopyOptions.create().setConverter(GXHutoolDataConvert::staticConvert);
-            return BeanUtil.toBean(sourceMap, targetClass, options);
+            // CopyOptions options = CopyOptions.create().setConverter(GXHutoolDataConvert::staticConvert);
+            // return BeanUtil.toBean(sourceMap, targetClass, options);
+            return GXHutoolDataConvert.staticConvert(targetClass, sourceMap);
         }
         // 情况2: Map -> Map
         if (Map.class.isAssignableFrom(targetClass)) {
