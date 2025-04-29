@@ -91,14 +91,14 @@ import java.util.*;
  * @author britton
  * @since 1.0.0
  */
-public class GXDataConvert {
+public class GXHutoolDataConvert {
     /**
      * 单例实例
      * <p>
      * 使用volatile确保多线程环境下的可见性和有序性
      * </p>
      */
-    private static volatile GXDataConvert INSTANCE;
+    private static volatile GXHutoolDataConvert INSTANCE;
 
     /**
      * 日志对象
@@ -106,7 +106,7 @@ public class GXDataConvert {
      * 使用final确保线程安全且只有一个实例
      * </p>
      */
-    private final Logger LOG = LoggerFactory.getLogger(GXDataConvert.class);
+    private final Logger LOG = LoggerFactory.getLogger(GXHutoolDataConvert.class);
 
     /**
      * 私有构造函数，防止外部实例化
@@ -114,7 +114,7 @@ public class GXDataConvert {
      * 采用单例模式，通过getInstance()方法获取实例
      * </p>
      */
-    private GXDataConvert() {
+    private GXHutoolDataConvert() {
         // 防止通过反射实例化
         if (INSTANCE != null) {
             throw new IllegalStateException("已经存在GXDataConvert实例，请使用getInstance()方法获取");
@@ -130,14 +130,14 @@ public class GXDataConvert {
      *
      * @return GXDataConvert实例
      */
-    public static GXDataConvert getInstance() {
+    public static GXHutoolDataConvert getInstance() {
         // 第一次检查，避免不必要的同步
         if (INSTANCE == null) {
             // 同步锁，确保线程安全
-            synchronized (GXDataConvert.class) {
+            synchronized (GXHutoolDataConvert.class) {
                 // 第二次检查，避免重复创建实例
                 if (INSTANCE == null) {
-                    INSTANCE = new GXDataConvert();
+                    INSTANCE = new GXHutoolDataConvert();
                 }
             }
         }

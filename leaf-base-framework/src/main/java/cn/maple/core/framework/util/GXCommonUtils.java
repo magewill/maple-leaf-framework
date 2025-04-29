@@ -19,11 +19,14 @@ import cn.hutool.http.*;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.constant.GXDataSourceConstant;
-import cn.maple.core.framework.convert.GXDataConvert;
+import cn.maple.core.framework.convert.GXCGLibDataConvert;
+import cn.maple.core.framework.convert.GXHutoolDataConvert;
+import cn.maple.core.framework.dto.GXBaseData;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.exception.GXBeanValidateException;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXConvertException;
+import cn.maple.core.framework.util.cglib.GXCglibUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -155,7 +158,7 @@ public class GXCommonUtils {
      * </p>
      */
     @Getter
-    private static final CopyOptions defaultCopyOptions = CopyOptions.create().setIgnoreError(true).setConverter(GXDataConvert::staticConvert);
+    private static final CopyOptions defaultCopyOptions = CopyOptions.create().setIgnoreError(true).setConverter(GXHutoolDataConvert::staticConvert);
 
     /**
      * 私有构造函数，防止实例化
@@ -669,7 +672,13 @@ public class GXCommonUtils {
             }
 
             // 复制属性
-            BeanUtil.copyProperties(tmpSource, target, copyOptions);
+            if (TypeToken.of(source.getClass()).isSubtypeOf(GXBaseData.class)) {
+                LOG.info("使用CGLIB进行高效属性复制!!");
+                GXCglibUtils.copy(tmpSource, target, new GXCGLibDataConvert(tClass));
+            } else {
+                LOG.info("使用BeanUtil进行属性复制!!");
+                BeanUtil.copyProperties(tmpSource, target, copyOptions);
+            }
 
             // 调用自定义处理方法（如果指定）
             if (CharSequenceUtil.isNotEmpty(methodName)) {
