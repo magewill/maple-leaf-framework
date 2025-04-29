@@ -241,7 +241,7 @@ public class GXCGLibDataConvert implements Converter {
      * @return 转换后的目标类型对象，如果转换失败则返回null
      */
     @Override
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings({"unchecked"})
     public Object convert(Object sourceValue, Class targetClass, Object context) {
         // 1. 空值安全处理
         if (sourceValue == null) {
@@ -455,7 +455,11 @@ public class GXCGLibDataConvert implements Converter {
      */
     private boolean isComplexBean(Class<?> clazz) {
         // 1. 快速过滤常见的非Bean类型
-        if (clazz == null || clazz.isPrimitive() || clazz.isArray() || clazz.isEnum() || clazz.isInterface()) {
+        if (clazz == null ||
+                clazz.isPrimitive() ||
+                clazz.isArray() ||
+                clazz.isEnum() ||
+                clazz.isInterface()) {
             return false;
         }
 
@@ -476,7 +480,6 @@ public class GXCGLibDataConvert implements Converter {
 
         // 4. 过滤集合和Map类型
         return !Map.class.isAssignableFrom(clazz) && !Collection.class.isAssignableFrom(clazz);
-
         // 通过所有检查，认为是复杂Bean类型
     }
 
