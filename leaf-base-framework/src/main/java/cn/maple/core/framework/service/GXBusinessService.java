@@ -21,7 +21,6 @@ import org.springframework.util.ClassUtils;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.locks.Lock;
 
 public interface GXBusinessService {
     /**
@@ -329,16 +328,16 @@ public interface GXBusinessService {
      */
     default void setCacheData(String cacheKey, Object data, Object... params) {
         GXBaseCacheService cacheService = getCacheService();
+        GXBaseCacheLockService cacheLockService = Objects.requireNonNull(GXSpringContextUtils.getBean(GXBaseCacheLockService.class));
         if (Objects.nonNull(cacheService)) {
-            Lock cacheLock = getCacheLock(cacheKey);
             try {
-                cacheLock.lock();
+                cacheLockService.tryLock(cacheKey);
                 Object dataFromCache = getDataFromCache(cacheKey, params);
                 if (Objects.isNull(dataFromCache)) {
                     cacheService.setCache(getCacheBucketName(), cacheKey, data);
                 }
             } finally {
-                cacheLock.unlock();
+                cacheLockService.releaseLock(cacheKey);
             }
         }
     }
@@ -377,17 +376,6 @@ public interface GXBusinessService {
     default String getCacheBucketName() {
         String s = ReUtil.replaceAll(getClass().getSimpleName(), "GX|ServiceImpl", "");
         return "mapleaf_default_cache:" + CharSequenceUtil.toUnderlineCase(s) + "_bucket";
-    }
-
-    /**
-     * 获取缓存锁
-     *
-     * @param lockName 锁的名字
-     * @return Lock 锁对象
-     */
-    @SuppressWarnings("all")
-    default Lock getCacheLock(String lockName) {
-        return Objects.requireNonNull(GXSpringContextUtils.getBean(GXBaseCacheLockService.class)).getLock(lockName);
     }
 
     /**

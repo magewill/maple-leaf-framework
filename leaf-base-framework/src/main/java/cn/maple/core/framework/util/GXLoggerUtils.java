@@ -4,7 +4,6 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import org.apache.logging.log4j.util.Strings;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 
@@ -34,11 +33,6 @@ import java.util.ArrayList;
  * @since 2021-10-19 17:40
  */
 public class GXLoggerUtils {
-    /**
-     * 日志对象
-     */
-    private static final Logger LOG = LoggerFactory.getLogger(GXLoggerUtils.class);
-
     /**
      * 私有构造函数，防止实例化
      */
