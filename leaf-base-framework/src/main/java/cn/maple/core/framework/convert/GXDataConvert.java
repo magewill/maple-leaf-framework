@@ -203,12 +203,6 @@ public class GXDataConvert {
                 return value; // 如果目标类型无法确定，则返回原始值
             }
 
-            // 性能优化：如果值已经是目标类型的实例，则直接返回（快速路径）
-            if (targetClazz.isInstance(value)) {
-                LOG.debug("值已经是目标类型的实例，无需转换");
-                return value;
-            }
-
             // 处理基本类型的包装类型转换（如Integer到int）
             if (targetClazz.isPrimitive() && ClassUtil.isPrimitiveWrapper(targetClazz)) {
                 LOG.debug("基本类型的包装类型转换: {} -> {}", value.getClass().getName(), targetClazz.getName());
