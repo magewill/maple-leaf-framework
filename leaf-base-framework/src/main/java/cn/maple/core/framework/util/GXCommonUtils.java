@@ -157,10 +157,7 @@ public class GXCommonUtils {
      * </p>
      */
     @Getter
-    private static final CopyOptions defaultCopyOptions = CopyOptions.create().setIgnoreError(true).setConverter((type, value) -> {
-        GXDataConvert dataConvert = new GXDataConvert();
-        return dataConvert.convert(type, value);
-    });
+    private static final CopyOptions defaultCopyOptions = CopyOptions.create().setIgnoreError(true).setConverter(GXDataConvert::staticConvert);
 
     /**
      * 私有构造函数，防止实例化
@@ -222,7 +219,7 @@ public class GXCommonUtils {
                 return envValue;
             }
 
-            String envValue = GXSpringContextUtils.getEnvironment().getProperty(key, String.class);
+            String envValue = Objects.requireNonNull(GXSpringContextUtils.getEnvironment()).getProperty(key, String.class);
             if (envValue == null) {
                 return getClassDefaultValue(clazzType);
             }
@@ -676,10 +673,7 @@ public class GXCommonUtils {
             // 复制属性
             if (TypeToken.of(source.getClass()).isSubtypeOf(GXBaseData.class)) {
                 LOG.info("使用CGLIB进行高效复制!!");
-                GXCglibUtils.copy(tmpSource, target, (value, type, context) -> {
-                    GXDataConvert dataConvert = new GXDataConvert();
-                    return dataConvert.convert(type, value);
-                });
+                GXCglibUtils.copy(tmpSource, target, (value, type, context) -> GXDataConvert.staticConvert(type, value));
             } else {
                 LOG.info("使用BeanUtil进行属性复制!!");
                 BeanUtil.copyProperties(tmpSource, target, copyOptions);
@@ -723,28 +717,6 @@ public class GXCommonUtils {
     }
 
     /**
-     * 将任意对象转换为指定类型的对象
-     * 复杂的JSON字符串请使用cn.hutool.json.JSONObject来作为type
-     * <p>
-     * {@code}
-     * eg:
-     * private JSONObject ext;
-     * Dict source = Dict.create().set("username","britton").set("realName","枫叶思源");
-     * convertSourceToTarget( source , PersonResDto.class, "customerProcess" , null);
-     * OR
-     * PersonReqProtocol req = new PersonReqProtocol();
-     * req.setUsername("britton");
-     * req.setRealName("枫叶思源")；
-     * convertSourceToTarget(req ,  PersonResDto.class, "customerProcess" , null);
-     * {code}
-     *
-     * @param source      源对象
-     * @param tClass      目标对象类型
-     * @param methodName  需要调用的方法名字
-     * @param copyOptions 复制选项
-     * @return 目标对象
-     */
-    /**
      * 将任意对象转换为指定类型的对象（简化版本，使用空Dict作为额外参数）
      * <p>
      * 该方法是{@link #convertSourceToTarget(Object, Class, String, CopyOptions, Object)}的简化版本，
@@ -768,6 +740,15 @@ public class GXCommonUtils {
      * UserEntity entity = userRepository.findById(1L);
      * UserDto dto = convertSourceToTarget(entity, UserDto.class, "process", null);
      * }
+     * eg:
+     * private JSONObject ext;
+     * Dict source = Dict.create().set("username","britton").set("realName","枫叶思源");
+     * convertSourceToTarget( source , PersonResDto.class, "customerProcess" , null);
+     * OR
+     * PersonReqProtocol req = new PersonReqProtocol();
+     * req.setUsername("britton");
+     * req.setRealName("枫叶思源")；
+     * convertSourceToTarget(req ,  PersonResDto.class, "customerProcess" , null);
      * </pre>
      * </p>
      *

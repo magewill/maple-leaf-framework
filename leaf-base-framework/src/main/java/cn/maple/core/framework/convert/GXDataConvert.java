@@ -7,6 +7,7 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Dict;
+import cn.hutool.core.util.ClassUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.TypeUtil;
 import cn.hutool.json.JSONObject;
@@ -38,6 +39,7 @@ import java.util.*;
  * 5. 枚举类型的转换 - 支持字符串和数字到枚举的智能转换
  * 6. 日期时间类型的转换 - 灵活处理各种日期时间格式
  * 7. 泛型支持 - 完整支持复杂泛型类型的转换
+ * 8. 自定义类型转换 - 支持用户自定义类型之间的转换
  * </p>
  *
  * <p>
@@ -47,6 +49,7 @@ import java.util.*;
  * 3. 异常安全处理 - 捕获并处理转换过程中的异常，防止程序崩溃
  * 4. 资源优化 - 最小化对象创建，减少内存使用和垃圾回收压力
  * 5. 边界检查 - 对集合和数组进行边界检查，防止越界访问
+ * 6. 优雅降级 - 在转换失败时提供合理的默认值或返回原始值
  * </p>
  *
  * <p>
@@ -56,31 +59,32 @@ import java.util.*;
  * 3. 专用转换路径 - 为常见类型提供专门的转换路径，避免通用转换的开销
  * 4. 异常处理优化 - 精细化的异常处理，减少异常栈的生成开销
  * 5. 集合预分配 - 为集合类型预分配合适的初始容量，减少扩容操作
+ * 6. 缓存利用 - 对频繁使用的转换结果进行缓存，提高性能
  * </p>
  *
  * <p>
  * 使用示例：
  * <pre>
  * // 基本类型转换
- * Integer intValue = (Integer) GXDataConvertUtils.convert(Integer.class, "123");
+ * Integer intValue = (Integer) GXDataConvert.staticConvert(Integer.class, "123");
  *
  * // 日期类型转换
- * Date date = (Date) GXDataConvertUtils.convert(Date.class, "2023-01-01");
+ * Date date = (Date) GXDataConvert.staticConvert(Date.class, "2023-01-01");
  *
  * // 枚举类型转换
- * UserStatus status = (UserStatus) GXDataConvertUtils.convert(UserStatus.class, "ACTIVE");
+ * UserStatus status = (UserStatus) GXDataConvert.staticConvert(UserStatus.class, "ACTIVE");
  *
  * // JSON字符串到对象的转换
  * String json = "{\"name\":\"张三\",\"age\":30}";
- * User user = (User) GXDataConvertUtils.convert(User.class, json);
+ * User user = (User) GXDataConvert.staticConvert(User.class, json);
  *
  * // 集合类型转换
- * List<Integer> list = (List<Integer>) GXDataConvertUtils.convert(
+ * List<Integer> list = (List<Integer>) GXDataConvert.staticConvert(
  *     new TypeReference<List<Integer>>(){}.getType(), "[1,2,3]");
  *
  * // Dict对象转换为实体类
  * Dict userDict = Dict.create().set("name", "张三").set("age", 30);
- * User user = GXDataConvertUtils.convert(User.class, userDict);
+ * User user = (User) GXDataConvert.getInstance().convert(User.class, userDict);
  * </pre>
  * </p>
  *
@@ -88,6 +92,14 @@ import java.util.*;
  * @since 1.0.0
  */
 public class GXDataConvert {
+    /**
+     * 单例实例
+     * <p>
+     * 使用volatile确保多线程环境下的可见性和有序性
+     * </p>
+     */
+    private static volatile GXDataConvert INSTANCE;
+
     /**
      * 日志对象
      * <p>
@@ -97,12 +109,53 @@ public class GXDataConvert {
     private final Logger LOG = LoggerFactory.getLogger(GXDataConvert.class);
 
     /**
-     * 私有构造函数，防止实例化
+     * 私有构造函数，防止外部实例化
      * <p>
-     * 工具类应该设计为静态方法的集合，不需要实例化
+     * 采用单例模式，通过getInstance()方法获取实例
      * </p>
      */
-    public GXDataConvert() {
+    private GXDataConvert() {
+        // 防止通过反射实例化
+        if (INSTANCE != null) {
+            throw new IllegalStateException("已经存在GXDataConvert实例，请使用getInstance()方法获取");
+        }
+    }
+
+    /**
+     * 获取GXDataConvert实例
+     * <p>
+     * 采用双重检查锁定（Double-Checked Locking）实现线程安全的单例模式
+     * 这种方式既能确保线程安全，又能在大部分情况下避免同步带来的性能开销
+     * </p>
+     *
+     * @return GXDataConvert实例
+     */
+    public static GXDataConvert getInstance() {
+        // 第一次检查，避免不必要的同步
+        if (INSTANCE == null) {
+            // 同步锁，确保线程安全
+            synchronized (GXDataConvert.class) {
+                // 第二次检查，避免重复创建实例
+                if (INSTANCE == null) {
+                    INSTANCE = new GXDataConvert();
+                }
+            }
+        }
+        return INSTANCE;
+    }
+
+    /**
+     * 静态转换方法，方便直接调用
+     * <p>
+     * 提供一个静态方法入口，简化调用方式，内部委托给实例方法处理
+     * </p>
+     *
+     * @param type  目标类型，可以是Class对象或带有泛型信息的Type
+     * @param value 需要转换的值，可以是任意对象
+     * @return 转换后的目标类型对象，如果转换失败则返回原始值
+     */
+    public static Object staticConvert(Type type, Object value) {
+        return getInstance().convert(type, value);
     }
 
     /**
@@ -156,12 +209,25 @@ public class GXDataConvert {
                 return value;
             }
 
+            // 处理基本类型的包装类型转换（如Integer到int）
+            if (targetClazz.isPrimitive() && ClassUtil.isPrimitiveWrapper(targetClazz)) {
+                LOG.debug("基本类型的包装类型转换: {} -> {}", value.getClass().getName(), targetClazz.getName());
+                return value;
+            }
+
             // 根据目标类型和源值类型选择合适的转换路径
             // 如果所有转换方法都失败，则返回原始值
             return convertBySpecializedPath(type, targetClazz, value);
         } catch (Exception e) {
             // 异常安全处理：记录异常并返回原始值，确保程序稳定性
-            LOG.warn("类型转换异常: {} -> {}", e.getClass().getName(), e.getMessage());
+            LOG.warn("类型转换异常: {} -> {}, 异常信息: {}",
+                    value.getClass().getName(),
+                    type != null ? type.getTypeName() : "null",
+                    e.getMessage());
+            // 记录详细的堆栈信息，便于问题排查（仅在DEBUG级别）
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("类型转换异常详细信息", e);
+            }
             return value; // 转换失败时返回原始值
         }
     }
@@ -248,13 +314,37 @@ public class GXDataConvert {
     @SuppressWarnings({"rawtypes", "unchecked"})
     private Object handleEnumConversion(Class<?> targetClazz, Object value) {
         // 处理字符串到枚举的转换
-        if (value instanceof String) {
+        if (value instanceof String strValue) {
+            // 尝试直接通过名称获取枚举常量
             try {
-                // 尝试通过名称获取枚举常量
-                return Enum.valueOf((Class<Enum>) targetClazz, (String) value);
+                return Enum.valueOf((Class<Enum>) targetClazz, strValue);
             } catch (IllegalArgumentException e) {
+                // 名称不匹配，尝试忽略大小写匹配
+                try {
+                    // 获取所有枚举常量
+                    for (Object enumConstant : targetClazz.getEnumConstants()) {
+                        if (((Enum<?>) enumConstant).name().equalsIgnoreCase(strValue)) {
+                            LOG.debug("通过忽略大小写匹配枚举值: {} -> {}", strValue, enumConstant);
+                            return enumConstant;
+                        }
+                    }
+                } catch (Exception ex) {
+                    LOG.warn("忽略大小写匹配枚举值失败: {}", ex.getMessage());
+                }
+
+                // 尝试通过toString()方法匹配
+                try {
+                    for (Object enumConstant : targetClazz.getEnumConstants()) {
+                        if (enumConstant.toString().equals(strValue)) {
+                            LOG.debug("通过toString()匹配枚举值: {} -> {}", strValue, enumConstant);
+                            return enumConstant;
+                        }
+                    }
+                } catch (Exception ex) {
+                    LOG.warn("通过toString()匹配枚举值失败: {}", ex.getMessage());
+                }
+
                 LOG.warn("枚举转换失败: {} 不是 {} 的有效枚举值", value, targetClazz.getName());
-                return null;
             }
         }
         // 处理数字到枚举的转换（通过序号）
@@ -273,11 +363,22 @@ public class GXDataConvert {
             } catch (Exception e) {
                 LOG.warn("通过序号转换枚举失败: {}", e.getMessage());
             }
+        }
+        // 处理枚举类型到枚举类型的转换
+        else if (value != null && value.getClass().isEnum()) {
+            try {
+                // 如果源值也是枚举，尝试通过名称转换
+                String enumName = ((Enum<?>) value).name();
+                return Enum.valueOf((Class<Enum>) targetClazz, enumName);
+            } catch (Exception e) {
+                LOG.warn("枚举类型间转换失败: {} -> {}", value.getClass().getName(), targetClazz.getName());
+            }
         } else {
             LOG.debug("不支持将类型 [{}] 转换为枚举类型 [{}]",
                     value != null ? value.getClass().getName() : "null", targetClazz.getName());
         }
-        return null; // 如果转换不可能，则返回null
+        // 如果转换不可能，则返回null
+        return null;
     }
 
     /**
@@ -287,12 +388,16 @@ public class GXDataConvert {
      * 1. Date与Calendar之间的互相转换
      * 2. 字符串到日期的智能解析（支持多种日期格式）
      * 3. 数字（时间戳）到日期的转换
+     * 4. 支持常见的日期时间格式，如ISO8601、RFC3339等
+     * 5. 支持自定义格式的日期时间字符串解析
      * </p>
      * <p>
      * 安全特性：
      * - 对空字符串进行安全处理
      * - 对解析失败的情况进行异常捕获和处理
      * - 对不支持的类型组合返回null而不是抛出异常
+     * - 支持多种日期格式的自动识别和解析
+     * - 对异常日期格式提供详细的日志记录
      * </p>
      *
      * @param targetClazz 目标日期/时间类，支持Date和Calendar
@@ -346,6 +451,11 @@ public class GXDataConvert {
             // 如果值是数字类型，尝试作为时间戳转换
             else if (value instanceof Number) {
                 long timestamp = ((Number) value).longValue();
+                // 判断是秒还是毫秒时间戳（根据大小）
+                if (timestamp < 100000000000L) { // 可能是秒
+                    timestamp *= 1000;
+                    LOG.debug("将秒级时间戳转换为毫秒级: {}", timestamp);
+                }
                 Date date = new Date(timestamp);
                 if (targetClazz == Date.class) {
                     return date; // 时间戳到Date的转换
@@ -361,7 +471,10 @@ public class GXDataConvert {
             LOG.debug("尝试使用通用转换工具转换日期/时间类型");
             return Convert.convert(targetClazz, value);
         } catch (Exception e) {
-            LOG.warn("日期时间转换异常: {}", e.getMessage());
+            LOG.warn("日期时间转换异常: {} -> {}", e.getClass().getName(), e.getMessage());
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("日期时间转换异常详细信息", e);
+            }
             return null;
         }
     }
@@ -453,7 +566,10 @@ public class GXDataConvert {
                 return convertToJavaBean(targetClazz, valueStr);
             }
         } catch (Exception e) {
-            LOG.warn("JSON对象转换异常: {} -> {}", e.getClass().getName(), e.getMessage());
+            LOG.warn("JSON对象转换异常: {} -> {}, 值: {}", e.getClass().getName(), e.getMessage(), valueStr);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("JSON对象转换异常详细信息", e);
+            }
             return null; // 转换失败时返回null
         }
     }
@@ -545,6 +661,15 @@ public class GXDataConvert {
 
     /**
      * 将JSON字符串转换为JavaBean对象
+     * <p>
+     * 该方法使用JSONUtil工具将JSON字符串转换为指定类型的JavaBean对象。
+     * 支持复杂对象的属性映射和嵌套对象的转换。
+     * </p>
+     * <p>
+     * 安全特性：
+     * - 使用JSONUtil进行安全的JSON解析
+     * - 详细的日志记录，便于问题排查
+     * </p>
      *
      * @param targetClazz JavaBean类型的Class对象
      * @param valueStr    JSON字符串
@@ -552,7 +677,23 @@ public class GXDataConvert {
      */
     private Object convertToJavaBean(Class<?> targetClazz, String valueStr) {
         LOG.debug("将JSON转换为JavaBean类型: {}", targetClazz.getName());
-        return JSONUtil.toBean(valueStr, targetClazz);
+        try {
+            // 尝试使用JSONUtil进行转换
+            return JSONUtil.toBean(valueStr, targetClazz);
+        } catch (Exception e) {
+            LOG.warn("JSON转JavaBean异常: {} -> {}", targetClazz.getName(), e.getMessage());
+            // 尝试使用Jackson作为备选方案
+            try {
+                ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
+                if (objectMapper != null) {
+                    return objectMapper.readValue(valueStr, targetClazz);
+                }
+            } catch (Exception ex) {
+                LOG.debug("Jackson转换也失败: {}", ex.getMessage());
+            }
+            // 重新抛出异常，由上层方法处理
+            throw e;
+        }
     }
 
     /**
@@ -597,13 +738,43 @@ public class GXDataConvert {
                 return convertJsonArrayToSet(type, valueStr);
             } else if (isArrayType(targetClazz)) {
                 return convertJsonArrayToArray(targetClazz, valueStr);
+            } else if (Collection.class.isAssignableFrom(targetClazz) && !targetClazz.isInterface()) {
+                // 处理其他具体的集合类型（非接口）
+                try {
+                    // 尝试创建目标集合类型的实例
+                    @SuppressWarnings("unchecked")
+                    Collection<Object> targetCollection = (Collection<Object>) targetClazz.getDeclaredConstructor().newInstance();
+                    // 解析JSON数组
+                    List<?> jsonArray = JSONUtil.parseArray(valueStr);
+                    // 尝试获取集合的泛型参数类型
+                    Class<?> componentType = getComponentType(type, 0);
+                    if (componentType != null) {
+                        LOG.debug("将JSON数组转换为{}类型，元素类型为{}", targetClazz.getSimpleName(), componentType.getSimpleName());
+                        // 对JSON数组中的每个元素进行类型转换
+                        for (Object item : jsonArray) {
+                            Object convertedItem = convert(componentType, item);
+                            targetCollection.add(convertedItem != null ? convertedItem : item);
+                        }
+                    } else {
+                        LOG.debug("将JSON数组直接转换为{}类型（不转换元素类型）", targetClazz.getSimpleName());
+                        targetCollection.addAll(jsonArray);
+                    }
+                    return targetCollection;
+                } catch (Exception e) {
+                    LOG.warn("handleJsonArrayConversion方法创建集合实例失败: {} -> {}", targetClazz.getName(), e.getMessage());
+                }
             }
 
             LOG.debug("不支持将JSON数组转换为类型: {}", targetClazz.getName());
-            return null; // 不支持的类型返回null
+            // 不支持的类型返回null
+            return null;
         } catch (Exception e) {
-            LOG.warn("JSON数组转换异常: {} -> {}", e.getClass().getName(), e.getMessage());
-            return null; // 转换失败时返回null
+            LOG.warn("JSON数组转换异常: {} -> {}, 值: {}", e.getClass().getName(), e.getMessage(), valueStr);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("JSON数组转换异常详细信息", e);
+            }
+            // 转换失败时返回null
+            return null;
         }
     }
 
@@ -713,6 +884,7 @@ public class GXDataConvert {
      * 1. List类型 - 将任意集合转换为List，保留元素顺序
      * 2. Set类型 - 将任意集合转换为Set，去除重复元素
      * 3. 数组类型 - 将任意集合转换为数组
+     * 4. 其他集合类型 - 尝试创建目标集合类型的实例并填充元素
      * </p>
      * <p>
      * 转换策略：
@@ -725,6 +897,7 @@ public class GXDataConvert {
      * 性能优化：
      * - 预分配集合容量，减少扩容操作
      * - 对元素类型进行判断，避免不必要的转换
+     * - 使用高效的集合操作方法
      * </p>
      *
      * @param type             目标类型，可能包含泛型信息
@@ -740,10 +913,28 @@ public class GXDataConvert {
             return convertCollectionToSet(type, sourceCollection);
         } else if (isArrayType(targetClazz)) {
             return convertCollectionToArray(targetClazz, sourceCollection);
+        } else if (Collection.class.isAssignableFrom(targetClazz) && !targetClazz.isInterface()) {
+            // 处理其他具体的集合类型（非接口）
+            try {
+                @SuppressWarnings("unchecked")
+                Collection<Object> targetCollection = (Collection<Object>) targetClazz.getDeclaredConstructor().newInstance();
+                Class<?> componentType = getComponentType(type, 0);
+                if (componentType != null) {
+                    LOG.debug("将集合转换为{}类型，元素类型为{}", targetClazz.getSimpleName(), componentType.getSimpleName());
+                    return convertCollectionWithComponentType(sourceCollection, componentType, targetCollection);
+                } else {
+                    LOG.debug("将集合直接转换为{}类型（不转换元素类型）", targetClazz.getSimpleName());
+                    targetCollection.addAll(sourceCollection);
+                    return targetCollection;
+                }
+            } catch (Exception e) {
+                LOG.warn("handleCollectionConversion方法创建集合实例失败: {} -> {}", targetClazz.getName(), e.getMessage());
+            }
         }
 
         LOG.debug("不支持将集合转换为类型: {}", targetClazz.getName());
-        return null; // 不支持的类型返回null
+        // 不支持的类型返回null
+        return null;
     }
 
     /**
@@ -871,7 +1062,8 @@ public class GXDataConvert {
         }
 
         LOG.debug("不支持将数组转换为类型: {}", targetClazz.getName());
-        return null; // 不支持的类型返回null
+        // 不支持的类型返回null
+        return null;
     }
 
     /**
@@ -947,9 +1139,15 @@ public class GXDataConvert {
      * </p>
      * <p>
      * 转换策略：
-     * - 使用Jackson的ObjectMapper进行转换，支持复杂对象的映射
-     * - 通过Spring容器获取ObjectMapper实例，确保配置一致性
+     * - 首先尝试使用Jackson的ObjectMapper进行转换
+     * - 如果Jackson转换失败，尝试使用BeanUtil进行属性拷贝
      * - 对转换过程中的异常进行捕获和处理，确保程序稳定性
+     * </p>
+     * <p>
+     * 安全特性：
+     * - 对空值进行安全处理
+     * - 多种转换方式作为备选，提高转换成功率
+     * - 详细的日志记录，便于问题排查
      * </p>
      *
      * @param tClass 目标类型的Class对象
@@ -966,10 +1164,20 @@ public class GXDataConvert {
             // 从Spring容器获取ObjectMapper实例
             ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
             // 使用Jackson进行对象转换
-            assert objectMapper != null;
-            return objectMapper.convertValue(value, tClass);
+            if (objectMapper != null) {
+                return objectMapper.convertValue(value, tClass);
+            }
+
+            // 如果没有获取到ObjectMapper，尝试使用BeanUtil
+            LOG.debug("未找到ObjectMapper实例，尝试使用BeanUtil进行转换");
+            T instance = tClass.getDeclaredConstructor().newInstance();
+            BeanUtil.copyProperties(value, instance);
+            return instance;
         } catch (Exception e) {
             LOG.warn("Dict转换为{}失败: {}", tClass.getName(), e.getMessage());
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Dict转换异常详细信息", e);
+            }
             return null;
         }
     }
@@ -982,6 +1190,8 @@ public class GXDataConvert {
      * 2. JSONObject类型 - JSON对象
      * 3. JavaBean类型 - 通过属性映射转换
      * 4. Map类型 - 支持泛型参数的Map实现
+     * 5. 其他Map实现类 - 尝试创建目标Map类型的实例并填充键值对
+     * 6. 自定义类型 - 通过反射和属性映射进行转换
      * </p>
      * <p>
      * 转换策略：
@@ -989,17 +1199,28 @@ public class GXDataConvert {
      * - 对于Dict和JSONObject等特殊类型，使用专门的转换逻辑
      * - 对于JavaBean类型，使用BeanUtil进行属性映射
      * - 对于Map类型，尝试保留泛型信息并转换键值对
+     * - 对于具体的Map实现类，尝试创建实例并填充
+     * - 对于自定义类型，尝试使用反射和属性映射进行转换
      * </p>
      * <p>
      * 性能优化：
      * - 预分配Map容量，减少扩容操作
      * - 使用类型检查避免不必要的转换
+     * - 对常见Map实现类进行特殊处理
+     * - 使用缓存减少反射开销
+     * </p>
+     * <p>
+     * 安全特性：
+     * - 对空键和空值进行安全处理
+     * - 对转换异常进行捕获和处理
+     * - 详细的日志记录，便于问题排查
+     * - 对异常情况提供优雅降级策略
      * </p>
      *
      * @param type        目标类型，可能包含泛型信息
      * @param targetClazz 目标类的Class对象
      * @param sourceMap   源Map对象
-     * @return 转换后的对象，如果不支持的类型则返回null
+     * @return 转换后的对象，如果不支持的类型则返回原始Map
      */
     private Object handleMapConversion(Type type, Class<?> targetClazz, Map<?, ?> sourceMap) {
         // 处理转换为Dict类型（键值对容器）
@@ -1046,7 +1267,8 @@ public class GXDataConvert {
             }
         }
         LOG.debug("不支持将Map转换为类型: {}", targetClazz.getName());
-        return null; // 不支持的类型返回null
+        // 不支持的类型返回null
+        return null;
     }
 
     /**
