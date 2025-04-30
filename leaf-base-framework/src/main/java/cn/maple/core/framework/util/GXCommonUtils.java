@@ -158,7 +158,7 @@ public class GXCommonUtils {
      * </p>
      */
     @Getter
-    private static final CopyOptions defaultCopyOptions = CopyOptions.create().setIgnoreError(true).setConverter(GXHutoolDataConvert::staticConvert);
+    private static final CopyOptions defaultCopyOptions = CopyOptions.create().setIgnoreNullValue(true).setIgnoreError(true).setConverter(GXHutoolDataConvert::staticConvert);
 
     /**
      * 私有构造函数，防止实例化
