@@ -16,6 +16,7 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.time.temporal.Temporal;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -234,6 +235,22 @@ public class GXCGLibDataConvert implements Converter {
      * 8. Map类型转换
      * 9. 复杂对象（JavaBean）转换
      * 10. 通用转换（兜底方案）
+     * </p>
+     * <p>
+     * 性能优化：
+     * 1. 使用类型判断的短路逻辑，优先处理常见类型
+     * 2. 对于基本类型和包装类型，进行快速兼容性检查
+     * 3. 缓存BeanCopier实例，避免重复创建
+     * 4. 使用专门的处理方法处理不同类型的转换，提高代码可维护性
+     * 5. 对于复杂对象，使用缓存的BeanCopier实例避免重复创建
+     * </p>
+     * <p>
+     * 安全特性：
+     * 1. 全面的参数验证，防止空指针异常
+     * 2. 完善的异常处理，确保转换过程不会中断
+     * 3. 类型安全检查，避免类型转换异常
+     * 4. 对于集合类型，创建新的集合实例而不是修改原有集合
+     * </p>
      *
      * @param sourceValue 源值，可以是任意类型的对象
      * @param targetClass 目标类型，指定转换的目标类型
@@ -267,7 +284,7 @@ public class GXCGLibDataConvert implements Converter {
 
             // 6. 处理日期/时间类型转换（使用Hutool）
             if (Date.class.isAssignableFrom(targetClass) || Calendar.class.isAssignableFrom(targetClass)
-                    || java.time.temporal.Temporal.class.isAssignableFrom(targetClass)) {
+                    || Temporal.class.isAssignableFrom(targetClass)) {
                 return Convert.convert(targetClass, sourceValue);
             }
 
