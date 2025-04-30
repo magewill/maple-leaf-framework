@@ -643,17 +643,6 @@ public class GXCommonUtils {
         }
 
         try {
-            // 处理字符串类型的JSON数据
-            Object tmpSource = source;
-            if (TypeToken.of(source.getClass()).isSubtypeOf(CharSequence.class)) {
-                String sourceStr = source.toString();
-                if (JSONUtil.isTypeJSONObject(sourceStr)) {
-                    tmpSource = JSONUtil.toBean(sourceStr, Dict.class);
-                } else if (JSONUtil.isTypeJSONArray(sourceStr)) {
-                    tmpSource = JSONUtil.toList(sourceStr, Dict.class);
-                }
-            }
-
             // 处理方法名和额外参数
             if (CharSequenceUtil.isBlank(methodName)) {
                 methodName = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
@@ -662,9 +651,6 @@ public class GXCommonUtils {
                 extraData = Dict.create();
             }
 
-            // 使用默认的复制选项（如果未指定）
-            copyOptions = ObjectUtil.defaultIfNull(copyOptions, GXCommonUtils::getDefaultCopyOptions);
-
             // 创建目标类型的实例
             T target = ReflectUtil.newInstanceIfPossible(tClass);
             if (target == null) {
@@ -672,12 +658,14 @@ public class GXCommonUtils {
             }
 
             // 复制属性
-            if (TypeToken.of(source.getClass()).isSubtypeOf(GXBaseData.class)) {
+            if (TypeToken.of(source.getClass()).isSubtypeOf(GXBaseData.class) && ObjectUtil.isNull(copyOptions)) {
                 LOG.info("使用CGLIB进行高效属性复制!!");
-                GXCglibUtils.copy(tmpSource, target, new GXCGLibDataConvert(tClass));
+                GXCglibUtils.copy(source, target, new GXCGLibDataConvert(tClass));
             } else {
+                // 使用默认的复制选项（如果未指定）
+                copyOptions = ObjectUtil.defaultIfNull(copyOptions, GXCommonUtils::getDefaultCopyOptions);
                 LOG.info("使用BeanUtil进行属性复制!!");
-                BeanUtil.copyProperties(tmpSource, target, copyOptions);
+                BeanUtil.copyProperties(source, target, copyOptions);
             }
 
             // 调用自定义处理方法（如果指定）
