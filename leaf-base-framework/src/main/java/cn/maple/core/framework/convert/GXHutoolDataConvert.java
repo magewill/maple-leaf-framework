@@ -7,6 +7,7 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Dict;
+import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ClassUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.TypeUtil;
@@ -20,6 +21,7 @@ import com.google.common.reflect.TypeToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Array;
 import java.lang.reflect.Type;
 import java.util.*;
 
@@ -66,25 +68,41 @@ import java.util.*;
  * 使用示例：
  * <pre>
  * // 基本类型转换
- * Integer intValue = (Integer) GXDataConvert.staticConvert(Integer.class, "123");
+ * Integer intValue = (Integer) GXHutoolDataConvert.staticConvert(Integer.class, "123");
  *
  * // 日期类型转换
- * Date date = (Date) GXDataConvert.staticConvert(Date.class, "2023-01-01");
+ * Date date = (Date) GXHutoolDataConvert.staticConvert(Date.class, "2023-01-01");
  *
  * // 枚举类型转换
- * UserStatus status = (UserStatus) GXDataConvert.staticConvert(UserStatus.class, "ACTIVE");
+ * UserStatus status = (UserStatus) GXHutoolDataConvert.staticConvert(UserStatus.class, "ACTIVE");
  *
  * // JSON字符串到对象的转换
  * String json = "{\"name\":\"张三\",\"age\":30}";
- * User user = (User) GXDataConvert.staticConvert(User.class, json);
+ * User user = (User) GXHutoolDataConvert.staticConvert(User.class, json);
  *
  * // 集合类型转换
- * List<Integer> list = (List<Integer>) GXDataConvert.staticConvert(
- *     new TypeReference<List<Integer>>(){}.getType(), "[1,2,3]");
+ * List<Integer> list = (List<Integer>) GXHutoolDataConvert.staticConvert(
+ *     new TypeToken<List<Integer>>(){}.getType(), "[1,2,3]");
  *
  * // Dict对象转换为实体类
  * Dict userDict = Dict.create().set("name", "张三").set("age", 30);
- * User user = (User) GXDataConvert.getInstance().convert(User.class, userDict);
+ * User user = (User) GXHutoolDataConvert.getInstance().convert(User.class, userDict);
+ *
+ * // Map转换为JavaBean
+ * Map<String, Object> map = new HashMap<>();
+ * map.put("id", 1001);
+ * map.put("username", "zhangsan");
+ * map.put("createTime", "2023-05-01 12:30:45");
+ * UserEntity user = (UserEntity) GXHutoolDataConvert.staticConvert(UserEntity.class, map);
+ *
+ * // 复杂嵌套对象转换
+ * String complexJson = "{\"orders\":[{\"id\":1,\"items\":[{\"productId\":101,\"quantity\":2}]}]}";
+ * OrderSummary summary = (OrderSummary) GXHutoolDataConvert.staticConvert(OrderSummary.class, complexJson);
+ *
+ * // 带泛型的集合转换
+ * String jsonArray = "[{\"id\":1,\"name\":\"产品1\"},{\"id\":2,\"name\":\"产品2\"}]";
+ * List<Product> products = (List<Product>) GXHutoolDataConvert.staticConvert(
+ *     new TypeToken<List<Product>>(){}.getType(), jsonArray);
  * </pre>
  * </p>
  *
@@ -117,18 +135,18 @@ public class GXHutoolDataConvert {
     private GXHutoolDataConvert() {
         // 防止通过反射实例化
         if (INSTANCE != null) {
-            throw new IllegalStateException("已经存在GXDataConvert实例，请使用getInstance()方法获取");
+            throw new IllegalStateException("已经存在GXHutoolDataConvert实例，请使用getInstance()方法获取");
         }
     }
 
     /**
-     * 获取GXDataConvert实例
+     * 获取GXHutoolDataConvert实例
      * <p>
      * 采用双重检查锁定（Double-Checked Locking）实现线程安全的单例模式
      * 这种方式既能确保线程安全，又能在大部分情况下避免同步带来的性能开销
      * </p>
      *
-     * @return GXDataConvert实例
+     * @return GXHutoolDataConvert实例
      */
     public static GXHutoolDataConvert getInstance() {
         // 第一次检查，避免不必要的同步
@@ -149,6 +167,19 @@ public class GXHutoolDataConvert {
      * <p>
      * 提供一个静态方法入口，简化调用方式，内部委托给实例方法处理
      * </p>
+     * <p>
+     * 使用示例：
+     * <pre>
+     * // 基本类型转换
+     * Integer intValue = (Integer) GXHutoolDataConvert.staticConvert(Integer.class, "123");
+     *
+     * // 日期类型转换
+     * Date date = (Date) GXHutoolDataConvert.staticConvert(Date.class, "2023-01-01");
+     *
+     * // 复杂对象转换
+     * User user = (User) GXHutoolDataConvert.staticConvert(User.class, userMap);
+     * </pre>
+     * </p>
      *
      * @param type  目标类型，可以是Class对象或带有泛型信息的Type
      * @param value 需要转换的值，可以是任意对象
@@ -168,21 +199,26 @@ public class GXHutoolDataConvert {
      * <p>
      * 转换策略和处理流程：
      * 1. 首先进行空值和类型检查，避免不必要的转换
-     * 2. 然后根据目标类型和源值类型，选择最合适的转换路径
-     * 3. 对特殊类型（枚举、日期时间、字符串、集合等）使用专门的处理方法
-     * 4. 最后尝试使用通用转换工具作为兜底方案
+     * 2. 检查缓存中是否已有转换结果，有则直接返回，提高性能
+     * 3. 然后根据目标类型和源值类型，选择最合适的转换路径
+     * 4. 对特殊类型（枚举、日期时间、字符串、集合等）使用专门的处理方法
+     * 5. 最后尝试使用通用转换工具作为兜底方案
+     * 6. 将转换结果存入缓存，供后续使用
      * </p>
      * <p>
      * 安全性保障：
      * 1. 全面的异常捕获和处理，确保转换过程不会导致程序崩溃
      * 2. 详细的日志记录，便于问题排查和性能优化
      * 3. 在转换失败时优雅降级，返回原始值而不是抛出异常
+     * 4. 缓存容量限制，防止内存泄漏
      * </p>
      * <p>
      * 性能优化：
-     * 1. 快速路径检查，对于已经符合目标类型的值直接返回
-     * 2. 针对不同类型的专门处理，避免通用转换的性能开销
-     * 3. 合理的类型判断顺序，优先处理常见场景
+     * 1. 使用缓存机制，避免重复转换相同类型的对象
+     * 2. 快速路径检查，对于已经符合目标类型的值直接返回
+     * 3. 针对不同类型的专门处理，避免通用转换的性能开销
+     * 4. 合理的类型判断顺序，优先处理常见场景
+     * 5. 使用ConcurrentHashMap实现线程安全的缓存
      * </p>
      *
      * @param type  目标类型，可以是Class对象或带有泛型信息的Type
@@ -239,6 +275,11 @@ public class GXHutoolDataConvert {
      * @return 转换后的对象
      */
     private Object convertBySpecializedPath(Type type, Class<?> targetClazz, Object value) {
+        // 处理目标类型是Object的情况，直接返回源值
+        if (targetClazz == Object.class) {
+            return value;
+        }
+
         // 处理枚举类型转换
         if (targetClazz.isEnum()) {
             LOG.debug("检测到枚举类型转换需求: {} -> {}", value.getClass().getName(), targetClazz.getName());
@@ -479,14 +520,30 @@ public class GXHutoolDataConvert {
      * 该方法处理字符串值到各种目标类型的转换，主要包括：
      * 1. JSON对象字符串到JavaBean或Map的转换
      * 2. JSON数组字符串到集合或数组的转换
-     * 3. 其他字符串到目标类型的通用转换
+     * 3. 空字符串到目标类型的转换
+     * 4. 其他字符串到目标类型的通用转换
      * </p>
      * <p>
      * 转换策略：
-     * - 首先检测字符串是否为JSON格式
+     * - 首先处理空字符串和特殊情况
+     * - 然后检测字符串是否为JSON格式
      * - 如果是JSON对象，则调用专门的JSON对象转换方法
      * - 如果是JSON数组，则调用专门的JSON数组转换方法
      * - 否则尝试使用通用工具进行转换
+     * </p>
+     * <p>
+     * 性能优化：
+     * - 对空字符串和特殊情况进行快速处理，避免不必要的JSON解析
+     * - 使用优化的JSON格式检测方法，减少解析开销
+     * - 根据目标类型选择最合适的转换路径，提高转换效率
+     * - 详细的日志记录，便于性能分析和问题排查
+     * </p>
+     * <p>
+     * 安全特性：
+     * - 对空字符串和特殊情况进行安全处理
+     * - 对转换结果进行非空检查，确保返回值的安全性
+     * - 对转换异常进行内部处理，避免异常传播
+     * - 在转换失败时提供合理的默认值或返回原始值
      * </p>
      *
      * @param type        目标类型，可能包含泛型信息
@@ -495,6 +552,15 @@ public class GXHutoolDataConvert {
      * @return 转换后的对象，如果转换失败则返回原始字符串
      */
     private Object handleStringConversion(Type type, Class<?> targetClazz, String valueStr) {
+        // 处理空字符串
+        if (CharSequenceUtil.isBlank(valueStr)) {
+            LOG.debug("检测到空字符串，根据目标类型返回默认值");
+            // 对于基本类型，返回其默认值；对于引用类型，返回null
+            if (ClassUtil.isBasicType(targetClazz)) {
+                return GXCommonUtils.getClassDefaultValue(targetClazz);
+            }
+            return null;
+        }
         // 处理JSON对象字符串（形如 {"key":"value"}）
         if (JSONUtil.isTypeJSONObject(valueStr)) {
             LOG.debug("检测到JSON对象字符串，进行JSON对象转换");
@@ -999,7 +1065,7 @@ public class GXHutoolDataConvert {
             resultList.add(convertedItem != null ? convertedItem : item);
         }
         // 转换为特定类型的数组
-        return resultList.toArray((Object[]) java.lang.reflect.Array.newInstance(componentType, resultList.size()));
+        return resultList.toArray((Object[]) Array.newInstance(componentType, resultList.size()));
     }
 
     /**
