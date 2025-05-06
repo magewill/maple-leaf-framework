@@ -2,11 +2,11 @@ package cn.maple.core.framework.convert;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.convert.Convert;
-import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.ClassUtil;
 import cn.hutool.core.util.ReflectUtil;
 import cn.hutool.core.util.TypeUtil;
 import cn.hutool.json.JSONUtil;
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -258,7 +258,9 @@ public class GXCGLibDataConvert implements Converter {
      * @return 缓存的或新创建的转换器实例
      */
     public static GXCGLibDataConvert getConverter(Class<?> targetClass) {
-        Assert.isNull(targetClass, "目标类型不能为null");
+        if (targetClass == null) {
+            throw new GXBusinessException("目标类型不能为null");
+        }
 
         // 从缓存中获取或创建新的转换器实例
         return CONVERTER_CACHE.computeIfAbsent(targetClass, clazz -> {
