@@ -45,81 +45,172 @@ import java.util.stream.Collectors;
 /**
  * 通用工具类
  * <p>
- * 该工具类提供了一系列常用的工具方法，包括但不限于：
- * 1. 环境配置获取 - 从Spring环境中安全地获取各类配置值
- * 2. 对象类型转换 - 支持复杂对象、集合的智能转换
- * 3. 反射调用 - 安全的动态方法调用
- * 4. 数据加解密 - 敏感数据的安全处理
- * 5. 手机号码处理 - 号码格式化与掩码处理
- * 6. 树形结构构建 - 高效构建树形数据结构
- * 7. 数据验证 - 各类数据格式验证
+ * 该工具类聚焦于类型转换、反射调用、加解密、树结构构建、数据校验、URL工具等常用功能，强调内存安全、线程安全与性能优化。
+ * <br>主要特性：
+ * <ul>
+ *   <li>环境配置获取与类型安全转换</li>
+ *   <li>对象与集合的深度类型转换与属性拷贝</li>
+ *   <li>反射调用与方法存在性校验</li>
+ *   <li>数据加密解密与Base64校验</li>
+ *   <li>树结构构建与递归处理</li>
+ *   <li>字符串、Map、JSON互转</li>
+ *   <li>URL可达性检测</li>
+ *   <li>严格的参数校验与异常处理，防御性编程</li>
+ *   <li>所有方法均为静态、无状态设计，适合并发场景</li>
+ * </ul>
+ * <br>内存安全：所有方法均对输入参数进行严格校验，避免空指针与资源泄漏。
+ * <br>线程安全：无共享状态，局部变量隔离，适合多线程环境。
+ * <br>性能优化：大集合并行流、反射缓存、异常分级处理。
+ * <br>使用建议：优先使用本工具类封装方法，避免重复造轮子，提升团队协作效率。
  * </p>
  * <p>
- * 内存安全特性：
- * 1. 所有方法都进行了参数验证，防止空指针异常和非法参数
- * 2. 使用安全的集合操作，避免并发修改异常和内存泄漏
- * 3. 对所有外部输入进行严格验证，防止非法数据
- * 4. 使用Optional处理可能为空的对象，避免空指针异常
- * 5. 合理管理资源，避免资源泄漏和内存溢出
- * 6. 安全处理异常，确保异常情况下资源能够正确释放
- * 7. 使用不可变集合返回结果，防止外部修改内部状态
- * </p>
- * <p>
- * 线程安全特性：
- * 1. 所有方法都是无状态的，可以安全地在多线程环境中调用
- * 2. 使用线程安全的集合类和工具类
- * 3. 通过参数验证和防御性编程确保多线程环境下的安全性
- * 4. 使用ConcurrentHashMap等并发集合处理共享数据
- * 5. 避免使用静态可变字段，防止并发访问问题
- * </p>
- * <p>
- * 使用示例：
- * <pre>
- * // 1. 获取配置信息
+ * <b>使用示例:</b>
+ * <pre>{@code
+ * // --- 1. 环境配置获取 ---
+ * // 获取字符串配置，不存在则返回null
  * String appId = GXCommonUtils.getEnvironmentValue("alipay.appId", String.class);
+ * // 获取整数配置，不存在则返回默认值 30
  * Integer timeout = GXCommonUtils.getEnvironmentValue("app.timeout", Integer.class, 30);
+ * // 获取List<String>类型的配置 (假设配置值为JSON数组字符串)
+ * List<String> whiteList = GXCommonUtils.getEnvironmentValue("app.whitelist", new TypeReference<List<String>>() {});
+ * // 获取Map<String, String>类型的配置 (假设配置值为JSON对象字符串)
+ * Map<String, String> configMap = GXCommonUtils.getEnvironmentValue("app.configMap", new TypeReference<Map<String, String>>() {});
  *
- * // 2. 对象转换
- * UserDTO userDTO = GXCommonUtils.convertSourceToTarget(userEntity, UserDTO.class, "customerProcess", null);
+ * // --- 2. 对象类型转换 ---
+ * // 2.1 Bean 转 DTO (假设UserEntity和UserDto结构类似)
+ * UserEntity userEntity = new UserEntity(1L, "张三", "zhangsan@example.com");
+ * UserDto userDto = GXCommonUtils.convertSourceToTarget(userEntity, UserDto.class);
  *
- * // 3. 列表转换
- * List<UserDTO> userDTOs = GXCommonUtils.convertSourceListToTargetList(userEntities, UserDTO.class);
+ * // 2.2 Map 转 Bean
+ * Map<String, Object> userMap = new HashMap<>();
+ * userMap.put("id", 2L);
+ * userMap.put("username", "李四");
+ * userMap.put("email", "lisi@example.com");
+ * UserDto userDtoFromMap = GXCommonUtils.convertSourceToTarget(userMap, UserDto.class);
  *
- * // 4. 带自定义选项的列表转换
- * CopyOptions options = CopyOptions.create().setIgnoreNullValue(true);
- * List<UserDTO> userDTOs = GXCommonUtils.convertSourceListToTargetList(userEntities, UserDTO.class, "process", options);
+ * // 2.3 JSON字符串 转 Bean
+ * String jsonStr = "{\"id\":3L, \"username\":\"王五\", \"email\":\"wangwu@example.com\"}";
+ * UserDto userDtoFromJson = GXCommonUtils.convertSourceToTarget(jsonStr, UserDto.class);
  *
- * // 5. 反射调用
- * // 5.1 基本反射调用
- * Object result = GXCommonUtils.reflectCallObjectMethod(userService, "findById", 1L);
+ * // 2.4 转换并调用自定义处理方法 (假设UserDto有customizeProcess(Dict extraData)方法)
+ * Dict extra = Dict.create().set("role", "admin");
+ * UserDto userDtoProcessed = GXCommonUtils.convertSourceToTarget(userEntity, UserDto.class, "customizeProcess", null, extra);
  *
- * // 5.2 调用带有复杂参数的方法
- * Map<String, Object> params = new HashMap<>();
- * params.put("id", 100);
- * params.put("status", "active");
- * List<User> users = (List<User>) GXCommonUtils.reflectCallObjectMethod(userService, "findByParams", params);
+ * // 2.5 使用自定义CopyOptions进行转换 (例如，自定义日期格式转换)
+ * CopyOptions customOptions = CopyOptions.create()
+ *     .setIgnoreNullValue(true)
+ *     .setConverter((type, value) -> {
+ *         if (value instanceof String && type.equals(Date.class)) {
+ *             try {
+ *                 // 尝试解析特定格式的日期字符串
+ *                 return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse((String) value);
+ *             } catch (ParseException e) {
+ *                 // 解析失败，可以返回null或抛出异常，或尝试其他格式
+ *                 return null;
+ *             }
+ *         }
+ *         // 对于其他类型，使用默认转换器
+ *         return GXHutoolDataConvert.staticConvert(type, value);
+ *     });
+ * OrderDto orderDto = GXCommonUtils.convertSourceToTarget(orderMap, OrderDto.class, null, customOptions);
  *
- * // 5.3 使用默认方法名调用
- * // 等同于调用 processor.customizeProcess(inputData)
- * Object result = GXCommonUtils.reflectCallObjectMethod(processor, null, inputData);
+ * // --- 3. 列表转换 ---
+ * // 3.1 实体列表 转 DTO列表
+ * List<UserEntity> userEntities = Arrays.asList(userEntity, new UserEntity(2L, "李四", "lisi@example.com"));
+ * List<UserDto> userDtos = GXCommonUtils.convertSourceListToTargetList(userEntities, UserDto.class);
  *
- * // 5.4 性能优化的反射调用
- * // 首次调用会缓存方法，后续调用相同方法时性能显著提升
- * for (int i = 0; i < 1000; i++) {
- *     GXCommonUtils.reflectCallObjectMethod(service, "process", "data" + i);
+ * // 3.2 Map列表 转 DTO列表
+ * List<Map<String, Object>> userMaps = Arrays.asList(userMap, MapUtil.of("id", 4L, "username", "赵六"));
+ * List<UserDto> userDtosFromMaps = GXCommonUtils.convertSourceListToTargetList(userMaps, UserDto.class);
+ *
+ * // 3.3 列表转换并调用自定义处理方法
+ * List<UserDto> userDtosProcessed = GXCommonUtils.convertSourceListToTargetList(userEntities, UserDto.class, "customizeProcess", null);
+ *
+ * // --- 4. 反射调用 ---
+ * // 4.1 调用Spring Bean的方法 (假设userService是Spring容器中的Bean)
+ * // 注意：需要确保GXSpringContextUtils已正确配置并能获取到Bean
+ * // User resultUser = (User) GXCommonUtils.reflectCallObjectMethod(UserService.class, "findById", 1L);
+ *
+ * // 4.2 调用普通对象的方法
+ * String name = (String) GXCommonUtils.reflectCallObjectMethod(userDto, "getUsername");
+ * GXCommonUtils.reflectCallObjectMethod(userDto, "setUsername", "新的用户名");
+ *
+ * // 4.3 调用无参方法
+ * Object result = GXCommonUtils.reflectCallObjectMethod(someObject, "process");
+ *
+ * // 4.4 调用带有可变参数的方法
+ * // GXCommonUtils.reflectCallObjectMethod(someService, "logMessage", "Error", "Details about the error");
+ *
+ * // --- 5. 数据加解密 ---
+ * // 5.1 加密数据 (假设密钥为 "mySecretKey", 有效期1小时)
+ * Dict dataToEncrypt = Dict.create().set("userId", 123).set("permission", "read");
+ * String encryptedData = GXCommonUtils.encryptedData(dataToEncrypt, "mySecretKey", 3600);
+ *
+ * // 5.2 解密数据
+ * Dict decryptedData = GXCommonUtils.decryptedData(encryptedData, "mySecretKey");
+ * if (decryptedData != null) {
+ *     Integer userId = decryptedData.getInt("userId");
+ *     String permission = decryptedData.getStr("permission");
  * }
  *
- * // 6. 数据加密
- * String encrypted = GXCommonUtils.encryptedData(Dict.create().set("userId", 1), "secretKey", 3600);
+ * // --- 6. 手机号码处理 ---
+ * // 6.1 验证手机号格式
+ * boolean isValidPhone = !GXCommonUtils.checkPhone("13812345678"); // true
+ * boolean isInvalidPhone = !GXCommonUtils.checkPhone("12345");     // false
  *
- * // 7. 数据解密
- * Dict decrypted = GXCommonUtils.decryptedData(encrypted, "secretKey");
+ * // 6.2 隐藏手机号中间部分 (保留前3位和后4位)
+ * String maskedPhone = GXCommonUtils.hiddenPhoneNumber("13812345678", 3, 7, '*'); // "138****5678"
  *
- * // 8. 手机号码处理
- * String maskedPhone = GXCommonUtils.hiddenPhoneNumber("13800138000", 3, 7, '*');
+ * // --- 7. 树形结构构建 ---
+ * // 假设MenuDto类有 getId(), getParentId(), setChildren(List<MenuDto> children) 方法
+ * List<MenuDto> menuList = Arrays.asList(
+ *     new MenuDto(1, 0, "系统管理"),
+ *     new MenuDto(2, 1, "用户管理"),
+ *     new MenuDto(3, 1, "角色管理"),
+ *     new MenuDto(4, 0, "业务管理"),
+ *     new MenuDto(5, 4, "订单管理")
+ * );
+ * // 构建以parentId为0的根节点树
+ * List<MenuDto> menuTree = GXCommonUtils.buildTree(menuList, 0);
  *
- * // 9. 树形结构构建
- * List<MenuDTO> menuTree = GXCommonUtils.buildTree(menuList, 0);
+ * // 假设CategoryDto类有 getCategoryId(), getParentCategoryId(), setSubCategories(List<CategoryDto> children) 方法
+ * // 需要指定获取父ID的方法名 "getParentCategoryId"
+ * // List<CategoryDto> categoryTree = GXCommonUtils.buildTree(categoryList, null, "getParentCategoryId");
+ *
+ * // --- 8. 数据验证 ---
+ * // 8.1 验证固话号码
+ * boolean isValidTel = !GXCommonUtils.checkTelephone("010-88888888"); // true
+ * boolean isInvalidTel = !GXCommonUtils.checkTelephone("1234567");    // false
+ *
+ * // 8.2 验证是否为Base64字符串
+ * boolean isBase64 = GXCommonUtils.isBase64("SGVsbG8="); // true
+ * boolean isNotBase64 = GXCommonUtils.isBase64("Hello!"); // false
+ *
+ * // --- 9. URL工具 ---
+ * // 检查URL是否可访问
+ * Integer statusCode = GXCommonUtils.checkURLReachable("https://www.baidu.com");
+ * if (statusCode == HttpStatus.HTTP_OK) {
+ *     System.out.println("百度首页可访问");
+ * } else {
+ *     System.out.println("访问百度首页失败，状态码: " + statusCode);
+ * }
+ *
+ * // --- 10. 字符串到对象转换 ---
+ * // 10.1 Map格式字符串转对象
+ * String mapStr = "{id=1, name=Test}";
+ * MyObject objFromMapStr = GXCommonUtils.convertStrToTarget(mapStr, MyObject.class);
+ *
+ * // 10.2 JSON格式字符串转对象
+ * String jsonStrForConvert = "{\"id\": 2, \"name\": \"AnotherTest\"}";
+ * MyObject objFromJsonStr = GXCommonUtils.convertStrToTarget(jsonStrForConvert, MyObject.class);
+ *
+ * }
+ * // 示例中使用的辅助类 (仅为演示)
+ * class UserEntity { long id; String username; String email; /* constructor, getters \\*\/ }
+ * class UserDto { long id; String username; String email; /* constructor, getters, setters, customizeProcess \\*\/ void customizeProcess(Dict extraData){} }
+ * class OrderDto { /* fields \\*\/ }
+ * class MenuDto { int id; int parentId; String name; List<MenuDto> children; /* constructor, getters, setters \\*\/ }
+ * class MyObject { int id; String name; /* constructor, getters, setters \\*\/ }
  * </pre>
  * </p>
  *
@@ -660,7 +751,8 @@ public class GXCommonUtils {
             // 复制属性
             if (TypeToken.of(source.getClass()).isSubtypeOf(GXBaseData.class) && ObjectUtil.isNull(copyOptions)) {
                 LOG.info("使用CGLIB进行高效属性复制!!");
-                GXCglibUtils.copy(source, target, new GXCGLibDataConvert(tClass));
+                //GXCglibUtils.copy(source, target, new GXCGLibDataConvert(tClass));
+                GXCglibUtils.copy(source, target, GXCGLibDataConvert.getConverter(tClass));
             } else {
                 // 使用默认的复制选项（如果未指定）
                 copyOptions = ObjectUtil.defaultIfNull(copyOptions, GXCommonUtils::getDefaultCopyOptions);

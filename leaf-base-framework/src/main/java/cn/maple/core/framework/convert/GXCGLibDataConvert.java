@@ -2,6 +2,7 @@ package cn.maple.core.framework.convert;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.convert.Convert;
+import cn.hutool.core.lang.Assert;
 import cn.hutool.core.util.ClassUtil;
 import cn.hutool.core.util.ReflectUtil;
 import cn.hutool.core.util.TypeUtil;
@@ -146,6 +147,29 @@ public class GXCGLibDataConvert implements Converter {
     private static final Logger LOG = LoggerFactory.getLogger(GXCGLibDataConvert.class);
 
     /**
+     * 类级别缓存，存储已经处理过的类
+     * <p>
+     * 使用静态ConcurrentHashMap确保在多个转换器实例之间共享缓存，
+     * 显著减少重复处理相同类的开销，特别是在高并发和大数据量场景下。
+     * </p>
+     * <p>
+     * 性能优化：
+     * 1. 预分配容量，避免动态扩容开销
+     * 2. 使用Boolean.TRUE/FALSE作为值，减少对象创建
+     * </p>
+     */
+    private static final Map<Class<?>, Boolean> PROCESSED_CLASSES_CACHE = new ConcurrentHashMap<>(256);
+
+    /**
+     * 转换器缓存 - 按目标类型缓存转换器实例
+     * <p>
+     * 缓存特定目标类型的转换器实例，避免重复创建
+     * 使用ConcurrentHashMap确保线程安全
+     * </p>
+     */
+    private static final Map<Class<?>, GXCGLibDataConvert> CONVERTER_CACHE = new ConcurrentHashMap<>(64);
+
+    /**
      * 字段缓存
      * <p>
      * 缓存目标类的字段信息，减少反射开销
@@ -191,11 +215,56 @@ public class GXCGLibDataConvert implements Converter {
      * @param targetClass 目标类型，不能为null
      * @throws IllegalArgumentException 如果targetClass为null
      */
-    public GXCGLibDataConvert(Class<?> targetClass) {
+    private GXCGLibDataConvert(Class<?> targetClass) {
         if (targetClass == null) {
             throw new IllegalArgumentException("目标类型不能为null");
         }
         preCacheFields(targetClass);
+    }
+
+    /**
+     * 获取或创建特定目标类型的转换器实例
+     * <p>
+     * 从缓存中获取已创建的转换器实例，如果不存在则创建新实例并放入缓存
+     * </p>
+     * <p>
+     * 性能优化：
+     * 1. 使用CONVERTER_CACHE缓存转换器实例，避免重复创建
+     * 2. 对于null目标类型，返回共享单例实例
+     * 3. 使用computeIfAbsent方法减少锁竞争
+     * 4. 预缓存目标类型的字段信息，提高后续转换性能
+     * </p>
+     * <p>
+     * 使用场景：
+     * 当需要重复转换相同目标类型的对象时，使用专用转换器可以获得更好的性能。
+     * 例如，在批量转换实体列表为DTO列表时：
+     * <pre>
+     * List<UserEntity> entities = getUserList(); // 假设这是获取用户列表的方法
+     * List<UserDTO> dtos = new ArrayList<>(entities.size());
+     *
+     * // 获取专用转换器和BeanCopier，避免重复创建
+     * GXCGLibDataConvert converter = GXCGLibDataConvert.getConverter(UserDTO.class);
+     * BeanCopier copier = BeanCopier.create(UserEntity.class, UserDTO.class, true);
+     *
+     * for (UserEntity entity : entities) {
+     *     UserDTO dto = new UserDTO();
+     *     copier.copy(entity, dto, converter);
+     *     dtos.add(dto);
+     * }
+     * </pre>
+     * </p>
+     *
+     * @param targetClass 目标类型，不能为null
+     * @return 缓存的或新创建的转换器实例
+     */
+    public static GXCGLibDataConvert getConverter(Class<?> targetClass) {
+        Assert.isNull(targetClass, "目标类型不能为null");
+
+        // 从缓存中获取或创建新的转换器实例
+        return CONVERTER_CACHE.computeIfAbsent(targetClass, clazz -> {
+            LOG.trace("为目标类型 {} 创建专用转换器", clazz.getName());
+            return new GXCGLibDataConvert(clazz);
+        });
     }
 
     /**
@@ -373,10 +442,33 @@ public class GXCGLibDataConvert implements Converter {
      * @param clazz 要缓存字段的类，不能为null
      */
     private void preCacheFields(Class<?> clazz) {
-        // 1. 快速过滤：跳过不需要缓存的类型
-        if (clazz == null || clazz.isPrimitive() || clazz.isArray() || clazz.isEnum() ||
-                clazz.isInterface() || Map.class.isAssignableFrom(clazz) ||
-                Collection.class.isAssignableFrom(clazz)) {
+        // 0. 空值检查
+        if (clazz == null) {
+            return;
+        }
+
+        // 1. 检查类是否已被处理（类级别缓存）
+        if (PROCESSED_CLASSES_CACHE.containsKey(clazz)) {
+            LOG.trace("类 {} 已被处理，跳过字段缓存", clazz.getName());
+            return;
+        }
+
+        // 2. 快速过滤：跳过不需要缓存的类型
+        if (clazz.isPrimitive() ||
+                clazz.isArray() ||
+                clazz.isEnum() ||
+                clazz.isInterface() ||
+                Map.class.isAssignableFrom(clazz) ||
+                Collection.class.isAssignableFrom(clazz) ||
+                Number.class.isAssignableFrom(clazz) ||
+                Boolean.class == clazz ||
+                Character.class == clazz ||
+                String.class == clazz ||
+                Date.class.isAssignableFrom(clazz) ||
+                Calendar.class.isAssignableFrom(clazz) ||
+                Temporal.class.isAssignableFrom(clazz)) {
+            // 标记为已处理，避免重复检查
+            PROCESSED_CLASSES_CACHE.put(clazz, Boolean.TRUE);
             return;
         }
 
@@ -384,12 +476,12 @@ public class GXCGLibDataConvert implements Converter {
             // 2. 获取所有字段（包括继承的字段）
             Field[] fields = ReflectUtil.getFields(clazz);
 
-            // 3. 预先分配足够的容量，避免动态扩容
+            // 4. 预先分配足够的容量，避免动态扩容
             int initialCapacity = Math.max(16, fields.length);
             Map<String, Field> tempFieldCache = new HashMap<>(initialCapacity);
             Map<String, Type> tempGenericCache = new HashMap<>(initialCapacity);
 
-            // 4. 批量处理所有字段
+            // 5. 批量处理所有字段
             for (Field field : fields) {
                 String fieldName = field.getName();
                 if (!fieldCache.containsKey(fieldName)) {
@@ -398,15 +490,20 @@ public class GXCGLibDataConvert implements Converter {
                 }
             }
 
-            // 5. 批量更新缓存，减少锁竞争
+            // 6. 批量更新缓存，减少锁竞争
             if (!tempFieldCache.isEmpty()) {
                 fieldCache.putAll(tempFieldCache);
                 genericTypeCache.putAll(tempGenericCache);
             }
 
+            // 7. 标记类已被处理，避免重复处理
+            PROCESSED_CLASSES_CACHE.put(clazz, Boolean.TRUE);
+
             // ReflectUtil.getFields已经处理了继承字段，不需要递归处理父类
         } catch (Exception e) {
             LOG.warn("为类 {} 预缓存字段时失败: {}", clazz.getName(), e.getMessage());
+            // 即使处理失败，也标记为已处理，避免重复尝试可能会失败的操作
+            PROCESSED_CLASSES_CACHE.put(clazz, Boolean.TRUE);
         }
     }
 

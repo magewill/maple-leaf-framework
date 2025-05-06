@@ -16,7 +16,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.*;
-import java.security.SecureRandom;
 import java.util.Date;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -24,10 +23,9 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * 文件上传服务实现类
  * <p>
- * 提供文件上传、Base64文件上传和文件删除等功能
- * 该服务只有在配置maple.framework.enable.file-upload=true时才会启用
- * 注意：该实现类的fileStoragePath字段在多线程环境下可能存在竞争条件，
- * 但通过synchronized块保证了目录创建的线程安全性
+ * 提供文件上传、Base64文件上传和文件删除等功能。
+ * 仅在配置 maple.framework.enable.file-upload=true 时启用。
+ * 目录创建采用线程安全方式，防止并发问题。
  * </p>
  *
  * @author maple
@@ -37,24 +35,16 @@ import java.util.concurrent.ThreadLocalRandom;
 @ConditionalOnExpression("'${maple.framework.enable.file-upload}'.equals('true')")
 public class GXFileUploadServiceImpl implements GXFileUploadService {
     /**
-     * 上传文件的存储路径
-     * 注意：该字段在多线程环境下被共享访问，需要注意线程安全
+     * 文件上传的存储根路径（由配置决定）
+     * 仅在 getFileStoragePath 方法中初始化和使用，保证线程安全
      */
     private Path fileStoragePath;
-    
-    /**
-     * 用于生成随机数的安全随机数生成器
-     */
-    private final SecureRandom secureRandom = new SecureRandom();
 
     /**
-     * 获取文件扩展名
-     * <p>
-     * 从文件名中提取文件扩展名，不包含点号
-     * </p>
+     * 获取文件扩展名（不含点号），如 jpg、png、pdf
      *
-     * @param fileName 文件名字
-     * @return 文件扩展名，例如 jpg, png, pdf 等，如果文件名为null则返回null
+     * @param fileName 文件名
+     * @return 扩展名，若文件名为 null 返回 null
      */
     private String getFileExtension(String fileName) {
         if (fileName == null) {
@@ -64,84 +54,75 @@ public class GXFileUploadServiceImpl implements GXFileUploadService {
     }
 
     /**
-     * 上传文件
-     * <p>
-     * 将MultipartFile类型的文件上传到指定的相对路径下
-     * 该方法会自动创建存储目录，并使用时间戳和随机数生成唯一文件名
-     * </p>
+     * 上传 MultipartFile 文件到指定相对路径
+     * 自动创建存储目录，生成唯一文件名
      *
-     * @param relativePath 存储的相对路径，相对于配置的根存储路径
-     * @param file 上传的文件对象
+     * @param relativePath 相对存储路径
+     * @param file         上传文件对象
      * @return 生成的文件名（不含路径）
-     * @throws GXBusinessException 当文件为空、IO异常或路径不安全时抛出业务异常
+     * @throws GXBusinessException 文件为空、IO异常或路径不安全时抛出
      */
     @Override
     public String upload(String relativePath, MultipartFile file) {
-        try {
-            if (file.isEmpty()) {
-                throw new GXBusinessException("文件不能为空");
-            }
-            Path fileStorageFileName = getFileStoragePath(relativePath, getFileExtension(file.getOriginalFilename()));
-            try (InputStream inputStream = file.getInputStream()) {
-                Files.copy(inputStream, fileStorageFileName, StandardCopyOption.REPLACE_EXISTING);
-            }
-            return fileStorageFileName.getFileName().toString();
-        } catch (IOException ex) {
-            throw new GXBusinessException("不能保存文件.请重试!", ex);
+        if (file == null || file.isEmpty()) {
+            throw new GXBusinessException("文件不能为空");
         }
+        Path fileStorageFileName = getFileStoragePath(relativePath, getFileExtension(file.getOriginalFilename()));
+        try (InputStream inputStream = file.getInputStream()) {
+            Files.copy(inputStream, fileStorageFileName, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException ex) {
+            throw new GXBusinessException("不能保存文件，请重试！", ex);
+        }
+        return fileStorageFileName.getFileName().toString();
     }
 
     /**
-     * 上传Base64文件
-     * <p>
-     * 将Base64编码的文件上传到指定的相对路径下
-     * Controller可以直接使用GXBase64DecodedMultipartFile类来接收前端传递的Base64字符串
-     * 该方法会自动创建存储目录，并使用时间戳和随机数生成唯一文件名
-     * </p>
+     * 上传 Base64 文件到指定相对路径
+     * 自动创建存储目录，生成唯一文件名
      *
-     * @param relativePath 存储的相对路径，相对于配置的根存储路径
-     * @param file Base64编码的文件
+     * @param relativePath 相对存储路径
+     * @param file         Base64 编码文件
      * @return 生成的文件名（不含路径）
-     * @throws GXBusinessException 当IO异常或路径不安全时抛出业务异常
+     * @throws GXBusinessException IO异常或路径不安全时抛出
      */
     @Override
     public String upload(String relativePath, GXBase64DecodedMultipartFile file) {
-        try {
-            String type = getFileExtension(file.getOriginalFilename());
-            Path fileStorageFilename = getFileStoragePath(relativePath, type);
-            file.transferTo(fileStorageFilename);
-            return fileStorageFilename.getFileName().toString();
-        } catch (IOException ex) {
-            throw new GXBusinessException("不能保存文件.请重试!", ex);
+        if (file == null) {
+            throw new GXBusinessException("文件不能为空");
         }
+        String type = getFileExtension(file.getOriginalFilename());
+        Path fileStorageFilename = getFileStoragePath(relativePath, type);
+        try {
+            file.transferTo(fileStorageFilename);
+        } catch (IOException ex) {
+            throw new GXBusinessException("不能保存文件，请重试！", ex);
+        }
+        return fileStorageFilename.getFileName().toString();
     }
 
     /**
-     * 获取上传文件存储目录
-     * <p>
-     * 返回当前文件存储的绝对路径
-     * </p>
+     * 获取上传文件存储根目录绝对路径
      *
-     * @return 文件上传的绝对路径
+     * @return 文件上传根路径
      */
     @Override
     public String getStoragePath() {
-        return fileStoragePath.toAbsolutePath().toString();
+        return fileStoragePath != null ? fileStoragePath.toAbsolutePath().toString() : null;
     }
 
     /**
-     * 删除指定文件
-     * <p>
-     * 根据文件名删除存储目录下的文件
-     * 如果文件不存在，则视为删除成功并记录日志
-     * </p>
+     * 删除指定文件（根据文件名，不含路径）
+     * 文件不存在视为删除成功
      *
-     * @param filename 待删除的文件名字（不含路径）
-     * @return 删除是否成功，成功返回true，失败抛出异常
-     * @throws GXBusinessException 当删除操作失败时抛出业务异常
+     * @param filename 待删除文件名
+     * @return 删除成功返回 true，失败抛出异常
+     * @throws GXBusinessException 删除失败时抛出
      */
     @Override
     public boolean deleteFile(String filename) {
+        if (filename == null) {
+            throw new GXBusinessException("文件名不能为空");
+        }
         Path destinationFile = fileStoragePath.resolve(Paths.get(filename)).toAbsolutePath();
         try {
             if (Files.notExists(destinationFile)) {
@@ -158,20 +139,16 @@ public class GXFileUploadServiceImpl implements GXFileUploadService {
     }
 
     /**
-     * 根据传入的文件类型和相对路径生成文件存储的完整路径
-     * <p>
-     * 该方法会生成一个基于时间戳、UUID和随机数的唯一文件名，
-     * 并确保存储路径的安全性，防止目录遍历攻击。
-     * 如果存储目录不存在，会以线程安全的方式创建目录。
-     * </p>
+     * 生成唯一文件名并返回完整存储路径，自动创建目录（线程安全）
+     * 防止路径遍历攻击，保证目录安全
      *
      * @param relativePath 相对存储路径
-     * @param mediaType 文件类型（扩展名，不含点号）
-     * @return 完整的文件存储路径
-     * @throws GXBusinessException 当路径不安全或创建目录失败时抛出业务异常
+     * @param mediaType    文件类型（扩展名）
+     * @return 目标文件完整路径
+     * @throws GXBusinessException 路径不安全或创建目录失败时抛出
      */
     private Path getFileStoragePath(String relativePath, String mediaType) {
-        // 生成基于时间戳、UUID和随机数的唯一文件名
+        // 生成唯一文件名（时间戳-UUID-随机数.扩展名）
         String timestamp = DateUtil.format(new Date(), DatePattern.PURE_DATETIME_MS_PATTERN);
         String uuid = UUID.randomUUID().toString().replaceAll("-", "").substring(0, 8);
         String randomPart = String.format("%03d", ThreadLocalRandom.current().nextInt(1000));
@@ -197,12 +174,12 @@ public class GXFileUploadServiceImpl implements GXFileUploadService {
             throw new GXBusinessException("相对路径包含无效的路径符号: " + relativePath);
         }
 
-        // 构建完整存储路径并规范化
+        // 构建并规范化完整存储路径
         String storagePath = CharSequenceUtil.format(
                 "{}{}{}", envStoragePath, File.separator,
                 relativePath != null ? relativePath : ""
         );
-        Path fileStoragePath = Paths.get(storagePath).normalize();
+        fileStoragePath = Paths.get(storagePath).normalize();
 
         // 线程安全地创建目录（Files.createDirectories 是线程安全的）
         try {
@@ -222,7 +199,7 @@ public class GXFileUploadServiceImpl implements GXFileUploadService {
 
         // 路径安全检查，防止路径遍历
         if (!destinationFile.getParent().equals(fileStoragePath.toAbsolutePath())) {
-            throw new GXBusinessException("不能存储文件到当前目录之外，可能存在路径遍历风险");
+            throw new GXBusinessException("不能存储文件到当前目录之外，存在路径遍历风险");
         }
 
         return destinationFile;

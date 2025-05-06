@@ -42,6 +42,35 @@ import java.util.regex.Pattern;
  *   <li>获取客户端IP地址（支持代理服务器）</li>
  *   <li>判断请求类型（HTTP、RPC）</li>
  *   <li>内网IP地址验证（IPv4和IPv6）</li>
+ *   <li>XSS/SQL注入防护与安全参数获取</li>
+ *   <li>请求频率限制与安全校验</li>
+ * </ul>
+ * </p>
+ *
+ * <p>
+ * <b>使用示例：</b>
+ * <pre>
+ * // 获取当前请求参数
+ * String username = GXCurrentRequestContextUtils.getHttpParam("username", String.class);
+ * // 获取安全参数（自动防XSS/SQL注入）
+ * String safeUsername = GXCurrentRequestContextUtils.getSafeHttpParam("username", String.class);
+ * // 获取客户端IP
+ * String ip = GXCurrentRequestContextUtils.getClientIP();
+ * // 获取安全IP（自动校验格式与XSS过滤）
+ * String safeIp = GXCurrentRequestContextUtils.getSafeClientIP();
+ * // 获取登录Token中的用户ID
+ * Integer userId = GXCurrentRequestContextUtils.getLoginFieldFromToken("token", "userId", Integer.class, null);
+ * // 检查请求是否被限流
+ * boolean limited = GXCurrentRequestContextUtils.isRateLimited(ip);
+ * </pre>
+ * </p>
+ *
+ * <p>
+ * <b>注意事项：</b>
+ * <ul>
+ *   <li>所有方法均为静态方法，线程安全。</li>
+ *   <li>安全相关方法建议优先使用（如getSafeHttpParam、getSafeHeader等）。</li>
+ *   <li>如需扩展白名单标签/属性，请修改ALLOWED_TAGS和ALLOWED_ATTRIBUTES。</li>
  * </ul>
  * </p>
  *

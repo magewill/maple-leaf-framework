@@ -99,14 +99,29 @@ import java.util.*;
  * String complexJson = "{\"orders\":[{\"id\":1,\"items\":[{\"productId\":101,\"quantity\":2}]}]}";
  * OrderSummary summary = (OrderSummary) GXHutoolDataConvert.staticConvert(OrderSummary.class, complexJson);
  *
- * // 带泛型的集合转换
+ * // 带泛型的集合转换 (JSON Array -> List<Bean>)
  * String jsonArray = "[{\"id\":1,\"name\":\"产品1\"},{\"id\":2,\"name\":\"产品2\"}]";
  * List<Product> products = (List<Product>) GXHutoolDataConvert.staticConvert(
  *     new TypeToken<List<Product>>(){}.getType(), jsonArray);
+ *
+ * // 复杂嵌套泛型转换 (JSON String -> Map<String, List<User>>)
+ * String complexMapJson = "{\"group1\":[{\"name\":\"A\"},{\"name\":\"B\"}], \"group2\":[{\"name\":\"C\"}]}";
+ * Type complexMapType = new TypeToken<Map<String, List<User>>>(){}.getType();
+ * Map<String, List<User>> userGroups = (Map<String, List<User>>) GXHutoolDataConvert.staticConvert(complexMapType, complexMapJson);
+ *
+ * // 集合到数组的转换
+ * List<String> names = Arrays.asList("Alice", "Bob");
+ * String[] nameArray = (String[]) GXHutoolDataConvert.staticConvert(String[].class, names);
+ *
+ * // 数组到List的转换
+ * Integer[] ids = {1, 2, 3};
+ * List<Integer> idList = (List<Integer>) GXHutoolDataConvert.staticConvert(
+ *     new TypeToken<List<Integer>>(){}.getType(), ids);
  * </pre>
  * </p>
  *
  * @author britton
+ * @see GXCGLibDataConvert CGLIB实现的版本，可能在特定场景下性能更优，但兼容性略差
  * @since 1.0.0
  */
 public class GXHutoolDataConvert {
@@ -348,6 +363,10 @@ public class GXHutoolDataConvert {
      */
     @SuppressWarnings({"rawtypes", "unchecked"})
     private Object handleEnumConversion(Class<?> targetClazz, Object value) {
+        // 入口已处理null，但增加防御性检查
+        if (value == null) {
+            return null;
+        }
         // 处理字符串到枚举的转换
         if (value instanceof String strValue) {
             // 尝试直接通过名称获取枚举常量
@@ -400,7 +419,7 @@ public class GXHutoolDataConvert {
             }
         }
         // 处理枚举类型到枚举类型的转换
-        else if (value != null && value.getClass().isEnum()) {
+        else if (value.getClass().isEnum()) {
             try {
                 // 如果源值也是枚举，尝试通过名称转换
                 String enumName = ((Enum<?>) value).name();
@@ -410,7 +429,7 @@ public class GXHutoolDataConvert {
             }
         } else {
             LOG.debug("不支持将类型 [{}] 转换为枚举类型 [{}]",
-                    value != null ? value.getClass().getName() : "null", targetClazz.getName());
+                    value.getClass().getName(), targetClazz.getName());
         }
         // 如果转换不可能，则返回null
         return null;
@@ -440,65 +459,74 @@ public class GXHutoolDataConvert {
      * @return 转换后的日期/时间对象，如果转换失败则返回null
      */
     private Object handleDateTimeConversion(Class<?> targetClazz, Object value) {
+        // 入口已处理null，但增加防御性检查
+        if (value == null) {
+            return null;
+        }
         try {
             // 如果值已经是日期类型
-            if (value instanceof Date dateValue) {
-                if (targetClazz == Date.class) {
-                    return dateValue; // Date到Date，直接返回
-                } else if (targetClazz == Calendar.class) {
-                    // Date到Calendar的转换
-                    Calendar calendar = Calendar.getInstance();
-                    calendar.setTime(dateValue);
-                    return calendar;
+            switch (value) {
+                case Date dateValue -> {
+                    if (targetClazz == Date.class) {
+                        return dateValue; // Date到Date，直接返回
+                    } else if (targetClazz == Calendar.class) {
+                        // Date到Calendar的转换
+                        Calendar calendar = Calendar.getInstance();
+                        calendar.setTime(dateValue);
+                        return calendar;
+                    }
                 }
-            }
-            // 如果值是日历类型
-            else if (value instanceof Calendar calValue) {
-                if (targetClazz == Calendar.class) {
-                    return calValue; // Calendar到Calendar，直接返回
-                } else if (targetClazz == Date.class) {
-                    // Calendar到Date的转换
-                    return calValue.getTime();
+                // 如果值是日历类型
+                case Calendar calValue -> {
+                    if (targetClazz == Calendar.class) {
+                        return calValue; // Calendar到Calendar，直接返回
+                    } else if (targetClazz == Date.class) {
+                        // Calendar到Date的转换
+                        return calValue.getTime();
+                    }
                 }
-            }
-            // 如果值是字符串类型，尝试解析为日期
-            else if (value instanceof String strValue) {
-                if (strValue.isEmpty()) {
-                    LOG.debug("日期字符串为空，返回null");
-                    return null;
+                // 如果值是字符串类型，尝试解析为日期
+                case String strValue -> {
+                    if (strValue.isEmpty()) {
+                        LOG.debug("日期字符串为空，返回null");
+                        return null;
+                    }
+
+                    // 使用Hutool的DateUtil进行日期解析（支持多种日期格式）
+                    Date date = DateUtil.parse(strValue);
+                    if (date != null) {
+                        if (targetClazz == Date.class) {
+                            return date; // 字符串到Date的转换
+                        } else if (targetClazz == Calendar.class) {
+                            // 字符串到Calendar的转换
+                            Calendar calendar = Calendar.getInstance();
+                            calendar.setTime(date);
+                            return calendar;
+                        }
+                    } else {
+                        LOG.debug("无法解析日期字符串: {}", strValue);
+                    }
                 }
 
-                // 使用Hutool的DateUtil进行日期解析（支持多种日期格式）
-                Date date = DateUtil.parse(strValue);
-                if (date != null) {
+                // 如果值是数字类型，尝试作为时间戳转换
+                case Number number -> {
+                    long timestamp = number.longValue();
+                    // 判断是秒还是毫秒时间戳（根据大小）
+                    if (timestamp < 100000000000L) { // 可能是秒
+                        timestamp *= 1000;
+                        LOG.debug("将秒级时间戳转换为毫秒级: {}", timestamp);
+                    }
+                    Date date = new Date(timestamp);
                     if (targetClazz == Date.class) {
-                        return date; // 字符串到Date的转换
+                        return date; // 时间戳到Date的转换
                     } else if (targetClazz == Calendar.class) {
-                        // 字符串到Calendar的转换
+                        // 时间戳到Calendar的转换
                         Calendar calendar = Calendar.getInstance();
                         calendar.setTime(date);
                         return calendar;
                     }
-                } else {
-                    LOG.debug("无法解析日期字符串: {}", strValue);
                 }
-            }
-            // 如果值是数字类型，尝试作为时间戳转换
-            else if (value instanceof Number) {
-                long timestamp = ((Number) value).longValue();
-                // 判断是秒还是毫秒时间戳（根据大小）
-                if (timestamp < 100000000000L) { // 可能是秒
-                    timestamp *= 1000;
-                    LOG.debug("将秒级时间戳转换为毫秒级: {}", timestamp);
-                }
-                Date date = new Date(timestamp);
-                if (targetClazz == Date.class) {
-                    return date; // 时间戳到Date的转换
-                } else if (targetClazz == Calendar.class) {
-                    // 时间戳到Calendar的转换
-                    Calendar calendar = Calendar.getInstance();
-                    calendar.setTime(date);
-                    return calendar;
+                default -> {
                 }
             }
 
@@ -552,6 +580,10 @@ public class GXHutoolDataConvert {
      * @return 转换后的对象，如果转换失败则返回原始字符串
      */
     private Object handleStringConversion(Type type, Class<?> targetClazz, String valueStr) {
+        // 入口已处理null，但方法内部逻辑依赖非null字符串
+        if (valueStr == null) {
+            return null;
+        }
         // 处理空字符串
         if (CharSequenceUtil.isBlank(valueStr)) {
             LOG.debug("检测到空字符串，根据目标类型返回默认值");
@@ -608,7 +640,7 @@ public class GXHutoolDataConvert {
      *
      * @param targetClazz 目标类的Class对象，指定JSON应该被转换成的类型
      * @param valueStr    JSON对象字符串，形如 {"key":"value"}
-     * @return 转换后的目标类型对象，如果转换失败则可能返回null
+     * @return 转换后的目标类型对象，如果转换失败则返回null
      */
     private Object handleJsonObjectConversion(Class<?> targetClazz, String valueStr) {
         try {
@@ -966,6 +998,10 @@ public class GXHutoolDataConvert {
      * @return 转换后的集合或数组，如果不支持的类型则返回null
      */
     private Object handleCollectionConversion(Type type, Class<?> targetClazz, Collection<?> sourceCollection) {
+        // 入口已处理null，但增加防御性检查
+        if (sourceCollection == null) {
+            return null;
+        }
         // 根据目标类型选择不同的转换策略
         if (isListType(targetClazz)) {
             return convertCollectionToList(type, sourceCollection);
@@ -1077,8 +1113,8 @@ public class GXHutoolDataConvert {
      *
      * @param sourceCollection 源集合
      * @param componentType    目标元素类型
-     * @param targetCollection 目标集合
-     * @return 转换后的集合
+     * @param targetCollection 预先创建好的目标集合实例 (例如 ArrayList, HashSet)
+     * @return 填充元素后的目标集合
      */
     private Collection<Object> convertCollectionWithComponentType(Collection<?> sourceCollection, Class<?> componentType, Collection<Object> targetCollection) {
         // 对集合中的每个元素进行类型转换
@@ -1114,6 +1150,10 @@ public class GXHutoolDataConvert {
      * @return 转换后的集合，如果不支持的类型则返回null
      */
     private Object handleArrayConversion(Type type, Class<?> targetClazz, Object[] sourceArray) {
+        // 入口已处理null，但增加防御性检查
+        if (sourceArray == null) {
+            return null;
+        }
         // 根据目标类型选择不同的转换策略
         if (isListType(targetClazz)) {
             return convertArrayToList(type, sourceArray);
@@ -1179,8 +1219,8 @@ public class GXHutoolDataConvert {
      *
      * @param sourceArray      源数组
      * @param componentType    目标元素类型
-     * @param targetCollection 目标集合
-     * @return 转换后的集合
+     * @param targetCollection 预先创建好的目标集合实例 (例如 ArrayList, HashSet)
+     * @return 填充元素后的目标集合
      */
     private Collection<Object> convertArrayWithComponentType(Object[] sourceArray, Class<?> componentType, Collection<Object> targetCollection) {
         // 对数组中的每个元素进行类型转换
@@ -1280,9 +1320,13 @@ public class GXHutoolDataConvert {
      * @param type        目标类型，可能包含泛型信息
      * @param targetClazz 目标类的Class对象
      * @param sourceMap   源Map对象
-     * @return 转换后的对象，如果不支持的类型则返回原始Map
+     * @return 转换后的对象，如果不支持的类型则返回null或原始Map（取决于具体情况）
      */
     private Object handleMapConversion(Type type, Class<?> targetClazz, Map<?, ?> sourceMap) {
+        // 入口已处理null，但增加防御性检查
+        if (sourceMap == null) {
+            return null;
+        }
         // 处理转换为Dict类型（键值对容器）
         if (targetClazz.isAssignableFrom(Dict.class)) {
             LOG.debug("将Map转换为Dict类型");
@@ -1346,7 +1390,7 @@ public class GXHutoolDataConvert {
      *
      * @param type  泛型类型，如List<String>、Map<Integer, User>等
      * @param index 泛型参数的索引，从0开始（例如，对于Map<K,V>，0表示K，1表示V）
-     * @return 组件类型的Class对象，如果未找到则返回null
+     * @return 组件类型的Class对象，如果无法解析或类型不是泛型则返回null
      */
     private Class<?> getComponentType(Type type, int index) {
         // 使用Hutool工具获取泛型参数类型
