@@ -35,6 +35,7 @@ import com.google.common.reflect.TypeToken;
 import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -302,16 +303,21 @@ public class GXCommonUtils {
         }
 
         try {
+            Environment environment = GXSpringContextUtils.getEnvironment();
+            if (ObjectUtil.isNull(environment)) {
+                LOG.debug("未找到Environment Bean，无法获取配置值!");
+                return getClassDefaultValue(clazzType);
+            }
             boolean simpleValueType = ClassUtil.isSimpleValueType(clazzType);
             if (simpleValueType) {
-                final R envValue = Objects.requireNonNull(GXSpringContextUtils.getEnvironment()).getProperty(key, clazzType);
+                final R envValue = environment.getProperty(key, clazzType);
                 if (null == envValue) {
                     return getClassDefaultValue(clazzType);
                 }
                 return envValue;
             }
 
-            String envValue = Objects.requireNonNull(GXSpringContextUtils.getEnvironment()).getProperty(key, String.class);
+            String envValue = environment.getProperty(key, String.class);
             if (envValue == null) {
                 return getClassDefaultValue(clazzType);
             }
