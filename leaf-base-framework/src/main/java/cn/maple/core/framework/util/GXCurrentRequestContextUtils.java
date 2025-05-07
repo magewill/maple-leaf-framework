@@ -808,7 +808,7 @@ public class GXCurrentRequestContextUtils {
 
         // 检查输入长度，防止超长输入导致性能问题
         if (input.length() > MAX_INPUT_LENGTH) {
-            LOG.warn("输入长度超过最大限制 ({}): {}", MAX_INPUT_LENGTH, input);
+            LOG.warn("输入长度超过最大限制 ({}): {}", MAX_INPUT_LENGTH, input.length());
             throw new IllegalArgumentException("输入长度超过最大限制: " + MAX_INPUT_LENGTH);
         }
 
@@ -845,7 +845,12 @@ public class GXCurrentRequestContextUtils {
      * @return 清理后的字符串
      */
     private static String cleanHtmlTagsAndAttributes(String input) {
-        StringBuilder result = new StringBuilder();
+        // 性能优化：如果输入不包含任何HTML标签，直接返回
+        if (!input.contains("<") || !input.contains(">")) {
+            return input;
+        }
+
+        StringBuilder result = new StringBuilder(input.length());
         int lastIndex = 0;
 
         // 使用正则表达式匹配所有 HTML 标签
@@ -1016,7 +1021,8 @@ public class GXCurrentRequestContextUtils {
         List<Long> timestamps = requestTimestamps.computeIfAbsent(clientId, k -> new ArrayList<>());
 
         // 移除1分钟前的记录
-        timestamps.removeIf(timestamp -> currentTime - timestamp > 60000);
+        long oneMinuteAgo = currentTime - 60000;
+        timestamps.removeIf(timestamp -> timestamp < oneMinuteAgo);
 
         // 添加当前请求时间戳
         timestamps.add(currentTime);
@@ -1031,11 +1037,10 @@ public class GXCurrentRequestContextUtils {
      * @param currentTime 当前时间戳
      */
     private static void cleanupExpiredRecords(long currentTime) {
-        requestTimestamps.forEach((clientId, timestamps) -> {
-            timestamps.removeIf(timestamp -> currentTime - timestamp > 60000);
-            if (timestamps.isEmpty()) {
-                requestTimestamps.remove(clientId);
-            }
+        long oneMinuteAgo = currentTime - 60000;
+        requestTimestamps.entrySet().removeIf(entry -> {
+            entry.getValue().removeIf(timestamp -> timestamp < oneMinuteAgo);
+            return entry.getValue().isEmpty();
         });
     }
 
@@ -1125,8 +1130,7 @@ public class GXCurrentRequestContextUtils {
      * <ol>
      *   <li>首先检查输入是否为空或超长（防止DoS攻击）</li>
      *   <li>检查是否包含非法字符（基本安全检查）</li>
-     *   <li>然后使用Java内置的InetAddress进行验证（最可靠的方法）</li>
-     *   <li>如果InetAddress验证失败，使用预编译正则表达式进行验证</li>
+     *   <li>然后使用预编译正则表达式进行验证</li>
      * </ol>
      * </p>
      *
@@ -1137,6 +1141,12 @@ public class GXCurrentRequestContextUtils {
         if (CharSequenceUtil.isBlank(ip) || ip.length() > MAX_IP_LENGTH) {
             return false;
         }
+
+        // 快速检查：包含非法字符
+        if (ip.contains("<") || ip.contains(">") || ip.contains("'") || ip.contains("\"") || ip.contains(";")) {
+            return false;
+        }
+
         return isIPv4(ip) || isIPv6(ip);
     }
 
@@ -1151,9 +1161,10 @@ public class GXCurrentRequestContextUtils {
         if (CharSequenceUtil.isNotBlank(ip)) {
             if (!isValidIP(ip)) {
                 LOG.warn("检测到无效的IP地址格式: {}", ip);
-                throw new GXBusinessException("无效的IP地址格式", HttpStatus.HTTP_BAD_REQUEST);
+                return "";
             }
-            return filterXSS(ip);
+            // IP已经通过isValidIP验证，无需再次过滤XSS
+            return ip;
         }
         return ip;
     }
