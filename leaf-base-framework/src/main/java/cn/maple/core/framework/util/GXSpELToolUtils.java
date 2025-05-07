@@ -3,14 +3,12 @@ package cn.maple.core.framework.util;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ClassUtil;
+import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.ReflectUtil;
 import jakarta.validation.constraints.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.expression.EvaluationContext;
-import org.springframework.expression.Expression;
-import org.springframework.expression.ExpressionParser;
-import org.springframework.expression.MethodResolver;
+import org.springframework.expression.*;
 import org.springframework.expression.spel.SpelEvaluationException;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
@@ -1706,14 +1704,14 @@ public class GXSpELToolUtils {
             if (CharSequenceUtil.isBlank(methodName)) {
                 throw new IllegalArgumentException("方法名不能为空");
             }
-            
+
             try {
                 // 优先从缓存获取方法对象，提高性能
                 Method method = getMethodFromCache(targetClass, methodName, parameterTypes != null ? parameterTypes : new Class[0]);
                 if (method == null) {
                     method = targetClass.getDeclaredMethod(methodName, parameterTypes != null ? parameterTypes : new Class[0]);
                     // 如果找到方法，添加到缓存中
-                    if (method != null) {
+                    if (ObjectUtil.isNotNull(method)) {
                         String cacheKey = generateMethodCacheKey(targetClass, methodName, parameterTypes != null ? parameterTypes : new Class[0]);
                         METHOD_CACHE.putIfAbsent(cacheKey, method);
                     }
@@ -1722,12 +1720,12 @@ public class GXSpELToolUtils {
             } catch (NoSuchMethodException e) {
                 LOG.warn("注册函数失败: {}.{}, 错误: {}", targetClass.getName(), methodName, e.getMessage());
             } catch (Exception e) {
-                LOG.error("注册函数时发生未知异常: {}.{}, 异常类型: {}, 异常信息: {}", 
-                          targetClass.getName(), methodName, e.getClass().getName(), e.getMessage());
+                LOG.error("注册函数时发生未知异常: {}.{}, 异常类型: {}, 异常信息: {}",
+                        targetClass.getName(), methodName, e.getClass().getName(), e.getMessage());
             }
             return this;
         }
-        
+
         /**
          * 设置类型转换器
          * <p>
@@ -1742,7 +1740,7 @@ public class GXSpELToolUtils {
          * class CustomTypeConverter implements TypeConverter {
          *     // 实现转换逻辑
          * }
-         * 
+         *
          * // 设置类型转换器
          * ContextBuilder builder = contextBuilder()
          *     .setTypeConverter(new CustomTypeConverter());
@@ -1754,14 +1752,14 @@ public class GXSpELToolUtils {
          * @return 构建器实例，支持链式调用
          * @throws IllegalArgumentException 如果类型转换器为null
          */
-        public ContextBuilder setTypeConverter(@NotNull org.springframework.expression.TypeConverter typeConverter) {
+        public ContextBuilder setTypeConverter(@NotNull TypeConverter typeConverter) {
             if (typeConverter == null) {
                 throw new IllegalArgumentException("类型转换器不能为null");
             }
             context.setTypeConverter(typeConverter);
             return this;
         }
-        
+
         /**
          * 设置属性访问器
          * <p>
@@ -1776,7 +1774,7 @@ public class GXSpELToolUtils {
          * class CustomPropertyAccessor implements PropertyAccessor {
          *     // 实现属性访问逻辑
          * }
-         * 
+         *
          * // 设置属性访问器
          * ContextBuilder builder = contextBuilder()
          *     .setPropertyAccessors(List.of(new CustomPropertyAccessor()));
@@ -1788,14 +1786,14 @@ public class GXSpELToolUtils {
          * @return 构建器实例，支持链式调用
          * @throws IllegalArgumentException 如果属性访问器列表为null或空
          */
-        public ContextBuilder setPropertyAccessors(@NotNull List<org.springframework.expression.PropertyAccessor> propertyAccessors) {
+        public ContextBuilder setPropertyAccessors(@NotNull List<PropertyAccessor> propertyAccessors) {
             if (propertyAccessors == null || propertyAccessors.isEmpty()) {
                 throw new IllegalArgumentException("属性访问器列表不能为null或空");
             }
             context.setPropertyAccessors(propertyAccessors);
             return this;
         }
-        
+
         /**
          * 设置方法解析器
          * <p>
@@ -1810,7 +1808,7 @@ public class GXSpELToolUtils {
          * class CustomMethodResolver implements MethodResolver {
          *     // 实现方法解析逻辑
          * }
-         * 
+         *
          * // 设置方法解析器
          * ContextBuilder builder = contextBuilder()
          *     .setMethodResolvers(List.of(new CustomMethodResolver()));
@@ -1845,7 +1843,7 @@ public class GXSpELToolUtils {
         public StandardEvaluationContext build() {
             return context;
         }
-        
+
         /**
          * 生成方法缓存的键
          * <p>
@@ -1858,12 +1856,12 @@ public class GXSpELToolUtils {
          * @return 缓存键
          */
         private String generateMethodCacheKey(Class<?> clazz, String methodName, Class<?>[] parameterTypes) {
-            return clazz.getName() + "#" + methodName + "#" + 
-                   (parameterTypes.length > 0 ? 
-                    Arrays.stream(parameterTypes)
-                          .map(Class::getName)
-                          .collect(Collectors.joining(",")) : 
-                    "");
+            return clazz.getName() + "#" + methodName + "#" +
+                    (parameterTypes.length > 0 ?
+                            Arrays.stream(parameterTypes)
+                                    .map(Class::getName)
+                                    .collect(Collectors.joining(",")) :
+                            "");
         }
     }
 }
