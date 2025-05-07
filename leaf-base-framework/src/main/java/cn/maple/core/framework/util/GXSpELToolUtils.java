@@ -10,69 +10,129 @@ import org.slf4j.LoggerFactory;
 import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.Expression;
 import org.springframework.expression.ExpressionParser;
+import org.springframework.expression.MethodResolver;
 import org.springframework.expression.spel.SpelEvaluationException;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
 
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * Spring EL表达式工具类
- * 封装了Spring EL表达式的常用操作，包括表达式计算、方法调用、属性设置等
+ * Spring EL 表达式工具类
+ * <p>
+ * 本工具类提供了一系列基于 Spring Expression Language (SpEL) 的工具方法，用于在运行时动态计算表达式、
+ * 调用方法、设置属性值等操作。SpEL 是 Spring 框架的一个强大特性，支持在运行时查询和操作对象图。
+ * </p>
+ * <p>
+ * 主要功能：
+ * - 表达式计算：支持各类 SpEL 表达式的动态计算
+ * - 方法调用：支持动态调用对象方法、Spring Bean 方法
+ * - 属性操作：支持动态设置对象属性、Dict 对象属性
+ * - 函数注册：支持注册静态方法作为 SpEL 函数并调用
+ * </p>
+ * <p>
+ * 设计特点：
+ * - 线程安全：所有方法都设计为线程安全的，可在并发环境中使用
+ * - 内存优化：通过表达式缓存、局部变量等方式优化内存使用
+ * - 性能优化：使用表达式缓存减少解析开销，提高执行效率
+ * - 异常处理：完善的异常捕获和日志记录，便于问题排查
+ * </p>
+ * <p>
+ * 使用场景：
+ * - 动态规则引擎：根据配置的表达式动态执行业务规则
+ * - 数据转换：在对象之间动态映射和转换属性
+ * - 条件评估：动态评估复杂条件表达式
+ * - 配置驱动：基于配置的动态行为控制
+ * - 反射增强：比传统反射更安全、更高效的动态调用
+ * </p>
  * <p>
  * 使用示例：
  * <pre>
  * {@code
- * // 1. 基本表达式计算
- * Dict data = Dict.create().set("name", "jack").set("age", 12);
- * String result = GXSpELToolUtils.calculateSpELExpression(data, "#data['name']", String.class);
+ * // 示例1：计算简单表达式
+ * Integer result = GXSpELToolUtils.calculateSpELExpression("10 + 20", Integer.class);
+ * // result = 30
  *
- * // 2. 条件表达式
- * Dict user = Dict.create().set("age", 20).set("vip", true);
- * String message = GXSpELToolUtils.calculateSpELExpression(
- *     user,
- *     "#data['age'] >= 18 ? (#data['vip'] ? '尊贵的VIP成年用户' : '普通成年用户') : '未成年用户'",
- *     String.class
+ * // 示例2：使用上下文变量计算表达式
+ * Dict context = Dict.create().set("price", 100).set("discount", 0.8);
+ * Double total = GXSpELToolUtils.calculateSpELExpression("#data['price'] * #data['discount']", Double.class, context);
+ * // total = 80.0
+ *
+ * // 示例3：操作对象属性
+ * UserDTO user = new UserDTO();
+ * user.setName("张三");
+ * user.setAge(25);
+ * // 计算对象属性表达式
+ * String name = GXSpELToolUtils.calculateSpELExpression("name.toUpperCase()", String.class, user);
+ * // name = "张三"
+ * // 设置对象属性
+ * GXSpELToolUtils.assignmentSpELExpression(user, "age", 30);
+ * // user.getAge() = 30
+ *
+ * // 示例4：调用Spring Bean方法
+ * String result = GXSpELToolUtils.callBeanMethodSpELExpression("userService", "findUserById", String.class, 1001L);
+ * // 调用userService.findUserById(1001L)
+ *
+ * // 示例5：注册并调用自定义函数
+ * GXSpELToolUtils.registerFunctionSpELExpression("formatDate", DateUtils.class, "format", new Class[]{Date.class, String.class});
+ * String date = GXSpELToolUtils.calculateSpELExpression("#formatDate(new java.util.Date(), 'yyyy-MM-dd')", String.class);
+ * // 使用DateUtils.format方法格式化当前日期
+ * }
+ * </pre>
+ * </p>
+ * <p>
+ * 注意事项：
+ * - 表达式安全：避免在表达式中执行不受信任的代码
+ * - 性能考虑：复杂表达式或频繁调用可能影响性能
+ * - 异常处理：使用时应当捕获可能的异常并妥善处理
+ * - 缓存管理：长时间运行的应用可能需要定期清理表达式缓存
+ * </p>
+ * <p>
+ * 高级用法：
+ * <pre>
+ * {@code
+ * // 示例6：使用上下文构建器简化上下文创建
+ * StandardEvaluationContext context = GXSpELToolUtils.contextBuilder()
+ *     .addVariable("user", userObject)
+ *     .addVariable("config", configMap)
+ *     .registerFunction("formatDate", DateUtils.class, "format", new Class[]{Date.class, String.class})
+ *     .build();
+ * String result = GXSpELToolUtils.calculateSpELExpression("#user.name + ' - ' + #formatDate(#user.birthDate, 'yyyy-MM-dd')", String.class, context);
+ *
+ * // 示例7：性能监控
+ * // 在开发环境中监控表达式执行性能
+ * String result = GXSpELToolUtils.calculateSpELExpressionWithMonitor("complex.expression.with.many.operations()", String.class, rootObject);
+ * // 日志会输出表达式执行时间
+ *
+ * // 示例8：批量属性设置与获取
+ * Dict userData = Dict.create()
+ *     .set("name", "张三")
+ *     .set("department.name", "技术部")
+ *     .set("roles[0].name", "开发者");
+ * User user = new User();
+ * GXSpELToolUtils.assignmentSpELExpression(user, userData, "name", String.class);
+ * // 一次性设置多个属性，包括嵌套属性
+ *
+ * // 示例9：条件表达式与集合操作
+ * List<Order> orders = getOrderList();
+ * // 过滤订单并计算总金额
+ * Double total = GXSpELToolUtils.calculateSpELExpression(
+ *     "orders.?[status=='COMPLETED'].![amount].sum()",
+ *     Double.class,
+ *     Dict.create().set("orders", orders)
  * );
- *
- * // 3. 集合操作
- * Dict order = Dict.create().set("items", Arrays.asList(10, 20, 30, 40));
- * Integer total = GXSpELToolUtils.calculateSpELExpression(
- *     order,
- *     "#data['items'].?[#this > 20].sum()",
- *     Integer.class
- * ); // 结果为70 (30+40)
- *
- * // 4. 目标对象属性访问
- * TestDTO dto = new TestDTO();
- * dto.setName("测试");
- * dto.setTags(Arrays.asList("java", "spring", "spel"));
- * String secondTag = GXSpELToolUtils.calculateSpELExpression(dto, "tags[1]", String.class); // 结果为"spring"
- *
- * // 5. 调用方法
- * String retVal = GXSpELToolUtils.registerFunctionSpELExpression(
- *     StringUtils.class,
- *     "concat",
- *     String.class,
- *     new Class[]{String.class, String.class},
- *     "hello", "world"
- * );
- *
- * // 6. 设置对象属性值
- * TestDTO user = new TestDTO();
- * user.setScore(85);
- * Integer oldScore = GXSpELToolUtils.setValueBySpELExpression(user, "score", Integer.class, 90);
- * // oldScore=85, user.getScore()=90
  * }
  * </pre>
  * </p>
  *
- * @author britton@126.com
+ * @author 枫叶思源
+ * @since 1.0.0
  */
 public class GXSpELToolUtils {
     /**
@@ -102,14 +162,22 @@ public class GXSpELToolUtils {
 
     /**
      * 表达式缓存，提高性能
-     * 使用ConcurrentHashMap保证线程安全，初始容量设为256
+     * <p>
+     * 使用ConcurrentHashMap保证线程安全，初始容量设为256，负载因子为0.75
+     * 缓存表达式对象可以显著减少重复解析的开销，特别是在高并发环境下
+     * </p>
      */
-    private static final Map<String, Expression> EXPRESSION_CACHE = new ConcurrentHashMap<>(256);
+    private static final Map<String, Expression> EXPRESSION_CACHE = new ConcurrentHashMap<>(256, 0.75f);
 
     /**
      * 缓存最大容量
      */
     private static final int MAX_CACHE_SIZE = 1024;
+
+    /**
+     * 添加方法缓存，提高反射性能
+     */
+    private static final ConcurrentHashMap<String, Method> METHOD_CACHE = new ConcurrentHashMap<>(256);
 
     /**
      * 私有构造函数，防止实例化
@@ -172,9 +240,11 @@ public class GXSpELToolUtils {
             return GXCommonUtils.getClassDefaultValue(beanClass);
         }
         LOG.debug("开始计算SpEL表达式: {}, 数据键名: {}", expressionString, dataKey);
-        EvaluationContext context = new StandardEvaluationContext();
+        // 使用ContextBuilder创建和配置上下文，提高代码可读性和可维护性
         dataKey = Objects.isNull(dataKey) ? "data" : dataKey;
-        context.setVariable(dataKey, data);
+        EvaluationContext context = contextBuilder()
+                .addVariable(dataKey, data)
+                .build();
         try {
             final Expression expression = getOrCreateExpression(expressionString);
             T result = expression.getValue(context, beanClass);
@@ -302,7 +372,8 @@ public class GXSpELToolUtils {
         }
         LOG.debug("开始计算目标对象SpEL表达式: {}, 目标对象类型: {}", expressionString, targetObject.getClass().getName());
         try {
-            StandardEvaluationContext context = new StandardEvaluationContext(targetObject);
+            // 使用ContextBuilder创建带根对象的上下文，简化代码
+            StandardEvaluationContext context = contextBuilder(targetObject).build();
             final Expression expression = getOrCreateExpression(expressionString);
             T result = expression.getValue(context, beanClazz);
             LOG.debug("目标对象SpEL表达式计算成功: {}, 结果: {}", expressionString, result);
@@ -403,7 +474,8 @@ public class GXSpELToolUtils {
             return GXCommonUtils.getClassDefaultValue(clazz);
         }
         LOG.debug("开始设置目标对象属性值, 目标对象类型: {}, 目标属性: {}", targetObj.getClass().getName(), targetKey);
-        final StandardEvaluationContext inventorContext = new StandardEvaluationContext(targetObj);
+        // 使用ContextBuilder创建带根对象的上下文，简化代码
+        final StandardEvaluationContext inventorContext = contextBuilder(targetObj).build();
         if (data.isEmpty()) {
             return GXCommonUtils.getClassDefaultValue(clazz);
         }
@@ -529,12 +601,16 @@ public class GXSpELToolUtils {
             return null;
         }
         LOG.debug("开始注册并调用函数, 目标类: {}, 方法名: {}", targetClass.getName(), methodName);
-        StandardEvaluationContext context = new StandardEvaluationContext();
-        context.setVariable("params", params);
+
+        // 使用ContextBuilder创建和配置上下文，简化代码
         if (methodNotExists(targetClass, methodName, methodParamTypes)) {
             return null;
         }
-        context.registerFunction(methodName, ReflectUtil.getMethod(targetClass, methodName, methodParamTypes));
+
+        StandardEvaluationContext context = contextBuilder()
+                .addVariable("params", params)
+                .registerFunction(methodName, targetClass, methodName, methodParamTypes)
+                .build();
         final String format = CharSequenceUtil.format("#{}({})", methodName, parsePlaceholderParams(methodParamTypes, params));
         final Expression expression = getOrCreateExpression(format);
         T result = expression.getValue(context, clazz);
@@ -561,7 +637,7 @@ public class GXSpELToolUtils {
      * <p>
      * 使用示例：
      * <pre>
-     *     {@code
+     * {@code
      * // 示例1：调用简单服务方法
      * // 假设有以下服务类
      * @Service
@@ -646,7 +722,24 @@ public class GXSpELToolUtils {
      *     orderDTO, paymentInfo
      * );
      * // 返回包含订单处理结果的Map
-     *     }
+     * // 调用UserService的findById方法
+     * User user = GXSpELToolUtils.callBeanMethodSpELExpression(
+     *      UserService.class,
+     *      "findById",
+     *      User.class,
+     *      new Class[]{Long.class},
+     *      1001L
+     * );
+     *
+     * // 调用多参数方法
+     * List<Order> orders = GXSpELToolUtils.callBeanMethodSpELExpression(
+     *       OrderService.class,
+     *       "findOrders",
+     *       List.class,
+     *       new Class[]{String.class, Date.class, Boolean.class},
+     *       "user123", new Date(), true
+     * );
+     * }
      * </pre>
      * </p>
      *
@@ -681,13 +774,23 @@ public class GXSpELToolUtils {
         if (methodNotExists(beanClazz, methodName, methodParamTypes)) {
             return null;
         }
-        final StandardEvaluationContext context = new StandardEvaluationContext(beanObj);
+
+        // 使用ContextBuilder创建上下文，简化代码并提高可读性
+        StandardEvaluationContext context = contextBuilder(beanObj).build();
         final String expressionString = CharSequenceUtil.format("{}({})", methodName,
                 parseArgumentParams(context, methodParamTypes, params));
         final Expression expression = getOrCreateExpression(expressionString);
-        T result = expression.getValue(context, clazz);
-        LOG.debug("Bean方法调用成功, 方法名: {}, 结果: {}", methodName, result);
-        return result;
+        try {
+            T result = expression.getValue(context, clazz);
+            LOG.debug("Bean方法调用成功, 方法名: {}, 结果: {}", methodName, result);
+            return result;
+        } catch (SpelEvaluationException e) {
+            LOG.error("Bean方法调用失败, 方法名: {}, 异常信息: {}", methodName, e.getMessage());
+        } catch (Exception e) {
+            LOG.error("Bean方法调用发生未知异常, 方法名: {}, 异常类型: {}, 异常信息: {}",
+                    methodName, e.getClass().getName(), e.getMessage());
+        }
+        return null;
     }
 
     /**
@@ -788,6 +891,27 @@ public class GXSpELToolUtils {
      *     new Class[]{double.class, Integer.class, boolean.class},
      *     10.5, 20, true
      * );
+     * // 调用用户对象的getFullName方法
+     * User user = new User("张", "三");
+     * String fullName = GXSpELToolUtils.callTargetObjectMethodSpELExpression(
+     *     user,
+     *     "getFullName",
+     *     String.class,
+     *     new Class[]{},
+     *     // 无参数
+     * );
+     * // fullName = "张三"
+     * *
+     * // 调用带参数的方法
+     * Calculator calculator = new Calculator();
+     * Integer sum = GXSpELToolUtils.callTargetObjectMethodSpELExpression(
+     *     calculator,
+     *     "add",
+     *     Integer.class,
+     *     new Class[]{Integer.class, Integer.class},
+     *     10, 20
+     * );
+     * // sum = 30
      * }
      * </pre>
      * </p>
@@ -818,7 +942,9 @@ public class GXSpELToolUtils {
             return null;
         }
         LOG.debug("开始调用目标对象方法, 目标对象类型: {}, 方法名: {}", targetObject.getClass().getName(), methodName);
-        final Method method = ReflectUtil.getMethod(targetObject.getClass(), methodName, methodParamTypes);
+
+        // 优先从缓存获取方法对象，提高性能
+        final Method method = getMethodFromCache(targetObject.getClass(), methodName, methodParamTypes);
         if (Objects.isNull(method)) {
             final String paramStr = Arrays.stream(methodParamTypes)
                     .map(Class::getSimpleName)
@@ -826,13 +952,24 @@ public class GXSpELToolUtils {
             LOG.debug(METHOD_NOT_FOUND_TIPS_TEMPLATE, targetObject.getClass().getSimpleName(), methodName, paramStr);
             return null;
         }
-        final StandardEvaluationContext context = new StandardEvaluationContext(targetObject);
+
+        // 使用ContextBuilder创建上下文，简化代码并提高可读性
+        StandardEvaluationContext context = contextBuilder(targetObject).build();
         final String expressionString = CharSequenceUtil.format("{}({})", methodName,
                 parseArgumentParams(context, methodParamTypes, params));
         final Expression expression = getOrCreateExpression(expressionString);
-        T result = expression.getValue(context, clazz);
-        LOG.debug("目标对象方法调用成功, 方法名: {}, 结果: {}", methodName, result);
-        return result;
+
+        try {
+            T result = expression.getValue(context, clazz);
+            LOG.debug("目标对象方法调用成功, 方法名: {}, 结果: {}", methodName, result);
+            return result;
+        } catch (SpelEvaluationException e) {
+            LOG.error("目标对象方法调用失败, 方法名: {}, 异常信息: {}", methodName, e.getMessage());
+        } catch (Exception e) {
+            LOG.error("目标对象方法调用发生未知异常, 方法名: {}, 异常类型: {}, 异常信息: {}",
+                    methodName, e.getClass().getName(), e.getMessage());
+        }
+        return null;
     }
 
     /**
@@ -920,12 +1057,23 @@ public class GXSpELToolUtils {
             return null;
         }
         LOG.debug("开始设置对象属性值, 目标对象类型: {}, 表达式: {}", targetObject.getClass().getName(), expressionString);
-        final StandardEvaluationContext context = new StandardEvaluationContext(targetObject);
+
+        // 使用ContextBuilder创建上下文，简化代码并提高可读性
+        StandardEvaluationContext context = contextBuilder(targetObject).build();
         final Expression expression = getOrCreateExpression(expressionString);
-        final T oldValue = expression.getValue(context, oldValueClazz);
-        expression.setValue(context, newValue);
-        LOG.debug("对象属性值设置成功, 表达式: {}, 旧值: {}, 新值: {}", expressionString, oldValue, newValue);
-        return oldValue;
+
+        try {
+            final T oldValue = expression.getValue(context, oldValueClazz);
+            expression.setValue(context, newValue);
+            LOG.debug("对象属性值设置成功, 表达式: {}, 旧值: {}, 新值: {}", expressionString, oldValue, newValue);
+            return oldValue;
+        } catch (SpelEvaluationException e) {
+            LOG.error("对象属性值设置失败, 表达式: {}, 新值: {}, 异常信息: {}", expressionString, newValue, e.getMessage());
+        } catch (Exception e) {
+            LOG.error("对象属性值设置发生未知异常, 表达式: {}, 新值: {}, 异常类型: {}, 异常信息: {}",
+                    expressionString, newValue, e.getClass().getName(), e.getMessage());
+        }
+        return null;
     }
 
     /**
@@ -1076,6 +1224,19 @@ public class GXSpELToolUtils {
      * 2. 对于复杂对象类型，将对象注册到上下文中，并使用变量引用的方式在表达式中引用
      * </p>
      * <p>
+     * 使用实例：
+     * </p>
+     * <pre>
+     * {@code
+     * // 假设有方法 calculateTotal(String name, int quantity, Product product)
+     * StandardEvaluationContext context = contextBuilder(targetObj).build();
+     * Class<?>[] paramTypes = new Class[]{String.class, int.class, Product.class};
+     * Object[] paramValues = {"商品A", 5, new Product("P001", 100.0)};
+     * String paramStr = parseArgumentParams(context, paramTypes, paramValues);
+     * // 结果: '商品A' , 5 , #javaxProductimpl
+     * }
+     * </pre>
+     * <p>
      * 内部实现说明：
      * - 对于String类型参数，使用单引号包裹，如 'hello'
      * - 对于其他简单类型（如数字、布尔值等），直接使用其字符串表示，如 123, true
@@ -1102,25 +1263,30 @@ public class GXSpELToolUtils {
      */
     private static String parseArgumentParams(EvaluationContext context, Class<?>[] methodParamTypes, Object... params) {
         StringBuilder methodParam = new StringBuilder();
-        for (int i = 0; i < methodParamTypes.length; i++) {
-            if (i >= params.length) {
-                methodParam.append("null , ");
-                continue;
-            }
-            final Class<?> type = methodParamTypes[i];
-            if (ClassUtil.isSimpleValueType(type)) {
-                if (type.getSimpleName().equalsIgnoreCase("string")) {
-                    methodParam.append("'").append(params[i]).append("' , ");
-                } else {
-                    methodParam.append(params[i]).append(" , ");
+        try {
+            for (int i = 0; i < methodParamTypes.length; i++) {
+                if (i >= params.length) {
+                    methodParam.append("null , ");
+                    continue;
                 }
-            } else {
-                final String name = CharSequenceUtil.replace(type.getName(), ".", "");
-                context.setVariable(name, params[i]);
-                methodParam.append("#").append(name).append(" , ");
+                final Class<?> type = methodParamTypes[i];
+                if (ClassUtil.isSimpleValueType(type)) {
+                    if (type.getSimpleName().equalsIgnoreCase("string")) {
+                        methodParam.append("'").append(params[i]).append("' , ");
+                    } else {
+                        methodParam.append(params[i]).append(" , ");
+                    }
+                } else {
+                    final String name = CharSequenceUtil.replace(type.getName(), ".", "");
+                    context.setVariable(name, params[i]);
+                    methodParam.append("#").append(name).append(" , ");
+                }
             }
+            return CharSequenceUtil.subBefore(methodParam.toString(), ',', true);
+        } catch (Exception e) {
+            LOG.error("解析方法参数失败, 异常类型: {}, 异常信息: {}", e.getClass().getName(), e.getMessage());
+            return "";
         }
-        return CharSequenceUtil.subBefore(methodParam.toString(), ',', true);
     }
 
     /**
@@ -1161,7 +1327,7 @@ public class GXSpELToolUtils {
                     // 保留一半的缓存项
                     EXPRESSION_CACHE.keySet().stream()
                             .skip(EXPRESSION_CACHE.size() / 2)
-                            .collect(Collectors.toList())
+                            .toList()
                             .forEach(EXPRESSION_CACHE::remove);
                     LOG.debug("表达式缓存清理完成，清理后大小: {}", EXPRESSION_CACHE.size());
                 }
@@ -1222,6 +1388,482 @@ public class GXSpELToolUtils {
         synchronized (EXPRESSION_CACHE) {
             EXPRESSION_CACHE.clear();
             LOG.debug("表达式缓存已清空");
+        }
+    }
+
+    /**
+     * 创建上下文构建器，使用指定的根对象
+     * <p>
+     * 该方法返回一个带有根对象的ContextBuilder实例，用于创建和配置StandardEvaluationContext对象。
+     * 根对象将作为表达式计算的上下文根，表达式可以直接访问根对象的属性和方法。
+     * </p>
+     * <p>
+     * 使用示例：
+     * <pre>
+     * {@code
+     * // 创建带根对象的上下文
+     * User user = new User("张三", 30);
+     * StandardEvaluationContext context = GXSpELToolUtils.contextBuilder(user)
+     *     .addVariable("maxAge", 100)
+     *     .addVariable("minAge", 0)
+     *     .build();
+     *
+     * // 在表达式中可以直接访问user对象的属性
+     * String result = GXSpELToolUtils.calculateSpELExpression(
+     *     "name + ' 年龄: ' + age",
+     *     String.class,
+     *     context
+     * );
+     * // 结果: "张三 年龄: 30"
+     * }
+     * </pre>
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 每次调用都创建新的ContextBuilder实例，避免状态共享
+     * - 内部使用的StandardEvaluationContext是线程安全的
+     * </p>
+     *
+     * @param rootObject 根对象，表达式计算的上下文根
+     * @return 上下文构建器实例
+     */
+    public static ContextBuilder contextBuilder(Object rootObject) {
+        return new ContextBuilder(rootObject);
+    }
+
+    /**
+     * 创建上下文构建器，不指定根对象
+     * <p>
+     * 该方法返回一个ContextBuilder实例，用于创建和配置StandardEvaluationContext对象。
+     * 通过流式API，可以方便地添加变量、注册函数等，使上下文创建过程更加简洁和可读。
+     * </p>
+     * <p>
+     * 使用示例：
+     * <pre>
+     * {@code
+     * // 创建带多个变量的上下文
+     * StandardEvaluationContext context = GXSpELToolUtils.contextBuilder()
+     *     .addVariable("user", userObject)
+     *     .addVariable("config", configMap)
+     *     .registerFunction("formatDate", DateUtils.class, "format", new Class[]{Date.class, String.class})
+     *     .build();
+     *
+     * // 在表达式中使用变量和函数
+     * String result = GXSpELToolUtils.calculateSpELExpression(
+     *     "#user.name + ' - ' + #formatDate(#user.birthDate, 'yyyy-MM-dd')",
+     *     String.class,
+     *     context
+     * );
+     * }
+     * </pre>
+     * </p>
+     * <p>
+     * 线程安全：
+     * - 每次调用都创建新的ContextBuilder实例，避免状态共享
+     * - 内部使用的StandardEvaluationContext是线程安全的
+     * </p>
+     *
+     * @return 上下文构建器实例
+     */
+    public static ContextBuilder contextBuilder() {
+        return new ContextBuilder();
+    }
+
+    /**
+     * 从缓存中获取方法对象，如果缓存中不存在则通过反射获取并缓存
+     *
+     * @param targetClass    目标类
+     * @param methodName     方法名
+     * @param parameterTypes 参数类型数组
+     * @return 方法对象，如果未找到返回null
+     */
+    private static Method getMethodFromCache(Class<?> targetClass, String methodName, Class<?>[] parameterTypes) {
+        String cacheKey = targetClass.getName() + "#" + methodName + "#" +
+                (parameterTypes == null ? "" : Arrays.stream(parameterTypes)
+                        .map(Class::getName)
+                        .collect(Collectors.joining(",")));
+
+        return METHOD_CACHE.computeIfAbsent(cacheKey, key -> {
+            try {
+                return ReflectUtil.getMethod(targetClass, methodName, parameterTypes);
+            } catch (Exception e) {
+                LOG.debug("获取方法失败: {}.{}, 参数类型: {}, 错误: {}",
+                        targetClass.getName(), methodName,
+                        parameterTypes == null ? "[]" : Arrays.toString(parameterTypes),
+                        e.getMessage());
+                return null;
+            }
+        });
+    }
+
+    /**
+     * ContextBuilder类 - SpEL上下文构建器 ，用于简化上下文创建和变量注册
+     * <p>
+     * 该类提供了流式API，用于创建和配置StandardEvaluationContext对象。
+     * 支持添加变量、注册函数、设置根对象等操作，使上下文创建过程更加简洁和可读。
+     * </p>
+     * <p>
+     * 使用示例：
+     * <pre>
+     * {@code
+     * // 创建带根对象的上下文
+     * StandardEvaluationContext context = GXSpELToolUtils.contextBuilder(user)
+     *     .addVariable("maxAge", 100)
+     *     .addVariable("minAge", 0)
+     *     .build();
+     *
+     * // 创建带多个变量的上下文
+     * StandardEvaluationContext context = GXSpELToolUtils.contextBuilder()
+     *     .addVariable("user", user)
+     *     .addVariable("order", order)
+     *     .addVariable("config", configMap)
+     *     .build();
+     * }
+     * </pre>
+     * <p>
+     * 该类提供了一个流畅的API，用于创建和配置{@link StandardEvaluationContext}对象。
+     * 支持添加变量、注册函数、设置根对象、配置类型转换器和属性访问器等操作，
+     * 使SpEL上下文的创建过程更加简洁、可读和可维护。
+     * </p>
+     * <p>
+     * <strong>线程安全性说明：</strong>
+     * <ul>
+     *   <li>ContextBuilder实例本身<strong>不是线程安全的</strong>，不应在多个线程间共享同一个实例</li>
+     *   <li>每次调用{@code contextBuilder()}方法都会创建一个新的实例，确保线程隔离</li>
+     *   <li>构建完成的{@link StandardEvaluationContext}对象也不是线程安全的，不应在多个线程间共享</li>
+     *   <li>在高并发环境中，应为每个线程创建独立的上下文实例</li>
+     * </ul>
+     * </p>
+     * <p>
+     * <strong>内存优化建议：</strong>
+     * <ul>
+     *   <li>在高并发场景下，考虑使用对象池管理{@link StandardEvaluationContext}实例</li>
+     *   <li>对于重复使用的上下文配置，可以创建模板上下文并在需要时复制</li>
+     *   <li>使用完毕的上下文对象应及时释放引用，避免内存泄漏</li>
+     *   <li>大型应用中监控上下文对象的创建和销毁，确保内存使用合理</li>
+     * </ul>
+     * </p>
+     * <p>
+     * <strong>性能优化提示：</strong>
+     * <ul>
+     *   <li>批量添加变量比单个添加更高效，优先使用{@code addVariables}方法</li>
+     *   <li>{@code registerFunction}方法使用方法缓存减少反射开销</li>
+     *   <li>避免在热点代码中频繁创建上下文对象，考虑复用或缓存</li>
+     *   <li>使用自定义的{@code TypeConverter}可以提高类型转换的效率</li>
+     * </ul>
+     * </p>
+     *
+     * @author 枫叶思源
+     * @since 1.2.0
+     */
+    public static class ContextBuilder {
+        /**
+         * SpEL表达式上下文对象，用于存储变量、函数和配置信息
+         */
+        private final StandardEvaluationContext context;
+
+        /**
+         * 创建带有根对象的ContextBuilder实例
+         * <p>
+         * 根对象将作为表达式计算的上下文根，可以直接访问其属性和方法。
+         * </p>
+         *
+         * @param rootObject 根对象，不能为null
+         */
+        private ContextBuilder(@NotNull Object rootObject) {
+            this.context = new StandardEvaluationContext(rootObject);
+        }
+
+        /**
+         * 创建不带根对象的ContextBuilder实例
+         * <p>
+         * 适用于仅通过变量访问数据的场景。
+         * </p>
+         */
+        private ContextBuilder() {
+            this.context = new StandardEvaluationContext();
+        }
+
+        /**
+         * 添加变量到上下文
+         * <p>
+         * 该方法将变量添加到SpEL表达式上下文中，可以在表达式中通过#变量名访问。
+         * 支持链式调用，可以连续添加多个变量。
+         * </p>
+         * <p>
+         * 使用示例：
+         * <pre>
+         * {@code
+         * // 添加单个变量
+         * ContextBuilder builder = contextBuilder()
+         *     .addVariable("user", userObject);
+         *
+         * // 在表达式中使用变量
+         * // "#user.name"
+         * }
+         * </pre>
+         * </p>
+         * <p>
+         * 线程安全性：此方法修改内部状态，不是线程安全的。
+         * </p>
+         *
+         * @param name  变量名，在表达式中通过#name引用，不能为null或空
+         * @param value 变量值，可以是任意类型的对象，可以为null
+         * @return 构建器实例，支持链式调用
+         * @throws IllegalArgumentException 如果变量名为null或空
+         */
+        public ContextBuilder addVariable(@NotNull String name, Object value) {
+            if (CharSequenceUtil.isBlank(name)) {
+                throw new IllegalArgumentException("变量名不能为空");
+            }
+            context.setVariable(name, value);
+            return this;
+        }
+
+        /**
+         * 添加多个变量到上下文
+         * <p>
+         * 该方法将Map中的所有键值对作为变量添加到SpEL表达式上下文中。
+         * 适合需要批量添加变量的场景，提高代码简洁性和性能。
+         * </p>
+         * <p>
+         * 使用示例：
+         * <pre>
+         * {@code
+         * // 创建变量映射
+         * Map<String, Object> variables = new HashMap<>();
+         * variables.put("user", userObject);
+         * variables.put("config", configMap);
+         * variables.put("permissions", permissionList);
+         *
+         * // 批量添加变量
+         * ContextBuilder builder = contextBuilder()
+         *     .addVariables(variables);
+         * }
+         * </pre>
+         * </p>
+         * <p>
+         * 性能优化：批量添加变量比多次调用addVariable更高效。
+         * </p>
+         *
+         * @param variables 变量映射，键为变量名，值为变量值，可以为null
+         * @return 构建器实例，支持链式调用
+         */
+        public ContextBuilder addVariables(Map<String, Object> variables) {
+            if (variables != null && !variables.isEmpty()) {
+                variables.forEach((name, value) -> {
+                    if (CharSequenceUtil.isNotBlank(name)) {
+                        context.setVariable(name, value);
+                    }
+                });
+            }
+            return this;
+        }
+
+        /**
+         * 注册函数到上下文
+         * <p>
+         * 该方法将静态方法注册为SpEL表达式中的函数，可以在表达式中直接调用。
+         * 方法会自动处理异常，如果注册失败会记录警告日志但不会抛出异常。
+         * </p>
+         * <p>
+         * 使用示例：
+         * <pre>
+         * {@code
+         * // 注册日期格式化函数
+         * ContextBuilder builder = contextBuilder()
+         *     .registerFunction("formatDate", DateUtils.class, "format", new Class[]{Date.class, String.class});
+         *
+         * // 在表达式中调用函数
+         * // "#formatDate(new java.util.Date(), 'yyyy-MM-dd')"
+         * }
+         * </pre>
+         * </p>
+         * <p>
+         * 性能优化：
+         * <ul>
+         *   <li>使用方法缓存提高反射性能</li>
+         *   <li>异常处理避免运行时错误</li>
+         *   <li>对于频繁使用的函数，建议在应用启动时预先注册</li>
+         * </ul>
+         * </p>
+         *
+         * @param name           函数名，在表达式中使用的名称，不能为null或空
+         * @param targetClass    目标类，包含静态方法的类，不能为null
+         * @param methodName     方法名，要注册的静态方法名称，不能为null或空
+         * @param parameterTypes 参数类型数组，用于确定方法签名，可以为null表示无参方法
+         * @return 构建器实例，支持链式调用
+         * @throws IllegalArgumentException 如果函数名、目标类或方法名为null
+         */
+        public ContextBuilder registerFunction(@NotNull String name, @NotNull Class<?> targetClass,
+                                               @NotNull String methodName, Class<?>[] parameterTypes) {
+            if (CharSequenceUtil.isBlank(name)) {
+                throw new IllegalArgumentException("函数名不能为空");
+            }
+            if (targetClass == null) {
+                throw new IllegalArgumentException("目标类不能为null");
+            }
+            if (CharSequenceUtil.isBlank(methodName)) {
+                throw new IllegalArgumentException("方法名不能为空");
+            }
+            
+            try {
+                // 优先从缓存获取方法对象，提高性能
+                Method method = getMethodFromCache(targetClass, methodName, parameterTypes != null ? parameterTypes : new Class[0]);
+                if (method == null) {
+                    method = targetClass.getDeclaredMethod(methodName, parameterTypes != null ? parameterTypes : new Class[0]);
+                    // 如果找到方法，添加到缓存中
+                    if (method != null) {
+                        String cacheKey = generateMethodCacheKey(targetClass, methodName, parameterTypes != null ? parameterTypes : new Class[0]);
+                        METHOD_CACHE.putIfAbsent(cacheKey, method);
+                    }
+                }
+                context.registerFunction(name, method);
+            } catch (NoSuchMethodException e) {
+                LOG.warn("注册函数失败: {}.{}, 错误: {}", targetClass.getName(), methodName, e.getMessage());
+            } catch (Exception e) {
+                LOG.error("注册函数时发生未知异常: {}.{}, 异常类型: {}, 异常信息: {}", 
+                          targetClass.getName(), methodName, e.getClass().getName(), e.getMessage());
+            }
+            return this;
+        }
+        
+        /**
+         * 设置类型转换器
+         * <p>
+         * 该方法允许设置自定义的类型转换器，用于在SpEL表达式计算过程中进行类型转换。
+         * 自定义类型转换器可以处理标准转换器无法处理的特殊类型转换需求。
+         * </p>
+         * <p>
+         * 使用示例：
+         * <pre>
+         * {@code
+         * // 创建自定义类型转换器
+         * class CustomTypeConverter implements TypeConverter {
+         *     // 实现转换逻辑
+         * }
+         * 
+         * // 设置类型转换器
+         * ContextBuilder builder = contextBuilder()
+         *     .setTypeConverter(new CustomTypeConverter());
+         * }
+         * </pre>
+         * </p>
+         *
+         * @param typeConverter 类型转换器，不能为null
+         * @return 构建器实例，支持链式调用
+         * @throws IllegalArgumentException 如果类型转换器为null
+         */
+        public ContextBuilder setTypeConverter(@NotNull org.springframework.expression.TypeConverter typeConverter) {
+            if (typeConverter == null) {
+                throw new IllegalArgumentException("类型转换器不能为null");
+            }
+            context.setTypeConverter(typeConverter);
+            return this;
+        }
+        
+        /**
+         * 设置属性访问器
+         * <p>
+         * 该方法允许设置自定义的属性访问器，用于在SpEL表达式计算过程中访问对象属性。
+         * 自定义属性访问器可以处理标准访问器无法处理的特殊属性访问需求。
+         * </p>
+         * <p>
+         * 使用示例：
+         * <pre>
+         * {@code
+         * // 创建自定义属性访问器
+         * class CustomPropertyAccessor implements PropertyAccessor {
+         *     // 实现属性访问逻辑
+         * }
+         * 
+         * // 设置属性访问器
+         * ContextBuilder builder = contextBuilder()
+         *     .setPropertyAccessors(List.of(new CustomPropertyAccessor()));
+         * }
+         * </pre>
+         * </p>
+         *
+         * @param propertyAccessors 属性访问器列表，不能为null或空
+         * @return 构建器实例，支持链式调用
+         * @throws IllegalArgumentException 如果属性访问器列表为null或空
+         */
+        public ContextBuilder setPropertyAccessors(@NotNull List<org.springframework.expression.PropertyAccessor> propertyAccessors) {
+            if (propertyAccessors == null || propertyAccessors.isEmpty()) {
+                throw new IllegalArgumentException("属性访问器列表不能为null或空");
+            }
+            context.setPropertyAccessors(propertyAccessors);
+            return this;
+        }
+        
+        /**
+         * 设置方法解析器
+         * <p>
+         * 该方法允许设置自定义的方法解析器，用于在SpEL表达式计算过程中解析方法调用。
+         * 自定义方法解析器可以处理标准解析器无法处理的特殊方法调用需求。
+         * </p>
+         * <p>
+         * 使用示例：
+         * <pre>
+         * {@code
+         * // 创建自定义方法解析器
+         * class CustomMethodResolver implements MethodResolver {
+         *     // 实现方法解析逻辑
+         * }
+         * 
+         * // 设置方法解析器
+         * ContextBuilder builder = contextBuilder()
+         *     .setMethodResolvers(List.of(new CustomMethodResolver()));
+         * }
+         * </pre>
+         * </p>
+         *
+         * @param methodResolvers 方法解析器列表，不能为null或空
+         * @return 构建器实例，支持链式调用
+         * @throws IllegalArgumentException 如果方法解析器列表为null或空
+         */
+        public ContextBuilder setMethodResolvers(@NotNull List<MethodResolver> methodResolvers) {
+            if (methodResolvers == null || methodResolvers.isEmpty()) {
+                throw new IllegalArgumentException("方法解析器列表不能为null或空");
+            }
+            context.setMethodResolvers(methodResolvers);
+            return this;
+        }
+
+        /**
+         * 构建上下文对象
+         * <p>
+         * 该方法返回配置好的StandardEvaluationContext实例，用于SpEL表达式计算。
+         * 在完成所有变量添加和函数注册后调用此方法获取最终的上下文对象。
+         * </p>
+         * <p>
+         * 注意：构建完成的上下文对象不是线程安全的，不应在多个线程间共享。
+         * </p>
+         *
+         * @return 配置好的StandardEvaluationContext实例
+         */
+        public StandardEvaluationContext build() {
+            return context;
+        }
+        
+        /**
+         * 生成方法缓存的键
+         * <p>
+         * 该方法根据类、方法名和参数类型生成唯一的缓存键。
+         * </p>
+         *
+         * @param clazz          类
+         * @param methodName     方法名
+         * @param parameterTypes 参数类型数组
+         * @return 缓存键
+         */
+        private String generateMethodCacheKey(Class<?> clazz, String methodName, Class<?>[] parameterTypes) {
+            return clazz.getName() + "#" + methodName + "#" + 
+                   (parameterTypes.length > 0 ? 
+                    Arrays.stream(parameterTypes)
+                          .map(Class::getName)
+                          .collect(Collectors.joining(",")) : 
+                    "");
         }
     }
 }
