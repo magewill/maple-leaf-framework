@@ -61,12 +61,28 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
  *         message = "账户余额不足"
  *     )
  *     private Long accountId;
- *     
+ *
  *     private BigDecimal amount;
  * }
  * </pre>
  * </p>
- * 
+ * <p>
+ * 使用示例4：启用缓存提高性能
+ * <pre>
+ * public class ProductDTO {
+ *     @GXValidateDBExists(
+ *         service = ProductExistsValidateService.class,
+ *         fieldName = "sku",
+ *         tableName = "tb_product",
+ *         enableCache = true,
+ *         cacheExpireSeconds = 300,
+ *         message = "产品不存在"
+ *     )
+ *     private String sku;
+ * }
+ * </pre>
+ * </p>
+ *
  * @author britton chen <britton@126.com>
  */
 @Target({ElementType.METHOD, ElementType.FIELD, ElementType.ANNOTATION_TYPE})
@@ -139,4 +155,26 @@ public @interface GXValidateDBExists {
      * @return String[]
      */
     String[] dependOnFields() default {};
+
+    /**
+     * 是否启用缓存
+     * <p>
+     * 启用缓存可以减少重复验证的数据库查询，提高性能。
+     * 适用于验证频率高但数据变化不频繁的场景。
+     * </p>
+     *
+     * @return boolean 默认为false
+     */
+    boolean enableCache() default false;
+
+    /**
+     * 缓存过期时间（秒）
+     * <p>
+     * 控制缓存项的有效期，避免缓存数据过期导致验证结果不准确。
+     * 仅在enableCache=true时有效。
+     * </p>
+     *
+     * @return int 默认为300秒（5分钟）
+     */
+    int cacheExpireSeconds() default 300;
 }
