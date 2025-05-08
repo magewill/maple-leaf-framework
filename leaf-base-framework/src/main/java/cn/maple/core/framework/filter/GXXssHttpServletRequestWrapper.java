@@ -6,6 +6,7 @@ import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
+import lombok.Getter;
 import lombok.SneakyThrows;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -42,7 +43,11 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
     /**
      * 原始的HttpServletRequest对象
      * 在某些特殊场景下，可能需要访问未经过滤的原始请求
+     * -- GETTER --
+     * 获取最原始的request对象
+     * 在某些特殊场景下，可能需要访问未经过滤的原始请求
      */
+    @Getter
     private final HttpServletRequest orgRequest;
 
     /**
@@ -54,9 +59,8 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
 
     /**
      * 构造函数，创建一个XSS过滤的请求包装器
-     * 
+     *
      * @param request 原始的HTTP请求对象
-     * @throws IOException 如果读取请求输入流时发生IO异常
      */
     @SneakyThrows
     public GXXssHttpServletRequestWrapper(HttpServletRequest request) {
@@ -149,7 +153,7 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
 
         // 创建包含过滤后内容的ByteArrayInputStream
         final ByteArrayInputStream bis = new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8));
-        
+
         // 返回自定义的ServletInputStream实现
         return new ServletInputStream() {
             /**
@@ -247,12 +251,12 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
         Map<String, String[]> map = new LinkedHashMap<>();
         // 获取原始参数Map
         Map<String, String[]> parameters = super.getParameterMap();
-        
+
         // 遍历原始参数Map，对每个参数值进行XSS过滤
         for (Map.Entry<String, String[]> entry : parameters.entrySet()) {
             final String[] values = entry.getValue();
             final String key = entry.getKey();
-            
+
             // 对数组中的每个值进行XSS过滤
             for (int i = 0; i < values.length; i++) {
                 if (values[i] != null) {
@@ -294,15 +298,5 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
             return null;
         }
         return htmlFilter.filter(input);
-    }
-
-    /**
-     * 获取最原始的request对象
-     * 在某些特殊场景下，可能需要访问未经过滤的原始请求
-     *
-     * @return 原始的HttpServletRequest对象
-     */
-    public HttpServletRequest getOrgRequest() {
-        return orgRequest;
     }
 }
