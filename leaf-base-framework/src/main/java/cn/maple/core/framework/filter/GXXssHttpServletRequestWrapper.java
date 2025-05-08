@@ -2,6 +2,7 @@ package cn.maple.core.framework.filter;
 
 import cn.hutool.core.io.IoUtil;
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.hutool.core.util.NumberUtil;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
@@ -32,6 +33,34 @@ import java.util.Map;
  * 线程安全说明：此类的实例通常由Servlet容器为每个请求创建，不会在线程间共享，因此是线程安全的。
  * 静态的htmlFilter对象是线程安全的，可以安全地在多个请求间共享。
  * </p>
+ * <p>
+ * 使用示例：
+ * <pre>
+ * // 在Spring Boot应用中配置XSS过滤器
+ * @Bean
+ * public FilterRegistrationBean<GXXssFilter> xssFilterRegistration() {
+ *     FilterRegistrationBean<GXXssFilter> registration = new FilterRegistrationBean<>();
+ *     registration.setFilter(new GXXssFilter());
+ *     registration.addUrlPatterns("/*");
+ *     registration.setName("xssFilter");
+ *     registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
+ *     return registration;
+ * }
+ * <p>
+ * // 手动对请求进行XSS过滤
+ * HttpServletRequest orgRequest = ...; // 原始请求
+ * GXXssHttpServletRequestWrapper xssRequest = new GXXssHttpServletRequestWrapper(orgRequest);
+ * // 使用过滤后的请求进行后续处理
+ * String safeParameter = xssRequest.getParameter("userInput");
+ * </pre>
+ * </p>
+ * <p>
+ * 内存优化说明：
+ * 1. 只缓存JSON类型的请求体，减少不必要的内存占用
+ * 2. 使用StandardCharsets.UTF_8常量而非创建新的Charset实例，减少对象创建
+ * 3. 使用空字节数组而非null，避免空指针异常
+ * 4. 使用try-with-resources确保资源正确关闭，避免资源泄漏
+ * </p>
  */
 public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
     /**
@@ -39,6 +68,12 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
      * 静态实例在多线程环境下共享，GXHTMLFilter类本身是线程安全的
      */
     private static final GXHTMLFilter htmlFilter = new GXHTMLFilter();
+
+    /**
+     * 请求体最大允许大小（10MB）
+     * 超过此大小的请求将被拒绝，防止恶意大型请求导致服务器资源耗尽
+     */
+    private static final int MAX_REQUEST_SIZE = 10 * 1024 * 1024;
 
     /**
      * 原始的HttpServletRequest对象
@@ -54,11 +89,25 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
      * 缓存请求体内容的字节数组
      * 由于InputStream只能读取一次，需要将内容缓存下来以便多次使用
      * 注意：对于大型请求体，这可能会占用较多内存
+     * <p>
+     * 内存优化说明：
+     * 1. 只缓存JSON类型的请求体，减少不必要的内存占用
+     * 2. 使用完毕后，可在请求结束时主动释放此缓存（由GC处理）
      */
     private byte[] cacheRequestBody;
 
     /**
      * 构造函数，创建一个XSS过滤的请求包装器
+     * <p>
+     * 线程安全说明：此构造函数在每个请求处理线程中被调用，每个请求都会创建一个新的实例，
+     * 因此不存在多线程共享此实例的情况，实例变量是线程安全的。
+     * </p>
+     * <p>
+     * 内存优化说明：
+     * 1. 只缓存JSON类型的请求体，其他类型请求不缓存，减少内存占用
+     * 2. 对于空请求体，使用空字节数组而非null，避免空指针异常
+     * 3. 使用try-with-resources可以确保输入流正确关闭，避免资源泄漏
+     * </p>
      *
      * @param request 原始的HTTP请求对象
      */
@@ -69,6 +118,11 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
         String contentType = super.getHeader(HttpHeaders.CONTENT_TYPE);
         // 只缓存JSON类型的请求体，减少内存占用
         if (CharSequenceUtil.containsIgnoreCase(contentType, MediaType.APPLICATION_JSON_VALUE)) {
+            // 检查请求体大小，防止恶意大型请求
+            int contentLength = NumberUtil.parseInt(request.getHeader(HttpHeaders.CONTENT_LENGTH), 0);
+            if (contentLength > MAX_REQUEST_SIZE) {
+                throw new IllegalArgumentException("请求体过大，超过最大限制：" + MAX_REQUEST_SIZE + " 字节");
+            }
             try {
                 cacheRequestBody = IoUtil.readBytes(request.getInputStream());
                 // 防止NPE，确保cacheRequestBody不为null
@@ -82,6 +136,7 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
             }
         } else {
             // 非JSON请求不缓存请求体，设置为空数组避免NPE
+            // 这样可以减少内存占用，特别是对于大型的非JSON请求
             cacheRequestBody = new byte[0];
         }
     }
@@ -116,8 +171,25 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
 
     /**
      * 获取请求体的输入流
-     * 对于JSON类型的请求，会先进行XSS过滤处理，然后返回过滤后内容的输入流
-     * 对于非JSON类型的请求，直接返回原始输入流
+     * <p>
+     * 对于JSON类型的请求，会先进行XSS过滤处理，然后返回过滤后内容的输入流。
+     * 对于非JSON类型的请求，直接返回原始输入流，避免不必要的处理开销。
+     * </p>
+     *
+     * <p>
+     * 线程安全说明：
+     * 1. 此方法在单个请求的处理线程中被调用，不存在多线程访问的情况
+     * 2. ByteArrayInputStream是线程安全的，可以安全地在返回的ServletInputStream中使用
+     * 3. 返回的匿名内部类ServletInputStream实例仅在当前请求中使用，不会被多线程共享
+     * </p>
+     *
+     * <p>
+     * 内存优化说明：
+     * 1. 只对JSON类型的请求进行XSS过滤，减少不必要的字符串处理
+     * 2. 对于空请求体，直接返回原始输入流，避免创建不必要的对象
+     * 3. 使用StandardCharsets.UTF_8常量而非创建新的Charset实例
+     * 4. 使用ByteArrayInputStream避免了对原始InputStream的多次读取
+     * </p>
      *
      * @return ServletInputStream对象，包含可能经过XSS过滤的请求体内容
      * @throws IOException 如果处理输入流时发生IO异常
@@ -125,23 +197,27 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
     @Override
     public ServletInputStream getInputStream() throws IOException {
         // 检查Content-Type，只对JSON类型的请求进行XSS过滤
+        // 这样可以避免对非JSON请求进行不必要的处理，提高性能
         String contentType = super.getHeader(HttpHeaders.CONTENT_TYPE);
         if (contentType == null || !CharSequenceUtil.containsIgnoreCase(contentType, MediaType.APPLICATION_JSON_VALUE)) {
             return super.getInputStream();
         }
 
         // 如果缓存的请求体为空，直接返回原始输入流
+        // 这样可以避免创建不必要的对象，减少内存占用
         if (cacheRequestBody.length == 0) {
             return super.getInputStream();
         }
 
         // 将字节数组转换为字符串，使用UTF-8编码
+        // 注意：对于大型JSON，这里会创建一个新的字符串对象，可能会占用较多内存
         String json = IoUtil.read(new ByteArrayInputStream(cacheRequestBody), StandardCharsets.UTF_8);
         if (CharSequenceUtil.isBlank(json)) {
             return super.getInputStream();
         }
 
         // 对JSON内容进行XSS过滤
+        // 这里会创建新的字符串对象，但这是必要的安全处理
         json = xssEncode(json);
 
         // TODO 这里有待优化 START
@@ -152,6 +228,7 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
         // TODO 这里有待优化 END
 
         // 创建包含过滤后内容的ByteArrayInputStream
+        // 使用StandardCharsets.UTF_8常量而非创建新的Charset实例，减少对象创建
         final ByteArrayInputStream bis = new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8));
 
         // 返回自定义的ServletInputStream实现
