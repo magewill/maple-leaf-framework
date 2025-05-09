@@ -320,7 +320,7 @@ public abstract class GXSSOSupportService {
      * @return 验证通过返回原Token，否则返回空Dict
      */
     protected Dict checkIpBrowser(HttpServletRequest request, Dict ssoToken) {
-        if (null == ssoToken) {
+        if (null == ssoToken || ssoToken.isEmpty()) {
             return Dict.create();
         }
         // 判断请求浏览器是否合法
@@ -428,8 +428,8 @@ public abstract class GXSSOSupportService {
             String domain = getConfig().getCookieDomain();
             if (null != domain) {
                 cookie.setDomain(domain);
-                if ("".equals(domain) || domain.contains("localhost")) {
-                    log.warn("if you can't login, please enter normal domain. instead:" + domain);
+                if (domain.isEmpty() || domain.contains("localhost")) {
+                    log.warn("if you can't login, please enter normal domain. instead:{}", domain);
                 }
             }
 
