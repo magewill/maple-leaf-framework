@@ -3,7 +3,6 @@ package cn.maple.redisson.config;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.redisson.properties.GXRedissonCacheManagerProperties;
-import cn.maple.redisson.properties.GXRedissonMQProperties;
 import cn.maple.redisson.properties.GXRedissonProperties;
 import jakarta.annotation.Resource;
 import org.redisson.Redisson;
@@ -47,13 +46,6 @@ public class GXRedissonSpringDataConfig {
     private GXRedissonProperties redissonConfig;
 
     /**
-     * Redisson消息队列配置属性
-     * 专用于消息队列操作的配置，与标准配置隔离，避免相互影响
-     */
-    @Resource
-    private GXRedissonMQProperties redissonMQConfig;
-
-    /**
      * Redisson缓存管理器配置属性
      * 用于配置Spring Cache集成，支持设置TTL和最大空闲时间
      */
@@ -74,23 +66,6 @@ public class GXRedissonSpringDataConfig {
         Codec jsonJacksonCodec = new JsonJacksonCodec();
         config.setCodec(jsonJacksonCodec);
         return Redisson.create(config);
-    }
-
-    /**
-     * 创建消息队列专用Redisson客户端
-     * <p>
-     * 使用独立的客户端实例处理消息队列操作，避免与标准操作互相影响
-     * 同样使用JsonJacksonCodec作为默认编解码器
-     * </p>
-     *
-     * @param mqConfig 消息队列Redisson配置对象
-     * @return 消息队列专用RedissonClient实例
-     */
-    @Bean(destroyMethod = "shutdown")
-    public RedissonClient redissonMQClient(Config mqConfig) {
-        Codec jsonJacksonCodec = new JsonJacksonCodec();
-        mqConfig.setCodec(jsonJacksonCodec);
-        return Redisson.create(mqConfig);
     }
 
     /**
@@ -129,24 +104,5 @@ public class GXRedissonSpringDataConfig {
             v.setUsername(GXCommonUtils.decodeConnectStr(v.getUsername(), String.class));
         });
         return JSONUtil.toBean(JSONUtil.toJsonStr(redissonConfig.getConfig()), Config.class);
-    }
-
-    /**
-     * 创建消息队列专用Redisson配置
-     * <p>
-     * 处理MQ连接信息，包括地址、密码和用户名的解码
-     * 使用线程安全的方式处理配置转换，避免并发问题
-     * </p>
-     *
-     * @return 消息队列专用Redisson配置对象
-     */
-    @Bean("mqConfig")
-    public Config mqConfig() {
-        redissonMQConfig.getConfig().forEach((k, v) -> {
-            v.setAddress(GXCommonUtils.decodeConnectStr(v.getAddress(), String.class));
-            v.setPassword(GXCommonUtils.decodeConnectStr(v.getPassword(), String.class));
-            v.setUsername(GXCommonUtils.decodeConnectStr(v.getUsername(), String.class));
-        });
-        return JSONUtil.toBean(JSONUtil.toJsonStr(redissonMQConfig.getConfig()), Config.class);
     }
 }
