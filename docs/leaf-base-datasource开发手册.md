@@ -26,7 +26,28 @@ leaf-base-datasource 是 Maple Leaf Framework 框架中负责数据库操作的�
 - `GXDynamicContextHolder`：动态数据源上下文持有者
 - `GXDataSourceAspect`：数据源切面，处理数据源切换逻辑
 
-#### 3.1.2 使用方法
+#### 3.1.2 工作原理
+
+动态数据源的切换主要依赖于 AOP（面向切面编程）和 `ThreadLocal` 技术：
+
+1.  **`@GXDataSource` 注解标记**：开发者在需要切换数据源的方法或类上使用 `@GXDataSource` 注解，并指定目标数据源的名称（例如 `"slave"` 或 `"master"`）。
+2.  **`GXDataSourceAspect` 切面拦截**：这是一个 AOP 切面，它会拦截所有标记了 `@GXDataSource` 注解的方法。
+    *   **方法进入前**：切面会读取注解中指定的数据源名称。然后，它调用 `GXDynamicContextHolder.push(dataSourceName)` 方法，将当前线程的数据源上下文设置为指定的数据源名称。`GXDynamicContextHolder` 内部使用 `ThreadLocal` 来存储数据源标识，确保数据源的切换仅对当前线程有效，避免线程间干扰。
+    *   **方法执行后/异常时**：无论方法是正常结束还是抛出异常，切面都会在 `finally` 块中调用 `GXDynamicContextHolder.poll()` 或 `GXDynamicContextHolder.clear()` 方法，将当前线程的数据源上下文恢复到上一个状态或清除，防止数据源状态泄露到后续操作中。
+3.  **`GXDynamicDataSource` 路由**：`GXDynamicDataSource` 类继承自 Spring 的 `AbstractRoutingDataSource`。它在每次数据库操作（如获取连接）时，会调用其 `determineCurrentLookupKey()` 方法。此方法内部通过 `GXDynamicContextHolder.peek()` 获取当前线程绑定的数据源名称。
+4.  **数据源选择**：`AbstractRoutingDataSource` 根据 `determineCurrentLookupKey()` 返回的名称，从预先配置好的数据源映射（Map）中查找并返回对应的数据源连接。如果 `GXDynamicContextHolder`中没有设置特定的数据源，则会使用默认数据源。
+
+通过这种方式，框架能够在不修改业务代码主体逻辑的情况下，灵活地实现方法级别或类级别的数据源动态切换。
+
+#### 3.1.3 注解参数说明
+
+`@GXDataSource` 注解包含以下参数：
+
+-   **`value` (或 `name`)**: `String` 类型，必需。用于指定要切换到的数据源的名称。这个名称必须与 `datasource.yml` (或其他配置文件) 中配置的数据源键名一致。
+
+    例如：`@GXDataSource("slave")` 表示切换到名为 "slave" 的数据源。
+
+#### 3.1.4 使用方法
 
 1. 在方法上添加 `@GXDataSource` 注解指定数据源名称：
 
@@ -51,6 +72,12 @@ try {
 }
 ```
 
+#### 3.1.5 注意事项
+
+-   **事务管理**：当在事务方法中使用 `@GXDataSource` 切换数据源时，需要特别注意事务的传播行为和数据源的一致性。如果一个事务跨越多个数据源，可能需要考虑使用分布式事务解决方案（如 Seata）。通常建议将涉及不同数据源的操作分离到不同的事务中。
+-   **嵌套切换**：如果在一个已经切换了数据源的方法内部，再次调用另一个也标记了 `@GXDataSource` 的方法，`GXDynamicContextHolder` 使用栈（Stack）来管理数据源标识，能够正确处理嵌套切换和恢复。
+-   **清晰命名**：数据源名称应清晰、有意义，并在配置文件和注解使用中保持一致。
+
 ### 3.2 数据过滤
 
 #### 3.2.1 相关类
@@ -74,7 +101,18 @@ try {
 6. 使用JSqlParser解析原始SQL，动态添加数据权限过滤条件
 7. 执行修改后的SQL，返回过滤后的结果
 
-#### 3.2.3 使用方法
+#### 3.2.3 注解参数说明
+
+`@GXDataFilter` 注解包含以下参数：
+
+-   **`tableAlias`**: `String` 类型，可选。查询SQL中主表的别名。如果SQL中使用了表别名，则必须提供此参数，以便正确构建过滤条件。例如，如果查询是 `SELECT u.* FROM user u`，则 `tableAlias`应为 `"u"`。
+-   **`userIdFieldNames`**: `String[]` 类型，可选。表示数据表中与用户ID关联的字段名数组。框架会使用这些字段名结合当前登录用户的ID来构建过滤条件，例如 `(u.creator_id = ? OR u.owner_id = ?)`。如果不需要按用户ID过滤，则留空。
+-   **`deptIdFieldNames`**: `String[]` 类型，可选。表示数据表中与部门ID关联的字段名数组。框架会使用这些字段名结合当前登录用户所属的部门ID列表来构建过滤条件，例如 `(u.dept_id IN (?,?,?) OR u.org_id IN (?,?,?))`。如果不需要按部门ID过滤，则留空。
+-   **`tenantFilter`**: `boolean` 类型，可选，默认为 `false`。是否启用租户过滤。如果为 `true`，并且系统配置了多租户支持，则会自动添加租户ID过滤条件。通常与多租户功能配合使用。
+-   **`selfScope`**: `boolean` 类型，可选，默认为 `true`。是否仅查询用户自身的数据。如果为 `true`，则会强制使用 `userIdFieldNames` 进行过滤。如果 `GXDataScopeService` 中有更复杂的逻辑（如基于角色的数据权限），此参数可以配合调整。
+-   **`ignoreFields`**: `String[]` 类型，可选。在某些特定场景下，即使配置了全局的过滤字段，也希望对某些查询中的特定字段不应用过滤，可以通过此参数指定。较少使用。
+
+#### 3.2.4 使用方法
 
 1. 在需要进行数据权限过滤的方法上添加 `@GXDataFilter` 注解：
 
@@ -229,6 +267,15 @@ public List<OrderEntity> getOrders(Map<String, Object> params) {
 }
 ```
 
+#### 3.2.6 注意事项
+
+-   **`GXDataScopeService` 的实现**：数据过滤的核心逻辑依赖于 `GXDataScopeService` 接口的实现。你需要根据项目的实际用户、角色、部门等权限模型，正确实现 `getDeptIdLst()`、`getUserId()`、`isSuperAdmin()` 以及 `getDataFilterSql()` (如果需要自定义复杂SQL) 等方法。
+-   **SQL兼容性**：`GXDataFilterInterceptor` 使用 JSqlParser 解析和修改SQL。对于非常复杂或非标准的SQL语句，可能存在兼容性问题。建议使用标准的SQL语法。
+-   **性能考虑**：动态添加过滤条件会略微增加SQL解析和执行的开销。对于性能敏感的查询，应评估其影响。确保数据库表中用于过滤的字段（如 `creator_id`, `dept_id`, `tenant_id`）已建立索引。
+-   **表别名**：如果查询中涉及多个表连接，务必确保 `tableAlias` 参数正确指向需要应用数据权限的主表别名。
+-   **超级管理员**：`isSuperAdmin()` 方法用于识别超级管理员。超级管理员通常会跳过所有数据权限过滤。请谨慎设计超级管理员的判断逻辑。
+-   **与多租户的结合**：当 `tenantFilter = true` 时，数据过滤会与多租户功能协同工作。确保多租户配置正确。
+
 ### 3.3 MyBatis 增强
 
 #### 3.3.1 基础组件
@@ -376,12 +423,28 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 
 ##### 3.3.3.3 工作原理
 
-事件监听系统基于Spring的事件机制实现，通过AOP切面在MyBatis操作前后发布相应的事件，由监听器处理这些事件。主要流程：
+事件监听系统深度整合了 Spring 的事件发布订阅机制与 AOP 技术，以非侵入式的方式对 MyBatis 的核心操作（增、删、改）进行监听。其核心流程如下：
 
-1. 通过AOP切面（如`GXMyBatisPlusSaveEntityAspect`）拦截MyBatis操作
-2. 在操作执行前后发布相应的事件
-3. 根据事件类型和监听器类型（同步/异步），由相应的监听器处理事件
-4. 同步监听器在当前线程中处理事件，异步监听器在独立线程池中处理事件
+1.  **注解扫描与监听器注册**：
+    *   系统启动时，会扫描带有 `@GXMyBatisListener` 注解的类、Service 或 Mapper 方法。
+    *   对于标记在类上的注解，如果指定了 `listenerClazz`，则将该服务类注册为对应实体操作的监听器。
+    *   对于标记在 Service 类或 Mapper 方法上的注解，系统会动态地将注解中指定的 `listenerClazz` (实现了 `GXMybatisListenerService` 接口的服务) 与这些数据操作关联起来。
+    *   `runType` 参数（默认为同步 `GXMyBatisEventConstant.MYBATIS_SYNC_EVENT`）决定了监听器执行的模式（同步或异步）。
+
+2.  **AOP 拦截与事件发布**：
+    *   通过一系列精心设计的 AOP 切面（例如 `GXMyBatisPlusSaveEntityAspect` 用于监听保存操作，`GXMyBatisPlusUpdateEntityAspect` 用于监听更新操作，`GXMyBatisPlusDeleteEntityAspect` 用于监听删除操作）来拦截 MyBatis 的 `insert`, `update`, `delete` 等关键数据操作方法。这些切面通常作用于 `GXMyBatisBaseServiceImpl` 中的标准方法或直接作用于 Mapper 接口的方法调用。
+    *   在被拦截的方法执行前或执行后，切面会根据操作类型和结果，构建并发布相应的事件对象（如 `GXMyBatisModelSaveEntityEvent`, `GXMyBatisModelUpdateEntityEvent` 等）。这些事件对象封装了操作的上下文信息，如被操作的实体、更新的字段等。
+
+3.  **事件分发与处理**：
+    *   Spring 的 `ApplicationEventMulticaster` 负责将发布的事件分发给所有匹配的监听器。
+    *   `GXMyBatisBaseListener` (及其子类 `GXMyBatisSyncListener`, `GXMyBatisAsyncListener`) 实现了 Spring 的 `ApplicationListener` 接口，能够接收这些事件。
+    *   监听器内部会根据事件的具体类型（如 `instanceof UserEntity`）和注解配置，调用 `GXMybatisListenerService` 实现类中对应的方法（如 `saveEntityListener`, `updateEntityListener`）。
+
+4.  **同步与异步执行**：
+    *   **同步监听器** (`GXMyBatisSyncListener` 或 `runType` 为同步时)：事件处理逻辑在当前业务线程中执行。这意味着监听器的执行会阻塞主流程，并且可以参与到主流程的事务中。适用于需要强一致性、事务性保障的后置处理。
+    *   **异步监听器** (`GXMyBatisAsyncListener` 或 `runType` 为异步时)：事件处理逻辑会被提交到专门的异步监听器线程池 (`GXMyBatisAsyncListenerExecutorConfig` 配置的 `myBatisEventAsyncTaskExecutor`) 中执行。这使得监听器操作与主业务流程解耦，不会阻塞主线程，适用于耗时较长或不需要立即反馈的非核心业务逻辑，如发送通知、记录日志等。异步监听器通常需要自行管理事务。
+
+通过这种机制，开发者可以方便地对数据持久化操作的各个生命周期点进行扩展，实现如操作审计、缓存更新、消息通知等附加功能，而无需修改核心的业务代码。
 
 ##### 3.3.3.4 同步与异步监听器
 
@@ -464,6 +527,35 @@ public class UserSyncEventListener extends GXMyBatisSyncListener {
 }
 ```
 
+##### 3.3.2.3 注解参数说明
+
+| 参数名          | 类型                                      | 是否必填 | 默认值                                   | 描述                                                                                                                                                              |
+|-----------------|-------------------------------------------|----------|------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------| 
+| `listenerClazz` | `Class<? extends GXMybatisListenerService>` | 否       | `GXMybatisListenerService.class`         | 指定实现了 `GXMybatisListenerService` 接口的监听器服务类。当注解直接标记在监听器类上时，此参数可省略或设置为其自身。当注解标记在Service或Mapper方法上时，需要指定具体的监听器实现。 |
+| `runType`       | `String`                                  | 否       | `GXMyBatisEventConstant.MYBATIS_SYNC_EVENT` | 指定监听器的执行类型，可选值为：<br> - `GXMyBatisEventConstant.MYBATIS_SYNC_EVENT` (默认): 同步执行，监听器逻辑与主业务逻辑在同一事务中，会影响主流程性能。<br> - `GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT`: 异步执行，监听器逻辑在独立的线程中执行，不阻塞主业务流程，通常用于耗时操作或非核心业务。                               | 
+| `order`         | `int`                                     | 否       | `Ordered.LOWEST_PRECEDENCE`              | 定义多个监听器时的执行顺序，值越小，优先级越高。                                                                                                                            |
+| `asyncExecutor` | `String`                                  | 否       | `"myBatisEventAsyncTaskExecutor"`        | 当 `runType` 为异步时，指定执行异步任务的线程池Bean名称。如果未指定或找不到对应的Bean，会尝试使用默认的异步执行器。                                                                 |
+
+##### 3.3.2.4 注意事项
+
+- **事务传播**：
+    - 同步监听器 (`GXMyBatisSyncListener`) 默认情况下会参与到当前主业务的事务中。如果监听器内部发生异常，可能会导致主事务回滚。
+    - 异步监听器 (`GXMyBatisAsyncListener`) 在独立的线程中执行，默认不参与主业务事务。如果异步监听器需要事务支持，需要在其内部方法上单独配置事务注解（如 `@Transactional`），并确保异步线程池能够正确传播事务上下文。
+- **异步执行与线程池**：
+    - 使用异步监听器时，建议配置专用的线程池（通过 `asyncExecutor` 参数指定），并合理设置线程池参数（核心线程数、最大线程数、队列容量等），以避免资源耗尽或性能瓶颈。
+    - 异步任务的异常处理需要特别注意，因为它们不会直接影响主流程。应在异步监听器内部做好充分的异常捕获和日志记录。
+- **监听范围**：
+    - `@GXMyBatisListener` 可以标记在实现了 `GXMyBatisListenerService` 的监听器类上，也可以直接标记在 `Service` 类或 `Mapper` 接口的方法上。
+    - 当标记在 `Service` 类上时，该 `Service` 中所有通过 `GXMyBatisBaseServiceImpl` 提供的标准增删改查方法，以及其调用的 `Mapper` 方法，都会触发监听。
+    - 当标记在 `Mapper` 方法上时，仅该特定方法会触发监听。
+- **事件对象**：
+    - 监听器方法接收的事件对象（如 `GXMyBatisModelSaveEntityEvent`、`GXMyBatisModelUpdateEntityEvent` 等）包含了触发事件的实体、原始SQL、执行结果等信息，可以根据这些信息执行相应的业务逻辑。
+- **性能考虑**：
+    - 同步监听器会增加主业务流程的执行时间，应避免在同步监听器中执行耗时操作。
+    - 过多的监听器或复杂的监听逻辑可能会对系统性能产生影响，需要谨慎设计和使用。
+- **与 `@Transactional` 的结合**：
+    - 当 `@GXMyBatisListener` 与 `@Transactional` 同时作用于一个方法或类时，需要注意它们的执行顺序和事务边界。通常，AOP拦截的顺序会影响行为，建议通过 `order` 参数明确控制监听器的执行顺序。
+
 3. 创建异步监听器：
 
 ```java
@@ -495,7 +587,56 @@ public class UserAsyncEventListener extends GXMyBatisAsyncListener {
 }
 ```
 
-4. 配置异步监听器线程池（可选）：
+
+2. 创建监听器（同步或异步），并使用 `@GXMyBatisListener` 注解标记在监听器类上，或者直接在需要监听的Mapper方法或Service类上使用该注解。
+
+   - **在监听器类上使用：**
+
+     ```java
+     @Component
+     @GXMyBatisListener(listenerClazz = UserListenerServiceImpl.class) // 指定实现了 GXMybatisListenerService 的服务类
+     public class UserSyncEventListener extends GXMyBatisSyncListener {
+         private final Logger logger = LoggerFactory.getLogger(getClass());
+
+         @Override
+         public void onSaveEntity(GXMyBatisModelSaveEntityEvent event) {
+             if (event.getSource() instanceof UserEntity) {
+                 UserEntity user = (UserEntity) event.getSource();
+                 logger.info("同步处理用户创建事件：{}", user.getUsername());
+                 // 执行需要事务支持的业务逻辑
+             }
+         }
+
+         // ... 其他事件处理方法
+     }
+     ```
+
+   - **在Service类上使用（示例）：**
+
+     ```java
+     @Service
+     @GXMyBatisListener(
+         listenerClazz = UserActivityListener.class, // 假设 UserActivityListener 实现了 GXMybatisListenerService
+         runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT // 设置为异步执行
+     )
+     public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEntity> implements UserService {
+         // 该类中的所有 GXMyBatisBaseServiceImpl 提供的标准增删改查方法，
+         // 以及自定义的、通过 UserMapper 执行的数据操作，
+         // 都会异步触发 UserActivityListener 中相应的监听方法。
+     }
+     ```
+
+   - **在Mapper方法上使用（示例）：**
+
+     ```java
+     @Mapper
+     public interface OrderMapper extends GXBaseMapper<OrderEntity> {
+         @GXMyBatisListener(listenerClazz = OrderStatusUpdateListener.class) // 监听特定方法的同步事件
+         int updateOrderStatus(Long orderId, Integer status);
+     }
+     ```
+
+3. 配置异步监听器线程池（可选）：
 
 ```java
 @Configuration
@@ -554,6 +695,237 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 ```
 
 ### 3.4 数据类型处理
+
+### 3.5 数据校验
+
+#### 3.5.1 数据库存在性校验 (`@GXValidateDBExists`)
+
+##### 3.5.1.1 简介
+
+`@GXValidateDBExists` 注解提供了一种便捷的方式来验证数据库中是否存在符合特定条件的记录。它通常用于DTO（数据传输对象）的字段上，结合JSR 303/JSR 380 Bean Validation规范使用，可以在数据持久化之前进行有效性检查。
+
+主要应用场景：
+- **唯一性验证**：确保某个字段的值在数据库表中是唯一的（例如，用户名、邮箱不能重复）。
+- **关联性验证**：确保某个字段的值在另一个关联表中存在（例如，创建订单时，用户ID必须在用户表中存在）。
+- **条件性验证**：根据一个或多个附加条件来验证记录是否存在（例如，检查产品ID是否存在并且状态为“已上架”）。
+
+##### 3.5.1.2 相关类
+
+- `GXValidateDBExists`：核心注解，用于标记需要进行数据库存在性校验的字段。
+- `GXValidateDBExistsValidator`：实现了 `jakarta.validation.ConstraintValidator` 接口的校验器，负责执行实际的数据库查询和验证逻辑。
+- `GXValidateDBExistsService`：一个服务接口，用户需要实现此接口来提供具体的数据库查询能力。框架会调用此接口的实现来检查数据是否存在。
+
+##### 3.5.1.3 注解参数说明
+
+| 参数名             | 类型                                      | 是否必填 | 默认值                                        | 描述                                                                                                                               |
+|--------------------|-------------------------------------------|----------|-----------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------|
+| `message`          | `String`                                  | 否       | `"{fieldName}对应的数据已经存在或是参数已经存在存在"` | 验证失败时的错误提示信息。可以使用占位符 `{fieldName}`。                                                                                   |
+| `groups`           | `Class<?>[]`                              | 否       | `{}`                                          | JSR 303/380的分组校验功能。                                                                                                            |
+| `payload`          | `Class<? extends Payload>[]`               | 否       | `{}`                                          | JSR 303/380的payload功能。                                                                                                           |
+| `service`          | `Class<? extends GXValidateDBExistsService>` | 是       |                                               | 指定一个实现了 `GXValidateDBExistsService` 接口的类，用于执行实际的数据库查询。                                                              |
+| `fieldName`        | `String`                                  | 是       |                                               | 要在数据库中校验的字段名（通常与DTO中的字段名一致，但也可以是数据库中的列名）。                                                                      |
+| `tableName`        | `String`                                  | 是       |                                               | 要查询的数据库表名。                                                                                                                     |
+| `condition`        | `String`                                  | 否       | `""`                                        | 附加的静态查询条件，格式为 `column1=value1,column2=value2`。例如：`status=1,type='ACTIVE'`。                                                 |
+| `spEL`             | `String`                                  | 否       | `""`                                        | Spring表达式语言（SpEL）条件。用于更复杂的动态条件判断，可以引用当前校验对象 (`#root`) 或查询结果 (`#result`)。例如：`#result.balance >= #root.amount`。 |
+| `dependOnFields`   | `String[]`                                | 否       | `{}`                                          | 依赖的其他字段名。当这些字段的值发生变化时，可能会影响校验结果，通常与缓存配合使用，确保缓存键的唯一性。                                                       |
+| `enableCache`      | `boolean`                                 | 否       | `false`                                       | 是否启用缓存。启用后，校验结果会被缓存，以提高重复校验的性能。适用于数据不经常变化的场景。                                                                 |
+| `cacheExpireSeconds` | `int`                                     | 否       | `300`                                         | 缓存的过期时间（秒），仅在 `enableCache` 为 `true` 时有效。                                                                                     |
+
+##### 3.5.1.4 使用方法
+
+1.  **定义 `GXValidateDBExistsService` 实现**
+
+    你需要创建一个类实现 `GXValidateDBExistsService` 接口。这个服务类将负责根据注解提供的参数（如表名、字段名、条件等）去数据库查询记录是否存在。
+
+    ```java
+    import cn.maple.core.datasource.service.GXValidateDBExistsService;
+    import org.springframework.stereotype.Service;
+    import org.springframework.beans.factory.annotation.Autowired;
+    import org.springframework.jdbc.core.JdbcTemplate;
+    import java.util.Map;
+    import java.util.List;
+
+    @Service("userExistsValidateService") // Bean的名称可以自定义，在注解中通过service属性引用
+    public class UserExistsValidateServiceImpl implements GXValidateDBExistsService {
+
+        @Autowired
+        private JdbcTemplate jdbcTemplate; // 或者使用MyBatis Mapper
+
+        @Override
+        public boolean exists(String tableName, String fieldName, Object fieldValue, String condition, String spEL, Map<String, Object> rootObject) {
+            StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM ").append(tableName)
+                                 .append(" WHERE ").append(fieldName).append(" = ?");
+            List<Object> params = new ArrayList<>();
+            params.add(fieldValue);
+
+            if (condition != null && !condition.isEmpty()) {
+                // 简单处理 condition，实际项目中可能需要更复杂的解析
+                String[] conditions = condition.split(",");
+                for (String cond : conditions) {
+                    String[] parts = cond.split("=");
+                    if (parts.length == 2) {
+                        sql.append(" AND ").append(parts[0].trim()).append(" = ?");
+                        params.add(parts[1].trim()); // 注意类型转换，这里简化为字符串
+                    }
+                }
+            }
+
+            // 注意：spEL 的执行通常在查询到数据后，用于对查询结果进行判断，
+            // 或者在查询前动态构建更复杂的查询条件，这里仅作示例。
+            // 如果spEL用于查询后的判断，则此处查询逻辑可能需要调整为先查出数据再用SpEL评估。
+            // 此处简化为直接查询count。
+
+            Integer count = jdbcTemplate.queryForObject(sql.toString(), params.toArray(), Integer.class);
+            return count != null && count > 0;
+        }
+
+        @Override
+        public Map<String, Object> queryData(String tableName, String fieldName, Object fieldValue, String condition, Map<String, Object> rootObject) {
+            // 如果spEL需要查询结果进行判断，则实现此方法返回查询到的数据Map
+            // 例如：SELECT * FROM tableName WHERE fieldName = ? AND ...
+            // 返回null或空Map表示未查到数据
+            return null; // 根据实际需求实现
+        }
+    }
+    ```
+
+2.  **在DTO字段上使用注解**
+
+    ```java
+    import jakarta.validation.constraints.NotBlank;
+    import cn.maple.core.datasource.annotation.GXValidateDBExists;
+
+    public class UserCreateDTO {
+
+        @NotBlank(message = "用户名不能为空")
+        @GXValidateDBExists(
+            service = UserExistsValidateServiceImpl.class, // 引用上面定义的Service实现类
+            fieldName = "username",                      // 数据库中的用户名字段
+            tableName = "tb_user",                       // 用户表名
+            message = "用户名已存在，请使用其他用户名"
+        )
+        private String username;
+
+        @NotBlank(message = "邮箱不能为空")
+        @GXValidateDBExists(
+            service = UserExistsValidateServiceImpl.class,
+            fieldName = "email",
+            tableName = "tb_user",
+            message = "该邮箱已被注册"
+        )
+        private String email;
+
+        // 其他字段...
+    }
+    ```
+
+    ```java
+    import cn.maple.core.datasource.annotation.GXValidateDBExists;
+    import java.math.BigDecimal;
+
+    // 假设有一个 AccountExistsValidateServiceImpl 实现了 GXValidateDBExistsService
+    // 并且 queryData 方法能够根据 accountId 查询账户信息（包括余额）
+    public class TransferDTO {
+
+        @GXValidateDBExists(
+            service = AccountExistsValidateServiceImpl.class,
+            fieldName = "accountId",
+            tableName = "tb_account",
+            message = "转出账户不存在"
+        )
+        private Long accountId;
+
+        private BigDecimal amount;
+
+        // 示例：使用SpEL校验账户余额是否足够，假设 #result 是 queryData 返回的Map
+        @GXValidateDBExists(
+            service = AccountExistsValidateServiceImpl.class,
+            fieldName = "accountId", // 实际查询依赖 accountId
+            tableName = "tb_account",
+            spEL = "#result != null && #result.balance >= #root.amount", // #result是查询结果，#root是TransferDTO实例
+            message = "账户余额不足以完成转账"
+        )
+        private Long accountIdForBalanceCheck; // 可以是一个辅助字段，或者直接用在accountId上（取决于校验逻辑）
+                                            // 注意：如果直接用在accountId上，且message不同，需要用groups区分
+
+        // Getter and Setter
+        public Long getAccountId() { return accountId; }
+        public void setAccountId(Long accountId) { this.accountId = accountId; this.accountIdForBalanceCheck = accountId; }
+        public BigDecimal getAmount() { return amount; }
+        public void setAmount(BigDecimal amount) { this.amount = amount; }
+        public Long getAccountIdForBalanceCheck() { return accountIdForBalanceCheck; }
+    }
+    ```
+
+3.  **在Controller中使用 `@Valid` 或 `@Validated` 触发校验**
+
+    ```java
+    import org.springframework.validation.annotation.Validated;
+    import org.springframework.web.bind.annotation.PostMapping;
+    import org.springframework.web.bind.annotation.RequestBody;
+    import org.springframework.web.bind.annotation.RestController;
+
+    @RestController
+    public class UserController {
+
+        @PostMapping("/users")
+        public String createUser(@Validated @RequestBody UserCreateDTO userCreateDTO) {
+            // 如果校验通过，执行创建用户逻辑
+            // ...
+            return "User created successfully";
+        }
+    }
+    ```
+
+##### 3.5.1.5 高级用法
+
+-   **带条件的唯一性校验**：
+    例如，验证在某个特定部门（`dept_id=100`）内，员工工号（`employee_no`）是否唯一。
+    ```java
+    @GXValidateDBExists(
+        service = EmployeeValidateServiceImpl.class,
+        fieldName = "employee_no",
+        tableName = "tb_employee",
+        condition = "dept_id=100", // 静态条件
+        message = "该部门下员工工号已存在"
+    )
+    private String employeeNo;
+    ```
+
+-   **使用SpEL进行复杂校验**：
+    例如，在更新操作时，校验新的邮箱地址是否已被其他用户（排除当前用户）使用。
+    ```java
+    // In UserUpdateDTO
+    private Long userId; // 当前用户ID
+
+    @GXValidateDBExists(
+        service = UserValidateServiceImpl.class,
+        fieldName = "email",
+        tableName = "tb_user",
+        spEL = "#result == null || #result.user_id == #root.userId", // #result是按email查到的记录，#root是UserUpdateDTO
+        message = "邮箱已被其他用户占用"
+    )
+    private String email;
+    ```
+    对应的 `GXValidateDBExistsService` 的 `queryData` 方法需要实现根据 `email` 查询用户记录（包含 `user_id`）。
+
+-   **启用缓存**：
+    对于一些不经常变动但校验频繁的数据，如产品分类是否存在，可以启用缓存。
+    ```java
+    @GXValidateDBExists(
+        service = CategoryValidateServiceImpl.class,
+        fieldName = "category_code",
+        tableName = "tb_category",
+        enableCache = true,
+        cacheExpireSeconds = 3600, // 缓存1小时
+        message = "产品分类编码不存在"
+    )
+    private String categoryCode;
+    ```
+
+通过 `@GXValidateDBExists` 注解，可以大大简化服务端数据校验逻辑，使其更声明式和易于维护。
+
+
 
 #### 3.4.1 JSON类型处理
 

@@ -117,6 +117,171 @@ leaf-base-framework 是 Maple Leaf Framework 框架的基础核心模块，提�
 
 ### 3.5 DDD支持
 
+### 3.6 API层定义
+
+### 3.7 切面编程 (AOP)
+
+### 3.8 配置类
+
+本章节将详细介绍 `leaf-base-framework` 框架中 `config` 包下的核心配置类及其功能。
+
+#### 3.8.1 `GXAsyncConfig`
+
+- **功能**: Spring异步任务线程池配置。
+- **描述**: 实现 `AsyncConfigurer` 接口，为 `@Async` 注解提供默认的线程池配置。线程池参数经过优化，可以应对高负载场景，防止线程池饱和导致系统不稳定。
+- **主要特性**:
+    - 动态线程池大小：根据CPU核心数自动调整线程池大小，支持通过配置文件覆盖默认配置。
+    - 智能拒绝策略：根据系统负载动态选择拒绝策略，保护系统稳定性。
+    - 完善的异常处理：捕获并记录所有异步任务异常，提供详细的诊断信息。
+    - 任务执行监控：监控长时间运行的任务和超时任务，便于性能分析和问题排查。
+    - 优雅关闭：确保应用关闭时所有任务都能完成，避免数据不一致。
+    - 线程池预热：预先创建核心线程，避免首次任务执行延迟。
+    - 自动资源释放：非核心线程在空闲时自动释放，减少资源占用。
+- **使用方法**: 通过 `@EnableAsync` 注解启用异步支持，在需要异步执行的方法上添加 `@Async` 注解即可。可以通过配置文件 `maple.framework.async.*` 相关属性进行自定义配置。
+
+#### 3.8.2 `GXCORSConfig`
+
+- **功能**: 跨域资源共享(CORS)配置。
+- **描述**: 提供Web应用的跨域资源共享(CORS)支持，允许从不同源的客户端安全地访问API。通过配置允许的源、HTTP方法、请求头以及是否允许携带凭证等参数，实现细粒度的跨域访问控制。
+- **安全说明**:
+    - 当 `allowCredentials` 设置为 `true` 时，不允许将 `allowOrigins` 设置为 `*`。
+    - 暴露必要的响应头，确保客户端能够正确处理跨域请求。
+    - 所有配置参数都可通过外部属性文件进行定制。
+- **使用方法**: 通过配置文件 `cors.allow.*` 相关属性进行配置。
+
+#### 3.8.3 `GXCommandLineRunner`
+
+- **功能**: 应用启动后任务执行器。
+- **描述**: 实现Spring Boot的 `CommandLineRunner` 接口，用于在应用启动完成后执行一系列初始化任务。它会自动收集所有实现了 `GXCommandLineRunnerService` 接口的Bean，并按顺序执行它们的 `run` 方法。
+- **线程安全**: 任务执行在应用启动线程中串行进行，不存在并发问题。使用 `AtomicInteger` 计数器安全地跟踪任务执行情况。每个任务的异常都被单独捕获和处理，不会影响其他任务的执行。
+- **使用方法**: 创建自定义的启动任务类并实现 `GXCommandLineRunnerService` 接口，框架会自动执行。
+
+#### 3.8.4 `GXFilterConfig`
+
+- **功能**: Web过滤器配置。
+- **描述**: 负责注册和配置应用中使用的各种Servlet过滤器，主要包括XSS防护过滤器、RequestContextFilter、ServletRequestPathFilter 和 CommonsRequestLoggingFilter。
+- **主要特性**:
+    - `GXXssFilter`: XSS防护过滤器，应用于所有请求路径，提供全局防护。优先级设置为最高，确保在其他过滤器之前执行。
+    - `RequestContextFilter`: 用于在子线程中获取上下文对象。可以将当前请求的上下文对象存储在线程本地变量中。
+    - `ServletRequestPathFilter`: 用于在子线程中获取请求路径。可以将当前请求的路径存储在线程本地变量中。
+    - `CommonsRequestLoggingFilter`: 用于记录请求日志，会将请求的详细信息记录到日志中。
+- **使用方法**: 过滤器默认启用或根据配置文件 `maple.framework.web.filter.*.enabled` 属性进行配置。
+
+#### 3.8.5 `GXFrameworkConfig`
+
+- **功能**: 框架核心配置。
+- **描述**: 提供自定义JSON序列化处理（特别是对null值的处理策略）、Bean验证配置（支持快速失败模式）和组件自动扫描配置。
+- **主要特性**:
+    - `ObjectMapper` 自定义: 自定义null值处理策略，根据字段类型返回不同的默认值；忽略未知属性，提高反序列化的健壮性；允许序列化空Bean对象。
+    - `LocalValidatorFactoryBean` 配置: 支持Bean验证的快速失败模式，在发现第一个验证错误后立即停止。
+    - `@ComponentScan("cn.maple")`: 自动扫描 `cn.maple` 包下的组件。
+- **使用方法**: 框架自动加载该配置。
+
+#### 3.8.6 `aware` 包
+
+- **`GXApplicationContextAware`**: Spring应用上下文感知类。实现 `ApplicationContextAware` 接口，在Spring容器启动时自动获取 `ApplicationContext` 并设置到 `GXApplicationContextSingleton` 单例中。通过 `@Order(Ordered.HIGHEST_PRECEDENCE)` 设置为最高优先级。
+- **`GXApplicationContextSingleton`**: Spring应用上下文单例持有类。使用枚举实现单例模式，用于在应用的任何位置获取Spring的 `ApplicationContext` 对象。具有线程安全、序列化安全和反射安全的特性。
+
+#### 3.8.7 `cache` 包
+
+- **`GXCaffeineCacheConfig`**: Caffeine缓存配置类。提供基于Caffeine的本地缓存管理器配置。支持自定义缓存配置和默认缓存配置。Caffeine缓存是线程安全的。
+    - **配置来源**: 通过注入 `GXCaffeineCacheManagerProperties` 来加载自定义缓存配置。
+    - **默认缓存**: 配置了多个默认缓存实例，如 `FRAMEWORK-CACHE`, `__DEFAULT__`, `UNIVERSAL-CACHE` 等，并设置了合理的默认参数。
+    - **动态创建**: 禁止自动创建缓存 (`caffeineCacheManager.dynamic=false`)，以避免缓存泄漏和内存溢出风险。
+- **相关属性类 (位于 `properties` 包)**:
+    - **`GXCaffeineCacheManagerProperties`**: Caffeine缓存管理器属性配置类。通过 `@PropertySource` 加载 `caffeine-cache-config.yml` 配置文件，并使用 `@ConfigurationProperties(prefix = "caffeine")` 绑定属性。包含一个 `Map<String, GXCaffeineCacheProperties>` 用于存储各个缓存的配置。
+    - **`GXCaffeineCacheProperties`**: 单个Caffeine缓存配置属性类。包含初始容量、最大条数、过期策略（访问后过期、写入后过期）、刷新策略、引用类型（弱引用、软引用）和统计功能开关等配置项。
+
+#### 3.8.8 `support` 包
+
+- **`GXCachingConfigurerSupport`**: 解决多CacheManager配置的支持类。实现 `CachingConfigurer` 接口，用于自定义Spring缓存的配置。
+    - **默认CacheManager**: 提供默认的 `CaffeineCacheManager` 作为缓存管理器。
+    - **自定义错误处理器**: 提供 `LoggingCacheErrorHandler`，增强日志记录能力，记录缓存操作（获取、写入、驱逐、清空）中发生的异常，但不会阻止异常传播。
+
+#### 3.8.9 `web` 包
+
+- **`GXBaseWebConfig`**: Web基础配置类。提供Web应用的基础配置，例如注册 `GXBaseRequestLoggingFilter`。
+    - **`GXBaseRequestLoggingFilter`**: 请求日志记录过滤器，用于记录HTTP请求的详细信息，如URL、请求头、请求参数、请求体等，便于调试和问题排查。该过滤器是线程安全的。
+
+### 3.7 切面编程 (AOP)
+
+#### 3.7.1 业务日志切面 (`GXBusinessLogAspect`)
+
+- **功能**：拦截标记了 `@GXBusinessLog` 注解的方法，自动记录业务操作日志。
+- **特点**：
+    - 线程安全。
+    - 记录信息包括：业务名称、描述、方法名、请求参数、客户端IP、执行时间、请求时间、用户名。
+    - 支持在类级别和方法级别使用注解，方法级别注解会覆盖类级别。
+    - 目标方法抛出的异常会被记录并继续向上抛出。
+    - 日志记录过程中的异常会被捕获并记录，不影响主业务流程。
+- **依赖**：需要 `GXBusinessLogService` 的实现来获取用户名和保存日志。
+
+#### 3.7.2 缓存清除切面 (`GXCacheEvictAspect`)
+
+- **功能**：拦截标记了 `@GXCacheEvict` 注解的方法，在方法成功执行后清除指定的缓存。
+- **特点**：
+    - 线程安全，使用分布式锁（依赖 `GXBaseCacheLockService`）确保缓存清除的原子性。
+    - 支持动态生成缓存键，可引用方法参数及其属性。
+    - 如果未指定 `cacheKey`，默认使用 `类名:方法名` 作为缓存键。
+    - 目标类需要实现 `evictCacheData(String cacheKey, Object... args)` 方法来执行实际的缓存清除操作。
+    - 只有当方法执行成功且返回结果不为null时才会触发缓存清除。
+    - 缓存清除异常不影响主业务流程。
+
+#### 3.7.3 缓存读取切面 (`GXCacheableAspect`)
+
+- **功能**：拦截标记了 `@GXCacheable` 注解的方法，实现方法返回值的缓存。
+- **特点**：
+    - 线程安全。
+    - 在方法执行前检查缓存，若命中则直接返回缓存数据，否则执行方法并将结果存入缓存。
+    - 支持动态生成缓存键，可引用方法参数及其属性。
+    - 如果未指定 `cacheKey`，默认使用 `类名:方法名` 作为缓存键。
+    - 目标类需要实现 `getDataFromCache(String cacheKey, Object... args)` 方法从缓存获取数据，以及 `setCacheData(String cacheKey, Object result, Object... args)` 方法将数据存入缓存。
+    - 支持通过 `@GXCacheable` 的 `retType` 和 `methodName` 属性对缓存结果进行类型转换。
+    - 缓存操作异常不影响主业务流程。
+
+#### 3.7.4 方法耗时监控切面 (`GXStopWatchAspect`)
+
+- **功能**：拦截标记了 `@GXStopWatch` 注解的方法或类中的所有方法，监控其执行时间。
+- **特点**：
+    - 记录方法的调用参数、返回结果和执行耗时。
+    - 集成 `GXTraceIdContextUtils`，日志输出会包含分布式追踪ID。
+    - 通过 `@Order(Ordered.HIGHEST_PRECEDENCE)` 确保切面最先执行，以准确测量方法耗时。
+    - 目标方法异常不会被吞噬。
+
+#### 3.7.5 请求参数验证切面 (`GXValidateRequestParamAspect`)
+
+- **功能**：拦截标记了 `@GetMapping` 注解的方法，自动对请求参数进行JSR 303/JSR 380 (Bean Validation) 验证。
+- **特点**：
+    - 线程安全，使用标准的 `jakarta.validation.Validator`。
+    - 验证失败时抛出 `GXBeanValidateException`，包含详细的验证错误信息。
+    - 默认优先级较高 (`Ordered.HIGHEST_PRECEDENCE + 100`)，确保在业务逻辑执行前进行参数验证。
+    - 可以扩展到其他HTTP请求方法注解如 `@PostMapping` 等。
+
+#### 3.6.1 API接口
+
+- `GXBaseServeApi`：一个基础 API 接口，定义了通用的数据操作方法，支持条件查询、分页、更新、删除等操作，设计上遵循线程安全和内存安全的最佳实践。
+- `GXBaseServeApiImpl`：`GXBaseServeApi` 接口的基础实现，封装了常用的数据操作方法，通过反射机制调用底层服务类的方法，支持静态绑定和动态绑定两种方式指定目标服务类，并实现了线程安全和内存安全的最佳实践。
+
+#### 3.6.2 API数据传输对象 (DTO)
+
+- `GXBaseApiReqDto`：基础的API请求DTO，继承自 `GXBaseReqDto`，作为所有API请求DTO的基类。
+- `GXQueryParamApiReqDto`：通用的查询参数API请求DTO，继承自 `GXBaseApiReqDto`。它封装了进行复杂查询所需的各种参数，例如：
+    - `tableName` 和 `tableNameAlias`：主表名及其别名，用于JOIN查询。
+    - `page` 和 `pageSize`：分页参数，默认为第一页，每页默认大小。
+    - `condition`：查询条件列表，使用 `GXCondition` 对象定义复杂的过滤逻辑。
+    - `columns`：需要查询的数据列集合。
+    - `orderByField`：排序字段，一个Map，键为字段名，值为排序方向（asc/desc）。
+    - `groupByField`：分组字段集合。
+    - `methodName`：`GXBaseData` 及其子类中的方法名，用于在查询后自动调用额外处理逻辑。
+    - `having`：SQL中的HAVING条件集合。
+    - `copyOptions`：Hutool `CopyOptions`，用于对象复制时的额外配置。
+    - `limit`：限制查询结果的条数。
+    - `joins`：JOIN连接信息列表，使用 `GXJoinDto` 定义连接表、类型和条件。
+    - `extraData`：额外参数，配合 `methodName` 使用。
+    - `rawSQL`：原始SQL语句，如果提供此字段，框架将直接执行此SQL，不再自动拼接。
+    - `ignoreDataFilter`：是否忽略数据权限，默认为false。
+- `GXBaseApiResDto`：基础的API响应DTO，继承自 `GXBaseResDto`，作为所有API响应DTO的基类。
+
 #### 3.5.1 领域驱动设计
 
 - 提供了DDD相关的基础设施，支持领域驱动设计开发
