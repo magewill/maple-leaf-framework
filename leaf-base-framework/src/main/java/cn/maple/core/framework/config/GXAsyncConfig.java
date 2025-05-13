@@ -69,12 +69,12 @@ public class GXAsyncConfig implements AsyncConfigurer {
      * 默认核心线程数系数（相对于CPU核心数）
      * 对于IO密集型任务，通常设置为CPU核心数的1-2倍较为合适
      */
-    private static final double DEFAULT_CORE_POOL_SIZE_FACTOR = 2.0;
+    private static final double DEFAULT_CORE_POOL_SIZE_FACTOR = 1.0;
 
     /**
      * 默认最大线程数系数（相对于核心线程数）
      */
-    private static final double DEFAULT_MAX_POOL_SIZE_FACTOR = 2.0;
+    private static final double DEFAULT_MAX_POOL_SIZE_FACTOR = 1.0;
 
     /**
      * 默认队列容量

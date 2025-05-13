@@ -33,4 +33,14 @@ public class GXRedissonConnectProperties {
      * 集群模式 链接最小闲置大小
      */
     private Integer slaveConnectionMinimumIdleSize = 2;
+
+    /**
+     * 线程数
+     */
+    private Integer threads = 2;
+
+    /**
+     * Netty线程数
+     */
+    private Integer nettyThreads = 4;
 }

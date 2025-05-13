@@ -67,7 +67,7 @@ public class GXMyBatisAsyncListenerExecutorConfig {
     /**
      * 默认最大线程数系数（相对于核心线程数）
      */
-    private static final double DEFAULT_MAX_POOL_SIZE_FACTOR = 2.0;
+    private static final double DEFAULT_MAX_POOL_SIZE_FACTOR = 1.0;
 
     /**
      * 默认队列容量
