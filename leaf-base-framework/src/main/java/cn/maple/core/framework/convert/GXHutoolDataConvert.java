@@ -593,6 +593,11 @@ public class GXHutoolDataConvert {
             }
             return null;
         }
+        // 处理目标类型就是字符串类型
+        if (targetClazz == String.class) {
+            LOG.debug("目标类型是String，直接返回字符串");
+            return valueStr;
+        }
         // 处理JSON对象字符串（形如 {"key":"value"}）
         if (JSONUtil.isTypeJSONObject(valueStr)) {
             LOG.debug("检测到JSON对象字符串，进行JSON对象转换");

@@ -704,12 +704,17 @@ public class GXCGLibDataConvert implements Converter {
      */
     private Object handleStringSourceConversion(Class<?> targetClass, String propertyName, String sourceValueStr, Object context) {
         LOG.trace("处理字符串源值转换到{}，属性名：{}", targetClass.getName(), propertyName);
+        // 目标字符串如果就是字符串类型，直接返回
+        if (String.class.equals(targetClass)) {
+            LOG.debug("目标类型是String，直接返回字符串");
+            return sourceValueStr;
+        }
         // 检查是否为JSON对象字符串 -> 目标对象/集合/Map
-        if (sourceValueStr.startsWith("{") && sourceValueStr.endsWith("}") && JSONUtil.isTypeJSONObject(sourceValueStr)) {
+        if (JSONUtil.isTypeJSONObject(sourceValueStr)) {
             LOG.trace("字符串源值看起来是JSON对象");
             return handleJsonObjectStringConversion(targetClass, sourceValueStr, propertyName, context);
         }
-        if (sourceValueStr.startsWith("[") && sourceValueStr.endsWith("]") && JSONUtil.isTypeJSONArray(sourceValueStr)) {
+        if (JSONUtil.isTypeJSONArray(sourceValueStr)) {
             LOG.trace("字符串源值看起来是JSON数组");
             return handleJsonArrayStringConversion(targetClass, sourceValueStr, propertyName, context);
         }
