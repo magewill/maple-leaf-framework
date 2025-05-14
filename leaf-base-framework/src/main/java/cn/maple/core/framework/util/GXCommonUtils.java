@@ -2,6 +2,7 @@ package cn.maple.core.framework.util;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
+import cn.hutool.core.bean.copier.IJSONTypeConverter;
 import cn.hutool.core.codec.Base64;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
@@ -11,33 +12,27 @@ import cn.hutool.core.exceptions.UtilException;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.Validator;
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.core.util.ClassUtil;
-import cn.hutool.core.util.ObjectUtil;
-import cn.hutool.core.util.ReUtil;
-import cn.hutool.core.util.ReflectUtil;
+import cn.hutool.core.util.*;
 import cn.hutool.http.*;
+import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.constant.GXDataSourceConstant;
-import cn.maple.core.framework.convert.GXCGLibDataConvert;
-import cn.maple.core.framework.convert.GXHutoolDataConvert;
-import cn.maple.core.framework.dto.GXBaseData;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.exception.GXBeanValidateException;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXConvertException;
-import cn.maple.core.framework.util.cglib.GXCglibUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Table;
-import com.google.common.reflect.TypeToken;
 import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Type;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -158,7 +153,45 @@ public class GXCommonUtils {
      * </p>
      */
     @Getter
-    private static final CopyOptions defaultCopyOptions = CopyOptions.create().setIgnoreNullValue(true).setIgnoreError(true).setConverter(GXHutoolDataConvert::staticConvert);
+    private static final CopyOptions defaultCopyOptions = CopyOptions.create().setConverter((type, value) -> {
+        if (null == value) {
+            return null;
+        }
+
+        Class<?> targetClazz = TypeUtil.getClass(type);
+
+        if (JSONUtil.isTypeJSON(value.toString()) && targetClazz.isAssignableFrom(String.class)) {
+            return value;
+        }
+
+        // 处理List<自定义类型>
+        if (JSONUtil.isTypeJSONArray(value.toString()) && targetClazz.isAssignableFrom(List.class)) {
+            Class<?> componentType = targetClazz.getComponentType();
+            if (ObjectUtil.isNull(componentType)) {
+                Type actualTypeArgument = TypeUtil.getTypeArgument(type, 0);
+                if (ObjectUtil.isNull(actualTypeArgument)) {
+                    return value;
+                }
+                componentType = (Class<?>) actualTypeArgument;
+            }
+            return JSONUtil.toList(JSONUtil.toJsonStr(value), componentType);
+        }
+
+        if (value instanceof IJSONTypeConverter) {
+            return ((IJSONTypeConverter) value).toBean(ObjectUtil.defaultIfNull(type, Object.class));
+        }
+
+        Object o = Convert.convertWithCheck(type, value, null, true);
+        if (Objects.nonNull(o)) {
+            return o;
+        }
+
+        if (Objects.nonNull(targetClazz) && !(targetClazz.isAssignableFrom(Dict.class) || targetClazz.isAssignableFrom(JSONObject.class) || targetClazz.isAssignableFrom(List.class) || targetClazz.isAssignableFrom(Set.class) || targetClazz.isAssignableFrom(Map.class))) {
+            return value;
+        }
+
+        return convertStrToTarget(value.toString(), targetClazz);
+    });
 
     /**
      * 私有构造函数，防止实例化
@@ -658,15 +691,9 @@ public class GXCommonUtils {
             }
 
             // 复制属性
-            if (TypeToken.of(source.getClass()).isSubtypeOf(GXBaseData.class) && ObjectUtil.isNull(copyOptions)) {
-                LOG.info("使用CGLIB进行高效属性复制!!");
-                GXCglibUtils.copy(source, target, new GXCGLibDataConvert(tClass));
-            } else {
-                // 使用默认的复制选项（如果未指定）
-                copyOptions = ObjectUtil.defaultIfNull(copyOptions, GXCommonUtils::getDefaultCopyOptions);
-                LOG.info("使用BeanUtil进行属性复制!!");
-                BeanUtil.copyProperties(source, target, copyOptions);
-            }
+            copyOptions = ObjectUtil.defaultIfNull(copyOptions, GXCommonUtils::getDefaultCopyOptions);
+            LOG.info("使用BeanUtil进行属性复制!!");
+            BeanUtil.copyProperties(source, target, copyOptions);
 
             // 调用自定义处理方法（如果指定）
             if (CharSequenceUtil.isNotEmpty(methodName)) {
