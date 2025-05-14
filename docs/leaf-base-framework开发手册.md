@@ -674,7 +674,7 @@ public class UserServiceImpl implements UserService {
 @RestController
 @RequestMapping("/api/users")
 @GXPermissionCtl("sys:user")
-public class UserController {
+public class UserController implements GXBaseController{
     
     @GetMapping("/list")
     @GXPermission("list")
@@ -793,7 +793,7 @@ public class UserEventListener {
 // 在方法上使用
 @RestController
 @RequestMapping("/api/user")
-public class UserController {
+public class UserController implements GXBaseController{
     
     @PostMapping("/login")
     @GXIgnoreLoginIntercept
@@ -807,7 +807,7 @@ public class UserController {
 @RestController
 @RequestMapping("/api/public")
 @GXIgnoreLoginIntercept
-public class PublicController {
+public class PublicController implements GXBaseController {
     
     @GetMapping("/config")
     public Result getPublicConfig() {
@@ -861,7 +861,7 @@ public interface UserFeignClient {
 ```java
 @RestController
 @RequestMapping("/api/users")
-public class UserController {
+public class UserController implements GXBaseController {
     
     @GetMapping("/{id}")
     public GXResultUtils<UserVO> getById(@PathVariable Long id) {
@@ -935,7 +935,7 @@ public class UserDTO {
 
 @RestController
 @RequestMapping("/api/users")
-public class UserController {
+public class UserController implements GXBaseController {
     
     @PostMapping
     public GXResultUtils<Boolean> save(@RequestBody @Valid UserDTO userDTO, BindingResult bindingResult) {

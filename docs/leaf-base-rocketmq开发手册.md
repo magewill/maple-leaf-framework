@@ -32,13 +32,49 @@ Leaf-Base-RocketMQ 是 Maple-Leaf-Framework 框架中用于简化 Apache RocketM
 
 本模块支持通过本地配置文件 (`application.yml` 或 `application.properties`) 和 Nacos 配置中心两种方式进行配置。系统启动时，会优先尝试加载 Nacos 配置。如果 Nacos 配置不可用或未配置，则会回退到使用本地配置文件中的设置。
 
-### 2.1 本地配置 (`GXLocalRocketMQConfigProperties`)
+### 2.1 本地配置 (`cn.maple.rocketmq.properties.local.GXLocalRocketMQConfigProperties`)
 
-在项目的 `src/main/resources/application.yml` (或 `.properties`) 文件中，可以配置以下 RocketMQ 相关参数。这些配置项由 `cn.maple.rocketmq.config.GXLocalRocketMQConfigProperties` 类加载。
+在项目的 `src/main/resources` 目录下，可以创建环境相关的 RocketMQ 配置文件，例如 `dev/rocket-mq.yml`。这些配置项由 `cn.maple.rocketmq.properties.local.GXLocalRocketMQConfigProperties` 类加载。该类通过 `@PropertySource(value = "classpath:${spring.profiles.active:}/rocket-mq.yml", factory = GXYamlPropertySourceFactory.class, ignoreResourceNotFound = true)` 注解加载 YAML 文件，并使用 `@ConfigurationProperties(prefix = "rocketmq")` 来绑定配置项。`ignoreResourceNotFound = true` 表示如果特定环境的配置文件不存在，不会报错。当 Nacos 相关类 `com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties` 不存在于类路径时，此本地配置类会被激活。
 
 ```yaml
-gx:
-  rocketmq:
+rocketmq: # 注意：根据 GXLocalRocketMQConfigProperties 和 GXNacosRocketMQConfigProperties 的 @ConfigurationProperties(prefix = "rocketmq")，前缀应为 rocketmq
+  # 是否启用 RocketMQ 功能，默认为 true。如果设置为 false，则不会初始化生产者。
+  enabled: true
+  # RocketMQ NameServer 地址，**必填**。多个地址用分号 (;) 分隔。
+  # 示例: "192.168.1.100:9876;192.168.1.101:9876"
+  name-server: "127.0.0.1:9876"
+  # 生产者组名，**必填**。建议使用应用名或业务模块名作为前缀，保证全局唯一。
+  # 示例: "my_app_order_producer_group"
+  producer-group: "default_producer_group"
+  # 发送消息超时时间（毫秒），默认为 3000 (3秒)。
+  send-message-timeout: 3000
+  # 消息体压缩阈值（字节）。当消息体大小超过此值时，SDK会自动进行压缩。默认为 4096 (4KB)。
+  compress-message-body-threshold: 4096
+  # 同步发送模式下，发送失败时的重试次数。默认为 2 次。
+  # 注意：这不包括第一次发送尝试。总共会尝试 1 + retryTimesWhenSendFailed 次。
+  retry-times-when-send-failed: 2
+  # 异步发送模式下，发送失败时的重试次数。默认为 2 次。
+  retry-times-when-send-async-failed: 2
+  # 是否开启VIP通道，默认为 true。如果 NameServer 版本较低 (如低于 3.5.8)，可能需要设置为 false。
+  # VIP通道允许客户端直接连接到Broker，绕过NameServer进行消息发送，可以提高发送性能。
+  vip-channel-enabled: true
+  # RocketMQ AccessKey，用于ACL (Access Control List) 权限控制。如果 Broker 开启了ACL，则必须配置。
+  access-key: ""
+  # RocketMQ SecretKey，用于ACL权限控制。如果 Broker 开启了ACL，则必须配置。
+  secret-key: ""
+  # 实例名称，默认为 "DEFAULT"
+  instance-name: "DEFAULT"
+  # 客户端回调线程数，默认为CPU核心数
+  client-callback-executor-threads: #不设置为系统默认
+  # 拉取消息的线程数，默认为CPU核心数
+  pull-message-thread-pool-nums: #不设置为系统默认
+  # 单元化模式下，单元名称
+  unit-name: ""
+  # 是否开启了OpenTelemetry Tracing，默认为false
+  open-telemetry-tracing-enabled: false
+```
+
+**注意：** `GXLocalRocketMQConfigProperties` 类中并没有显式定义上述所有配置项的字段，它依赖于 Spring Boot 的 `@ConfigurationProperties` 自动绑定机制。实际可配置的属性以 RocketMQ Spring Boot Starter 官方文档为准，此处列出的是常见配置。
     # 是否启用 RocketMQ 功能，默认为 true。如果设置为 false，则不会初始化生产者。
     enabled: true
     # RocketMQ NameServer 地址，**必填**。多个地址用分号 (;) 分隔。
@@ -75,24 +111,75 @@ gx:
     open-telemetry-tracing-enabled: false
 ```
 
-### 2.2 Nacos 配置 (`GXNacosRocketMQConfigProperties`)
+### 2.2 Nacos 配置 (`cn.maple.rocketmq.properties.nacos.GXNacosRocketMQConfigProperties`)
 
-如果您的项目集成了 Nacos 作为配置中心，本模块可以通过 `cn.maple.rocketmq.config.GXNacosRocketMQConfigProperties` 类从 Nacos 加载 RocketMQ 配置。Nacos 中的配置项会覆盖本地配置文件中的同名配置项。
+如果您的项目集成了 Nacos 作为配置中心，本模块可以通过 `cn.maple.rocketmq.properties.nacos.GXNacosRocketMQConfigProperties` 类从 Nacos 加载 RocketMQ 配置。该类通过 `@ConditionalOnClass(name = {"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})` 判断 Nacos 环境是否存在。如果存在，则此配置类会被激活。
 
 **启用条件**:
 - 项目中引入了 `spring-cloud-starter-alibaba-nacos-config` 依赖。
 - 正确配置了 Nacos 服务器地址 (`spring.cloud.nacos.config.server-addr`)。
 - 在 Nacos 中创建了对应的 Data ID，并且配置了 RocketMQ 相关参数。
 
-**Data ID 示例**: 假设您的应用在 Nacos 中的 `spring.application.name` 为 `my-application`，并且配置文件格式为 `yaml`，则默认的 Data ID 可能为 `my-application.yaml` 或您自定义的共享配置 Data ID。
+**Data ID**: `GXNacosRocketMQConfigProperties` 类通过 `@NacosConfigurationProperties(prefix = "rocketmq", dataId = "${spring.application.name:rocket-mq}-rocket-mq.yml", groupId = "${spring.cloud.nacos.config.group:${nacos.config.group:DEFAULT_GROUP}}", autoRefreshed = true)` 注解来指定配置来源。
+    - `prefix`: "rocketmq"
+    - `dataId`: 默认为 `${spring.application.name:rocket-mq}-rocket-mq.yml`。如果应用定义了 `spring.application.name`，则 Data ID 为 `[应用名]-rocket-mq.yml`；否则为 `rocket-mq-rocket-mq.yml`。
+    - `groupId`: 默认为 `${spring.cloud.nacos.config.group:${nacos.config.group:DEFAULT_GROUP}}`。优先使用 `spring.cloud.nacos.config.group`，其次是 `nacos.config.group`，最后是 `DEFAULT_GROUP`。
+    - `autoRefreshed`: `true`，表示配置变更时会自动刷新。
 
 **Nacos 配置内容示例 (YAML格式)**:
 
-在 Nacos 控制台对应的 Data ID 下，配置如下（仅展示与本地配置不同的部分或Nacos特有的）：
+在 Nacos 控制台对应的 Data ID 和 Group 下，配置如下（以 `rocketmq` 为根配置项）：
 
 ```yaml
-gx:
-  rocketmq:
+rocketmq:
+    # Nacos中配置的NameServer地址，会覆盖本地配置
+    name-server: "your-nacos-managed-nameserver1:9876;your-nacos-managed-nameserver2:9876"
+    # Nacos中配置的生产者组名
+    producer-group: "nacos_configured_producer_group"
+    send-message-timeout: 5000 # 示例：Nacos中配置了不同的超时时间
+    access-key: "nacosConfiguredAccessKey"
+    secret-key: "nacosConfiguredSecretKey"
+    # ... 其他所有在 RocketMQ Spring Boot Starter 中支持的属性均可在 Nacos 中配置 ...
+```
+
+**注意：** `GXNacosRocketMQConfigProperties` 类中并没有显式定义上述所有配置项的字段，它依赖于 Spring Boot 的 `@ConfigurationProperties` 和 Nacos 的 `@NacosConfigurationProperties` 自动绑定机制。实际可配置的属性以 RocketMQ Spring Boot Starter 官方文档为准。 # 注意：根据 GXLocalRocketMQConfigProperties 和 GXNacosRocketMQConfigProperties 的 @ConfigurationProperties(prefix = "rocketmq")，前缀应为 rocketmq
+  # 是否启用 RocketMQ 功能，默认为 true。如果设置为 false，则不会初始化生产者。
+  enabled: true
+  # RocketMQ NameServer 地址，**必填**。多个地址用分号 (;) 分隔。
+  # 示例: "192.168.1.100:9876;192.168.1.101:9876"
+  name-server: "127.0.0.1:9876"
+  # 生产者组名，**必填**。建议使用应用名或业务模块名作为前缀，保证全局唯一。
+  # 示例: "my_app_order_producer_group"
+  producer-group: "default_producer_group"
+  # 发送消息超时时间（毫秒），默认为 3000 (3秒)。
+  send-message-timeout: 3000
+  # 消息体压缩阈值（字节）。当消息体大小超过此值时，SDK会自动进行压缩。默认为 4096 (4KB)。
+  compress-message-body-threshold: 4096
+  # 同步发送模式下，发送失败时的重试次数。默认为 2 次。
+  # 注意：这不包括第一次发送尝试。总共会尝试 1 + retryTimesWhenSendFailed 次。
+  retry-times-when-send-failed: 2
+  # 异步发送模式下，发送失败时的重试次数。默认为 2 次。
+  retry-times-when-send-async-failed: 2
+  # 是否开启VIP通道，默认为 true。如果 NameServer 版本较低 (如低于 3.5.8)，可能需要设置为 false。
+  # VIP通道允许客户端直接连接到Broker，绕过NameServer进行消息发送，可以提高发送性能。
+  vip-channel-enabled: true
+  # RocketMQ AccessKey，用于ACL (Access Control List) 权限控制。如果 Broker 开启了ACL，则必须配置。
+  access-key: ""
+  # RocketMQ SecretKey，用于ACL权限控制。如果 Broker 开启了ACL，则必须配置。
+  secret-key: ""
+  # 实例名称，默认为 "DEFAULT"
+  instance-name: "DEFAULT"
+  # 客户端回调线程数，默认为CPU核心数
+  client-callback-executor-threads: #不设置为系统默认
+  # 拉取消息的线程数，默认为CPU核心数
+  pull-message-thread-pool-nums: #不设置为系统默认
+  # 单元化模式下，单元名称
+  unit-name: ""
+  # 是否开启了OpenTelemetry Tracing，默认为false
+  open-telemetry-tracing-enabled: false
+```
+
+**注意：** `GXLocalRocketMQConfigProperties` 类中并没有显式定义上述所有配置项的字段，它依赖于 Spring Boot 的 `@ConfigurationProperties` 自动绑定机制。实际可配置的属性以 RocketMQ Spring Boot Starter 官方文档为准，此处列出的是常见配置。
     # Nacos中配置的NameServer地址，会覆盖本地配置
     name-server: "your-nacos-managed-nameserver1:9876;your-nacos-managed-nameserver2:9876"
     # Nacos中配置的生产者组名
@@ -106,8 +193,8 @@ gx:
 ```
 
 **核心逻辑**:
-- `GXNacosRocketMQConfigProperties` 类使用 `@NacosConfigurationProperties` 注解，并指定 `prefix = "gx.rocketmq"` 和 `autoRefreshed = true`。这意味着当 Nacos 中 `gx.rocketmq` 前缀下的配置发生变更时，这些属性会自动刷新到应用中，`DefaultMQProducer` 实例会根据新的配置重建（如果关键配置如 `name-server` 或 `producer-group` 发生变化）。
-- 如果 `gx.rocketmq.enabled` 在 Nacos 中被设置为 `false`，即使本地配置为 `true`，RocketMQ 生产者也不会被初始化或在运行时被关闭。
+- 当 Nacos 中 `rocketmq` 前缀下的配置发生变更时，这些属性会自动刷新到应用中。`DefaultMQProducer` 实例是否会根据新的配置重建取决于 `RocketMQTemplate` 的具体实现和相关配置的变更影响。
+- 如果 `rocketmq.enabled` 在 Nacos 中被设置为 `false`，即使本地配置为 `true`，RocketMQ 生产者也不会被初始化或在运行时被关闭（具体行为取决于 `RocketMQTemplate` 如何响应配置变更）。
 
 **优先级**:
 1. Nacos 配置 (`GXNacosRocketMQConfigProperties`)
@@ -119,11 +206,11 @@ gx:
 
 ### 3.1 消息请求DTO
 
-`GXRocketMQMessageReqDto` 类是消息发送的核心数据传输对象，用于封装发送到 RocketMQ 的消息数据。该类继承自 `GXBaseReqDto`，可以利用基类提供的通用功能。
+`cn.maple.rocketmq.dto.inner.GXRocketMQMessageReqDto` 类是消息发送的核心数据传输对象，用于封装发送到 RocketMQ 的消息数据。该类继承自 `cn.maple.core.framework.dto.req.GXBaseReqDto`，可以利用基类提供的通用功能。
 
 **核心特性与考量：**
 - **安全性**：
-    - 消息体默认使用 `Hutool JSONUtil` 进行序列化，确保数据可读性和兼容性。
+    - 消息体在构造方法中或通过 `setBody` 方法传入对象时，会使用 `cn.hutool.json.JSONUtil.toJsonStr()` 进行序列化为JSON字符串，确保数据可读性和兼容性。
     - 对于敏感信息，建议在调用构造方法或 `setBody` 前进行脱敏处理。
 - **性能**：
     - 使用高效的JSON工具进行序列化。
@@ -134,10 +221,10 @@ gx:
 
 | 属性名 | 类型 | 描述 |
 | ------ | ---- | ---- |
-| topic | String | 消息主题，**必填**。消息的第一级分类，最长不超过255个字符，由字母、数字、中划线和下划线构成。命名建议：使用有意义的业务名称（如 `order_topic`），下划线分隔。避免特殊字符和中文。 |
+| topic | String | 消息主题，**必填**。消息的第一级分类，RocketMQ的消息必须有主题。最长不超过255个字符，由字母、数字、中划线和下划线构成。命名建议：使用有意义的业务名称（如 `order_topic`），下划线分隔。避免特殊字符和中文。 |
 | tag | String | 消息标签，可选，默认为空字符串。消息的第二级分类，用于同一主题下的消息过滤。命名建议：简洁明了，表达消息具体类型或操作（如 `created`, `paid`）。 |
-| body | String | 消息内容，**必填**。通常是JSON格式的字符串。安全建议：避免包含敏感信息（如密码、密钥），必要时进行脱敏处理，控制消息大小。 |
-| deliverTime | long | 延迟发送时间（秒），用于延迟消息。设置后，消息将在指定的时间后才被消费者接收。适用于订单超时、预约提醒等场景。注意：RocketMQ的延时等级是固定的，此处的秒级延时会在SDK层面转换为RocketMQ支持的延时等级进行发送，如果需要非常精确的延时，可能需要在应用层面进一步处理或选择其他机制。 |
+| body | String | 消息内容，**必填**。通常是业务对象的JSON格式字符串。在构造方法中，如果传入的是一个Object，会自动转换为JSON字符串。安全建议：避免包含敏感信息（如密码、密钥），必要时进行脱敏处理，控制消息大小。 |
+| deliverTime | long | 延迟发送时间（秒），用于延迟消息。设置后，消息将在指定的时间后才被消费者接收。适用于订单超时、预约提醒等场景。注意：RocketMQ的延时等级是固定的 (例如 1s 5s 10s 30s 1m ... 2h)，`GXSendRocketMQServiceImpl` 中的 `sendDelayMessage` 方法会将此秒级延时转换为毫秒级的时间戳 (`System.currentTimeMillis() + messageReqDto.getDeliverTime() * 1000L`)，并设置到 `Message` 的 `setDeliverTimeMs` 属性中，由 `RocketMQTemplate` 的 `syncSend` 方法处理。如果需要非常精确的延时，可能需要在应用层面进一步处理或选择其他机制。 |
 | messageKey | String | 消息唯一标识，可选，但**强烈建议设置**。用于消息的查询和跟踪。建议使用业务唯一标识（如订单号、用户ID）。好处：方便控制台查询跟踪、问题排查、业务分析、实现消息幂等性。 |
 
 #### 3.1.2 构造方法
@@ -171,64 +258,97 @@ customMessage.setMessageKey("ORD123456_REFUND");
 // - GXRocketMQMessageReqDto(): 默认构造函数，后续需手动设置所有必要属性，尤其是 topic。
 // - GXRocketMQMessageReqDto(Object body): 仅指定消息体，后续需手动设置 topic。
 // - GXRocketMQMessageReqDto(String tag, Object body): 指定标签和消息体，后续需手动设置 topic。
-// - GXRocketMQMessageReqDto(String topic, String tag, Object body, int deliverTime, String messageKey): 全参数构造，推荐使用以确保所有属性都被正确初始化。
+// - GXRocketMQMessageReqDto(String topic, String tag, Object body, long deliverTime, String messageKey): 全参数构造，推荐使用以确保所有属性都被正确初始化 (注意 deliverTime 类型为 long)。
 ```
 
 ### 3.2 消息发送服务
 
-`GXSendRocketMQService` 接口及其实现类 `GXSendRocketMQServiceImpl` 提供了多种消息发送模式。
+`cn.maple.rocketmq.service.GXSendRocketMQService` 接口及其实现类 `cn.maple.rocketmq.service.impl.GXSendRocketMQServiceImpl` 提供了多种消息发送模式。该服务实现类依赖 `org.apache.rocketmq.spring.core.RocketMQTemplate` 进行消息发送。
 
-#### 3.2.1 普通消息发送 (send)
+#### 3.2.1 普通消息发送 (`sendNormalMessage`)
 
-- **方法签名**: `SendResult send(GXRocketMQMessageReqDto messageDto)`
-- **描述**: 发送普通（同步）消息。消息会立即发送，并等待 Broker 的确认。这是最可靠的发送方式。
-- **参数**: `messageDto` - 包含消息主题、标签、内容、消息Key等信息的请求对象。
-- **返回**: `SendResult` - 发送结果，包含发送状态、消息ID、消息队列等信息。
+- **方法签名**: `void sendNormalMessage(GXRocketMQMessageReqDto messageReqDto)`
+- **描述**: 发送普通消息。内部调用 `rocketMQTemplate.send(destination, message)`，这是一个同步发送操作。如果发送成功，记录成功日志；如果发送失败，记录错误日志并抛出 `GXBusinessException`。
+- **参数**: `messageReqDto` - 包含消息主题、标签、内容、消息Key等信息的请求对象。`topic` 和 `body` 不能为空。
+- **返回**: `void`
 - **使用场景**: 对消息可靠性要求非常高，需要明确知道消息是否成功投递到 Broker 的场景。例如：重要的交易指令、订单状态变更等。
 - **注意事项**:
-    - **阻塞**: 同步发送会阻塞当前业务线程，直到收到 Broker 的响应或超时。在高并发或对响应时间敏感的场景下，需要谨慎评估其对系统性能的影响。
-    - **超时**: 默认发送超时时间为3秒，可以通过 `gx.rocketmq.send-message-timeout` (本地配置) 或 Nacos 配置进行调整。
-    - **重试**: 发送失败时，SDK内部会自动进行重试（默认2次）。
-    - **异常处理**: 需要捕获并处理可能抛出的 `MQClientException`, `RemotingException`, `MQBrokerException`, `InterruptedException` 等异常。
+    - **阻塞**: `rocketMQTemplate.send()` 是同步操作，会阻塞当前线程。
+    - **异常处理**: 方法内部会捕获所有异常，记录日志，并包装为 `GXBusinessException` 抛出。
+    - **消息构造**: 使用 `MessageBuilder` 构建消息。如果 `messageKey` 不为空，会通过 `messageBuilder.setHeader(RocketMQHeaders.KEYS, messageKey)` 设置。
+    - **目标地址**: 通过内部私有方法 `getDestination(messageReqDto)` 构建，格式为 `topic:tag` (如果tag存在) 或 `topic` (如果tag不存在)。
 
-#### 3.2.2 延迟消息发送 (sendDelay)
+#### 3.2.2 延迟消息发送 (`sendDelayMessage`)
 
-- **方法签名**: `SendResult sendDelay(GXRocketMQMessageReqDto messageDto)`
-- **描述**: 发送延迟消息。消息将在 `messageDto` 中指定的 `deliverTime` (秒) 之后才对消费者可见。
-- **参数**: `messageDto` - 必须包含 `deliverTime` 属性，指定延迟的秒数。
-- **返回**: `SendResult` - 发送结果。
+- **方法签名**: `String sendDelayMessage(GXRocketMQMessageReqDto messageReqDto)`
+- **描述**: 发送延迟消息。消息将在 `messageReqDto` 中指定的 `deliverTime` (秒) 之后才对消费者可见。内部将 `deliverTime` (秒) 转换为毫秒级的时间戳 (`System.currentTimeMillis() + messageReqDto.getDeliverTime() * 1000L`)，然后调用 `rocketMQTemplate.syncSendDeliverTimeMills(getDestination(messageReqDto), message, deliveryTimeMills)` 进行发送。
+- **参数**: `messageReqDto` - 包含消息主题、标签、内容、消息Key以及 `deliverTime` (延迟秒数，必须大于0) 的请求对象。`topic` 和 `body` 不能为空。
+- **返回**: `String` - 发送成功后返回 `SendResult` 中的 `MsgId`。如果发送失败，记录错误日志并抛出 `GXBusinessException`。
 - **使用场景**: 需要在未来某个特定时间点触发的业务逻辑。例如：订单创建30分钟后未支付则自动关闭订单、会议开始前15分钟发送提醒。
 - **注意事项**:
-    - **延迟等级**: RocketMQ Broker 端预设了18个延迟等级 (例如：1s, 5s, 10s, 30s, 1m ... 2h)。SDK 会将用户设置的秒级 `deliverTime` 转换为最接近的、且不小于该时间的预设延迟等级进行发送。因此，延迟时间可能不是绝对精确的秒级，会有一定的误差。
-    - **最大延迟**: 开源版 RocketMQ 最大支持2小时的延迟。
-    - **实现**: 内部依然调用同步发送逻辑，因此具备同步发送的可靠性，但同样会阻塞线程。
+    - **延迟时间**: `deliverTime` 单位为秒，且必须大于0，否则抛出 `GXBusinessException`。
+    - **实现**: 内部调用 `rocketMQTemplate.syncSendDeliverTimeMills()` 方法，这是一个同步发送操作，会阻塞当前线程。
+    - **精确度**: `syncSendDeliverTimeMills` 允许指定消息投递的绝对时间戳（毫秒），相比基于固定延迟等级的发送方式，理论上可以提供更灵活的延迟控制，但具体精确度仍受Broker端调度影响。
+    - **异常处理**: 方法内部会捕获所有异常，记录日志，并包装为 `GXBusinessException` 抛出。
 
-#### 3.2.3 异步消息发送 (sendAsync)
+#### 3.2.3 异步消息发送 (`sendAsync`)
 
-- **方法签名**: `void sendAsync(GXRocketMQMessageReqDto messageDto, SendCallback sendCallback)`
-- **描述**: 异步发送消息。消息发送请求提交后，业务线程不会阻塞等待 Broker 响应，而是立即返回。发送结果通过注册的 `SendCallback` 回调函数进行处理。
-- **参数**:
-    - `messageDto`: 消息请求对象。
-    - `sendCallback`: 回调接口，需要实现 `onSuccess(SendResult sendResult)` 和 `onException(Throwable e)` 方法。
-- **返回**: `void`
+- **方法签名**: `boolean sendAsync(GXRocketMQMessageReqDto messageReqDto)`
+- **描述**: 异步发送消息。消息发送请求提交后，业务线程不会阻塞等待 Broker 响应，而是立即返回。内部调用 `rocketMQTemplate.asyncSend(destination, message, SendCallback)`。
+- **参数**: `messageReqDto`: 消息请求对象。`topic` 和 `body` 不能为空。
+- **返回**: `boolean` - `true` 表示异步发送请求已成功提交。如果请求提交过程中发生异常 (如参数校验失败)，则记录错误日志并抛出 `GXBusinessException` (此时不会返回 `false`)。
 - **使用场景**: 对响应时间敏感，且可以接受消息最终一致性的场景。例如：用户操作日志记录、用户行为数据采集、通知类消息（如图文推送结果通知）。可以显著提高系统的吞吐量。
-- **注意事项**:
-    - **回调处理**: 必须在 `SendCallback` 中妥善处理发送成功和失败的逻辑。例如，失败时可以记录日志、尝试重发（需注意幂等性）或通知相关方。
+- **注意事项**: 
+    - **回调处理**: `GXSendRocketMQServiceImpl` 内部实现了一个匿名 `SendCallback`：
+        - `onSuccess(SendResult sendResult)`: 记录包含主题、标签和消息ID的成功日志。
+        - `onException(Throwable throwable)`: 记录包含主题、标签、错误信息和异常堆栈的错误日志。
+      业务方无法直接提供自定义的 `SendCallback` 实例给此方法。
+    - **返回值**: 返回 `true` 仅表示异步发送任务已提交给 `RocketMQTemplate`，不代表消息最终发送成功。实际的发送结果由内部 `SendCallback` 处理。
+    - **异常处理**: 如果在准备异步发送（如参数校验、消息构建）阶段发生错误，会抛出 `GXBusinessException`。`SendCallback` 中的 `onException` 处理的是异步发送过程中的网络或Broker错误。
     - **线程池**: 异步发送依赖于生产者内部的线程池。如果业务量过大，需要关注线程池的配置和状态。
     - **资源管理**: 回调方法中应避免执行耗时操作，以免阻塞回调线程池，影响其他异步消息的处理。
 
-#### 3.2.4 单向消息发送 (sendOneway)
+#### 3.2.4 单向消息发送 (`sendOneway`)
 
-- **方法签名**: `void sendOneway(GXRocketMQMessageReqDto messageDto)`
-- **描述**: 单向（Oneway）发送消息。消息发送请求提交后，不等待 Broker 的任何响应，也不关心消息是否发送成功。这种方式的发送效率最高，但可靠性最低。
-- **参数**: `messageDto`: 消息请求对象。
-- **返回**: `void`
+- **方法签名**: `boolean sendOneway(GXRocketMQMessageReqDto messageReqDto)`
+- **描述**: 单向（Oneway）发送消息。消息发送请求提交后，不等待 Broker 的任何响应，也不关心消息是否发送成功。内部调用 `rocketMQTemplate.sendOneWay(getDestination(messageReqDto), message)`。
+- **参数**: `messageReqDto`: 消息请求对象。`topic` 和 `body` 不能为空。
+- **返回**: `boolean` - `true` 表示单向发送请求已成功提交。如果请求提交过程中发生异常 (如参数校验失败)，则记录错误日志并抛出 `GXBusinessException` (此时不会返回 `false`)。
 - **使用场景**: 对消息可靠性要求不高，允许少量消息丢失的场景。例如：非核心业务的监控数据上报、应用性能指标采样、可选的通知等。适用于需要极高吞吐量且能容忍数据丢失的场景。
-- **注意事项**:
+- **注意事项**: 
     - **消息丢失风险**: 由于不等待 Broker 确认，网络抖动、Broker故障等都可能导致消息丢失，且客户端无感知。
+    - **返回值**: 返回 `true` 仅表示单向发送任务已提交给 `RocketMQTemplate`，不代表消息最终发送成功或被Broker接收。
+    - **异常处理**: 如果在准备单向发送（如参数校验、消息构建）阶段发生错误，会抛出 `GXBusinessException`。
     - **适用性评估**: 仅在业务可以完全容忍消息丢失的情况下使用。
 
-#### 3.2.5 同步批量消息发送 (sendBatch)
+#### 3.2.5 同步消息发送 (`syncSend`)
+
+- **方法签名**: `boolean syncSend(GXRocketMQMessageReqDto messageReqDto)`
+- **描述**: 同步发送消息。内部调用 `rocketMQTemplate.syncSend(getDestination(messageReqDto), message)`。如果发送成功，记录成功日志并返回 `true`；如果发送失败，记录错误日志并抛出 `GXBusinessException` (此时不会返回 `false`)。
+- **参数**: `messageReqDto` - 消息请求对象。`topic` 和 `body` 不能为空。
+- **返回**: `boolean` - `true` 表示消息发送成功。
+- **使用场景**: 需要明确知道消息是否成功投递，并且希望通过返回值直接判断的场景（尽管失败时仍会抛出异常）。
+- **注意事项**:
+    - **阻塞**: 同步发送会阻塞当前业务线程。
+    - **异常处理**: 方法内部会捕获所有异常，记录日志，并包装为 `GXBusinessException` 抛出。这意味着调用方通常需要通过 `try-catch` 来处理发送失败的情况，而不是仅仅依赖 `false` 返回值。
+    - **与 `sendNormalMessage` 的区别**: `sendNormalMessage` 返回 `void`，失败时抛出异常。`syncSend` 返回 `boolean` (成功时为 `true`)，失败时同样抛出异常。从异常处理角度看，两者在失败场景下的行为类似，都需要调用方捕获异常。
+
+*(文档原有章节 3.2.5 `同步批量消息发送 (sendBatch)` 在 `GXSendRocketMQService` 接口和 `GXSendRocketMQServiceImpl` 实现中未找到对应方法。如果需要批量发送功能，`RocketMQTemplate` 本身支持批量发送，但当前模块未封装。)*
+
+### 3.3 内部辅助方法
+
+#### 3.3.1 `getDestination`
+
+- **方法签名**: `private String getDestination(GXRocketMQMessageReqDto messageReqDto)`
+- **描述**: 根据 `GXRocketMQMessageReqDto` 中的 `topic` 和 `tag` 构建 RocketMQ 的目标字符串 (destination)。
+- **参数**: `messageReqDto` - 消息请求对象。`messageReqDto` 和 `messageReqDto.getTopic()` 不能为空。
+- **返回**: `String` - 格式为 `topic:tag` (如果 `tag` 不为空) 或 `topic` (如果 `tag` 为空或空字符串)。
+- **逻辑**: 
+    - 对 `messageReqDto` 进行 null 检查。
+    - 对 `messageReqDto.getTopic()` 进行空检查，如果为空则抛出 `GXBusinessException`。
+    - 如果 `messageReqDto.getTag()` 为空或空字符串，则返回 `topic`。
+    - 否则，使用 `CharSequenceUtil.format("{}:{}", topic, tag)` 返回 `topic:tag`。
+- **用途**: 在所有消息发送方法中，用于确定消息发送的目标地址。
 
 - **方法签名**: `SendResult sendBatch(List<GXRocketMQMessageReqDto> messages)`
 - **描述**: 同步发送批量消息。将多条消息打包成一个批次一次性发送给 Broker，可以减少网络请求次数，提高发送效率。
@@ -244,7 +364,7 @@ customMessage.setMessageKey("ORD123456_REFUND");
     - **错误处理**: 如果批量发送失败（例如，由于消息过大或 Broker 问题），需要业务方根据 `SendResult` 和异常信息进行判断和处理，可能需要重试或记录失败的消息。
     - **实现**: `GXSendRocketMQServiceImpl` 中的 `sendBatch` 方法会将 `List<GXRocketMQMessageReqDto>` 转换为 `List<Message>`，然后调用 `DefaultMQProducer` 的 `send(Collection<Message> msgs)` 方法。
 
-### 3.3 安全性、内存与性能考量
+### 3.4 安全性、内存与性能考量
 
 - **安全性**:
     - **消息内容安全**: 
