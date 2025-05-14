@@ -6,12 +6,14 @@ import cn.hutool.core.util.ClassUtil;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
-import org.redisson.api.RBlockingQueue;
-import org.redisson.api.RDelayedQueue;
+import org.redisson.api.MessageParams;
+import org.redisson.api.RReliableQueue;
 import org.redisson.api.RedissonClient;
+import org.redisson.api.queue.QueueAddParams;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -79,8 +81,11 @@ public class GXRedissonQueueUtils {
         try {
             String msg = convertMessageToString(message);
             LOGGER.info("发送Redisson的延迟队列消息 : queueName = {} , message = {}", queueName, msg);
-            RDelayedQueue<String> delayedQueue = getDelayedQueue(queueName);
-            delayedQueue.offer(msg, delayTime, timeUnit);
+            RReliableQueue<String> delayedQueue = getDelayedQueue(queueName);
+            MessageParams<String> messageParams = new MessageParams<>(msg);
+            QueueAddParams<String> queueAddParams = new QueueAddParams<>(messageParams);
+            queueAddParams.timeout(Duration.of(delayTime, timeUnit.toChronoUnit()));
+            delayedQueue.add(queueAddParams);
         } catch (GXBusinessException e) {
             throw e;
         } catch (Exception e) {
@@ -125,8 +130,11 @@ public class GXRedissonQueueUtils {
         try {
             String msg = convertMessageToString(message);
             LOGGER.info("异步发送Redisson的延迟队列消息 : queueName = {} , message = {}", queueName, msg);
-            RDelayedQueue<String> delayedQueue = getDelayedQueue(queueName);
-            delayedQueue.offer(msg, delayTime, timeUnit);
+            RReliableQueue<String> delayedQueue = getDelayedQueue(queueName);
+            MessageParams<String> messageParams = new MessageParams<>(msg);
+            QueueAddParams<String> queueAddParams = new QueueAddParams<>(messageParams);
+            queueAddParams.timeout(Duration.of(delayTime, timeUnit.toChronoUnit()));
+            delayedQueue.add(queueAddParams);
         } catch (GXBusinessException e) {
             throw e;
         } catch (Exception e) {
@@ -147,7 +155,7 @@ public class GXRedissonQueueUtils {
      * @throws IllegalArgumentException 如果队列名为空
      * @throws GXBusinessException      如果无法获取RedissonClient实例
      */
-    public static RDelayedQueue<String> getDelayedQueue(String queueName) {
+    public static RReliableQueue<String> getDelayedQueue(String queueName) {
         if (CharSequenceUtil.isBlank(queueName)) {
             throw new IllegalArgumentException("队列名不能为空");
         }
@@ -158,8 +166,8 @@ public class GXRedissonQueueUtils {
         }
 
         try {
-            RBlockingQueue<String> destinationQueue = redissonMQClient.getBlockingQueue(queueName);
-            return redissonMQClient.getDelayedQueue(destinationQueue);
+            // use the RReliableQueue object with delay feature.
+            return redissonMQClient.getReliableQueue(queueName);
         } catch (Exception e) {
             LOGGER.error("获取延迟队列[{}]实例时发生异常: {}", queueName, e.getMessage(), e);
             throw new GXBusinessException("获取延迟队列实例失败: " + e.getMessage(), e);
