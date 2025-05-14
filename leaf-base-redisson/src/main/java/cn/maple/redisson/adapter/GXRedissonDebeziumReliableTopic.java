@@ -87,7 +87,7 @@ public class GXRedissonDebeziumReliableTopic<T> {
     private final String topicName;
 
     public GXRedissonDebeziumReliableTopic(String name) {
-        this(GXSpringContextUtils.getBean(RedissonClient.class), new StringCodec(), name);
+        this(GXSpringContextUtils.getBean("redissonMQClient", RedissonClient.class), new StringCodec(), name);
     }
 
     /**
