@@ -50,26 +50,26 @@ import java.util.concurrent.ForkJoinTask;
  *     null,  // 默认异常处理器
  *     false   // 非异步模式
  * );
- * 
+ *
  * // 2. 在主线程中设置MDC上下文
  * MDC.put("traceId", "main-thread-trace-id");
  * MDC.put("userId", "12345");
- * 
+ *
  * // 3. 提交Runnable任务
  * pool.execute(() -> {
  *     // 在这里可以获取到与主线程相同的traceId
  *     String traceId = MDC.get("traceId"); // 值为 "main-thread-trace-id"
  *     String userId = MDC.get("userId");   // 值为 "12345"
- *     
+ *
  *     logger.info("并行任务执行中..."); // 日志会包含相同的traceId
  * });
- * 
+ *
  * // 4. 提交Callable任务
  * ForkJoinTask<String> task = pool.submit(() -> {
  *     // MDC上下文也会被正确传递
  *     return "任务完成，traceId: " + MDC.get("traceId");
  * });
- * 
+ *
  * // 5. 使用Java 8 并行流时的配置（全局设置）
  * // System.setProperty("java.util.concurrent.ForkJoinPool.common.threadFactory", "自定义的MDC感知线程工厂");
  * // List<String> result = list.parallelStream()
@@ -79,7 +79,7 @@ import java.util.concurrent.ForkJoinTask;
  * //         return item.toUpperCase();
  * //     })
  * //     .collect(Collectors.toList());
- * 
+ *
  * // 6. 关闭线程池
  * pool.shutdown();
  * </pre>
@@ -123,9 +123,9 @@ public class GXMdcWrapperForkJoinPool extends ForkJoinPool {
      * </p>
      *
      * @param parallelism 并行度，通常设置为可用处理器数量
-     * @param factory 创建工作线程的工厂
-     * @param handler 未捕获异常的处理器
-     * @param asyncMode 是否使用异步模式（FIFO而非LIFO）
+     * @param factory     创建工作线程的工厂
+     * @param handler     未捕获异常的处理器
+     * @param asyncMode   是否使用异步模式（FIFO而非LIFO）
      */
     public GXMdcWrapperForkJoinPool(int parallelism, ForkJoinWorkerThreadFactory factory, Thread.UncaughtExceptionHandler handler, boolean asyncMode) {
         super(parallelism, factory, handler, asyncMode);
@@ -151,9 +151,9 @@ public class GXMdcWrapperForkJoinPool extends ForkJoinPool {
      * 在提交任务前，使用GXMdcThreadUtils包装任务，确保MDC上下文（包括traceId）能够传递到ForkJoin线程中。
      * </p>
      *
-     * @param task 需要提交的任务
+     * @param task   需要提交的任务
      * @param result 任务完成后返回的结果
-     * @param <T> 结果的类型
+     * @param <T>    结果的类型
      * @return 表示任务的ForkJoinTask
      */
     @Override
@@ -168,7 +168,7 @@ public class GXMdcWrapperForkJoinPool extends ForkJoinPool {
      * </p>
      *
      * @param task 需要提交的任务
-     * @param <T> 任务结果的类型
+     * @param <T>  任务结果的类型
      * @return 表示任务的ForkJoinTask
      */
     @Override

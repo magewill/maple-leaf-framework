@@ -49,27 +49,27 @@ import java.util.concurrent.Future;
  * executor.setQueueCapacity(100);
  * executor.setThreadNamePrefix("mdc-async-");
  * executor.initialize();
- * 
+ *
  * // 2. 在主线程中设置MDC上下文
  * MDC.put("traceId", "main-thread-trace-id");
  * MDC.put("userId", "12345");
- * 
+ *
  * // 3. 提交任务到线程池（MDC上下文会自动传递）
  * executor.execute(() -> {
  *     // 在这里可以获取到与主线程相同的traceId
  *     String traceId = MDC.get("traceId"); // 值为 "main-thread-trace-id"
  *     String userId = MDC.get("userId");   // 值为 "12345"
- *     
+ *
  *     // 业务逻辑...
  *     logger.info("异步任务执行中..."); // 日志会包含相同的traceId
  * });
- * 
+ *
  * // 4. 提交有返回值的任务
  * Future<String> future = executor.submit(() -> {
  *     // MDC上下文也会被正确传递
  *     return "任务完成，traceId: " + MDC.get("traceId");
  * });
- * 
+ *
  * // 5. 在Spring配置中使用
  * // @Bean
  * // public ThreadPoolTaskExecutor threadPoolTaskExecutor() {
@@ -104,7 +104,7 @@ public class GXMdcWrapperThreadPoolTaskExecutor extends ThreadPoolTaskExecutor {
      * 在执行任务前，使用GXMdcThreadUtils包装任务，确保MDC上下文（包括traceId）能够传递到线程池线程中。
      * </p>
      *
-     * @param task 需要执行的任务
+     * @param task         需要执行的任务
      * @param startTimeout 启动超时时间（毫秒）
      */
     @Override
@@ -119,7 +119,7 @@ public class GXMdcWrapperThreadPoolTaskExecutor extends ThreadPoolTaskExecutor {
      * </p>
      *
      * @param task 需要提交的任务
-     * @param <T> 任务结果的类型
+     * @param <T>  任务结果的类型
      * @return 表示任务的未来结果的Future
      */
     @Override
@@ -164,7 +164,7 @@ public class GXMdcWrapperThreadPoolTaskExecutor extends ThreadPoolTaskExecutor {
      * </p>
      *
      * @param task 需要提交的任务
-     * @param <T> 任务结果的类型
+     * @param <T>  任务结果的类型
      * @return 表示任务的可监听Future
      */
     @Override

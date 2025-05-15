@@ -49,32 +49,32 @@ import java.util.concurrent.*;
  *     new ThreadFactoryBuilder().setNameFormat("mdc-pool-%d").build(),  // 线程工厂
  *     new ThreadPoolExecutor.CallerRunsPolicy()                         // 拒绝策略
  * );
- * 
+ *
  * // 2. 在主线程中设置MDC上下文
  * MDC.put("traceId", "main-thread-trace-id");
  * MDC.put("userId", "12345");
- * 
+ *
  * // 3. 提交任务到线程池（MDC上下文会自动传递）
  * executor.execute(() -> {
  *     // 在这里可以获取到与主线程相同的traceId
  *     String traceId = MDC.get("traceId"); // 值为 "main-thread-trace-id"
  *     String userId = MDC.get("userId");   // 值为 "12345"
- *     
+ *
  *     // 业务逻辑...
  *     logger.info("异步任务执行中..."); // 日志会包含相同的traceId
  * });
- * 
+ *
  * // 4. 提交有返回值的任务
  * Future<String> future = executor.submit(() -> {
  *     // MDC上下文也会被正确传递
  *     return "任务完成，traceId: " + MDC.get("traceId");
  * });
- * 
+ *
  * // 5. 提交带结果的Runnable任务
  * Future<Integer> futureWithResult = executor.submit(() -> {
  *     logger.info("执行带结果的Runnable任务");
  * }, 42); // 任务完成后返回42
- * 
+ *
  * // 6. 关闭线程池（实际应用中通常由容器管理生命周期）
  * executor.shutdown();
  * </pre>
@@ -89,11 +89,11 @@ public class GXMdcWrapperThreadPoolExecutor extends ThreadPoolExecutor {
      * 创建一个具有指定核心线程数、最大线程数、保持活动时间和工作队列的线程池，并支持MDC上下文传递。
      * </p>
      *
-     * @param corePoolSize 核心线程数
+     * @param corePoolSize    核心线程数
      * @param maximumPoolSize 最大线程数
-     * @param keepAliveTime 线程空闲时的保持活动时间
-     * @param unit 保持活动时间的时间单位
-     * @param workQueue 用于保存任务的阻塞队列
+     * @param keepAliveTime   线程空闲时的保持活动时间
+     * @param unit            保持活动时间的时间单位
+     * @param workQueue       用于保存任务的阻塞队列
      */
     public GXMdcWrapperThreadPoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue) {
         super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue);
@@ -106,12 +106,12 @@ public class GXMdcWrapperThreadPoolExecutor extends ThreadPoolExecutor {
      * 线程工厂用于创建新线程，可以自定义线程的命名、优先级等属性。
      * </p>
      *
-     * @param corePoolSize 核心线程数
+     * @param corePoolSize    核心线程数
      * @param maximumPoolSize 最大线程数
-     * @param keepAliveTime 线程空闲时的保持活动时间
-     * @param unit 保持活动时间的时间单位
-     * @param workQueue 用于保存任务的阻塞队列
-     * @param threadFactory 创建新线程的工厂
+     * @param keepAliveTime   线程空闲时的保持活动时间
+     * @param unit            保持活动时间的时间单位
+     * @param workQueue       用于保存任务的阻塞队列
+     * @param threadFactory   创建新线程的工厂
      */
     public GXMdcWrapperThreadPoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue, ThreadFactory threadFactory) {
         super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue, threadFactory);
@@ -124,12 +124,12 @@ public class GXMdcWrapperThreadPoolExecutor extends ThreadPoolExecutor {
      * 拒绝处理器用于处理线程池无法接受新任务的情况。
      * </p>
      *
-     * @param corePoolSize 核心线程数
+     * @param corePoolSize    核心线程数
      * @param maximumPoolSize 最大线程数
-     * @param keepAliveTime 线程空闲时的保持活动时间
-     * @param unit 保持活动时间的时间单位
-     * @param workQueue 用于保存任务的阻塞队列
-     * @param handler 拒绝执行处理器
+     * @param keepAliveTime   线程空闲时的保持活动时间
+     * @param unit            保持活动时间的时间单位
+     * @param workQueue       用于保存任务的阻塞队列
+     * @param handler         拒绝执行处理器
      */
     public GXMdcWrapperThreadPoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue, RejectedExecutionHandler handler) {
         super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue, handler);
@@ -141,13 +141,13 @@ public class GXMdcWrapperThreadPoolExecutor extends ThreadPoolExecutor {
      * 创建一个具有所有可配置参数的线程池，并支持MDC上下文传递。
      * </p>
      *
-     * @param corePoolSize 核心线程数
+     * @param corePoolSize    核心线程数
      * @param maximumPoolSize 最大线程数
-     * @param keepAliveTime 线程空闲时的保持活动时间
-     * @param unit 保持活动时间的时间单位
-     * @param workQueue 用于保存任务的阻塞队列
-     * @param threadFactory 创建新线程的工厂
-     * @param handler 拒绝执行处理器
+     * @param keepAliveTime   线程空闲时的保持活动时间
+     * @param unit            保持活动时间的时间单位
+     * @param workQueue       用于保存任务的阻塞队列
+     * @param threadFactory   创建新线程的工厂
+     * @param handler         拒绝执行处理器
      */
     public GXMdcWrapperThreadPoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue, ThreadFactory threadFactory, RejectedExecutionHandler handler) {
         super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue, threadFactory, handler);
@@ -173,9 +173,9 @@ public class GXMdcWrapperThreadPoolExecutor extends ThreadPoolExecutor {
      * 在提交任务前，使用GXMdcThreadUtils包装任务，确保MDC上下文（包括traceId）能够传递到线程池线程中。
      * </p>
      *
-     * @param task 需要提交的任务
+     * @param task   需要提交的任务
      * @param result 任务完成后返回的结果
-     * @param <T> 结果的类型
+     * @param <T>    结果的类型
      * @return 表示任务的Future
      */
     @Override
@@ -190,7 +190,7 @@ public class GXMdcWrapperThreadPoolExecutor extends ThreadPoolExecutor {
      * </p>
      *
      * @param task 需要提交的任务
-     * @param <T> 任务结果的类型
+     * @param <T>  任务结果的类型
      * @return 表示任务的Future
      */
     @Override
