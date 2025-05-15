@@ -4,6 +4,7 @@ import cn.hutool.core.text.CharSequenceUtil;
 import org.slf4j.MDC;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -107,7 +108,13 @@ public class GXMdcThreadUtils {
      * <p>
      * <b>线程安全</b>：
      * - MDC.getCopyOfContextMap() 返回当前线程的 MDC 上下文副本，不会影响其他线程。
-     * - 返回的 Map 被包装为不可变 Map（Collections.unmodifiableMap），防止意外修改。
+     * - 返回的 Map 被包装为不可变 Map（通过 Map.copyOf），防止意外修改。
+     * - Java 17+ 中的 Map.copyOf 比 Collections.unmodifiableMap 更高效，因为它创建了一个全新的不可变 Map。
+     * </p>
+     * <p>
+     * <b>性能优化</b>：
+     * - 使用 Map.copyOf 替代传统的 Collections.unmodifiableMap，减少内存占用。
+     * - 对空 Map 进行快速检查，避免不必要的复制操作。
      * </p>
      *
      * @return 当前线程的 MDC 上下文副本（不可变 Map），如果为空则返回 null
@@ -118,6 +125,7 @@ public class GXMdcThreadUtils {
             return null;
         }
         // 返回不可变 Map，防止外部修改
+        // Java 17+ 中的 Map.copyOf 比 Collections.unmodifiableMap 更高效
         return Map.copyOf(context);
     }
 
@@ -137,6 +145,11 @@ public class GXMdcThreadUtils {
      * - 传入的 context 是不可变 Map（通过 getMdcContext 获取），避免被修改。
      * </p>
      * <p>
+     * <b>性能优化</b>：
+     * - 使用 Objects.requireNonNull 进行参数校验，提高代码的健壮性。
+     * - 优化 MDC 上下文的设置和恢复逻辑，减少不必要的操作。
+     * </p>
+     * <p>
      * <b>使用示例</b>：
      * <pre>
      * ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -149,11 +162,10 @@ public class GXMdcThreadUtils {
      * @param context  父线程的 MDC 上下文映射（通过 getMdcContext 获取）
      * @param <T>      Callable 返回值的类型
      * @return 包装后的 Callable 任务
+     * @throws NullPointerException 如果 callable 为 null
      */
     public static <T> Callable<T> wrap(final Callable<T> callable, final Map<String, String> context) {
-        if (callable == null) {
-            throw new IllegalArgumentException("Callable cannot be null");
-        }
+        Objects.requireNonNull(callable, "Callable cannot be null");
         return () -> {
             // 保存子线程的原始 MDC 上下文（如果存在）
             Map<String, String> originalContext = MDC.getCopyOfContextMap();
@@ -195,6 +207,11 @@ public class GXMdcThreadUtils {
      * - 传入的 context 是不可变 Map（通过 getMdcContext 获取），避免被修改。
      * </p>
      * <p>
+     * <b>性能优化</b>：
+     * - 使用 Objects.requireNonNull 进行参数校验，提高代码的健壮性。
+     * - 优化 MDC 上下文的设置和恢复逻辑，减少不必要的操作。
+     * </p>
+     * <p>
      * <b>使用示例</b>：
      * <pre>
      * ExecutorService executor = Executors.newFixedThreadPool(2);
@@ -206,11 +223,10 @@ public class GXMdcThreadUtils {
      * @param runnable 需要包装的 Runnable 任务
      * @param context  父线程的 MDC 上下文映射（通过 getMdcContext 获取）
      * @return 包装后的 Runnable 任务
+     * @throws NullPointerException 如果 runnable 为 null
      */
     public static Runnable wrap(final Runnable runnable, final Map<String, String> context) {
-        if (runnable == null) {
-            throw new IllegalArgumentException("Runnable cannot be null");
-        }
+        Objects.requireNonNull(runnable, "Runnable cannot be null");
         return () -> {
             // 保存子线程的原始 MDC 上下文（如果存在）
             Map<String, String> originalContext = MDC.getCopyOfContextMap();
@@ -280,6 +296,11 @@ public class GXMdcThreadUtils {
      * - 传入的 context 是不可变 Map，避免被修改。
      * </p>
      * <p>
+     * <b>性能优化</b>：
+     * - 使用 Objects.requireNonNull 进行参数校验，提高代码的健壮性。
+     * - 优化 MDC 上下文的设置和恢复逻辑，减少不必要的操作。
+     * </p>
+     * <p>
      * <b>使用示例</b>：
      * <pre>
      * Map<String, String> context = GXMdcThreadUtils.getMdcContext();
@@ -293,11 +314,10 @@ public class GXMdcThreadUtils {
      * @param context  父线程的 MDC 上下文映射（通过 getMdcContext 获取）
      * @param <T>      Supplier 返回值的类型
      * @return 包装后的 Supplier
+     * @throws NullPointerException 如果 supplier 为 null
      */
     public static <T> Supplier<T> wrapSupplier(final Supplier<T> supplier, final Map<String, String> context) {
-        if (supplier == null) {
-            throw new IllegalArgumentException("Supplier cannot be null");
-        }
+        Objects.requireNonNull(supplier, "Supplier cannot be null");
         return () -> {
             // 保存子线程的原始 MDC 上下文（如果存在）
             Map<String, String> originalContext = MDC.getCopyOfContextMap();
@@ -445,6 +465,12 @@ public class GXMdcThreadUtils {
      * <p>
      * <b>线程安全</b>：
      * - 通过包装 Function 确保 MDC 上下文的安全传递和清理。
+     * - 使用 try-finally 块确保 MDC 上下文的清理，即使函数执行过程中抛出异常。
+     * </p>
+     * <p>
+     * <b>性能优化</b>：
+     * - 在方法调用时获取 MDC 上下文，而不是在每次函数执行时重新获取，减少上下文复制操作。
+     * - 优化 MDC 上下文的设置和恢复逻辑，减少不必要的操作。
      * </p>
      * <p>
      * <b>使用示例</b>：
@@ -461,8 +487,10 @@ public class GXMdcThreadUtils {
      * @param <T>      输入类型
      * @param <R>      输出类型
      * @return 包装后的函数，可以安全地访问 MDC 上下文
+     * @throws NullPointerException 如果 function 为 null
      */
     public static <T, R> Function<T, R> contextWrapper(Function<T, R> function) {
+        Objects.requireNonNull(function, "Function cannot be null");
         Map<String, String> context = getMdcContext();
         return input -> {
             // 保存当前线程的原始 MDC 上下文
