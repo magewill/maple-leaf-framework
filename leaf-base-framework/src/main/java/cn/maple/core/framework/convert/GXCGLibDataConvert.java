@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.cglib.beans.BeanCopier;
 import org.springframework.cglib.core.Converter;
 
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
@@ -167,7 +168,7 @@ public class GXCGLibDataConvert implements Converter {
      * 使用ConcurrentHashMap确保线程安全
      * </p>
      */
-    private static final Map<Class<?>, GXCGLibDataConvert> CONVERTER_CACHE = new ConcurrentHashMap<>(64);
+    private static final Map<Class<?>, WeakReference<GXCGLibDataConvert>> CONVERTER_CACHE = new ConcurrentHashMap<>(64);
 
     /**
      * 字段缓存
@@ -262,11 +263,17 @@ public class GXCGLibDataConvert implements Converter {
             throw new GXBusinessException("目标类型不能为null");
         }
 
-        // 从缓存中获取或创建新的转换器实例
-        return CONVERTER_CACHE.computeIfAbsent(targetClass, clazz -> {
-            LOG.trace("为目标类型 {} 创建专用转换器", clazz.getName());
-            return new GXCGLibDataConvert(clazz);
-        });
+        // 尝试从弱引用缓存获取
+        WeakReference<GXCGLibDataConvert> weakRef = CONVERTER_CACHE.get(targetClass);
+        GXCGLibDataConvert converter = (weakRef != null) ? weakRef.get() : null;
+
+        if (converter == null) {
+            // 创建新实例并存储弱引用
+            converter = new GXCGLibDataConvert(targetClass);
+            CONVERTER_CACHE.put(targetClass, new WeakReference<>(converter));
+        }
+
+        return converter;
     }
 
     /**
