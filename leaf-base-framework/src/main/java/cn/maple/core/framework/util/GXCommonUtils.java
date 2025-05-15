@@ -40,6 +40,7 @@ import org.springframework.core.env.Environment;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -251,6 +252,12 @@ public class GXCommonUtils {
      */
     @Getter
     private static final CopyOptions defaultCopyOptions = CopyOptions.create().setIgnoreNullValue(true).setIgnoreError(true).setConverter(GXHutoolDataConvert::staticConvert);
+
+    /**
+     * 缓存反射调用时的方法
+     */
+    @Getter
+    private static final Map<GXMethodCacheKeyUtils.MethodCacheKey, Method> METHOD_CACHE = new ConcurrentHashMap<>(64);
 
     /**
      * 私有构造函数，防止实例化
@@ -1107,11 +1114,7 @@ public class GXCommonUtils {
             }
 
             // 查找匹配的方法（使用同步块保护方法查找过程，避免并发问题）
-            Method method = ReflectUtil.getMethod(object.getClass(), methodName, paramTypes);
-            if (Objects.isNull(method) && paramTypes.length == 0) {
-                // 尝试查找无参方法
-                method = ReflectUtil.getMethodByName(object.getClass(), methodName);
-            }
+            Method method = findMethod(object.getClass(), methodName, paramTypes);
 
             // 检查方法是否存在
             if (Objects.isNull(method)) {
@@ -1126,47 +1129,127 @@ public class GXCommonUtils {
 
             // 调用方法
             return ReflectUtil.invoke(object, method, params);
-        } catch (UtilException e) {
-            // 异常处理
-            Throwable cause = e.getCause();
-            if (cause instanceof InvocationTargetException) {
-                Throwable targetException = ((InvocationTargetException) cause).getTargetException();
+        } catch (Exception ex) {
+            return handleReflectionException(ex, object, methodName, params);
+        }
+    }
 
-                // 处理Bean验证异常
-                if (targetException instanceof GXBeanValidateException) {
-                    throw (GXBeanValidateException) targetException;
-                }
+    /**
+     * 查找指定类中的方法
+     * <p>
+     * 该方法用于在指定类中查找具有给定名称和参数类型的方法。首先尝试从缓存中获取方法对象，
+     * 如果缓存中不存在，则使用反射查找方法并将结果存入缓存。方法查找过程会先尝试精确匹配参数类型，
+     * 如果找不到且参数为空，则尝试查找无参方法。
+     * </p>
+     *
+     * <p>线程安全性：</p>
+     * <p>该方法是线程安全的。使用ConcurrentHashMap的computeIfAbsent方法确保在多线程环境下
+     * 只有一个线程会执行方法查找逻辑，避免重复计算和线程安全问题。</p>
+     *
+     * <p>使用示例：</p>
+     * <pre>
+     * // 查找有参方法
+     * Class<?> targetClass = MyService.class;
+     * String methodName = "processData";
+     * Class<?>[] paramTypes = new Class<?>[] {String.class, Integer.class};
+     * Method method = GXCommonUtils.findMethod(targetClass, methodName, paramTypes);
+     *
+     * // 查找无参方法
+     * Method noArgMethod = GXCommonUtils.findMethod(targetClass, "initialize", new Class<?>[0]);
+     * </pre>
+     *
+     * <p>注意事项：</p>
+     * <p>方法查找结果会被缓存，以提高后续调用的性能。如果类中的方法在运行时发生变化（这在正常情况下不应该发生），
+     * 缓存可能会返回过时的结果。</p>
+     *
+     * @param clazz      目标类，不能为null
+     * @param methodName 方法名，不能为null或空字符串
+     * @param paramTypes 方法参数类型数组，不能为null，但可以是空数组表示无参方法
+     * @return 找到的方法对象，如果未找到匹配的方法则返回null
+     */
+    private static Method findMethod(Class<?> clazz, String methodName, Class<?>[] paramTypes) {
+        // 参数校验
+        Objects.requireNonNull(clazz, "目标类不能为null");
+        Objects.requireNonNull(methodName, "方法名不能为null");
+        Objects.requireNonNull(paramTypes, "参数类型数组不能为null");
 
-                // 处理调用目标运行时异常
-                if (InvocationTargetRuntimeException.class.isAssignableFrom(e.getClass())) {
-                    throw new GXBusinessException(targetException.getMessage(),
-                            Optional.ofNullable(targetException.getCause()).orElse(targetException));
-                }
+        // 创建方法缓存键
+        final GXMethodCacheKeyUtils.MethodCacheKey methodCacheKey =
+                GXMethodCacheKeyUtils.getMethodCacheKey(clazz, methodName, paramTypes);
 
-                // 处理其他异常
-                String exceptionMessage = CharSequenceUtil.isEmpty(targetException.getMessage())
-                        ? "系统反射调用失败" : targetException.getMessage();
-                LOG.error("系统反射调用{}.{}({})失败 , [错误消息 : {}] [错误原因 : {}]",
-                        object.getClass().getSimpleName(), methodName, Arrays.toString(params),
-                        e.getMessage(), cause);
-                throw new GXBusinessException(exceptionMessage, targetException);
+        // 从缓存中获取或计算方法对象
+        return METHOD_CACHE.computeIfAbsent(methodCacheKey, key -> {
+            // 首先尝试使用精确的参数类型匹配
+            Method method = ReflectUtil.getMethod(clazz, methodName, paramTypes);
+
+            // 如果找不到且参数为空，尝试查找无参方法
+            if (Objects.isNull(method) && paramTypes.length == 0) {
+                method = ReflectUtil.getMethodByName(clazz, methodName);
             }
 
-            // 重新抛出原始异常
-            LOG.error("反射调用过程中发生未知异常: {}", e.getMessage());
-            throw e;
-        } catch (SecurityException se) {
+            return method;
+        });
+    }
+
+    /**
+     * 处理反射调用过程中的异常
+     * <p>
+     * 该方法根据异常类型进行分类处理，提供详细的错误信息和日志记录，
+     * 并将原始异常包装为业务异常抛出。
+     * </p>
+     *
+     * @param e          捕获的异常
+     * @param object     被调用方法的对象
+     * @param methodName 被调用的方法名
+     * @param params     方法参数
+     * @return 永远不会返回值，总是抛出异常
+     * @throws GXBeanValidateException 如果目标方法抛出该异常
+     * @throws GXBusinessException     如果反射调用过程中发生其他异常
+     */
+    private static Object handleReflectionException(Exception e, Object object, String methodName, Object[] params) {
+        // 处理UtilException，通常包含InvocationTargetException
+        switch (e) {
+            case UtilException utilException -> {
+                Throwable cause = utilException.getCause();
+                // 处理调用目标方法时的异常
+                if (cause instanceof InvocationTargetException ite) {
+                    Throwable targetException = ite.getTargetException();
+                    // 处理Bean验证异常
+                    if (targetException instanceof GXBeanValidateException) {
+                        throw (GXBeanValidateException) targetException;
+                    }
+                    // 处理调用目标运行时异常
+                    if (utilException instanceof InvocationTargetRuntimeException) {
+                        throw new GXBusinessException(targetException.getMessage(),
+                                Optional.ofNullable(targetException.getCause()).orElse(targetException));
+                    }
+                    // 处理其他异常
+                    String exceptionMessage = CharSequenceUtil.isEmpty(targetException.getMessage())
+                            ? "系统反射调用失败" : targetException.getMessage();
+                    LOG.error("系统反射调用{}.{}({})失败 , [错误消息 : {}] [错误原因 : {}]",
+                            object.getClass().getSimpleName(), methodName, Arrays.toString(params),
+                            utilException.getMessage(), cause);
+                    throw new GXBusinessException(exceptionMessage, targetException);
+                }
+                // 重新抛出原始异常
+                LOG.error("反射调用过程中发生未知异常: {}", utilException.getMessage());
+                throw utilException;
+            }
             // 处理安全异常
-            LOG.error("反射调用过程中发生安全异常: {}", se.getMessage());
-            throw new GXBusinessException("反射调用安全检查失败: " + se.getMessage(), se);
-        } catch (IllegalArgumentException iae) {
+            case SecurityException se -> {
+                LOG.error("反射调用过程中发生安全异常: {}", se.getMessage());
+                throw new GXBusinessException("反射调用安全检查失败: " + se.getMessage(), se);
+            }
             // 处理参数异常
-            LOG.error("反射调用参数不匹配: {}", iae.getMessage());
-            throw new GXBusinessException("反射调用参数不匹配: " + iae.getMessage(), iae);
-        } catch (Exception ex) {
+            case IllegalArgumentException iae -> {
+                LOG.error("反射调用参数不匹配: {}", iae.getMessage());
+                throw new GXBusinessException("反射调用参数不匹配: " + iae.getMessage(), iae);
+            }
             // 处理其他可能的异常
-            LOG.error("反射调用过程中发生异常: {}", ex.getMessage());
-            throw new GXBusinessException("反射调用失败: " + ex.getMessage(), ex);
+            default -> {
+                LOG.error("反射调用过程中发生异常: {}", e.getMessage());
+                throw new GXBusinessException("反射调用失败: " + e.getMessage(), e);
+            }
         }
     }
 
