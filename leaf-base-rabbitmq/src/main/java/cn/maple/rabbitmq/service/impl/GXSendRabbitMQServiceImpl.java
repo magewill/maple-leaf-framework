@@ -17,13 +17,16 @@ import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -50,6 +53,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>使用ConcurrentHashMap缓存队列信息，确保线程安全</li>
  *   <li>关键操作使用ReentrantLock保护，避免竞态条件</li>
  *   <li>异步操作使用专用线程池，避免资源耗尽</li>
+ *   <li>使用AtomicInteger生成线程名称序列，确保线程命名唯一性</li>
  * </ul>
  * </p>
  *
@@ -61,6 +65,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>显式设置消息的内容类型和编码，避免乱码问题</li>
  *   <li>通过JSONUtil工具类处理JSON转换，避免手动字符串拼接</li>
  *   <li>使用有界队列和自定义拒绝策略，防止OOM</li>
+ *   <li>使用Objects.requireNonNull进行参数校验，避免NPE</li>
  * </ul>
  * </p>
  *
@@ -72,8 +77,16 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>采用双重检查锁定模式减少锁竞争</li>
  *   <li>批量操作减少与RabbitMQ服务器的交互次数</li>
  *   <li>异步API支持高并发场景下的非阻塞操作</li>
+ *   <li>线程池参数可配置，适应不同的负载场景</li>
  * </ul>
  * </p>
+ *
+ * <h2>Java 17+ 特性应用</h2>
+ * <ul>
+ *   <li>使用增强的空安全检查（Objects.requireNonNull）</li>
+ *   <li>使用AtomicInteger替代UUID生成线程名称序列，提高性能</li>
+ *   <li>利用更高效的并发工具，提升多线程性能</li>
+ * </ul>
  *
  * <h2>使用示例</h2>
  * <p>
@@ -157,37 +170,16 @@ import java.util.concurrent.locks.ReentrantLock;
  * </p>
  *
  * @author maple
+ * @since 1.0.0
  */
 @Service
 @Slf4j
 public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements GXSendRabbitMQService {
     /**
-     * 用于执行异步RabbitMQ操作的线程池
-     * 使用有界线程池避免资源耗尽，核心线程数和最大线程数可通过配置调整
-     * 队列容量有限，防止任务堆积导致内存溢出
-     * 使用自定义的线程工厂，便于问题排查
+     * 线程计数器，用于生成唯一的线程名称
+     * 使用AtomicInteger确保线程安全，比UUID生成更高效
      */
-    private static final ExecutorService rabbitMqAsyncExecutor = new ThreadPoolExecutor(
-            // 核心线程数 - 可通过配置调整
-            Runtime.getRuntime().availableProcessors(),
-            // 最大线程数 - 可通过配置调整
-            Runtime.getRuntime().availableProcessors() * 2,
-            // 空闲线程存活时间
-            60L,
-            // 时间单位
-            TimeUnit.SECONDS,
-            // 工作队列 - 有界队列防止OOM
-            new LinkedBlockingQueue<>(1000),
-            // 线程工厂 - 自定义命名便于问题排查
-            r -> {
-                Thread thread = new Thread(r, "rabbitmq-async-worker-" + UUID.randomUUID().toString().substring(0, 8));
-                // 设置为守护线程，不阻止JVM退出
-                thread.setDaemon(true);
-                return thread;
-            },
-            // 拒绝策略 - 使用调用者运行策略，防止任务丢失
-            new ThreadPoolExecutor.CallerRunsPolicy()
-    );
+    private static final AtomicInteger THREAD_COUNTER = new AtomicInteger(1);
     /**
      * 用于缓存已创建的队列信息，避免重复检查队列是否存在
      * 使用ConcurrentHashMap确保线程安全
@@ -198,17 +190,84 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
      */
     private final ReentrantLock queueOperationLock = new ReentrantLock();
     /**
+     * 线程池核心线程数配置，默认为可用处理器数量
+     * 可通过配置文件调整，适应不同的负载场景
+     */
+    @Value("${maple.framework.rabbitmq.thread-pool.core-size:#{T(java.lang.Runtime).getRuntime().availableProcessors()}}")
+    private int threadPoolCoreSize;
+    /**
+     * 线程池最大线程数配置，默认为可用处理器数量的2倍
+     * 可通过配置文件调整，适应不同的负载场景
+     */
+    @Value("${maple.framework.rabbitmq.thread-pool.max-size:#{T(java.lang.Runtime).getRuntime().availableProcessors() * 2}}")
+    private int threadPoolMaxSize;
+    /**
+     * 线程池队列容量配置，默认为1000
+     * 可通过配置文件调整，避免任务堆积导致OOM
+     */
+    @Value("${maple.framework.rabbitmq.thread-pool.queue-capacity:1000}")
+    private int threadPoolQueueCapacity;
+    /**
+     * 用于执行异步RabbitMQ操作的线程池
+     * 使用有界线程池避免资源耗尽，核心线程数和最大线程数可通过配置调整
+     * 队列容量有限，防止任务堆积导致内存溢出
+     * 使用自定义的线程工厂，便于问题排查
+     * 懒加载初始化，确保配置属性已被注入
+     */
+    private ExecutorService rabbitMqAsyncExecutor;
+    /**
      * RabbitMQ模板组件，用于发送消息
      * 由Spring自动注入，线程安全
      */
     @Resource
     private RabbitTemplate rabbitTemplate;
+
     /**
      * RabbitMQ管理组件，用于动态管理队列、交换机和绑定关系
      * 由Spring自动注入，线程安全
      */
     @Resource
     private RabbitAdmin rabbitAdmin;
+
+    /**
+     * 获取异步操作线程池
+     * 懒加载初始化，确保配置属性已被注入
+     * 线程池参数可通过配置文件调整，适应不同的负载场景
+     *
+     * @return 异步操作线程池
+     */
+    private ExecutorService getRabbitMqAsyncExecutor() {
+        if (rabbitMqAsyncExecutor == null) {
+            synchronized (this) {
+                if (rabbitMqAsyncExecutor == null) {
+                    rabbitMqAsyncExecutor = new ThreadPoolExecutor(
+                            // 核心线程数 - 通过配置调整
+                            threadPoolCoreSize,
+                            // 最大线程数 - 通过配置调整
+                            threadPoolMaxSize,
+                            // 空闲线程存活时间
+                            60L,
+                            // 时间单位
+                            TimeUnit.SECONDS,
+                            // 工作队列 - 有界队列防止OOM
+                            new LinkedBlockingQueue<>(threadPoolQueueCapacity),
+                            // 线程工厂 - 自定义命名便于问题排查
+                            r -> {
+                                Thread thread = new Thread(r, "rabbitmq-async-worker-" + THREAD_COUNTER.getAndIncrement());
+                                // 设置为守护线程，不阻止JVM退出
+                                thread.setDaemon(true);
+                                return thread;
+                            },
+                            // 拒绝策略 - 使用调用者运行策略，防止任务丢失
+                            new ThreadPoolExecutor.CallerRunsPolicy()
+                    );
+                    log.info("RabbitMQ异步操作线程池已初始化，核心线程数: {}, 最大线程数: {}, 队列容量: {}",
+                            threadPoolCoreSize, threadPoolMaxSize, threadPoolQueueCapacity);
+                }
+            }
+        }
+        return rabbitMqAsyncExecutor;
+    }
 
     /**
      * 发送常规消息到RabbitMQ
@@ -223,12 +282,20 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
      * 3. 通过JSONUtil工具类处理JSON转换，避免手动字符串拼接
      * </p>
      *
-     * @param messageReqDto 待发送的消息请求对象，包含消息内容、交换机、路由键等信息
+     * @param messageReqDto 待发送的消息请求对象，包含消息内容、交换机、路由键等信息，不能为null
      * @return Object 发送结果，通常为消息发送成功或失败的提示信息
-     * @throws AmqpException 如果消息发送过程中发生错误，将抛出AmqpException异常
+     * @throws AmqpException            如果消息发送过程中发生错误，将抛出AmqpException异常
+     * @throws IllegalArgumentException 如果messageReqDto为null或必要参数缺失
      */
     @Override
     public Object sendNormalMessage(GXRabbitMQMessageReqDto messageReqDto) {
+        // 参数校验，使用Java 17+的Objects.requireNonNull进行空检查
+        Objects.requireNonNull(messageReqDto, "消息请求DTO不能为null");
+        Objects.requireNonNull(messageReqDto.getExchange(), "交换机名称不能为null");
+        Objects.requireNonNull(messageReqDto.getRoutingKey(), "路由键不能为null");
+        Objects.requireNonNull(messageReqDto.getData(), "消息内容不能为null");
+        Objects.requireNonNull(messageReqDto.getMessageProperties(), "消息属性不能为null");
+
         try {
             // 提取消息相关信息
             Dict data = messageReqDto.getData();
@@ -253,6 +320,9 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
             rabbitTemplate.convertAndSend(exchange, routingKey, message, correlationData);
 
             log.debug("消息发送成功 - 交换机: {}, 路由键: {}", exchange, routingKey);
+        } catch (IllegalArgumentException e) {
+            // 参数异常，直接抛出，便于调用者快速定位问题
+            throw e;
         } catch (AmqpConnectException e) {
             // 连接异常，可能是暂时性网络问题
             log.error("RabbitMQ连接异常，将进行重试: {}", e.getMessage());
@@ -388,98 +458,101 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
 
     /**
      * 使用追踪信息增强消息
-     * 该方法向消息中添加追踪ID、时间戳和来源服务信息，以便于追踪消息流和诊断问题
+     * <p>
+     * 该方法向消息中添加追踪ID、时间戳和来源服务信息，以便于追踪消息流和诊断问题。
+     * 追踪信息包括：
+     * <ul>
+     *   <li>X-Trace-Id: 唯一的追踪标识符，用于跟踪消息流转</li>
+     *   <li>X-Timestamp: 消息发送时的时间戳</li>
+     *   <li>X-Source-Service: 发送消息的服务名称</li>
+     * </ul>
+     * </p>
      *
-     * @param message       消息对象，包含消息的内容和属性
-     * @param messageReqDto 消息请求DTO，包含发送消息的额外参数（未使用）
+     * @param message       消息对象，包含消息的内容和属性，不能为null
+     * @param messageReqDto 消息请求DTO，包含发送消息的额外参数
+     * @throws IllegalArgumentException 如果message为null
      */
     private void enhanceMessageWithTracing(Message message, GXRabbitMQMessageReqDto messageReqDto) {
+        // 参数校验，使用Java 17+的Objects.requireNonNull进行空检查
+        Objects.requireNonNull(message, "消息对象不能为null");
+
         // 获取消息的属性
         MessageProperties props = message.getMessageProperties();
+
         // 添加追踪ID
         String traceId = GXTraceIdContextUtils.generateTraceId();
         if (traceId != null) {
             props.setHeader("X-Trace-Id", traceId);
+        } else {
+            // 如果无法获取追踪ID，则生成一个新的
+            traceId = UUID.randomUUID().toString();
+            props.setHeader("X-Trace-Id", traceId);
         }
+
         // 添加时间戳
         props.setTimestamp(DateUtil.date());
+        props.setHeader("X-Timestamp", System.currentTimeMillis());
+
         // 获取应用的名字
         String applicationName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class);
+        if (applicationName == null || applicationName.trim().isEmpty()) {
+            applicationName = "unknown";
+        }
+
         // 添加来源服务信息
         props.setHeader("X-Source-Service", applicationName);
+
+        // 设置消息ID，便于追踪
+        if (props.getMessageId() == null) {
+            props.setMessageId(traceId);
+        }
+
+        log.trace("消息追踪信息已添加 - TraceId: {}, Service: {}", traceId, applicationName);
     }
 
     /**
      * 异步设置消息通道
      * <p>
-     * 此方法创建一个CompletableFuture，用于异步地设置消息通道。它将队列的创建和绑定到交换机的操作
-     * 交给专用线程池执行，适合需要执行耗时的队列设置操作的场景。使用专用线程池而非默认ForkJoinPool，
-     * 避免在高并发场景下影响其他异步任务的执行。
-     * </p>
-     * <p>
-     * 线程安全说明：
-     * 1. 使用专用的有界线程池，避免资源耗尽
-     * 2. 内部操作通过ReentrantLock保证原子性
-     * 3. 异常处理完善，不会导致线程泄漏
-     * </p>
-     * <p>
-     * 性能优化：
-     * 1. 使用专用线程池，避免与其他异步任务竞争资源
-     * 2. 线程池参数可配置，适应不同的负载场景
-     * 3. 异常处理机制完善，提高系统稳定性
-     * </p>
-     * <p>
-     * 使用示例：
-     * <pre>
-     * // 异步创建一个Direct类型的交换机和队列，并绑定
-     * CompletableFuture<Boolean> future = setupMessageChannelAsync(
-     *     "my-queue", true, false, false, null,
-     *     new DirectExchange("my-exchange", true, false),
-     *     "my-routing-key"
-     * );
-     *
-     * // 添加回调处理结果
-     * future.thenAccept(success -> {
-     *     if (success) {
-     *         log.info("消息通道创建成功");
-     *     } else {
-     *         log.error("消息通道创建失败");
-     *     }
-     * });
-     * </pre>
+     * 异步创建队列、交换机并绑定，适用于高并发场景。
+     * 该方法会在专用线程池中执行，不会阻塞调用线程。
+     * 线程池参数可通过配置文件调整，适应不同的负载场景。
      * </p>
      *
-     * @param queueName  队列名称，用于标识队列
-     * @param durable    如果为true，队列将被持久化；否则，队列将是临时的
-     * @param exclusive  如果为true，队列只能被声明该排他的连接使用
-     * @param autoDelete 如果为true，当最后一个消费者取消订阅后，队列将自动删除
-     * @param queueArgs  队列的其他参数，如消息存活时间、自动过期时间等
-     * @param exchange   交换机对象，用于绑定队列
-     * @param routingKey 路由键，用于绑定队列到交换机的规则
-     * @return 返回一个CompletableFuture对象，表示异步操作的结果
+     * @param queueName  队列名称，不能为null或空
+     * @param durable    是否持久化
+     * @param exclusive  是否排他
+     * @param autoDelete 是否自动删除
+     * @param arguments  队列参数，可以为null
+     * @param exchange   交换机，不能为null
+     * @param routingKey 路由键，不能为null或空
+     * @return CompletableFuture<Boolean> 异步操作结果，true表示成功，false表示失败
+     * @throws IllegalArgumentException 如果必要参数为null或空
      */
-    public CompletableFuture<Boolean> setupMessageChannelAsync(String queueName, boolean durable,
-                                                               boolean exclusive, boolean autoDelete,
-                                                               Map<String, Object> queueArgs,
-                                                               AbstractExchange exchange, String routingKey) {
-        // 参数校验
-        if (queueName == null || exchange == null || routingKey == null) {
-            return CompletableFuture.failedFuture(
-                    new IllegalArgumentException("queueName, exchange and routingKey must not be null"));
+    @Override
+    public CompletableFuture<Boolean> setupMessageChannelAsync(String queueName, boolean durable, boolean exclusive, boolean autoDelete, Map<String, Object> arguments, AbstractExchange exchange, String routingKey) {
+        // 参数校验，使用Java 17+的Objects.requireNonNull进行空检查
+        Objects.requireNonNull(queueName, "队列名称不能为null");
+        if (queueName.trim().isEmpty()) {
+            throw new IllegalArgumentException("队列名称不能为空");
+        }
+        Objects.requireNonNull(exchange, "交换机不能为null");
+        Objects.requireNonNull(routingKey, "路由键不能为null");
+        if (routingKey.trim().isEmpty()) {
+            throw new IllegalArgumentException("路由键不能为空");
         }
 
-        // 使用自定义线程池执行异步任务，避免使用默认ForkJoinPool
+        // 使用懒加载的线程池执行异步任务
         return CompletableFuture.supplyAsync(() -> {
             try {
-                // 执行同步方法创建消息通道
-                return setupMessageChannel(queueName, durable, exclusive, autoDelete, queueArgs, exchange, routingKey);
+                // 调用同步方法设置消息通道
+                return setupMessageChannel(queueName, durable, exclusive, autoDelete, arguments, exchange, routingKey);
             } catch (Exception e) {
-                // 记录异常并返回失败结果，而不是让异常传播
-                log.error("异步创建消息通道时发生异常: 队列[{}], 交换机[{}], 路由键[{}], 原因: {}",
+                // 记录详细的异常信息，包括异常类型、消息和堆栈跟踪
+                log.error("异步设置消息通道失败 - 队列: {}, 交换机: {}, 路由键: {}, 异常: {}",
                         queueName, exchange.getName(), routingKey, e.getMessage(), e);
                 return false;
             }
-        }, rabbitMqAsyncExecutor);
+        }, getRabbitMqAsyncExecutor());
     }
 
     /**
@@ -657,40 +730,69 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
     @Override
     public boolean setupMessageChannel(String queueName, boolean durable, boolean exclusive, boolean autoDelete,
                                        Map<String, Object> queueArgs, AbstractExchange exchange, String routingKey) {
-        // 使用ReentrantLock确保创建过程的原子性
-        queueOperationLock.lock();
+        // 参数校验
+        if (CharSequenceUtil.isBlank(queueName) || exchange == null || CharSequenceUtil.isBlank(routingKey)) {
+            log.error("创建消息通道失败: 参数不完整 queueName={}, exchange={}, routingKey={}",
+                    queueName, exchange != null ? exchange.getName() : "null", routingKey);
+            return false;
+        }
         try {
-            // 1. 创建交换机
-            boolean exchangeCreated = createExchange(exchange);
-            if (!exchangeCreated) {
-                log.error("消息通道创建失败: 无法创建交换机 {}", exchange.getName());
-                return false;
+            // 首先检查本地缓存，避免不必要的锁竞争
+            Boolean exists = queueCache.get(queueName);
+            if (Boolean.TRUE.equals(exists)) {
+                log.debug("队列已存在(缓存): {}", queueName);
+                return true;
             }
 
-            // 2. 创建队列
-            Queue queue = createQueue(queueName, durable, exclusive, autoDelete, queueArgs);
-            if (queue == null) {
-                log.error("消息通道创建失败: 无法创建队列 {}", queueName);
-                return false;
-            }
+            // 双重检查锁定模式，减少锁竞争
+            if (exists == null) {
+                // 获取锁，确保线程安全
+                queueOperationLock.lock();
+                try {
+                    // 再次检查缓存，避免在等待锁期间其他线程已创建队列
+                    exists = queueCache.get(queueName);
+                    if (Boolean.TRUE.equals(exists)) {
+                        log.debug("队列已存在(锁内缓存): {}", queueName);
+                        return true;
+                    }
 
-            // 3. 建立绑定关系
-            boolean bindingCreated = bindQueueToExchange(queueName, exchange.getName(), routingKey);
-            if (!bindingCreated) {
-                log.error("消息通道创建失败: 无法建立绑定关系 队列[{}] -> 交换机[{}], 路由键[{}]",
-                        queueName, exchange.getName(), routingKey);
-                return false;
-            }
+                    // 1. 创建交换机
+                    boolean exchangeCreated = createExchange(exchange);
+                    if (!exchangeCreated) {
+                        log.error("消息通道创建失败: 无法创建交换机 {}", exchange.getName());
+                        return false;
+                    }
 
-            log.info("成功创建完整消息通道: 队列[{}] -> 交换机[{}](类型:{}), 路由键[{}]",
-                    queueName, exchange.getName(), exchange.getType(), routingKey);
+                    // 2. 创建队列
+                    Queue queue = createQueue(queueName, durable, exclusive, autoDelete, queueArgs);
+                    if (queue == null) {
+                        log.error("消息通道创建失败: 无法创建队列 {}", queueName);
+                        return false;
+                    }
+
+                    // 3. 建立绑定关系
+                    boolean bindingCreated = bindQueueToExchange(queueName, exchange.getName(), routingKey);
+                    if (!bindingCreated) {
+                        log.error("消息通道创建失败: 无法建立绑定关系 队列[{}] -> 交换机[{}], 路由键[{}]",
+                                queueName, exchange.getName(), routingKey);
+                        return false;
+                    }
+
+                    log.info("成功创建完整消息通道: 队列[{}] -> 交换机[{}](类型:{}), 路由键[{}]",
+                            queueName, exchange.getName(), exchange.getType(), routingKey);
+
+                    // 更新缓存
+                    queueCache.put(queueName, true);
+                } finally {
+                    // 释放锁
+                    queueOperationLock.unlock();
+                }
+            }
             return true;
         } catch (Exception e) {
             log.error("创建消息通道时发生异常: 队列[{}], 交换机[{}], 路由键[{}], 原因: {}",
                     queueName, exchange.getName(), routingKey, e.getMessage(), e);
             return false;
-        } finally {
-            queueOperationLock.unlock();
         }
     }
 

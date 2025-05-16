@@ -6,6 +6,7 @@ import org.springframework.amqp.core.AbstractExchange;
 import org.springframework.amqp.core.Queue;
 
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * RabbitMQ消息发送和队列管理服务接口
@@ -211,4 +212,24 @@ public interface GXSendRabbitMQService extends GXBusinessService {
      * @return 如果成功创建队列、交换机并建立绑定关系则返回true，否则返回false
      */
     boolean setupDurableMessageChannel(String queueName, AbstractExchange exchange, String routingKey);
+
+    /**
+     * 异步设置消息通道
+     * <p>
+     * 异步创建队列、交换机并绑定，适用于高并发场景。
+     * 该方法会在专用线程池中执行，不会阻塞调用线程。
+     * 线程池参数可通过配置文件调整，适应不同的负载场景。
+     * </p>
+     *
+     * @param queueName  队列名称，不能为null或空
+     * @param durable    是否持久化
+     * @param exclusive  是否排他
+     * @param autoDelete 是否自动删除
+     * @param arguments  队列参数，可以为null
+     * @param exchange   交换机，不能为null
+     * @param routingKey 路由键，不能为null或空
+     * @return CompletableFuture<Boolean> 异步操作结果，true表示成功，false表示失败
+     * @throws IllegalArgumentException 如果必要参数为null或空
+     */
+    CompletableFuture<Boolean> setupMessageChannelAsync(String queueName, boolean durable, boolean exclusive, boolean autoDelete, Map<String, Object> arguments, AbstractExchange exchange, String routingKey);
 }
