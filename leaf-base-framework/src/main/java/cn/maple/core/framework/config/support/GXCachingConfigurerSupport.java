@@ -145,7 +145,7 @@ public class GXCachingConfigurerSupport implements CachingConfigurer {
         private String getError(Cache cache, Object key) {
             String cacheName = cache == null ? "unknown" : cache.getName();
             String keyStr = key == null ? "null" : key.toString();
-            return String.format("cacheName:%s,cacheKey:%s", cacheName, keyStr);
+            return String.format("缓存操作异常-->缓存名称:%s,缓存键:%s", cacheName, keyStr);
         }
     }
 }

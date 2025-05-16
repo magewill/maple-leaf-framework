@@ -415,9 +415,14 @@ public class GXCGLibDataConvert implements Converter {
             // 12. 使用Hutool的通用转换作为兜底方案
             Object convertedValue = Convert.convertWithCheck(targetClass, sourceValue, null, false);
             if (convertedValue != null) {
-                // 检查Hutool是否真正进行了转换，还是因类型不兼容而返回了原始对象
+                // 进一步检查：Hutool的某些转换在无法精确匹配时可能返回原始对象。
+                // 如果转换后的对象不是目标类型的实例，并且它与源对象是同一个实例（引用相同），
+                // 那么可以认为转换并未真正成功或未达到预期效果。
                 if (!targetClass.isInstance(convertedValue) && sourceValue == convertedValue) {
-                    return null; // 更明确地表示转换失败
+                    LOG.info("Hutool Convert 未能将源类型 {} 转换为目标类型 {} (属性: {}), 返回了原始对象。",
+                            sourceClass.getName(), targetClass.getName(), propertyName != null ? propertyName : "N/A");
+                    // 更明确地表示转换失败
+                    return null;
                 }
                 return convertedValue;
             }
