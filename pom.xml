@@ -53,7 +53,7 @@
         <spring-cloud.version>2024.0.1</spring-cloud.version>
         <spring-cloud-alibaba.version>2023.0.3.2</spring-cloud-alibaba.version>
         <seata.spring.boot.starter.version>2.2.0</seata.spring.boot.starter.version>
-        <netty.version>4.1.121.Final</netty.version>
+        <netty.version>4.2.1.Final</netty.version>
         <elasticsearch.version>8.18.0</elasticsearch.version>
         <zstd-jni.version>1.5.6-3</zstd-jni.version>
         <antlr4-runtime.version>4.13.1</antlr4-runtime.version>
