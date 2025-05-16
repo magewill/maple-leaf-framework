@@ -6,6 +6,10 @@ import org.springframework.retry.RetryContext;
 import org.springframework.retry.RetryListener;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+
 /**
  * GX 自定义 Spring Retry 监听器实现。
  * <p>
@@ -55,6 +59,18 @@ import org.springframework.stereotype.Component;
 @Component
 public class GXRetryListener implements RetryListener {
     /**
+     * 回调类型缓存，用于存储回调类的类型描述信息
+     * 使用 ConcurrentHashMap 确保线程安全，同时避免在高并发场景下重复计算类型描述
+     */
+    private static final Map<Class<?>, String> CALLBACK_TYPE_CACHE = new ConcurrentHashMap<>();
+
+    /**
+     * 回调类型解析器，用于从回调对象获取更有意义的类型描述
+     * 默认实现返回类的简单名称，可以通过继承类覆盖此方法提供更详细的描述
+     */
+    private static final Function<Class<?>, String> DEFAULT_TYPE_RESOLVER = Class::getSimpleName;
+
+    /**
      * 在重试操作开始时调用。
      * <p>
      * 对于有状态的重试 (stateful retry)，如果父级上下文 (parent context) 存在，
@@ -78,7 +94,8 @@ public class GXRetryListener implements RetryListener {
         if (context.getRetryCount() == 0) {
             String contextId = getContextId(context);
             int retryCount = context.getRetryCount();
-            String callbackType = callback.getClass().getName(); // 使用完整类名以提供更详细的信息
+            // 使用完整类名以提供更详细的信息
+            String callbackType = getCallbackTypeDescription(callback);
 
             log.info("GXRetryListener: 开始执行重试操作. 上下文ID: {}, 初始尝试次数: {}, 回调类型: {}",
                     contextId, retryCount, callbackType);
@@ -103,7 +120,7 @@ public class GXRetryListener implements RetryListener {
         String contextId = getContextId(context);
         int totalAttempts = context.getRetryCount() + (throwable == null ? 1 : 0);
         // 使用完整类名以提供更详细的信息
-        String callbackType = callback.getClass().getName();
+        String callbackType = getCallbackTypeDescription(callback);
 
         if (throwable == null) {
             // 操作成功完成
@@ -115,7 +132,7 @@ public class GXRetryListener implements RetryListener {
                     contextId,
                     totalAttempts,
                     callbackType,
-                    throwable.getClass().getName(),
+                    throwable.getClass().getSimpleName(),
                     throwable.getMessage());
 
             // 在DEBUG级别记录完整堆栈信息，便于问题排查
@@ -142,8 +159,8 @@ public class GXRetryListener implements RetryListener {
         // RetryCount 是已失败的次数，当前尝试是其+1
         int currentAttempt = context.getRetryCount() + 1;
         // 使用完整类名以提供更详细的信息
-        String callbackType = callback.getClass().getName();
-        String exceptionClass = throwable.getClass().getName();
+        String callbackType = getCallbackTypeDescription(callback);
+        String exceptionClass = throwable.getClass().getSimpleName();
         String exceptionMessage = throwable.getMessage();
 
         // 记录每次重试失败的日志
@@ -158,6 +175,53 @@ public class GXRetryListener implements RetryListener {
         if (log.isDebugEnabled()) {
             log.debug("GXRetryListener: 重试尝试失败详细堆栈. 上下文ID: {}, 尝试次数: {}", contextId, currentAttempt, throwable);
         }
+    }
+
+    /**
+     * 获取回调对象的类型描述
+     * <p>
+     * 此方法从回调对象获取类型描述，优先使用缓存以提高性能。
+     * 对于频繁使用的回调类型，避免重复计算类名，减少内存和CPU开销。
+     *
+     * @param callback 回调对象
+     * @param <T>      回调返回类型
+     * @param <E>      回调可能抛出的异常类型
+     * @return 回调类型的描述字符串
+     */
+    private <T, E extends Throwable> String getCallbackTypeDescription(RetryCallback<T, E> callback) {
+        if (callback == null) {
+            return "<null>";
+        }
+
+        // 使用回调对象的类作为缓存键
+        Class<?> callbackClass = callback.getClass();
+
+        // 从缓存中获取类型描述，如果不存在则计算并存入缓存
+        return CALLBACK_TYPE_CACHE.computeIfAbsent(callbackClass, clazz -> {
+            // 使用 Java 17 的 switch 表达式处理不同类型的回调
+            // 这里可以根据实际需求扩展，识别特定的回调类型并提供更有意义的描述
+            return switch (clazz.getName()) {
+                // 处理匿名内部类，提取外部类信息
+                case String s when s.contains("$") -> {
+                    String[] parts = s.split("\\$");
+                    String outerClass = parts[0];
+                    try {
+                        // 尝试获取外部类的简单名称
+                        Class<?> outer = Class.forName(outerClass);
+                        yield outer.getSimpleName() + "$Anonymous";
+                    } catch (ClassNotFoundException e) {
+                        // 如果无法加载外部类，则使用包名+类名的最后部分
+                        int lastDot = outerClass.lastIndexOf('.');
+                        yield lastDot > 0 ? outerClass.substring(lastDot + 1) + "$Anonymous" : s;
+                    }
+                }
+                // 处理 lambda 表达式
+                case String s when s.contains("$$Lambda") ->
+                        "Lambda@" + Integer.toHexString(System.identityHashCode(callback));
+                // 默认情况下使用类的简单名称
+                default -> DEFAULT_TYPE_RESOLVER.apply(clazz);
+            };
+        });
     }
 
     /**

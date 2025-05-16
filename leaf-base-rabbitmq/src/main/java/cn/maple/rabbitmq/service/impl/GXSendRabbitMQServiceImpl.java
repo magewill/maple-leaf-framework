@@ -9,7 +9,6 @@ import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import cn.maple.rabbitmq.dto.inner.GXRabbitMQMessageReqDto;
 import cn.maple.rabbitmq.service.GXSendRabbitMQService;
-import cn.maple.retry.util.GXRetryUtil;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpConnectException;
@@ -26,7 +25,6 @@ import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.Supplier;
 
 /**
  * RabbitMQ消息发送服务实现类
@@ -248,50 +246,27 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
 
             // 创建消息并发送
             Message message = new Message(JSONUtil.toJsonStr(data).getBytes(StandardCharsets.UTF_8), messageProperties);
+
+            // 增强消息，添加追踪信息
+            enhanceMessageWithTracing(message, messageReqDto);
+
             rabbitTemplate.convertAndSend(exchange, routingKey, message, correlationData);
 
             log.debug("消息发送成功 - 交换机: {}, 路由键: {}", exchange, routingKey);
         } catch (AmqpConnectException e) {
             // 连接异常，可能是暂时性网络问题
             log.error("RabbitMQ连接异常，将进行重试: {}", e.getMessage());
-            return retryOperation(() -> sendNormalMessage(messageReqDto), 3, 1000);
         } catch (AmqpException e) {
             log.error("消息发送失败 - 原因: {}", e.getMessage(), e);
             // 重新抛出异常，让调用者决定如何处理
             throw e;
         } catch (Exception e) {
-            log.error("消息发送过程中发生未预期的异常: {}", e.getMessage(), e);
+            // 记录详细错误日志
+            log.error("消息发送失败 - 异常类型: {}, 原因: {}", e.getClass().getName(), e.getMessage(), e);
+            // 重新抛出异常，让调用者决定如何处理
             throw new AmqpException("消息发送过程中发生未预期的异常", e);
         }
         return null;
-    }
-
-    /**
-     * 通用重试操作
-     * 该方法用于包装任何可能需要重试的操作，通过Supplier接口传入需要重试的操作，
-     * 并指定最大重试次数和延迟时间来执行重试逻辑
-     *
-     * @param operation  要执行的操作，通过Supplier接口传入
-     * @param maxRetries 最大重试次数
-     * @param delayMs    每次重试之间的初始延迟时间（毫秒）
-     * @param <T>        操作返回的泛型类型
-     * @return 操作的结果
-     * @throws RuntimeException 如果重试次数用尽后操作仍然失败，则抛出运行时异常
-     */
-    public <T> T retryOperation(Supplier<T> operation, int maxRetries, long delayMs) {
-        try {
-            return GXRetryUtil.retryOperation(context -> {
-                try {
-                    return operation.get();
-                } catch (Exception e) {
-                    log.warn("重试操作过程中发生异常，准备进行第 {} 次重试", context.getRetryCount(), e);
-                    throw e;
-                }
-            }, maxRetries, delayMs);
-        } catch (Exception e) {
-            log.error("重试操作最终失败，已达到最大重试次数或发生不可恢复异常", e);
-            throw new RuntimeException("重试操作失败", e);
-        }
     }
 
     /**
@@ -331,7 +306,6 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
             if (queueCache.containsKey(queueName)) {
                 return new Queue(queueName, durable, exclusive, autoDelete, arguments);
             }
-
             // 创建队列对象
             Queue queue = new Queue(queueName, durable, exclusive, autoDelete, arguments);
             // 使用RabbitAdmin声明队列
