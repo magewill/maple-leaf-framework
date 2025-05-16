@@ -34,11 +34,130 @@ import java.util.function.Supplier;
  * 该类实现了GXSendRabbitMQService接口，提供了向RabbitMQ发送消息的具体实现。
  * 通过Spring的RabbitTemplate组件实现消息的发送，支持消息确认和返回机制。
  * </p>
+ * 
+ * <h2>功能特点</h2>
+ * <ul>
+ *   <li>支持发送常规消息到指定交换机和路由键</li>
+ *   <li>支持动态创建队列、交换机和绑定关系</li>
+ *   <li>提供异步操作API，适用于高并发场景</li>
+ *   <li>内置重试机制，提高消息发送可靠性</li>
+ *   <li>支持消息追踪，便于问题排查</li>
+ * </ul>
+ * 
+ * <h2>线程安全说明</h2>
  * <p>
- * 线程安全说明：该实现类是线程安全的，可以在多线程环境下使用。
- * RabbitTemplate本身是线程安全的，可以被多个线程共享。
+ * 该实现类是线程安全的，可以在多线程环境下使用：
+ * <ul>
+ *   <li>RabbitTemplate本身是线程安全的，可以被多个线程共享</li>
+ *   <li>使用ConcurrentHashMap缓存队列信息，确保线程安全</li>
+ *   <li>关键操作使用ReentrantLock保护，避免竞态条件</li>
+ *   <li>异步操作使用专用线程池，避免资源耗尽</li>
+ * </ul>
  * </p>
- *
+ * 
+ * <h2>内存安全</h2>
+ * <p>
+ * 该实现类采取了多种措施确保内存安全：
+ * <ul>
+ *   <li>使用StandardCharsets.UTF_8确保字符编码一致性</li>
+ *   <li>显式设置消息的内容类型和编码，避免乱码问题</li>
+ *   <li>通过JSONUtil工具类处理JSON转换，避免手动字符串拼接</li>
+ *   <li>使用有界队列和自定义拒绝策略，防止OOM</li>
+ * </ul>
+ * </p>
+ * 
+ * <h2>性能优化</h2>
+ * <p>
+ * 该实现类包含多项性能优化措施：
+ * <ul>
+ *   <li>使用本地缓存避免重复检查队列是否存在</li>
+ *   <li>采用双重检查锁定模式减少锁竞争</li>
+ *   <li>批量操作减少与RabbitMQ服务器的交互次数</li>
+ *   <li>异步API支持高并发场景下的非阻塞操作</li>
+ * </ul>
+ * </p>
+ * 
+ * <h2>使用示例</h2>
+ * <p>
+ * 1. 发送消息示例：
+ * <pre>
+ * // 创建消息请求DTO
+ * GXRabbitMQMessageReqDto messageReqDto = new GXRabbitMQMessageReqDto();
+ * messageReqDto.setExchange("order-exchange");
+ * messageReqDto.setRoutingKey("order.created");
+ * messageReqDto.setData(Dict.create().set("orderId", 12345).set("status", "CREATED"));
+ * messageReqDto.setMessageProperties(new MessageProperties());
+ * 
+ * // 发送消息
+ * sendRabbitMQService.sendNormalMessage(messageReqDto);
+ * </pre>
+ * </p>
+ * 
+ * <p>
+ * 2. 创建消息通道示例：
+ * <pre>
+ * // 创建一个Direct类型的交换机和队列，并绑定
+ * boolean success = sendRabbitMQService.setupMessageChannel(
+ *     "order-queue", true, false, false, null,
+ *     new DirectExchange("order-exchange", true, false),
+ *     "order.created"
+ * );
+ * 
+ * // 创建一个Topic类型的交换机和队列，并绑定
+ * boolean success = sendRabbitMQService.setupMessageChannel(
+ *     "notification-queue", true, false, false, null,
+ *     new TopicExchange("notification-exchange", true, false),
+ *     "notification.#"
+ * );
+ * </pre>
+ * </p>
+ * 
+ * <p>
+ * 3. 异步创建消息通道示例：
+ * <pre>
+ * // 异步创建一个Direct类型的交换机和队列，并绑定
+ * CompletableFuture<Boolean> future = sendRabbitMQService.setupMessageChannelAsync(
+ *     "async-queue", true, false, false, null,
+ *     new DirectExchange("async-exchange", true, false),
+ *     "async.message"
+ * );
+ * 
+ * // 添加回调处理结果
+ * future.thenAccept(success -> {
+ *     if (success) {
+ *         log.info("消息通道创建成功");
+ *     } else {
+ *         log.error("消息通道创建失败");
+ *     }
+ * });
+ * </pre>
+ * </p>
+ * 
+ * <p>
+ * 4. 使用死信队列示例：
+ * <pre>
+ * // 创建死信交换机参数
+ * Map<String, Object> args = new HashMap<>();
+ * args.put("x-dead-letter-exchange", "dlx-exchange");
+ * args.put("x-dead-letter-routing-key", "dlx-routing-key");
+ * args.put("x-message-ttl", 60000); // 消息过期时间：60秒
+ * 
+ * // 创建主队列（带有死信配置）
+ * sendRabbitMQService.setupMessageChannel(
+ *     "main-queue", true, false, false, args,
+ *     new DirectExchange("main-exchange", true, false),
+ *     "main-routing-key"
+ * );
+ * 
+ * // 创建死信队列
+ * sendRabbitMQService.setupMessageChannel(
+ *     "dlx-queue", true, false, false, null,
+ *     new DirectExchange("dlx-exchange", true, false),
+ *     "dlx-routing-key"
+ * );
+ * </pre>
+ * </p>
+ * 
  * @author maple
  */
 @Service
