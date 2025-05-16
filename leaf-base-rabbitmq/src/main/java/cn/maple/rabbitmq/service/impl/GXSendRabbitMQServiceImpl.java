@@ -18,7 +18,6 @@ import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.retry.RetryCallback;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -281,9 +280,16 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
      */
     public <T> T retryOperation(Supplier<T> operation, int maxRetries, long delayMs) {
         try {
-            return GXRetryUtil.retryOperation((RetryCallback<T, Throwable>) context -> operation.get(), maxRetries, delayMs);
-        } catch (Throwable e) {
-            log.error("重试操作失败，已达到最大重试次数或发生不可恢复异常", e);
+            return GXRetryUtil.retryOperation(context -> {
+                try {
+                    return operation.get();
+                } catch (Exception e) {
+                    log.warn("重试操作过程中发生异常，准备进行第 {} 次重试", context.getRetryCount(), e);
+                    throw e;
+                }
+            }, maxRetries, delayMs);
+        } catch (Exception e) {
+            log.error("重试操作最终失败，已达到最大重试次数或发生不可恢复异常", e);
             throw new RuntimeException("重试操作失败", e);
         }
     }
