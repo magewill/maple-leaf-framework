@@ -18,6 +18,7 @@ import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.retry.RetryCallback;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -34,7 +35,7 @@ import java.util.function.Supplier;
  * 该类实现了GXSendRabbitMQService接口，提供了向RabbitMQ发送消息的具体实现。
  * 通过Spring的RabbitTemplate组件实现消息的发送，支持消息确认和返回机制。
  * </p>
- * 
+ *
  * <h2>功能特点</h2>
  * <ul>
  *   <li>支持发送常规消息到指定交换机和路由键</li>
@@ -43,7 +44,7 @@ import java.util.function.Supplier;
  *   <li>内置重试机制，提高消息发送可靠性</li>
  *   <li>支持消息追踪，便于问题排查</li>
  * </ul>
- * 
+ *
  * <h2>线程安全说明</h2>
  * <p>
  * 该实现类是线程安全的，可以在多线程环境下使用：
@@ -54,7 +55,7 @@ import java.util.function.Supplier;
  *   <li>异步操作使用专用线程池，避免资源耗尽</li>
  * </ul>
  * </p>
- * 
+ *
  * <h2>内存安全</h2>
  * <p>
  * 该实现类采取了多种措施确保内存安全：
@@ -65,7 +66,7 @@ import java.util.function.Supplier;
  *   <li>使用有界队列和自定义拒绝策略，防止OOM</li>
  * </ul>
  * </p>
- * 
+ *
  * <h2>性能优化</h2>
  * <p>
  * 该实现类包含多项性能优化措施：
@@ -76,7 +77,7 @@ import java.util.function.Supplier;
  *   <li>异步API支持高并发场景下的非阻塞操作</li>
  * </ul>
  * </p>
- * 
+ *
  * <h2>使用示例</h2>
  * <p>
  * 1. 发送消息示例：
@@ -87,12 +88,12 @@ import java.util.function.Supplier;
  * messageReqDto.setRoutingKey("order.created");
  * messageReqDto.setData(Dict.create().set("orderId", 12345).set("status", "CREATED"));
  * messageReqDto.setMessageProperties(new MessageProperties());
- * 
+ *
  * // 发送消息
  * sendRabbitMQService.sendNormalMessage(messageReqDto);
  * </pre>
  * </p>
- * 
+ *
  * <p>
  * 2. 创建消息通道示例：
  * <pre>
@@ -102,7 +103,7 @@ import java.util.function.Supplier;
  *     new DirectExchange("order-exchange", true, false),
  *     "order.created"
  * );
- * 
+ *
  * // 创建一个Topic类型的交换机和队列，并绑定
  * boolean success = sendRabbitMQService.setupMessageChannel(
  *     "notification-queue", true, false, false, null,
@@ -111,7 +112,7 @@ import java.util.function.Supplier;
  * );
  * </pre>
  * </p>
- * 
+ *
  * <p>
  * 3. 异步创建消息通道示例：
  * <pre>
@@ -121,7 +122,7 @@ import java.util.function.Supplier;
  *     new DirectExchange("async-exchange", true, false),
  *     "async.message"
  * );
- * 
+ *
  * // 添加回调处理结果
  * future.thenAccept(success -> {
  *     if (success) {
@@ -132,7 +133,7 @@ import java.util.function.Supplier;
  * });
  * </pre>
  * </p>
- * 
+ *
  * <p>
  * 4. 使用死信队列示例：
  * <pre>
@@ -141,14 +142,14 @@ import java.util.function.Supplier;
  * args.put("x-dead-letter-exchange", "dlx-exchange");
  * args.put("x-dead-letter-routing-key", "dlx-routing-key");
  * args.put("x-message-ttl", 60000); // 消息过期时间：60秒
- * 
+ *
  * // 创建主队列（带有死信配置）
  * sendRabbitMQService.setupMessageChannel(
  *     "main-queue", true, false, false, args,
  *     new DirectExchange("main-exchange", true, false),
  *     "main-routing-key"
  * );
- * 
+ *
  * // 创建死信队列
  * sendRabbitMQService.setupMessageChannel(
  *     "dlx-queue", true, false, false, null,
@@ -157,7 +158,7 @@ import java.util.function.Supplier;
  * );
  * </pre>
  * </p>
- * 
+ *
  * @author maple
  */
 @Service
@@ -279,7 +280,12 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
      * @throws RuntimeException 如果重试次数用尽后操作仍然失败，则抛出运行时异常
      */
     public <T> T retryOperation(Supplier<T> operation, int maxRetries, long delayMs) {
-        return GXRetryUtil.retryOperation(context -> operation.get(), maxRetries, delayMs);
+        try {
+            return GXRetryUtil.retryOperation((RetryCallback<T, Throwable>) context -> operation.get(), maxRetries, delayMs);
+        } catch (Throwable e) {
+            log.error("重试操作失败，已达到最大重试次数或发生不可恢复异常", e);
+            throw new RuntimeException("重试操作失败", e);
+        }
     }
 
     /**
@@ -495,7 +501,6 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
             }
         }, rabbitMqAsyncExecutor);
     }
-
 
     /**
      * 检查队列是否存在
