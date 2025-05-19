@@ -460,7 +460,34 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 - 异常不会影响主流程，但需要妥善记录和处理异常
 - 适用场景：与主业务弱相关的操作，如发送通知、记录日志、统计分析等
 
-##### 3.3.3.5 使用方法
+### 3.3.2 MyBatis 事件监听与 `@GXMyBatisListener`
+
+`@GXMyBatisListener` 注解用于定义和配置MyBatis操作事件的监听器。通过此注解，开发者可以方便地在数据持久化操作（如增、删、改）的不同阶段插入自定义逻辑，例如记录审计日志、更新缓存、发送通知等。
+
+该注解可以标记在实现了 `cn.maple.core.datasource.listener.GXMybatisListenerService` 接口的监听器类上，或者直接标记在 `Service` 类或 `Mapper` 接口的方法上，以指定特定的监听行为。框架会自动扫描带有此注解的组件，并根据配置的事件类型（同步/异步）和作用范围来触发相应的监听器方法。
+
+##### 3.3.2.1 核心接口与类
+
+- **`cn.maple.core.datasource.annotation.GXMyBatisListener`**: 核心注解，用于声明一个类或方法作为MyBatis事件监听器，并配置其行为。
+- **`cn.maple.core.datasource.listener.GXMyBatisBaseListener`**: 监听器基础接口，定义了MyBatis操作（如保存、更新、删除等）的事件回调方法。开发者需要实现此接口中的一个或多个方法来处理特定事件。它包含以下主要方法：
+    - `onSaveEntity(GXMyBatisModelSaveEntityEvent event)`: 监听实体保存操作。
+    - `onUpdateEntity(GXMyBatisModelUpdateEntityEvent event)`: 监听实体更新操作。
+    - `onUpdateField(GXMyBatisModelUpdateFieldEvent event)`: 监听实体特定字段更新操作。
+    - `onDeleteLogic(GXMyBatisModelDeleteLogicEvent event)`: 监听实体逻辑删除操作。
+    - `onSaveBatch(GXMyBatisModelSaveBatchEvent event)`: 监听实体批量保存操作。
+- **`cn.maple.core.datasource.listener.GXMyBatisSyncListener`**: 同步监听器抽象类，实现了 `GXMyBatisBaseListener`。同步监听器的逻辑会在主业务操作的同一个事务内、同一个线程中执行。适用于需要强一致性或事务保证的场景。
+- **`cn.maple.core.datasource.listener.GXMyBatisAsyncListener`**: 异步监听器抽象类，实现了 `GXMyBatisBaseListener`。异步监听器的逻辑会在独立的线程中执行，不阻塞主业务流程，通常通过配置的线程池进行管理。适用于耗时操作或对主流程性能影响较大的场景。
+- **`cn.maple.core.datasource.listener.GXMybatisListenerService`**: 一个标记接口。如果 `@GXMyBatisListener` 注解的 `listenerClazz` 属性指定的是一个实现了此接口的类，框架会认为这是一个需要被管理的监听器服务。通常，监听器类会直接继承 `GXMyBatisSyncListener` 或 `GXMyBatisAsyncListener`，并被Spring容器管理（例如使用 `@Component` 注解）。
+- **事件对象 (位于 `cn.maple.core.datasource.event` 包下)**:
+    - `GXMyBatisModelEvent`: 所有MyBatis模型事件的基类。
+    - `GXMyBatisModelSaveEntityEvent`: 实体保存事件对象，包含被保存的实体信息。
+    - `GXMyBatisModelUpdateEntityEvent`: 实体更新事件对象，包含更新前后的实体信息或更新参数。
+    - `GXMyBatisModelUpdateFieldEvent`: 实体特定字段更新事件对象。
+    - `GXMyBatisModelDeleteLogicEvent`: 实体逻辑删除事件对象。
+    - `GXMyBatisModelSaveBatchEvent`: 实体批量保存事件对象，包含被批量保存的实体列表。
+- **`cn.maple.core.datasource.constant.GXMyBatisEventConstant`**: 事件常量类，定义了监听器执行类型的常量：
+    - `MYBATIS_SYNC_EVENT`: 表示同步执行事件。
+    - `MYBATIS_ASYNC_EVENT`: 表示异步执行事件。
 
 1. 创建监听器服务接口实现：
 
@@ -496,42 +523,187 @@ public class UserListenerServiceImpl implements UserListenerService {
 }
 ```
 
-2. 创建同步监听器：
+##### 3.3.2.2 `@GXMyBatisListener` 注解使用示例
 
-```java
-@Component
-@GXMyBatisListener
-public class UserSyncEventListener extends GXMyBatisSyncListener {
-    private final Logger logger = LoggerFactory.getLogger(getClass());
-    
-    @Override
-    public void onSaveEntity(GXMyBatisModelSaveEntityEvent event) {
-        if (event.getSource() instanceof UserEntity) {
-            UserEntity user = (UserEntity) event.getSource();
-            logger.info("同步处理用户创建事件：{}", user.getUsername());
-            // 执行需要事务支持的业务逻辑
-        }
-    }
-    
-    @Override
-    public void onUpdateEntity(GXMyBatisModelUpdateEntityEvent event) {
-        if (event.getSource() instanceof Dict) {
-            Dict source = (Dict) event.getSource();
-            if (source.containsKey("entityData") && source.get("entityData") instanceof UserEntity) {
-                UserEntity user = (UserEntity) source.get("entityData");
-                logger.info("同步处理用户更新事件：{}", user.getUsername());
-                // 执行需要事务支持的业务逻辑
+1.  **创建监听器实现类**：
+    继承 `GXMyBatisSyncListener` (同步) 或 `GXMyBatisAsyncListener` (异步)，并重写需要关注的事件处理方法。使用 `@Component` (或其他Spring stereotype注解) 使其被Spring容器管理，并使用 `@GXMyBatisListener` 标记该类。
+
+    **同步监听器示例：**
+    ```java
+    package com.example.listener;
+
+    import cn.maple.core.datasource.annotation.GXMyBatisListener;
+    import cn.maple.core.datasource.event.GXMyBatisModelSaveEntityEvent;
+    import cn.maple.core.datasource.event.GXMyBatisModelUpdateEntityEvent;
+    import cn.maple.core.datasource.listener.GXMyBatisSyncListener;
+    import com.example.entity.UserEntity; // 假设的实体类
+    import org.slf4j.Logger;
+    import org.slf4j.LoggerFactory;
+    import org.springframework.stereotype.Component;
+    import org.apache.commons.collections.MapUtils; // 假设使用commons-collections
+    import java.util.Map;
+
+    @Component
+    @GXMyBatisListener // 标记此类为MyBatis事件监听器，默认同步执行
+    public class UserAuditSyncListener extends GXMyBatisSyncListener {
+
+        private static final Logger logger = LoggerFactory.getLogger(UserAuditSyncListener.class);
+
+        @Override
+        public void onSaveEntity(GXMyBatisModelSaveEntityEvent event) {
+            if (event.getSource() instanceof UserEntity) {
+                UserEntity user = (UserEntity) event.getSource();
+                logger.info("[SYNC] User saved: {}", user.getUsername());
+                // 在同一事务中执行审计日志记录等操作
             }
         }
+
+        @Override
+        public void onUpdateEntity(GXMyBatisModelUpdateEntityEvent event) {
+            Object source = event.getSource();
+            if (source instanceof Map) { // 更新操作可能传递Map类型的参数
+                Map<?, ?> params = (Map<?, ?>) source;
+                Object entityData = params.get("entityData"); // GXMyBatisBaseServiceImpl中更新方法传递的实体通常在entityData中
+                if (entityData instanceof UserEntity) {
+                    UserEntity user = (UserEntity) entityData;
+                    logger.info("[SYNC] User updated: {}", user.getUsername());
+                    // 在同一事务中执行审计日志记录等操作
+                }
+            } else if (source instanceof UserEntity) { // 也可能直接是实体对象
+                 UserEntity user = (UserEntity) source;
+                 logger.info("[SYNC] User updated directly: {}", user.getUsername());
+            }
+        }
+        // 可以根据需要重写其他事件方法，如 onDeleteLogic, onUpdateField 等
     }
-}
-```
+    ```
+
+    **异步监听器示例：**
+    ```java
+    package com.example.listener;
+
+    import cn.maple.core.datasource.annotation.GXMyBatisListener;
+    import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
+    import cn.maple.core.datasource.event.GXMyBatisModelSaveEntityEvent;
+    import cn.maple.core.datasource.listener.GXMyBatisAsyncListener;
+    import com.example.entity.UserEntity;
+    import org.slf4j.Logger;
+    import org.slf4j.LoggerFactory;
+    import org.springframework.stereotype.Component;
+
+    @Component
+    @GXMyBatisListener(
+        runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT, // 设置为异步执行
+        asyncExecutor = "myBatisEventAsyncTaskExecutor" // 指定异步执行器Bean名称 (可选)
+    )
+    public class WelcomeNotificationAsyncListener extends GXMyBatisAsyncListener {
+
+        private static final Logger logger = LoggerFactory.getLogger(WelcomeNotificationAsyncListener.class);
+
+        @Override
+        public void onSaveEntity(GXMyBatisModelSaveEntityEvent event) {
+            if (event.getSource() instanceof UserEntity) {
+                UserEntity user = (UserEntity) event.getSource();
+                logger.info("[ASYNC] New user registered: {}. Preparing to send welcome email.", user.getUsername());
+                try {
+                    // 模拟发送邮件等耗时操作
+                    Thread.sleep(2000); // 模拟耗时
+                    logger.info("[ASYNC] Welcome email sent to {}.
+", user.getEmail());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    logger.error("[ASYNC] Error sending welcome email for user {}: {}", user.getUsername(), e.getMessage());
+                } catch (Exception e) {
+                    logger.error("[ASYNC] Unexpected error sending welcome email for user {}: {}", user.getUsername(), e.getMessage());
+                }
+            }
+        }
+        // 其他异步事件处理
+    }
+    ```
+
+2.  **在Service类或Mapper方法上使用 `@GXMyBatisListener`** (可选，用于更细粒度的控制)
+
+    如果不想全局监听某个实体的所有操作，或者想为特定的Service操作或Mapper方法指定不同的监听器，可以直接在它们上面使用 `@GXMyBatisListener` 注解，并指定 `listenerClazz`。
+
+    **在Service类上使用示例：**
+    ```java
+    package com.example.service;
+
+    import cn.maple.core.datasource.annotation.GXMyBatisListener;
+    import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
+    import cn.maple.core.datasource.service.impl.GXMyBatisBaseServiceImpl;
+    import com.example.entity.OrderEntity;
+    import com.example.listener.OrderSpecificAsyncListener; // 假设这是为Order定制的异步监听器
+    import com.example.mapper.OrderMapper;
+    import org.springframework.stereotype.Service;
+
+    @Service
+    @GXMyBatisListener(
+        listenerClazz = OrderSpecificAsyncListener.class, // 指定特定的监听器类
+        runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT
+    )
+    public class OrderServiceImpl extends GXMyBatisBaseServiceImpl<OrderMapper, OrderEntity> implements OrderService {
+        // 此Service中所有GXMyBatisBaseServiceImpl提供的标准增删改查方法，
+        // 以及通过OrderMapper执行的数据操作，都将异步触发OrderSpecificAsyncListener。
+    }
+    ```
+
+    **在Mapper方法上使用示例：**
+    ```java
+    package com.example.mapper;
+
+    import cn.maple.core.datasource.annotation.GXMyBatisListener;
+    import cn.maple.core.datasource.mapper.GXBaseMapper;
+    import com.example.entity.ProductEntity;
+    import com.example.listener.ProductStockSyncListener; // 假设这是产品库存同步监听器
+    import org.apache.ibatis.annotations.Mapper;
+    import org.apache.ibatis.annotations.Param;
+
+    @Mapper
+    public interface ProductMapper extends GXBaseMapper<ProductEntity> {
+
+        @GXMyBatisListener(listenerClazz = ProductStockSyncListener.class) // 仅此方法触发同步监听
+        int decreaseStock(@Param("productId") Long productId, @Param("quantity") int quantity);
+    }
+    ```
+
+3.  **配置异步监听器线程池** (如果使用异步监听器)
+
+    如果使用了异步监听器 (`runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT`)，建议配置一个专用的线程池来执行这些异步任务。可以在Spring配置类中定义一个 `Executor` Bean，并将其名称通过 `@GXMyBatisListener` 的 `asyncExecutor` 属性指定。
+
+    ```java
+    package com.example.config;
+
+    import org.springframework.context.annotation.Bean;
+    import org.springframework.context.annotation.Configuration;
+    import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+    import java.util.concurrent.Executor;
+
+    @Configuration
+    public class AsyncExecutionConfig {
+
+        public static final String ASYNC_EXECUTOR_NAME = "myBatisEventAsyncTaskExecutor";
+
+        @Bean(name = ASYNC_EXECUTOR_NAME)
+        public Executor myBatisEventAsyncTaskExecutor() {
+            ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+            executor.setCorePoolSize(5);       // 核心线程数
+            executor.setMaxPoolSize(10);      // 最大线程数
+            executor.setQueueCapacity(25);    // 队列容量
+            executor.setThreadNamePrefix("MyBatisEvent-"); // 线程名前缀
+            executor.initialize();
+            return executor;
+        }
+    }
+    ```
+    如果未指定 `asyncExecutor` 或找不到对应的Bean，框架可能会尝试使用默认的异步执行机制（例如Spring的 `@Async` 默认线程池，但这取决于具体实现和版本）。
 
 ##### 3.3.2.3 注解参数说明
 
 | 参数名          | 类型                                      | 是否必填 | 默认值                                   | 描述                                                                                                                                                              |
 |-----------------|-------------------------------------------|----------|------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------| 
-| `listenerClazz` | `Class<? extends GXMybatisListenerService>` | 否       | `GXMybatisListenerService.class`         | 指定实现了 `GXMybatisListenerService` 接口的监听器服务类。当注解直接标记在监听器类上时，此参数可省略或设置为其自身。当注解标记在Service或Mapper方法上时，需要指定具体的监听器实现。 |
+| `listenerClazz` | `Class<? extends cn.maple.core.datasource.listener.GXMybatisListenerService>` | 否       | `cn.maple.core.datasource.listener.GXMybatisListenerService.class`         | 指定实现了 `GXMybatisListenerService` 接口的监听器服务类。当注解直接标记在监听器类上时（监听器类本身实现了 `GXMyBatisBaseListener` 并通常被Spring管理），此参数可省略。当注解标记在Service或Mapper方法上，用于指定一个外部的监听器类时，此参数是必需的。 |
 | `runType`       | `String`                                  | 否       | `GXMyBatisEventConstant.MYBATIS_SYNC_EVENT` | 指定监听器的执行类型，可选值为：<br> - `GXMyBatisEventConstant.MYBATIS_SYNC_EVENT` (默认): 同步执行，监听器逻辑与主业务逻辑在同一事务中，会影响主流程性能。<br> - `GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT`: 异步执行，监听器逻辑在独立的线程中执行，不阻塞主业务流程，通常用于耗时操作或非核心业务。                               | 
 | `order`         | `int`                                     | 否       | `Ordered.LOWEST_PRECEDENCE`              | 定义多个监听器时的执行顺序，值越小，优先级越高。                                                                                                                            |
 | `asyncExecutor` | `String`                                  | 否       | `"myBatisEventAsyncTaskExecutor"`        | 当 `runType` 为异步时，指定执行异步任务的线程池Bean名称。如果未指定或找不到对应的Bean，会尝试使用默认的异步执行器。                                                                 |
@@ -556,105 +728,96 @@ public class UserSyncEventListener extends GXMyBatisSyncListener {
 - **与 `@Transactional` 的结合**：
     - 当 `@GXMyBatisListener` 与 `@Transactional` 同时作用于一个方法或类时，需要注意它们的执行顺序和事务边界。通常，AOP拦截的顺序会影响行为，建议通过 `order` 参数明确控制监听器的执行顺序。
 
-3. 创建异步监听器：
 
-```java
-@Component
-@GXMyBatisListener
-public class UserAsyncEventListener extends GXMyBatisAsyncListener {
-    private final Logger logger = LoggerFactory.getLogger(getClass());
-    
-    @Override
-    public void onSaveEntity(GXMyBatisModelSaveEntityEvent event) {
-        try {
-            if (event.getSource() instanceof UserEntity) {
-                UserEntity user = (UserEntity) event.getSource();
-                logger.info("异步处理用户创建事件：{}", user.getUsername());
-                // 执行耗时操作，如发送邮件通知
-                sendWelcomeEmail(user);
-            }
-        } catch (Exception e) {
-            // 异常不会影响主流程，但需要记录日志
-            logger.error("处理用户创建事件异常", e);
-        }
-    }
-    
-    private void sendWelcomeEmail(UserEntity user) {
-        // 模拟发送欢迎邮件
-        logger.info("发送欢迎邮件给：{}", user.getEmail());
-        // 实际邮件发送逻辑...
-    }
-}
-```
-
-
-2. 创建监听器（同步或异步），并使用 `@GXMyBatisListener` 注解标记在监听器类上，或者直接在需要监听的Mapper方法或Service类上使用该注解。
-
-   - **在监听器类上使用：**
-
-     ```java
-     @Component
-     @GXMyBatisListener(listenerClazz = UserListenerServiceImpl.class) // 指定实现了 GXMybatisListenerService 的服务类
-     public class UserSyncEventListener extends GXMyBatisSyncListener {
-         private final Logger logger = LoggerFactory.getLogger(getClass());
-
-         @Override
-         public void onSaveEntity(GXMyBatisModelSaveEntityEvent event) {
-             if (event.getSource() instanceof UserEntity) {
-                 UserEntity user = (UserEntity) event.getSource();
-                 logger.info("同步处理用户创建事件：{}", user.getUsername());
-                 // 执行需要事务支持的业务逻辑
-             }
-         }
-
-         // ... 其他事件处理方法
-     }
-     ```
-
-   - **在Service类上使用（示例）：**
-
-     ```java
-     @Service
-     @GXMyBatisListener(
-         listenerClazz = UserActivityListener.class, // 假设 UserActivityListener 实现了 GXMybatisListenerService
-         runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT // 设置为异步执行
-     )
-     public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEntity> implements UserService {
-         // 该类中的所有 GXMyBatisBaseServiceImpl 提供的标准增删改查方法，
-         // 以及自定义的、通过 UserMapper 执行的数据操作，
-         // 都会异步触发 UserActivityListener 中相应的监听方法。
-     }
-     ```
-
-   - **在Mapper方法上使用（示例）：**
-
-     ```java
-     @Mapper
-     public interface OrderMapper extends GXBaseMapper<OrderEntity> {
-         @GXMyBatisListener(listenerClazz = OrderStatusUpdateListener.class) // 监听特定方法的同步事件
-         int updateOrderStatus(Long orderId, Integer status);
-     }
-     ```
-
-3. 配置异步监听器线程池（可选）：
-
-```java
-@Configuration
-public class AsyncConfig {
-    @Bean(name = "myBatisEventAsyncTaskExecutor")
-    public Executor myBatisEventAsyncTaskExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(5);
-        executor.setMaxPoolSize(10);
-        executor.setQueueCapacity(25);
-        executor.setThreadNamePrefix("MyBatis-Event-");
         executor.initialize();
         return executor;
     }
 }
 ```
 
-#### 3.3.4 使用方法
+#### 3.3.3 整体使用流程概览
+
+1.  **定义实体类**：确保实体类继承自 `cn.maple.core.datasource.model.GXMyBatisModel` (或其子类)，这是事件能够正确识别和处理实体的前提。
+
+    ```java
+    package com.example.entity;
+
+    import cn.maple.core.datasource.model.GXMyBatisModel;
+    import com.baomidou.mybatisplus.annotation.TableName;
+    import lombok.Data;
+    import lombok.EqualsAndHashCode;
+
+    @Data
+    @EqualsAndHashCode(callSuper = true)
+    @TableName("tb_user")
+    public class UserEntity extends GXMyBatisModel {
+        private String username;
+        private String password;
+        private String email;
+        // 其他字段...
+    }
+    ```
+
+2.  **创建Mapper接口**：继承 `cn.maple.core.datasource.mapper.GXBaseMapper<T>`。
+
+    ```java
+    package com.example.mapper;
+
+    import cn.maple.core.datasource.mapper.GXBaseMapper;
+    import com.example.entity.UserEntity;
+    import org.apache.ibatis.annotations.Mapper;
+
+    @Mapper
+    public interface UserMapper extends GXBaseMapper<UserEntity> {
+        // 可以定义自定义的SQL方法
+    }
+    ```
+
+3.  **创建Service接口与实现**：
+    - Service接口继承 `cn.maple.core.datasource.service.GXMyBatisBaseService<T>`。
+    - Service实现类继承 `cn.maple.core.datasource.service.impl.GXMyBatisBaseServiceImpl<M, T>`。
+
+    ```java
+    package com.example.service;
+
+    import cn.maple.core.datasource.service.GXMyBatisBaseService;
+    import com.example.entity.UserEntity;
+
+    public interface UserService extends GXMyBatisBaseService<UserEntity> {
+        // 自定义服务方法
+        void registerUser(UserEntity user);
+    }
+    ```
+
+    ```java
+    package com.example.service.impl;
+
+    import cn.maple.core.datasource.service.impl.GXMyBatisBaseServiceImpl;
+    import com.example.entity.UserEntity;
+    import com.example.mapper.UserMapper;
+    import com.example.service.UserService;
+    import org.springframework.stereotype.Service;
+    import org.springframework.transaction.annotation.Transactional;
+
+    @Service
+    public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEntity> implements UserService {
+
+        @Override
+        @Transactional // 示例：注册用户操作通常需要事务
+        public void registerUser(UserEntity user) {
+            // 进行一些业务校验或处理
+            // ...
+            this.save(user); // 调用GXMyBatisBaseServiceImpl的save方法，会触发onSaveEntity事件
+            // 如果配置了监听器，此时相关的监听逻辑会被执行
+        }
+    }
+    ```
+
+4.  **创建并配置监听器**：按照 **3.3.2.2** 中的示例创建监听器类，并使用 `@GXMyBatisListener` 注解。
+
+5.  **(可选) 配置异步线程池**：如果使用了异步监听器，按照 **3.3.2.2 (步骤3)** 中的示例配置线程池。
+
+6.  **执行操作触发事件**：当调用 `GXMyBatisBaseServiceImpl` 提供的标准增删改查方法（如 `save`, `updateById`, `removeById` 等），或者调用被 `@GXMyBatisListener` 注解的 `Mapper` 方法时，相应的事件会被发布，并由匹配的监听器处理。
 
 1. 创建实体类继承 `GXMyBatisModel`：
 
@@ -694,7 +857,7 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 }
 ```
 
-### 3.4 数据类型处理
+### 3.4 JSON与Java对象类型处理
 
 ### 3.5 数据校验
 
@@ -931,23 +1094,30 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 
 ##### 3.4.1.1 相关类
 
-- `GXJSONToListTypeHandler`：JSON转List类型处理器，用于将JSON字符串与List<Map<String, Object>>类型互相转换
-- `GXJSONToMapTypeHandler`：JSON转Map类型处理器，用于将JSON字符串与Map<String, Object>类型互相转换
-- `GXJsonNodeValueTypeHandler`：JsonNode值类型处理器，用于处理Jackson的JsonNode类型
-- `GXTreeNodeTypeHandler`：树节点类型处理器，用于处理树形结构数据
+- `GXJSONToListTypeHandler`：JSON转`List<Map<String, Object>>`类型处理器。用于将数据库中的JSON字符串（通常存储为CLOB或TEXT类型）与Java中的`List<Map<String, Object>>`类型进行双向转换。在读取时，如果数据库值为`NULL`或空JSON对象字符串，会返回空List。
+- `GXJSONToMapTypeHandler`：JSON转`Map<String, Object>`类型处理器。用于将数据库中的JSON字符串（通常存储为CLOB或TEXT类型）与Java中的`Map<String, Object>`类型进行双向转换。在读取时，会将JSON对象的键名转换为驼峰式命名（camelCase）。如果数据库值为`NULL`或空JSON对象字符串，会返回空Map。
+- `GXJsonNodeValueTypeHandler`：JsonNode值类型处理器，用于处理Jackson库的`JsonNode`类型与数据库存储之间的转换。
+- `GXTreeNodeTypeHandler`：树节点类型处理器，用于处理自定义的树形结构数据（如`TreeNode`对象）与数据库存储之间的转换。
 
 ##### 3.4.1.2 工作原理
 
-类型处理器基于MyBatis的TypeHandler机制实现，用于在Java类型和数据库类型之间进行转换。主要流程：
+这些类型处理器基于MyBatis的`TypeHandler`机制，实现了Java特定类型与数据库JDBC类型之间的自动转换。它们主要处理将Java对象序列化为JSON字符串存入数据库，以及从数据库读取JSON字符串反序列化为Java对象的过程。
 
-1. **写入数据库时**：
-   - 将Java对象（如Map、List）转换为JSON字符串
-   - 通过JDBC将JSON字符串写入数据库（通常存储为TEXT或JSON类型）
+**工作流程概述：**
 
-2. **从数据库读取时**：
-   - 从数据库读取JSON字符串
-   - 将JSON字符串解析为Java对象（如Map、List）
-   - 返回给应用程序使用
+1.  **参数设置 (Java对象 -> 数据库记录)**:
+    *   当MyBatis执行插入或更新操作，需要将Java对象（如 `Map<String, Object>` 或 `List<Map<String, Object>>`）作为参数传递给SQL语句时：
+    *   对应的TypeHandler（例如 `GXJSONToMapTypeHandler`）的 `setNonNullParameter` 方法被调用。
+    *   该方法将Java对象使用JSON库（如Hutool JSON）序列化为JSON字符串。
+    *   序列化后的JSON字符串通过 `PreparedStatement.setCharacterStream()` 方法设置到SQL参数中，通常对应数据库的TEXT、CLOB或JSON类型的字段。
+
+2.  **结果获取 (数据库记录 -> Java对象)**:
+    *   当MyBatis执行查询操作，从 `ResultSet` 中获取数据并映射到Java实体字段时：
+    *   对应的TypeHandler的 `getNullableResult` 方法被调用。
+    *   该方法从 `ResultSet` 中读取指定列的值（通常是CLOB类型，通过 `ResultSet.getClob()` 读取并转换为字符串）。
+    *   读取到的JSON字符串使用JSON库反序列化为目标Java类型（如 `Map<String, Object>` 或 `List<Map<String, Object>>`）。
+    *   `GXJSONToMapTypeHandler` 在反序列化时，还会将JSON对象的键名转换为驼峰式命名。
+    *   如果数据库中的值为NULL或无效JSON，处理器会返回null或空集合/Map，以避免空指针异常。
 
 ##### 3.4.1.3 使用方法
 
@@ -959,15 +1129,16 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 public class UserEntity extends GXMyBatisModel {
     private String username;
     
-    // 存储用户扩展属性，如地址、联系方式等
+    // 存储用户扩展属性，如地址、联系方式等。数据库中存储为JSON字符串。
+    // 读取时，JSON对象的键名会自动转换为驼峰式。
     @TableField(typeHandler = GXJSONToMapTypeHandler.class)
     private Map<String, Object> attributes;
     
-    // 存储用户标签列表
+    // 存储用户标签列表，每个标签是一个Map。数据库中存储为JSON数组字符串。
     @TableField(typeHandler = GXJSONToListTypeHandler.class)
     private List<Map<String, Object>> tags;
     
-    // 存储用户权限树
+    // 存储用户权限树，具体结构取决于TreeNode的定义和GXTreeNodeTypeHandler的实现
     @TableField(typeHandler = GXTreeNodeTypeHandler.class)
     private TreeNode permissionTree;
 }
@@ -1090,11 +1261,11 @@ ComplexStructure structure = JSONUtil.toBean(JSONUtil.toJsonStr(entity.getStruct
 
 #### 3.5.1 相关类
 
-- `GXMyBatisEncryptInterceptor`：加密拦截器，用于在数据写入数据库前自动加密敏感字段
-- `GXMyBatisDecryptInterceptor`：解密拦截器，用于在数据从数据库读取后自动解密敏感字段
-- `GXSensitiveData`：敏感数据注解，标记需要加解密的实体类
-- `GXSensitiveDataEncryptService`：敏感数据加密服务接口
-- `GXSensitiveDataDecryptService`：敏感数据解密服务接口
+- `GXMyBatisEncryptInterceptor`：加密拦截器，在MyBatis执行SQL前自动加密标记了`@GXSensitiveData`注解的实体类中的敏感字段。通过拦截`ParameterHandler`的`setParameters`方法实现。
+- `GXMyBatisDecryptInterceptor`：解密拦截器，在MyBatis查询结果返回前自动解密标记了`@GXSensitiveData`注解的实体类中的敏感字段。通过拦截`ResultSetHandler`的`handleResultSets`方法实现。
+- `GXSensitiveData`：敏感数据注解（通常位于`cn.maple.core.framework.annotation.GXSensitiveData`），用于标记实体类，表明该类包含需要进行加解密的字段。
+- `GXSensitiveDataEncryptService`：敏感数据加密服务接口（通常位于`cn.maple.core.framework.service.GXSensitiveDataEncryptService`），定义了加密操作。需要开发者提供此接口的实现。
+- `GXSensitiveDataDecryptService`：敏感数据解密服务接口（通常位于`cn.maple.core.framework.service.GXSensitiveDataDecryptService`），定义了解密操作。需要开发者提供此接口的实现。
 
 #### 3.5.2 工作原理
 
@@ -1126,49 +1297,86 @@ public class UserEntity extends GXMyBatisModel {
 }
 ```
 
-2. 实现加密和解密服务接口：
+2. 实现加密和解密服务接口，并注册为Spring Bean：
+
+   开发者需要提供 `GXSensitiveDataEncryptService` 和 `GXSensitiveDataDecryptService` 接口的实现。这些实现类应包含具体的加密和解密逻辑 (例如，使用AES、SM4等算法)。
 
 ```java
+import cn.maple.core.framework.service.GXSensitiveDataEncryptService;
+import org.springframework.stereotype.Service;
+import java.lang.reflect.Field;
+
 @Service
-public class SensitiveDataEncryptServiceImpl implements GXSensitiveDataEncryptService {
+public class MySensitiveDataEncryptServiceImpl implements GXSensitiveDataEncryptService {
+    // 假设这是你的加密密钥，实际项目中应从安全配置中获取
+    private final String secretKey = "your-secret-key"; 
+
     @Override
-    public Object encrypt(Object value, String fieldName) {
-        if (value == null) {
-            return null;
+    public void encrypt(Field[] declaredFields, Object parameterObject) throws IllegalAccessException {
+        // 遍历对象的所有字段
+        for (Field field : declaredFields) {
+            // 假设我们只加密String类型的字段，并且字段名为password或idCard
+            // 实际项目中，你可能需要更复杂的逻辑来判断哪些字段需要加密，
+            // 例如基于字段上的特定注解，或者根据字段名列表
+            if (field.getType().equals(String.class) && 
+                ("password".equals(field.getName()) || "idCard".equals(field.getName()))) {
+                field.setAccessible(true);
+                String originalValue = (String) field.get(parameterObject);
+                if (originalValue != null) {
+                    // 调用你的加密方法
+                    String encryptedValue = encryptValue(originalValue);
+                    field.set(parameterObject, encryptedValue);
+                }
+            }
         }
-        // 根据字段名和值进行加密处理
-        if ("password".equals(fieldName) || "idCard".equals(fieldName)) {
-            return encryptValue(value.toString());
-        }
-        return value;
     }
-    
+
     private String encryptValue(String value) {
-        // 实现具体的加密算法，如AES加密
-        return AESUtil.encrypt(value, secretKey);
+        // 实现具体的加密算法，例如AES加密
+        // return AESUtil.encrypt(value, secretKey); // 替换为你的加密实现
+        return "encrypted_" + value; // 示例加密
     }
 }
 
+import cn.maple.core.framework.service.GXSensitiveDataDecryptService;
+import org.springframework.stereotype.Service;
+import java.lang.reflect.Field;
+
 @Service
-public class SensitiveDataDecryptServiceImpl implements GXSensitiveDataDecryptService {
+public class MySensitiveDataDecryptServiceImpl implements GXSensitiveDataDecryptService {
+    // 假设这是你的解密密钥
+    private final String secretKey = "your-secret-key";
+
     @Override
-    public Object decrypt(Object value, String fieldName) {
-        if (value == null) {
-            return null;
+    public void decrypt(Object resultObject) throws IllegalAccessException {
+        if (resultObject == null) return;
+        Field[] declaredFields = resultObject.getClass().getDeclaredFields();
+        for (Field field : declaredFields) {
+            if (field.getType().equals(String.class) && 
+                ("password".equals(field.getName()) || "idCard".equals(field.getName()))) {
+                field.setAccessible(true);
+                String encryptedValue = (String) field.get(resultObject);
+                if (encryptedValue != null) {
+                    // 调用你的解密方法
+                    String decryptedValue = decryptValue(encryptedValue);
+                    field.set(resultObject, decryptedValue);
+                }
+            }
         }
-        // 根据字段名和值进行解密处理
-        if ("password".equals(fieldName) || "idCard".equals(fieldName)) {
-            return decryptValue(value.toString());
+    }
+
+    private String decryptValue(String value) {
+        // 实现具体的解密算法，例如AES解密
+        // return AESUtil.decrypt(value, secretKey); // 替换为你的解密实现
+        if (value.startsWith("encrypted_")) {
+            return value.substring("encrypted_".length()); // 示例解密
         }
         return value;
-    }
-    
-    private String decryptValue(String value) {
-        // 实现具体的解密算法，如AES解密
-        return AESUtil.decrypt(value, secretKey);
     }
 }
 ```
+
+   **注意**：上述示例中的加密解密逻辑非常简单，仅用于演示。在实际项目中，请使用经过验证的强加密算法，并妥善管理密钥。`GXSensitiveDataEncryptService` 的 `encrypt` 方法和 `GXSensitiveDataDecryptService` 的 `decrypt` 方法会直接操作传入的对象实例，修改其字段值。
 
 3. 在配置类中注册加解密拦截器：
 
@@ -1191,9 +1399,9 @@ public class MybatisConfig {
 
 #### 3.6.1 相关类
 
-- `GXValidateDBExists`：验证数据库存在注解，用于标记需要进行数据库存在性验证的字段
-- `GXValidateDBExistsService`：验证数据库存在服务接口，定义验证逻辑
-- `GXValidateDBExistsValidator`：验证数据库存在验证器，实现Jakarta Validation的ConstraintValidator接口
+- `GXValidateDBExists`：数据库存在性验证注解（位于`cn.maple.core.datasource.annotation.GXValidateDBExists`），用于标记DTO中的字段，以验证其值在数据库中是否满足特定条件（如存在、唯一等）。
+- `GXValidateDBExistsService`：验证数据库存在服务接口（位于`cn.maple.core.datasource.service.GXValidateDBExistsService`），定义了执行实际数据库查询以进行验证的方法。开发者可以提供此接口的自定义实现。
+- `GXValidateDBExistsValidator`：验证数据库存在验证器（位于`cn.maple.core.datasource.service.impl.GXValidateDBExistsValidator`），实现了Jakarta Validation的`ConstraintValidator`接口，用于处理`@GXValidateDBExists`注解的验证逻辑。
 
 #### 3.6.2 工作原理
 
@@ -1207,29 +1415,71 @@ public class MybatisConfig {
 
 #### 3.6.3 使用方法
 
-1. 在需要验证的字段上添加 `@GXValidateDBExists` 注解：
+#### 3.6.3 注解参数说明
+
+`@GXValidateDBExists` 注解包含以下主要参数：
+
+-   **`message`**: `String` 类型，可选。验证失败时返回的错误消息。可以包含占位符，如 `{fieldName}`。
+-   **`groups`**: `Class<?>[]` 类型，可选。指定验证所属的分组，用于Jakarta Validation的分组验证功能。
+-   **`payload`**: `Class<? extends Payload>[]` 类型，可选。Jakarta Validation的payload机制。
+-   **`service`**: `Class<? extends GXValidateDBExistsService>` 类型，必需。指定用于执行数据库查询的 `GXValidateDBExistsService` 实现类。
+-   **`fieldName`**: `String` 类型，必需。指定当前被注解字段在数据库表中对应的列名。如果DTO字段名与数据库列名一致，也需要填写。
+-   **`tableName`**: `String` 类型，必需。指定要查询的数据库表名。
+-   **`condition`**: `String` 类型，可选。附加的SQL查询条件（WHERE子句的一部分），例如 `status=1 AND type='A'`。注意SQL注入风险，通常用于固定条件的拼接。
+-   **`spEL`**: `String` 类型，可选。Spring Expression Language (SpEL) 表达式，用于对查询结果进行更复杂的判断。表达式的上下文包含查询结果（通常是数量，`#result`）以及根对象（DTO实例，`#root`）。例如，`#result > 0` 表示记录必须存在，`#result == 0` 表示记录必须不存在（唯一性校验）。
+-   **`dependOnFields`**: `String[]` 类型，可选。指定当前字段验证所依赖的其他DTO字段名。这些依赖字段的值会从当前请求上下文中获取，并可用于构建动态的`condition`或在`GXValidateDBExistsService`实现中使用。
+-   **`enableCache`**: `boolean` 类型，可选，默认为 `false`。是否启用验证结果缓存。启用后，`GXValidateDBExistsValidator` 会缓存验证结果以提高性能。
+-   **`cacheExpireSeconds`**: `int` 类型，可选，默认为 `60`。缓存过期时间（秒），仅当 `enableCache` 为 `true` 时有效。
+
+#### 3.6.4 使用方法
+
+1.  在需要验证的DTO字段上添加 `@GXValidateDBExists` 注解：
 
 ```java
+import cn.maple.core.datasource.annotation.GXValidateDBExists;
+import cn.maple.core.datasource.service.GXValidateDBExistsService; // 假设你有一个默认实现或自定义实现
+import jakarta.validation.constraints.NotBlank;
+
+// 假设这是你的自定义验证服务实现类
+// @Service
+// public class MyCustomValidateServiceImpl implements GXValidateDBExistsService { /* ... */ }
+
 public class UserDTO {
+
+    @NotBlank(message = "部门ID不能为空")
     @GXValidateDBExists(
-        table = "tb_department",      // 要查询的表名
-        field = "id",               // 表中的字段名
-        message = "部门不存在",      // 验证失败时的错误消息
-        service = DepartmentExistsService.class  // 可选，自定义验证服务
+        service = GXDefaultValidateDBExistsServiceImpl.class, // 使用框架提供的默认实现或你的自定义实现
+        tableName = "tb_department",
+        fieldName = "id",               // 对应数据库表中的 id 列
+        message = "指定的部门不存在",
+        spEL = "#result > 0"          // 期望记录存在
     )
     private Long departmentId;
-    
+
     @GXValidateDBExists(
-        table = "tb_role",
-        field = "id",
+        service = GXDefaultValidateDBExistsServiceImpl.class,
+        tableName = "tb_user",
+        fieldName = "username",
+        message = "用户名已存在，请使用其他用户名",
+        spEL = "#result == 0"         // 期望记录不存在 (用于唯一性校验)
+    )
+    private String username;
+
+    @GXValidateDBExists(
+        service = GXDefaultValidateDBExistsServiceImpl.class,
+        tableName = "tb_role",
+        fieldName = "id",
         condition = "status = 1",   // 附加条件，确保角色是启用状态
-        message = "角色不存在或未启用"
+        message = "角色不存在或未启用",
+        spEL = "#result > 0"
     )
     private Long roleId;
     
     // 其他字段...
 }
 ```
+
+   **注意**：`GXDefaultValidateDBExistsServiceImpl` 是一个假设的默认服务实现，你需要根据实际框架提供的或自己实现的 `GXValidateDBExistsService` 来替换。
 
 2. 实现自定义验证服务（可选）：
 
@@ -1256,34 +1506,85 @@ public class DepartmentExistsService implements GXValidateDBExistsService {
 }
 ```
 
-#### 3.6.4 高级特性
+#### 3.6.5 高级特性
 
-1. **条件验证**：通过condition属性添加额外的查询条件
+1.  **条件验证 (`condition`)**：通过`condition`属性添加静态的SQL WHERE子句。
+
+    ```java
+    @GXValidateDBExists(
+        service = YourValidateService.class, // 替换为你的验证服务实现
+        tableName = "tb_product",
+        fieldName = "id",
+        condition = "status = 1 AND stock > 0",  // 确保商品有库存且已上架
+        message = "商品不存在、已下架或缺货",
+        spEL = "#result > 0"
+    )
+    private Long productId;
+    ```
+
+2.  **SpEL表达式验证 (`spEL`)**：使用Spring Expression Language对查询结果（通常是记录数）进行判断。
+
+    ```java
+    // 验证用户名是否唯一 (期望查询结果为0)
+    @GXValidateDBExists(
+        service = YourValidateService.class, // 替换为你的验证服务实现
+        tableName = "tb_users",
+        fieldName = "username",
+        message = "用户名已存在",
+        spEL = "#result == 0" 
+    )
+    private String username;
+    ```
+
+3.  **依赖字段 (`dependOnFields`)**：验证可以依赖DTO中的其他字段值。这些值可以在自定义的`GXValidateDBExistsService`中通过`GXValidateExistsDto.getDependOnValues()`获取。
+
+    ```java
+    public class OrderDTO {
+        private String orderType;
+
+        @GXValidateDBExists(
+            service = OrderItemValidateService.class, // 自定义服务处理依赖逻辑
+            tableName = "tb_items",
+            fieldName = "item_code",
+            dependOnFields = {"orderType"}, // 依赖 orderType 字段
+            message = "根据订单类型，该物料编码无效",
+            spEL = "#result > 0"
+        )
+        private String itemCode;
+    }
+    ```
+    在`OrderItemValidateService`中，你可以获取`orderType`的值来动态调整查询逻辑。
+
+4.  **验证缓存 (`enableCache`, `cacheExpireSeconds`)**：`GXValidateDBExistsValidator`内置了对验证结果的缓存机制，通过设置`enableCache = true`来启用。
+
+    ```java
+    @GXValidateDBExists(
+        service = YourValidateService.class, // 替换为你的验证服务实现
+        tableName = "tb_config",
+        fieldName = "config_key",
+        message = "配置项不存在",
+        spEL = "#result > 0",
+        enableCache = true,
+        cacheExpireSeconds = 3600 // 缓存1小时
+    )
+    private String configKey;
+    ```
+    注意：缓存是在`GXValidateDBExistsValidator`级别实现的，是基于内存的。对于分布式环境或需要更精细控制的缓存，可以考虑在`GXValidateDBExistsService`的实现中集成如Redis等外部缓存。`GXValidateDBExistsValidator`的缓存键是根据注解参数和字段值生成的。
+
+3. **异步验证**：`GXValidateDBExistsService` 接口定义了 `validateExistsAsync` 方法，允许实现异步的数据库验证逻辑。这对于耗时较长的验证操作非常有用，可以避免阻塞请求处理线程。
 
 ```java
-@GXValidateDBExists(
-    table = "tb_product",
-    field = "id",
-    condition = "status = 1 AND stock > 0",  // 确保商品有库存且已上架
-    message = "商品不存在、已下架或缺货"
-)
-private Long productId;
-```
-
-2. **验证缓存**：验证器内部使用缓存提高性能，避免重复查询
-
-```java
-// 在配置类中自定义缓存参数
-@Bean
-public GXValidateDBExistsValidator validateDBExistsValidator() {
-    GXValidateDBExistsValidator validator = new GXValidateDBExistsValidator();
-    validator.setCacheEnabled(true);
-    validator.setCacheExpireSeconds(300);  // 缓存5分钟
-    return validator;
+// 在你的 GXValidateDBExistsService 实现中：
+@Override
+public CompletableFuture<Boolean> validateExistsAsync(GXValidateExistsDto dto) {
+    return CompletableFuture.supplyAsync(() -> {
+        // 执行实际的数据库查询逻辑
+        // 例如: return jdbcTemplate.queryForObject(sql, params, Integer.class) > 0;
+        return true; // 示例
+    }, asyncExecutor); // asyncExecutor 是你配置的线程池
 }
 ```
-
-3. **异步验证**：对于复杂验证逻辑，支持异步验证模式
+当使用异步验证时，Jakarta Validation框架通常需要特定的集成来处理`CompletableFuture`。如果框架本身不直接支持，你可能需要在调用验证的地方手动处理异步结果，或者确保验证器能够正确处理异步完成的信号。
 
 ```java
 @GXValidateDBExists(
@@ -1880,3 +2181,6 @@ Leaf-Base-Datasource 模块作为 Maple Leaf Framework 的核心数据库操作�
 - [P6Spy 官方文档](https://p6spy.readthedocs.io/)
 - [Redisson 官方文档](https://github.com/redisson/redisson/wiki)
 - [Spring Transaction 官方文档](https://docs.spring.io/spring-framework/docs/current/reference/html/data-access.html#transaction)
+
+
+本文档旨在帮助开发者理解和使用 `leaf-base-datasource` 模块。如有疑问或建议，请联系模块维护者。
