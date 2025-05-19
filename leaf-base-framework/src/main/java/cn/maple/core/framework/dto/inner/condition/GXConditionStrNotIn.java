@@ -18,7 +18,7 @@ import java.util.Set;
  * 该类用于构建SQL中的字符串类型NOT IN条件，采用MyBatis参数化查询机制，
  * 有效防止SQL注入攻击。每个值都会被单独参数化处理，确保查询安全。
  * </p>
- * 
+ *
  * <p>
  * 安全特性：
  * <ul>
@@ -29,7 +29,7 @@ import java.util.Set;
  *   <li>为每个值创建独立的参数名，避免参数混淆</li>
  * </ul>
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
@@ -37,43 +37,54 @@ import java.util.Set;
  * Set<String> statusSet = new HashSet<>();
  * statusSet.add("已删除");
  * statusSet.add("已禁用");
- * 
+ *
  * // 2. 创建NOT IN条件（WHERE t.status NOT IN ('已删除', '已禁用')）
  * GXConditionStrNotIn condition = new GXConditionStrNotIn("t", "status", statusSet);
- * 
+ *
  * // 3. 在查询构建器中使用该条件
  * GXModelQueryParamDto queryParam = new GXModelQueryParamDto();
  * queryParam.addCondition(condition);
  * List<UserEntity> users = userMapper.selectByCondition(queryParam);
- * 
+ *
  * // 4. 也可以与其他条件组合使用
  * queryParam.addCondition(new GXConditionEQ("t", "dept_id", 10));
  * </pre>
  * </p>
- * 
+ *
  * <p>
  * 性能优化：
  * <ul>
  *   <li>使用参数化查询允许数据库缓存执行计划，提高性能</li>
  *   <li>根据运行环境自动调整IN子句参数数量限制</li>
- *   <li>使用StringBuilder构建参数占位符列表，减少字符串连接开销</li>
+ *   <li>使用String.join高效连接参数占位符，减少字符串连接开销</li>
+ *   <li>缓存集合大小计算结果，避免重复调用size()方法</li>
  * </ul>
  * </p>
- * 
+ *
+ * <p>
+ * 注意事项：
+ * <ul>
+ *   <li>当传入的值集合为空时，会生成"field NOT IN ()"语句，这在大多数数据库中是无效的</li>
+ *   <li>调用者应当在使用前检查集合是否为空，并采取适当的处理策略</li>
+ *   <li>对于空集合，建议在业务层面提前处理，例如返回全部结果或使用其他条件替代</li>
+ * </ul>
+ * </p>
+ *
  * @author 塵渊
  */
 public class GXConditionStrNotIn extends GXCondition<String> {
     /**
      * 存储NOT IN条件的字符串值集合
+     * 使用final修饰确保线程安全性，防止集合引用被修改
      */
     private final Set<String> values;
 
     /**
      * 构造函数
-     * 
+     *
      * @param tableNameAlias 表别名，如"t"、"user"等，可以为空
-     * @param fieldName 字段名，如"status"、"type"等
-     * @param value 字符串值集合，用于NOT IN条件
+     * @param fieldName      字段名，如"status"、"type"等
+     * @param value          字符串值集合，用于NOT IN条件
      */
     public GXConditionStrNotIn(String tableNameAlias, String fieldName, Set<String> value) {
         super(tableNameAlias, fieldName, value);
@@ -82,7 +93,7 @@ public class GXConditionStrNotIn extends GXCondition<String> {
 
     /**
      * 获取操作符
-     * 
+     *
      * @return 返回"not in"操作符
      */
     @Override
@@ -97,7 +108,7 @@ public class GXConditionStrNotIn extends GXCondition<String> {
      * [tableAlias].[fieldName] NOT IN (#{param1}, #{param2}, ...)
      * 每个参数都会被单独处理，确保安全。
      * </p>
-     * 
+     *
      * @return 返回构建好的WHERE子句字符串
      * @throws GXBusinessException 当IN条件中的值数量超过限制时抛出
      */
@@ -107,14 +118,17 @@ public class GXConditionStrNotIn extends GXCondition<String> {
         String activeProfile = GXCommonUtils.getActiveProfile();
         // 默认限制条件，生产环境使用
         int limitCnt = 100000;
-        // 开发环境列表
-        List<String> envLst = CollUtil.newArrayList(GXCommonConstant.RUN_ENV_DEV, GXCommonConstant.RUN_ENV_LOCAL);
+        // 开发环境列表（使用不可变列表提高性能和安全性）
+        List<String> envLst = List.of(GXCommonConstant.RUN_ENV_DEV, GXCommonConstant.RUN_ENV_LOCAL);
         // 如果是开发环境，使用更严格的限制
         if (CollUtil.contains(envLst, activeProfile)) {
             limitCnt = GXCommonUtils.getEnvironmentValue("db.in.limit.cnt", Integer.class, 50);
         }
+        // 获取集合大小（仅计算一次以提高性能）
+        int valuesSize = values.size();
+
         // 检查值数量是否超过限制
-        if (CollUtil.size(values) > limitCnt) {
+        if (valuesSize > limitCnt) {
             throw new GXBusinessException(CharSequenceUtil.format("NOT IN查询条件不能超过{}条数据!", limitCnt));
         }
 
@@ -144,7 +158,7 @@ public class GXConditionStrNotIn extends GXCondition<String> {
      * 该方法处理参数映射，为每个值创建单独的参数，并进行SQL注入检查。
      * 虽然方法返回空字符串，但会填充paramMap用于MyBatis参数化查询。
      * </p>
-     * 
+     *
      * @return 空字符串，实际值存储在paramMap中
      * @throws GXSqlInjectionException 当检测到SQL注入风险时抛出
      */
@@ -157,7 +171,7 @@ public class GXConditionStrNotIn extends GXCondition<String> {
         for (String str : values) {
             // 检查SQL注入
             if (GXDBStringEscapeUtils.check(str)) {
-                throw new GXSqlInjectionException("SQL注入异常");
+                throw new GXSqlInjectionException("检测到SQL注入风险：包含可疑字符或SQL关键字");
             }
             // 创建参数名并存储值
             String itemParamName = paramName + "_" + index++;

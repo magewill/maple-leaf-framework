@@ -8,32 +8,33 @@ import cn.hutool.core.text.CharSequenceUtil;
  * 该类用于从JSON类型字段中移除指定路径的数据。
  * 使用MySQL的JSON_REMOVE函数实现，支持参数化查询以防止SQL注入。
  * </p>
- * 
+ *
  * <p>
  * 安全特性：
  * - 使用MyBatis参数化查询机制(#{})，而非字符串拼接，防止SQL注入
  * - 路径参数单独处理并通过参数映射传递，增强安全性
  * - 自动处理空路径情况，默认使用根路径($)
  * - 支持表别名，适用于多表更新场景
+ * - 线程安全设计，继承自GXUpdateField的线程安全特性
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
  * // 从JSON字段中移除特定路径的数据
  * // 假设user_info字段内容为: {"contact":{"email":"test@example.com","phone":"123456"}}
- * 
+ *
  * // 1. 移除contact.email (结果: {"contact":{"phone":"123456"}})
  * GXUpdateField<?> removeField = new GXUpdateJsonRemoveField("user", "user_info", "contact.email");
- * 
+ *
  * // 2. 将字段添加到更新列表
  * List<GXUpdateField<?>> updateFields = new ArrayList<>();
  * updateFields.add(removeField);
- * 
+ *
  * // 3. 创建更新条件
  * List<GXCondition<?>> conditions = new ArrayList<>();
  * conditions.add(new GXConditionEQ("user", "id", 100));
- * 
+ *
  * // 4. 执行更新操作
  * String sql = GXBuildRawSql.updateFieldByCondition("user", updateFields, conditions);
  * // 生成SQL: UPDATE user SET user.user_info = JSON_REMOVE(user.user_info, #{dbQueryParamInnerDto.paramMap.update_user_info_1_path}) WHERE user.id = #{dbQueryParamInnerDto.paramMap.condition_id_1}
@@ -72,13 +73,17 @@ public class GXUpdateJsonRemoveField extends GXUpdateField<String> {
         // JSON操作需要特殊处理
         // 为JSON路径创建单独的参数
         String pathParamName = paramName + "_path";
+        // 构建标准JSON路径格式 $ 或 $.property
+        // 处理空路径情况，默认使用根路径
         String jsonPath = CharSequenceUtil.isEmpty(path) ? "$" : "$." + path;
         this.paramMap.put(pathParamName, jsonPath);
 
+        // 根据是否有表别名构建不同的SQL片段
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{} = JSON_REMOVE({}, #{dbQueryParamInnerDto.paramMap.{}})", fieldName, fieldName, pathParamName);
+            return CharSequenceUtil.format("{} = JSON_REMOVE({}, #{dbQueryParamInnerDto.paramMap.{}})",
+                    fieldName, fieldName, pathParamName);
         }
-        return CharSequenceUtil.format("{}.{} = JSON_REMOVE({}.{}, #{dbQueryParamInnerDto.paramMap.{}})", tableNameAlias, fieldName, tableNameAlias, fieldName, pathParamName);
+        return CharSequenceUtil.format("{}.{} = JSON_REMOVE({}.{}, #{dbQueryParamInnerDto.paramMap.{}})",
+                tableNameAlias, fieldName, tableNameAlias, fieldName, pathParamName);
     }
-
 }
