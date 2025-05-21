@@ -5,8 +5,8 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.text.StrPool;
 import cn.hutool.http.HttpStatus;
+import cn.maple.core.framework.api.dto.res.GXErrorApiResDto;
 import cn.maple.core.framework.code.GXDefaultResultStatusCode;
-import cn.maple.core.framework.api.dto.res.GXApiErrorResDto;
 import cn.maple.core.framework.exception.*;
 import cn.maple.core.framework.service.GXBotNotificationExceptionService;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
@@ -323,8 +323,8 @@ public class GXExceptionHandler {
     }
 
     @ExceptionHandler(GXWebClientAuthTokenException.class)
-    public GXApiErrorResDto handleGXWebClientAuthTokenException(GXWebClientAuthTokenException e) {
-        GXApiErrorResDto apiErrorResDto = new GXApiErrorResDto();
+    public GXErrorApiResDto handleGXWebClientAuthTokenException(GXWebClientAuthTokenException e) {
+        GXErrorApiResDto apiErrorResDto = new GXErrorApiResDto();
         apiErrorResDto.setTimestamp(DateUtil.now());
         apiErrorResDto.setStatus(HttpStatus.HTTP_INTERNAL_ERROR);
         apiErrorResDto.setCode(e.getCode());

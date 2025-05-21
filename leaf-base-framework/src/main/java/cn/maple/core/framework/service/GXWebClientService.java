@@ -7,6 +7,11 @@ import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXAuthCodeUtils;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatusCode;
+
+import java.util.Map;
 
 /**
  * WebClient服务接口
@@ -21,6 +26,7 @@ import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
  *   <li>提供HTTP请求认证Token</li>
  *   <li>支持WebClient和HttpExchange的认证机制</li>
  *   <li>与Spring的WebClient和HttpServiceProxyFactory集成</li>
+ *   <li>记录HTTP请求和响应信息，便于调试和监控</li>
  * </ul>
  *
  * <p><strong>线程安全性：</strong></p>
@@ -30,6 +36,7 @@ import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
  *   <li>建议使用线程安全的缓存机制，如ConcurrentHashMap或Caffeine</li>
  *   <li>对于需要定期刷新的Token，建议使用原子引用(AtomicReference)或读写锁(ReentrantReadWriteLock)</li>
  *   <li>避免使用同步块获取Token，可考虑使用双重检查锁定模式或CAS操作</li>
+ *   <li>日志记录方法应避免阻塞主线程，可考虑使用异步日志或缓冲区</li>
  * </ul>
  *
  * <p><strong>性能优化：</strong></p>
@@ -39,6 +46,7 @@ import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
  *   <li>可以实现Token预生成机制，在当前Token即将过期前提前生成新Token</li>
  *   <li>考虑使用异步方式刷新Token，避免阻塞请求处理线程</li>
  *   <li>对于高并发场景，可以使用令牌桶或漏桶算法限制Token生成频率</li>
+ *   <li>日志记录应考虑采样策略，避免在高流量场景下产生过多日志</li>
  * </ul>
  *
  * <p><strong>使用示例：</strong></p>
@@ -48,6 +56,7 @@ import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
  * public class CustomWebClientService implements GXWebClientService {
  *     // 使用线程安全的缓存存储Token
  *     private final LoadingCache<String, String> tokenCache;
+ *     private final Logger logger = LoggerFactory.getLogger(CustomWebClientService.class);
  * <p>
  *     public CustomWebClientService() {
  *         // 创建带有过期时间的缓存
@@ -70,6 +79,39 @@ import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
  *         }
  *         return generateHttpAuthToken(tokenSource, GXTokenConstant.WEB_CLIENT_TOKEN_EXPIRE);
  *     }
+ *
+ *     @Override
+ *     public void logRequestResponse(HttpMethod method, String url, HttpHeaders requestHeaders,
+ *                                  Object requestBody, HttpStatusCode statusCode,
+ *                                  HttpHeaders responseHeaders, Object responseBody, long durationMs) {
+ *         // 使用MDC添加请求标识，便于日志关联
+ *         String requestId = UUID.randomUUID().toString();
+ *         MDC.put("requestId", requestId);
+ *
+ *         try {
+ *             // 记录请求信息
+ *             if (logger.isDebugEnabled()) {
+ *                 logger.debug("HTTP请求: {} {} [请求ID: {}]", method, url, requestId);
+ *                 logger.debug("请求头: {}", requestHeaders);
+ *                 if (requestBody != null) {
+ *                     logger.debug("请求体: {}", requestBody);
+ *                 }
+ *             }
+ *
+ *             // 记录响应信息
+ *             if (logger.isDebugEnabled()) {
+ *                 logger.debug("HTTP响应: 状态码={}, 耗时={}ms [请求ID: {}]",
+ *                              statusCode.value(), durationMs, requestId);
+ *                 logger.debug("响应头: {}", responseHeaders);
+ *                 if (responseBody != null) {
+ *                     logger.debug("响应体: {}", responseBody);
+ *                 }
+ *             }
+ *         } finally {
+ *             // 清理MDC上下文
+ *             MDC.remove("requestId");
+ *         }
+ *     }
  * }
  * <p>
  * // 2. 在WebClient配置中使用
@@ -82,6 +124,36 @@ import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
  *     public WebClient webClient() {
  *         return WebClient.builder()
  *             .defaultHeader(GXCommonConstant.WEB_CLIENT_AUTH_TOKEN, webClientService.generateHttpAuthToken())
+ *             .filter((request, next) -> {
+ *                 // 记录请求开始时间
+ *                 long startTime = System.currentTimeMillis();
+ *
+ *                 // 获取请求信息
+ *                 HttpMethod method = request.method();
+ *                 String url = request.url().toString();
+ *                 HttpHeaders requestHeaders = request.headers();
+ *
+ *                 // 执行请求并记录响应
+ *                 return next.exchange(request)
+ *                     .doOnSuccess(response -> {
+ *                         long endTime = System.currentTimeMillis();
+ *                         long duration = endTime - startTime;
+ *
+ *                         // 获取响应信息
+ *                         HttpStatusCode statusCode = response.statusCode();
+ *                         HttpHeaders responseHeaders = response.headers().asHttpHeaders();
+ *
+ *                         // 记录请求和响应信息
+ *                         response.bodyToMono(String.class)
+ *                             .defaultIfEmpty("<空响应体>")
+ *                             .subscribe(responseBody ->
+ *                                 webClientService.logRequestResponse(
+ *                                     method, url, requestHeaders, null,
+ *                                     statusCode, responseHeaders, responseBody, duration
+ *                                 )
+ *                             );
+ *                     });
+ *             })
  *             .build();
  *     }
  * }
@@ -224,5 +296,99 @@ public interface GXWebClientService {
             throw new GXBusinessException("请配置maple.framework.web.client.secret");
         }
         return tokenSecret;
+    }
+
+    /**
+     * 记录HTTP请求和响应信息
+     * <p>
+     * 该方法用于记录HTTP请求和响应的详细信息，包括请求方法、URL、请求头、请求体、
+     * 响应状态码、响应头、响应体和请求耗时等。这些信息对于调试和监控非常有用。
+     * </p>
+     * <p>
+     * 实现类应根据实际需求决定日志记录的详细程度和格式，例如：
+     * 1. 在开发环境记录完整的请求和响应信息，在生产环境只记录基本信息
+     * 2. 对敏感信息（如密码、Token等）进行脱敏处理
+     * 3. 使用结构化日志格式，便于日志分析和检索
+     * 4. 添加请求ID，便于关联同一请求的多条日志
+     * </p>
+     * <p>
+     * 性能和安全注意事项：
+     * <ul>
+     *   <li>避免在高流量场景下记录过多日志，可以采用采样策略</li>
+     *   <li>考虑使用异步日志框架，避免日志记录阻塞请求处理线程</li>
+     *   <li>大型响应体应考虑截断或摘要记录，避免日志过大</li>
+     *   <li>敏感信息应进行脱敏处理，避免安全风险</li>
+     *   <li>考虑使用MDC（Mapped Diagnostic Context）添加请求上下文信息</li>
+     * </ul>
+     * </p>
+     *
+     * @param method          HTTP请求方法
+     * @param url             请求URL
+     * @param requestHeaders  请求头信息
+     * @param requestBody     请求体（可能为null）
+     * @param statusCode      响应状态码
+     * @param responseHeaders 响应头信息
+     * @param responseBody    响应体（可能为null）
+     * @param durationMs      请求耗时（毫秒）
+     */
+    default void logRequestResponse(HttpMethod method, String url, HttpHeaders requestHeaders,
+                                    Object requestBody, HttpStatusCode statusCode,
+                                    HttpHeaders responseHeaders, Object responseBody, long durationMs) {
+        // 默认实现为空，由具体实现类根据需求实现
+    }
+
+    /**
+     * 记录HTTP请求和响应信息（简化版）
+     * <p>
+     * 该方法是{@link #logRequestResponse}的简化版本，适用于只需记录基本请求和响应信息的场景。
+     * 实现类可以根据需要选择实现此方法或完整版本。
+     * </p>
+     *
+     * @param method     HTTP请求方法
+     * @param url        请求URL
+     * @param statusCode 响应状态码
+     * @param durationMs 请求耗时（毫秒）
+     * @param requestId  请求ID，用于关联同一请求的多条日志（可选）
+     */
+    default void logRequestResponse(HttpMethod method, String url, HttpStatusCode statusCode,
+                                    long durationMs, String requestId) {
+        // 默认实现为空，由具体实现类根据需求实现
+    }
+
+    /**
+     * 记录HTTP请求异常信息
+     * <p>
+     * 该方法用于记录HTTP请求过程中发生的异常信息，包括请求方法、URL、异常信息等。
+     * 这些信息对于排查问题非常有用。
+     * </p>
+     *
+     * @param method    HTTP请求方法
+     * @param url       请求URL
+     * @param exception 异常信息
+     * @param requestId 请求ID，用于关联同一请求的多条日志（可选）
+     */
+    default void logRequestException(HttpMethod method, String url, Throwable exception, String requestId) {
+        // 默认实现为空，由具体实现类根据需求实现
+    }
+
+    /**
+     * 获取需要脱敏的请求头字段集合
+     * <p>
+     * 该方法返回需要在日志记录中进行脱敏处理的请求头字段名称集合。
+     * 默认实现包含常见的敏感字段，如Authorization、Cookie等。
+     * 实现类可以覆盖此方法，根据实际需求添加或移除字段。
+     * </p>
+     *
+     * @return 需要脱敏的请求头字段名称集合
+     */
+    default Map<String, String> getSensitiveHeaderFields() {
+        // 返回默认的敏感字段映射，键为字段名，值为脱敏后的显示值
+        return Map.of(
+                "Authorization", "******",
+                "Cookie", "******",
+                GXCommonConstant.WEB_CLIENT_AUTH_TOKEN, "******",
+                "X-Auth-Token", "******",
+                "X-API-Key", "******"
+        );
     }
 }

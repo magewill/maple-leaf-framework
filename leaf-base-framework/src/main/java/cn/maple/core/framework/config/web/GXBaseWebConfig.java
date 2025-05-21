@@ -1,8 +1,8 @@
 package cn.maple.core.framework.config.web;
 
 import cn.hutool.json.JSONUtil;
+import cn.maple.core.framework.api.dto.res.GXErrorApiResDto;
 import cn.maple.core.framework.constant.GXCommonConstant;
-import cn.maple.core.framework.api.dto.res.GXApiErrorResDto;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.filter.GXBaseRequestLoggingFilter;
 import cn.maple.core.framework.service.GXWebClientService;
@@ -220,6 +220,42 @@ public class GXBaseWebConfig {
             return Mono.just(clientRequest);
         });
 
+        // 创建响应日志过滤器，记录响应信息和响应体
+        ExchangeFilterFunction responseLoggingFilter = ExchangeFilterFunction.ofResponseProcessor(clientResponse -> {
+            long endTime = System.currentTimeMillis();
+            HttpStatusCode statusCode = clientResponse.statusCode();
+
+            // 获取请求开始时间，计算请求耗时
+            List<String> requestStartTimeHeaders = clientResponse.headers().header("requestStartTime");
+            if (!requestStartTimeHeaders.isEmpty()) {
+                try {
+                    long startTime = Long.parseLong(requestStartTimeHeaders.getFirst());
+                    long duration = endTime - startTime;
+                    LOGGER.debug("HTTP响应: 状态码={}, 耗时={}ms", statusCode.value(), duration);
+                } catch (NumberFormatException e) {
+                    LOGGER.debug("HTTP响应: 状态码={}", statusCode.value());
+                }
+            } else {
+                LOGGER.debug("HTTP响应: 状态码={}", statusCode.value());
+            }
+
+            // 记录响应头信息（仅在TRACE级别）
+            if (LOGGER.isTraceEnabled()) {
+                clientResponse.headers().asHttpHeaders().forEach((name, values) ->
+                        LOGGER.trace("响应头: {}={}", name, String.join(", ", values)));
+            }
+
+            // 对于成功响应，可以选择记录响应体（需要谨慎使用，可能影响性能）
+            if (LOGGER.isTraceEnabled() && statusCode.is2xxSuccessful()) {
+                return clientResponse.bodyToMono(String.class)
+                        .defaultIfEmpty("<空响应体>")
+                        .doOnNext(body -> LOGGER.trace("响应体: {}", body))
+                        .map(body -> clientResponse.mutate().body(body).build());
+            }
+
+            return Mono.just(clientResponse);
+        });
+
         // 创建处理错误过滤器
         ExchangeFilterFunction errorHandlingFilter = ExchangeFilterFunction.ofResponseProcessor(clientResponse -> {
             HttpStatusCode httpStatusCode = clientResponse.statusCode();
@@ -229,10 +265,10 @@ public class GXBaseWebConfig {
                         httpStatusCode);
             }
             if (httpStatusCode.is4xxClientError()) {
-                return clientResponse.bodyToMono(GXApiErrorResDto.class)
+                return clientResponse.bodyToMono(GXErrorApiResDto.class)
                         .flatMap(errorBody -> Mono.error(new GXBusinessException("Server Error: " + errorBody.getMessage(), httpStatusCode.value())));
             } else if (httpStatusCode.is5xxServerError()) {
-                return clientResponse.bodyToMono(GXApiErrorResDto.class)
+                return clientResponse.bodyToMono(GXErrorApiResDto.class)
                         .flatMap(body -> Mono.error(new GXBusinessException("Server Error: " + JSONUtil.toJsonStr(body), httpStatusCode.value())));
             }
             return Mono.just(clientResponse);
@@ -242,6 +278,7 @@ public class GXBaseWebConfig {
         return WebClient.builder()
                 .exchangeStrategies(strategies)
                 .filter(requestLoggingFilter)
+                .filter(responseLoggingFilter)
                 .filter(errorHandlingFilter)
                 .defaultHeaders(headers -> {
                     GXWebClientService webClientService = GXSpringContextUtils.getBean(GXWebClientService.class);
