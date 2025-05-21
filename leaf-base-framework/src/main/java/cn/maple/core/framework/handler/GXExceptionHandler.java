@@ -1,16 +1,21 @@
 package cn.maple.core.framework.handler;
 
+import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.text.StrPool;
 import cn.hutool.http.HttpStatus;
 import cn.maple.core.framework.code.GXDefaultResultStatusCode;
+import cn.maple.core.framework.api.dto.res.GXApiErrorResDto;
 import cn.maple.core.framework.exception.*;
 import cn.maple.core.framework.service.GXBotNotificationExceptionService;
+import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.core.framework.util.GXResultUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.fasterxml.jackson.databind.exc.MismatchedInputException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.UnexpectedTypeException;
 import jakarta.validation.ValidationException;
 import lombok.extern.slf4j.Slf4j;
@@ -315,6 +320,20 @@ public class GXExceptionHandler {
         log.error(e.getMessage(), e);
         exceptionNotify(e);
         return GXResultUtils.error(HttpStatus.HTTP_INTERNAL_ERROR, "存在SQL注入风险!");
+    }
+
+    @ExceptionHandler(GXWebClientAuthTokenException.class)
+    public GXApiErrorResDto handleGXWebClientAuthTokenException(GXWebClientAuthTokenException e) {
+        GXApiErrorResDto apiErrorResDto = new GXApiErrorResDto();
+        apiErrorResDto.setTimestamp(DateUtil.now());
+        apiErrorResDto.setStatus(HttpStatus.HTTP_INTERNAL_ERROR);
+        apiErrorResDto.setCode(e.getCode());
+        HttpServletRequest httpServletRequest = Objects.requireNonNull(GXCurrentRequestContextUtils.getHttpServletRequest());
+        apiErrorResDto.setPath(httpServletRequest.getRequestURI());
+        apiErrorResDto.setMessage(e.getMessage());
+        HttpServletResponse httpServletResponse = Objects.requireNonNull(GXCurrentRequestContextUtils.getHttpServletResponse());
+        httpServletResponse.setStatus(e.getCode());
+        return apiErrorResDto;
     }
 
     /**

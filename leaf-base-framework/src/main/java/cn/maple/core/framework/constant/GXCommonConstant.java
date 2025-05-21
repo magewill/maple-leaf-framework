@@ -6,23 +6,23 @@ package cn.maple.core.framework.constant;
  * 该类定义了框架中使用的各种常量，包括分页参数、环境标识、加密密钥等。
  * 这些常量在整个应用程序中被广泛使用，集中定义有助于统一管理和维护。
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
  * // 1. 使用分页常量
  * int currentPage = GXCommonConstant.DEFAULT_CURRENT_PAGE;
  * int pageSize = GXCommonConstant.DEFAULT_PAGE_SIZE;
- * 
+ *
  * // 2. 判断运行环境
  * String env = getEnvironment();
  * boolean isProd = GXCommonConstant.RUN_ENV_PROD.equals(env);
- * 
+ *
  * // 3. 获取敏感信息加密密钥
  * String secretKey = System.getProperty(GXCommonConstant.DATA_SOURCE_SECRET_KEY);
  * </pre>
  * </p>
- * 
+ *
  * <p>
  * 常量分类：
  * 1. 分页相关常量 - 默认分页参数和最大分页限制
@@ -30,7 +30,7 @@ package cn.maple.core.framework.constant;
  * 3. 安全相关常量 - 加密密钥和敏感信息处理
  * 4. 系统配置常量 - 部署环境标识和请求头
  * </p>
- * 
+ *
  * @author maple
  */
 public class GXCommonConstant {
@@ -143,6 +143,11 @@ public class GXCommonConstant {
      * 根据条件在数据库查询出来的记录不存在
      */
     public static final int DB_RECORD_NOT_FOUND = -1;
+
+    /**
+     * 使用WebClient传递的认证Token
+     */
+    public static final String WEB_CLIENT_AUTH_TOKEN = "Web-Client-Auth-Token";
 
     private GXCommonConstant() {
     }

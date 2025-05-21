@@ -6,7 +6,7 @@ package cn.maple.core.framework.constant;
  * 本类定义了系统中所有与Token处理相关的常量，包括Token名称、过期时间、刷新阈值、密钥等。
  * 这些常量用于实现安全的用户认证和授权机制，支持前端用户和管理端用户的不同处理策略。
  * </p>
- * 
+ *
  * <p>
  * 安全说明：
  * 1. 不同类型的用户（前端用户、管理员）使用不同的密钥，增强安全隔离
@@ -15,23 +15,23 @@ package cn.maple.core.framework.constant;
  * 4. 所有密钥都应妥善保管，避免泄露
  * 5. Token中可存储用户ID、用户名等关键信息，便于身份识别和权限控制
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
  * // 创建用户Token
  * String userId = "10001";
  * String userName = "张三";
- * 
+ *
  * // 构建Token数据
  * Map<String, Object> tokenData = new HashMap<>();
  * tokenData.put(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, userId);
  * tokenData.put(GXTokenConstant.TOKEN_USER_NAME_FIELD_NAME, userName);
  * tokenData.put(GXTokenConstant.LOGIN_AT_FIELD_NAME, System.currentTimeMillis());
- * 
+ *
  * // 生成Token
  * String token = JWTUtils.generateToken(tokenData, GXTokenConstant.USER_TOKEN_SECRET_KEY, GXTokenConstant.USER_EXPIRE);
- * 
+ *
  * // 验证Token并获取用户ID
  * Claims claims = JWTUtils.parseToken(token, GXTokenConstant.USER_TOKEN_SECRET_KEY);
  * String verifiedUserId = claims.get(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, String.class);
@@ -80,6 +80,21 @@ public class GXTokenConstant {
      * </p>
      */
     public static final int USER_TOKEN_RENEWAL = 24 * 60 * 60 * 7;
+
+    /**
+     * web客户端token过期时间（秒）
+     * <p>
+     * 默认为150秒（5 * 30），用于WebClient调用时的认证Token有效期。
+     * 此值应根据系统安全需求和性能考虑进行设置：
+     * - 值过小会导致频繁生成Token，增加系统负担
+     * - 值过大会增加Token被盗用的风险
+     * </p>
+     * <p>
+     * 在实现GXWebClientService时，建议提前60秒左右刷新Token，
+     * 以确保系统运行过程中Token的连续有效性。
+     * </p>
+     */
+    public static final int WEB_CLIENT_TOKEN_EXPIRE = 5 * 30;
 
     /**
      * 用户端缓存桶的名字(redisson)

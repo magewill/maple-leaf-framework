@@ -9,7 +9,7 @@ import java.lang.annotation.*;
  * 在需要登录认证的系统中，被该注解标记的方法或类将跳过登录验证拦截器，
  * 允许未登录用户直接访问，常用于登录接口、注册接口、公开API等场景。
  * </p>
- * 
+ *
  * <p>
  * 使用场景：
  * - 登录、注册、找回密码等身份认证相关接口
@@ -18,7 +18,7 @@ import java.lang.annotation.*;
  * - 静态资源访问
  * - 第三方回调接口
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
@@ -26,7 +26,7 @@ import java.lang.annotation.*;
  * @RestController
  * @RequestMapping("/api/user")
  * public class UserController {
- *     
+ * <p>
  *     // 登录接口不需要登录验证
  *     @PostMapping("/login")
  *     @GXIgnoreLoginIntercept
@@ -34,7 +34,7 @@ import java.lang.annotation.*;
  *         // 登录逻辑
  *         return Result.success();
  *     }
- *     
+ * <p>
  *     // 注册接口不需要登录验证
  *     @PostMapping("/register")
  *     @GXIgnoreLoginIntercept
@@ -42,7 +42,7 @@ import java.lang.annotation.*;
  *         // 注册逻辑
  *         return Result.success();
  *     }
- *     
+ * <p>
  *     // 需要登录验证的接口
  *     @GetMapping("/profile")
  *     public Result getUserProfile() {
@@ -50,48 +50,48 @@ import java.lang.annotation.*;
  *         return Result.success();
  *     }
  * }
- * 
+ * <p>
  * // 2. 在类上使用，对整个控制器的所有方法生效
  * @RestController
  * @RequestMapping("/api/public")
  * @GXIgnoreLoginIntercept
  * public class PublicController {
- *     
+ *
  *     @GetMapping("/config")
  *     public Result getPublicConfig() {
  *         // 获取公共配置
  *         return Result.success();
  *     }
- *     
+ *
  *     @GetMapping("/articles")
  *     public Result listPublicArticles() {
  *         // 获取公开文章
  *         return Result.success();
  *     }
  * }
- * 
+ * <p>
  * // 3. 在拦截器中实现登录验证逻辑
  * @Component
  * public class LoginInterceptor implements HandlerInterceptor {
- *     
+ *
  *     @Override
  *     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
  *         // 如果不是处理方法，直接放行
  *         if (!(handler instanceof HandlerMethod)) {
  *             return true;
  *         }
- *         
+ * <p>
  *         HandlerMethod handlerMethod = (HandlerMethod) handler;
  *         Class<?> clazz = handlerMethod.getBeanType();
  *         Method method = handlerMethod.getMethod();
- *         
+ * <p>
  *         // 检查类或方法上是否有GXIgnoreLoginIntercept注解
- *         if (clazz.isAnnotationPresent(GXIgnoreLoginIntercept.class) || 
+ *         if (clazz.isAnnotationPresent(GXIgnoreLoginIntercept.class) ||
  *             method.isAnnotationPresent(GXIgnoreLoginIntercept.class)) {
  *             // 有注解，不需要登录验证，直接放行
  *             return true;
  *         }
- *         
+ * <p>
  *         // 获取当前用户登录状态
  *         String token = request.getHeader("Authorization");
  *         if (StringUtils.isEmpty(token)) {
@@ -99,10 +99,10 @@ import java.lang.annotation.*;
  *             response.setStatus(HttpStatus.UNAUTHORIZED.value());
  *             return false;
  *         }
- *         
+ * <p>
  *         // 验证token有效性
  *         // ...
- *         
+ * <p>
  *         return true;
  *     }
  * }
