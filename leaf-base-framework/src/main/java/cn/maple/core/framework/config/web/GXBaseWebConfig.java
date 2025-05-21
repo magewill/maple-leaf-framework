@@ -8,6 +8,8 @@ import cn.maple.core.framework.filter.GXBaseRequestLoggingFilter;
 import cn.maple.core.framework.service.GXWebClientService;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import io.netty.channel.ChannelOption;
+import io.netty.handler.timeout.ReadTimeoutHandler;
+import io.netty.handler.timeout.WriteTimeoutHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
@@ -25,6 +27,7 @@ import reactor.netty.http.client.HttpClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Web基础配置类
@@ -296,6 +299,11 @@ public class GXBaseWebConfig {
                 // 设置连接超时和响应超时
                 .clientConnector(new ReactorClientHttpConnector(HttpClient.create()
                         .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, DEFAULT_TIMEOUT_SECONDS * 1000)
+                        .doOnConnected(conn -> conn
+                                // 读超时：在指定时间内没有收到任何数据,30秒读超时
+                                .addHandlerLast(new ReadTimeoutHandler(30, TimeUnit.SECONDS))
+                                // 写超时：在指定时间内没有完成数据发送,30秒写超时
+                                .addHandlerLast(new WriteTimeoutHandler(30, TimeUnit.SECONDS)))
                         .responseTimeout(Duration.ofSeconds(DEFAULT_TIMEOUT_SECONDS))))
                 .build();
     }

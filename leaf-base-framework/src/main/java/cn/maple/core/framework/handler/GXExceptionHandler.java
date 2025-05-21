@@ -28,6 +28,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -334,6 +335,12 @@ public class GXExceptionHandler {
         HttpServletResponse httpServletResponse = Objects.requireNonNull(GXCurrentRequestContextUtils.getHttpServletResponse());
         httpServletResponse.setStatus(e.getCode());
         return apiErrorResDto;
+    }
+
+    @ExceptionHandler(WebClientRequestException.class)
+    public GXResultUtils<Dict> handleWebClientRequestException(WebClientRequestException e) {
+        log.error(e.getMessage(), e);
+        return GXResultUtils.error(HttpStatus.HTTP_INTERNAL_ERROR, "WebClient网络请求异常");
     }
 
     /**
