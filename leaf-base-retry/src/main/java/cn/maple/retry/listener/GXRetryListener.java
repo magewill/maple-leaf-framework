@@ -7,8 +7,11 @@ import org.springframework.retry.RetryListener;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * GX 自定义 Spring Retry 监听器实现。
@@ -58,9 +61,17 @@ import java.util.function.Function;
 @Slf4j
 @Component
 public class GXRetryListener implements RetryListener {
+
+    /**
+     * 缓存最大容量，防止内存泄漏
+     * 当缓存达到此大小时，会清理一半的缓存条目
+     */
+    private static final int MAX_CACHE_SIZE = 1000;
+
     /**
      * 回调类型缓存，用于存储回调类的类型描述信息
      * 使用 ConcurrentHashMap 确保线程安全，同时避免在高并发场景下重复计算类型描述
+     * 增加了缓存大小限制，防止在长时间运行的应用中出现内存泄漏
      */
     private static final Map<Class<?>, String> CALLBACK_TYPE_CACHE = new ConcurrentHashMap<>();
 
@@ -69,6 +80,20 @@ public class GXRetryListener implements RetryListener {
      * 默认实现返回类的简单名称，可以通过继承类覆盖此方法提供更详细的描述
      */
     private static final Function<Class<?>, String> DEFAULT_TYPE_RESOLVER = Class::getSimpleName;
+
+    /**
+     * 日志级别配置，支持动态调整日志输出级别
+     * 可通过系统属性 gx.retry.log.level 进行配置
+     * 支持的级别：DEBUG, INFO, WARN, ERROR
+     */
+    private static final String LOG_LEVEL = System.getProperty("maple.framework.retry.log.level", "INFO");
+
+    /**
+     * 是否启用详细日志记录
+     * 可通过系统属性 gx.retry.log.verbose 进行配置
+     */
+    private static final boolean ENABLE_VERBOSE_LOGGING = Boolean.parseBoolean(
+            System.getProperty("maple.framework.retry.log.verbose", "false"));
 
     /**
      * 在重试操作开始时调用。
@@ -87,19 +112,32 @@ public class GXRetryListener implements RetryListener {
      */
     @Override
     public <T, E extends Throwable> boolean open(RetryContext context, RetryCallback<T, E> callback) {
+        // 参数校验，确保传入参数的有效性
+        Objects.requireNonNull(context, "重试上下文不能为null");
+        Objects.requireNonNull(callback, "重试回调不能为null");
+
         // 记录重试操作开始，包含上下文ID和尝试次数（通常为0）
         // 使用 context.getAttribute("context.name") 可以获取到 RetryTemplate 设置的名称，如果设置了的话
         // 这里我们简单记录，更复杂的场景可以传递更多上下文信息
         // 仅在首次尝试时记录 "开始"，避免有状态重试时重复记录
-        if (context.getRetryCount() == 0) {
+        if (context.getRetryCount() == 0 && shouldLogAtLevel("INFO")) {
             String contextId = getContextId(context);
             int retryCount = context.getRetryCount();
             // 使用完整类名以提供更详细的信息
             String callbackType = getCallbackTypeDescription(callback);
 
-            log.info("GXRetryListener: 开始执行重试操作. 上下文ID: {}, 初始尝试次数: {}, 回调类型: {}",
-                    contextId, retryCount, callbackType);
+            String logMessage = "GXRetryListener: 开始执行重试操作. 上下文ID: {}, 初始尝试次数: {}, 回调类型: {}";
+
+            // 如果启用详细日志，添加更多上下文信息
+            if (ENABLE_VERBOSE_LOGGING) {
+                String contextInfo = extractContextInfo(context);
+                logMessage += ", 上下文详情: {}";
+                log.info(logMessage, contextId, retryCount, callbackType, contextInfo);
+            } else {
+                log.info(logMessage, contextId, retryCount, callbackType);
+            }
         }
+
         // 返回 true 表示继续执行操作
         return true;
     }
@@ -117,6 +155,10 @@ public class GXRetryListener implements RetryListener {
      */
     @Override
     public <T, E extends Throwable> void close(RetryContext context, RetryCallback<T, E> callback, Throwable throwable) {
+        // 参数校验，确保传入参数的有效性
+        Objects.requireNonNull(context, "重试上下文不能为null");
+        Objects.requireNonNull(callback, "重试回调不能为null");
+
         String contextId = getContextId(context);
         int totalAttempts = context.getRetryCount() + (throwable == null ? 1 : 0);
         // 使用完整类名以提供更详细的信息
@@ -124,19 +166,34 @@ public class GXRetryListener implements RetryListener {
 
         if (throwable == null) {
             // 操作成功完成
-            log.info("GXRetryListener: 重试操作成功结束. 上下文ID: {}, 总尝试次数: {}, 回调类型: {}",
-                    contextId, totalAttempts, callbackType);
+            if (shouldLogAtLevel("INFO")) {
+                String logMessage = "GXRetryListener: 重试操作成功结束. 上下文ID: {}, 总尝试次数: {}, 回调类型: {}";
+
+                if (ENABLE_VERBOSE_LOGGING) {
+                    String contextInfo = extractContextInfo(context);
+                    logMessage += ", 上下文详情: {}";
+                    log.info(logMessage, contextId, totalAttempts, callbackType, contextInfo);
+                } else {
+                    log.info(logMessage, contextId, totalAttempts, callbackType);
+                }
+            }
         } else {
             // 所有重试尝试均失败
-            log.warn("GXRetryListener: 重试操作最终失败. 上下文ID: {}, 总尝试次数: {}, 回调类型: {}, 最后一次异常: {}: {}",
-                    contextId,
-                    totalAttempts,
-                    callbackType,
-                    throwable.getClass().getSimpleName(),
-                    throwable.getMessage());
+            if (shouldLogAtLevel("WARN")) {
+                String logMessage = "GXRetryListener: 重试操作最终失败. 上下文ID: {}, 总尝试次数: {}, 回调类型: {}, 最后一次异常: {}: {}";
+                if (ENABLE_VERBOSE_LOGGING) {
+                    String contextInfo = extractContextInfo(context);
+                    logMessage += ", 上下文详情: {}";
+                    log.warn(logMessage, contextId, totalAttempts, callbackType,
+                            throwable.getClass().getSimpleName(), throwable.getMessage(), contextInfo);
+                } else {
+                    log.warn(logMessage, contextId, totalAttempts, callbackType,
+                            throwable.getClass().getSimpleName(), throwable.getMessage());
+                }
+            }
 
             // 在DEBUG级别记录完整堆栈信息，便于问题排查
-            if (log.isDebugEnabled()) {
+            if (shouldLogAtLevel("DEBUG") && log.isDebugEnabled()) {
                 log.debug("GXRetryListener: 重试操作失败详细堆栈. 上下文ID: {}", contextId, throwable);
             }
         }
@@ -155,24 +212,34 @@ public class GXRetryListener implements RetryListener {
      */
     @Override
     public <T, E extends Throwable> void onError(RetryContext context, RetryCallback<T, E> callback, Throwable throwable) {
+        // 参数校验，确保传入参数的有效性
+        Objects.requireNonNull(context, "重试上下文不能为null");
+        Objects.requireNonNull(callback, "重试回调不能为null");
+        Objects.requireNonNull(throwable, "异常信息不能为null");
+
         String contextId = getContextId(context);
         // RetryCount 是已失败的次数，当前尝试是其+1
         int currentAttempt = context.getRetryCount() + 1;
         // 使用完整类名以提供更详细的信息
         String callbackType = getCallbackTypeDescription(callback);
         String exceptionClass = throwable.getClass().getSimpleName();
-        String exceptionMessage = throwable.getMessage();
+        String exceptionMessage = Optional.ofNullable(throwable.getMessage()).orElse("<无异常消息>");
 
         // 记录每次重试失败的日志
-        log.warn("GXRetryListener: 重试操作中发生错误. 上下文ID: {}, 当前尝试次数: {}, 回调类型: {}, 异常: {}: {}",
-                contextId,
-                currentAttempt,
-                callbackType,
-                exceptionClass,
-                exceptionMessage);
-
+        if (shouldLogAtLevel("WARN")) {
+            String logMessage = "GXRetryListener: 重试操作中发生错误. 上下文ID: {}, 当前尝试次数: {}, 回调类型: {}, 异常: {}: {}";
+            if (ENABLE_VERBOSE_LOGGING) {
+                String contextInfo = extractContextInfo(context);
+                Optional<Long> nextRetryDelay = extractNextRetryDelay(context);
+                logMessage += ", 上下文详情: {}, 下次重试延迟: {}ms";
+                log.warn(logMessage, contextId, currentAttempt, callbackType, exceptionClass,
+                        exceptionMessage, contextInfo, nextRetryDelay.orElse(-1L));
+            } else {
+                log.warn(logMessage, contextId, currentAttempt, callbackType, exceptionClass, exceptionMessage);
+            }
+        }
         // 在DEBUG级别记录完整堆栈信息，便于问题排查
-        if (log.isDebugEnabled()) {
+        if (shouldLogAtLevel("DEBUG") && log.isDebugEnabled()) {
             log.debug("GXRetryListener: 重试尝试失败详细堆栈. 上下文ID: {}, 尝试次数: {}", contextId, currentAttempt, throwable);
         }
     }
@@ -182,6 +249,7 @@ public class GXRetryListener implements RetryListener {
      * <p>
      * 此方法从回调对象获取类型描述，优先使用缓存以提高性能。
      * 对于频繁使用的回调类型，避免重复计算类名，减少内存和CPU开销。
+     * 增加了缓存大小限制，防止内存泄漏。
      *
      * @param callback 回调对象
      * @param <T>      回调返回类型
@@ -195,6 +263,19 @@ public class GXRetryListener implements RetryListener {
 
         // 使用回调对象的类作为缓存键
         Class<?> callbackClass = callback.getClass();
+
+        // 检查缓存大小，防止内存泄漏
+        if (CALLBACK_TYPE_CACHE.size() >= MAX_CACHE_SIZE) {
+            // 当缓存达到上限时，清理一半的缓存
+            var iterator = CALLBACK_TYPE_CACHE.entrySet().iterator();
+            var count = 0;
+            var halfSize = MAX_CACHE_SIZE / 2;
+            while (iterator.hasNext() && count < halfSize) {
+                iterator.next();
+                iterator.remove();
+                count++;
+            }
+        }
 
         // 从缓存中获取类型描述，如果不存在则计算并存入缓存
         return CALLBACK_TYPE_CACHE.computeIfAbsent(callbackClass, clazz -> {
@@ -238,6 +319,8 @@ public class GXRetryListener implements RetryListener {
      * @return 上下文的标识符字符串
      */
     private String getContextId(RetryContext context) {
+        Objects.requireNonNull(context, "重试上下文不能为null");
+
         // 尝试从上下文中获取名称，如果 RetryTemplate 设置了名称
         var name = context.getAttribute(RetryContext.NAME);
         if (name instanceof String nameStr && !nameStr.isEmpty()) {
@@ -255,5 +338,124 @@ public class GXRetryListener implements RetryListener {
         }
 
         return idStr;
+    }
+
+    /**
+     * 判断是否应该在指定级别记录日志
+     * <p>
+     * 根据配置的日志级别决定是否输出日志，支持动态调整日志级别。
+     * 日志级别优先级：DEBUG < INFO < WARN < ERROR
+     *
+     * @param level 要检查的日志级别
+     * @return 是否应该记录日志
+     */
+    private boolean shouldLogAtLevel(String level) {
+        return switch (LOG_LEVEL.toUpperCase()) {
+            case "DEBUG" -> true; // DEBUG级别记录所有日志
+            case "INFO" -> !"DEBUG".equalsIgnoreCase(level); // INFO级别不记录DEBUG日志
+            case "WARN" -> "WARN".equalsIgnoreCase(level) || "ERROR".equalsIgnoreCase(level); // WARN级别只记录WARN和ERROR
+            case "ERROR" -> "ERROR".equalsIgnoreCase(level); // ERROR级别只记录ERROR
+            default -> true; // 默认记录所有日志
+        };
+    }
+
+    /**
+     * 提取重试上下文的详细信息
+     * <p>
+     * 从重试上下文中提取有用的属性信息，用于详细日志记录。
+     * 这些信息可以帮助开发者更好地理解重试操作的上下文环境。
+     *
+     * @param context 重试上下文
+     * @return 上下文信息字符串
+     */
+    private String extractContextInfo(RetryContext context) {
+        var info = new StringBuilder();
+
+        try {
+            // 添加上下文属性信息
+            var attributeNames = context.attributeNames();
+            if (attributeNames.length > 0) {
+                info.append("属性[");
+                for (var i = 0; i < attributeNames.length; i++) {
+                    if (i > 0) info.append(", ");
+                    var attrName = attributeNames[i];
+                    var attrValue = context.getAttribute(attrName);
+                    // 避免记录敏感信息或过长的属性值
+                    var valueStr = attrValue != null ?
+                            (attrValue.toString().length() > 100 ?
+                                    attrValue.toString().substring(0, 100) + "..." :
+                                    attrValue.toString()) : "null";
+                    info.append(attrName).append("=").append(valueStr);
+                }
+                info.append("]");
+            }
+        } catch (Exception e) {
+            // 如果提取上下文信息时发生异常，记录错误但不影响主流程
+            if (log.isDebugEnabled()) {
+                log.debug("提取重试上下文信息时发生异常", e);
+            }
+            return "<提取上下文信息失败>";
+        }
+
+        return !info.isEmpty() ? info.toString() : "<无额外信息>";
+    }
+
+    /**
+     * 提取下次重试的延迟时间
+     * <p>
+     * 尝试从重试上下文中提取下次重试的延迟时间信息。
+     * 由于Spring Retry的内部实现可能变化，这里采用保守的方法进行提取。
+     *
+     * @param context 重试上下文
+     * @return 延迟时间（毫秒），如果无法获取则返回空
+     */
+    private Optional<Long> extractNextRetryDelay(RetryContext context) {
+        try {
+            // 尝试从上下文中获取退避策略信息
+            var sleepTime = context.getAttribute("sleepTime");
+            if (sleepTime instanceof Number number) {
+                return Optional.of(number.longValue());
+            }
+
+            // 尝试从其他可能的属性中获取延迟信息
+            var backOffContext = context.getAttribute("backOffContext");
+            if (backOffContext != null) {
+                // 这里可以根据具体的退避策略实现来提取延迟时间
+                // 由于Spring Retry的内部实现可能变化，这里采用保守的方法
+            }
+        } catch (Exception e) {
+            // 忽略异常，返回空值
+            if (log.isDebugEnabled()) {
+                log.debug("无法提取重试延迟时间", e);
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    /**
+     * 获取监听器的配置信息
+     * <p>
+     * 返回当前监听器的配置信息，包括日志级别、详细日志开关等。
+     * 这个方法主要用于调试和监控目的。
+     *
+     * @return 配置信息的供应商
+     */
+    public static Supplier<String> getConfigInfo() {
+        return () -> String.format("日志级别=%s, 详细日志=%s, 缓存大小=%d/%d",
+                LOG_LEVEL, ENABLE_VERBOSE_LOGGING, CALLBACK_TYPE_CACHE.size(), MAX_CACHE_SIZE);
+    }
+
+    /**
+     * 清理回调类型缓存
+     * <p>
+     * 手动清理回调类型缓存，释放内存。
+     * 通常在应用关闭或需要释放内存时调用。
+     */
+    public static void clearCache() {
+        CALLBACK_TYPE_CACHE.clear();
+        if (log.isDebugEnabled()) {
+            log.debug("GXRetryListener: 已清理回调类型缓存");
+        }
     }
 }
