@@ -1,5 +1,6 @@
 package cn.maple.retry.util;
 
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.retry.listener.GXRetryListener;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.retry.RecoveryCallback;
@@ -11,6 +12,10 @@ import org.springframework.retry.support.RetryTemplate;
 
 import java.util.Collections;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Supplier;
 
 /**
  * GX 重试工具类，提供基于 Spring Retry 的重试操作封装。
@@ -95,6 +100,24 @@ public final class GXRetryUtil {
 
     // 默认最大退避时间（毫秒）
     private static final long DEFAULT_MAX_INTERVAL = 10000L;
+
+    // 参数校验常量 定义重试机制的参数范围
+
+    // 最小和最大的重试次数
+    private static final int MIN_MAX_ATTEMPTS = 1;
+    private static final int MAX_MAX_ATTEMPTS = 100;
+
+    // 最小和最大的初始间隔时间，单位为毫秒
+    private static final long MIN_INITIAL_INTERVAL = 100L;
+    private static final long MAX_INITIAL_INTERVAL = 300000L; // 5分钟
+
+    // 最小和最大的时间倍增系数
+    private static final double MIN_MULTIPLIER = 1.0;
+    private static final double MAX_MULTIPLIER = 10.0;
+
+    // 最小和最大的最大间隔时间，单位为毫秒
+    private static final long MIN_MAX_INTERVAL = 1000L;
+    private static final long MAX_MAX_INTERVAL = 3600000L; // 1小时
 
     /**
      * 私有构造函数，防止实例化工具类。
@@ -289,13 +312,224 @@ public final class GXRetryUtil {
             double multiplier,
             long maxInterval,
             Map<Class<? extends Throwable>, Boolean> retryExceptions) throws E {
-        // 参数校验
-        if (retryCallback == null) {
-            throw new IllegalArgumentException("retryCallback 不能为空");
+        // 增强参数校验
+        validateParameters(retryCallback, maxAttempts, initialInterval, multiplier, maxInterval);
+
+        // 使用工厂方法创建配置好的RetryTemplate
+        var retryTemplate = createRetryTemplate(maxAttempts, initialInterval, multiplier, maxInterval, retryExceptions);
+
+        // 执行重试操作
+        // 如果提供了 recoveryCallback，则使用 execute(RetryCallback, RecoveryCallback)
+        // 否则，使用 execute(RetryCallback)
+        return recoveryCallback != null
+                ? retryTemplate.execute(retryCallback, recoveryCallback)
+                : retryTemplate.execute(retryCallback);
+    }
+
+    /**
+     * 异步执行带重试逻辑的操作，使用默认的重试策略。
+     * <p>
+     * 此方法将重试操作提交到指定的执行器中异步执行，适用于不希望阻塞当前线程的场景。
+     * 返回的 {@link CompletableFuture} 可以用于获取结果或处理异常。
+     *
+     * @param retryCallback 要执行的业务逻辑，封装在 {@link RetryCallback} 中
+     * @param executor      用于异步执行的执行器
+     * @param <T>           操作的返回类型
+     * @param <E>           操作可能抛出的异常类型
+     * @return {@link CompletableFuture} 包装的操作结果
+     * @since 1.1.0
+     */
+    public static <T, E extends Throwable> CompletableFuture<T> retryOperationAsync(
+            RetryCallback<T, E> retryCallback, Executor executor) {
+        Objects.requireNonNull(retryCallback, "retryCallback 不能为空");
+        Objects.requireNonNull(executor, "executor 不能为空");
+
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return retryOperation(retryCallback);
+            } catch (Throwable e) {
+                throw new GXBusinessException(e.getMessage(), e);
+            }
+        }, executor);
+    }
+
+    /**
+     * 异步执行带重试逻辑的操作，支持自定义重试参数。
+     *
+     * @param retryCallback    要执行的业务逻辑
+     * @param recoveryCallback 恢复回调函数
+     * @param maxAttempts      最大尝试次数
+     * @param initialInterval  初始退避时间
+     * @param multiplier       退避乘数
+     * @param maxInterval      最大退避时间
+     * @param retryExceptions  可重试的异常映射
+     * @param executor         用于异步执行的执行器
+     * @param <T>              操作的返回类型
+     * @param <E>              操作可能抛出的异常类型
+     * @return {@link CompletableFuture} 包装的操作结果
+     * @since 1.1.0
+     */
+    public static <T, E extends Throwable> CompletableFuture<T> retryOperationAsync(
+            RetryCallback<T, E> retryCallback,
+            RecoveryCallback<T> recoveryCallback,
+            int maxAttempts,
+            long initialInterval,
+            double multiplier,
+            long maxInterval,
+            Map<Class<? extends Throwable>, Boolean> retryExceptions,
+            Executor executor) {
+        Objects.requireNonNull(retryCallback, "retryCallback 不能为空");
+        Objects.requireNonNull(executor, "executor 不能为空");
+
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return retryOperation(retryCallback, recoveryCallback, maxAttempts,
+                        initialInterval, multiplier, maxInterval, retryExceptions);
+            } catch (Throwable e) {
+                throw new RuntimeException(e);
+            }
+        }, executor);
+    }
+
+    /**
+     * 使用 Supplier 接口执行带重试逻辑的操作，提供更简洁的API。
+     * <p>
+     * 此方法适用于不需要抛出受检异常的场景，使用 {@link Supplier} 接口
+     * 提供更简洁的lambda表达式支持。
+     *
+     * @param supplier 要执行的业务逻辑，封装在 {@link Supplier} 中
+     * @param <T>      操作的返回类型
+     * @return 操作成功时的返回结果
+     * @throws RuntimeException 如果所有重试尝试都失败
+     * @since 1.1.0
+     */
+    public static <T> T retrySupplier(Supplier<T> supplier) {
+        Objects.requireNonNull(supplier, "supplier 不能为空");
+
+        return retryOperation(context -> supplier.get());
+    }
+
+    /**
+     * 使用 Supplier 接口执行带重试逻辑的操作，支持自定义重试参数。
+     *
+     * @param supplier        要执行的业务逻辑
+     * @param maxAttempts     最大尝试次数
+     * @param initialInterval 初始退避时间
+     * @param <T>             操作的返回类型
+     * @return 操作成功时的返回结果
+     * @throws RuntimeException 如果所有重试尝试都失败
+     * @since 1.1.0
+     */
+    public static <T> T retrySupplier(Supplier<T> supplier, int maxAttempts, long initialInterval) {
+        Objects.requireNonNull(supplier, "supplier 不能为空");
+
+        return retryOperation(context -> supplier.get(), maxAttempts, initialInterval);
+    }
+
+    /**
+     * 增强的参数校验方法。
+     * <p>
+     * 对所有输入参数进行全面校验，确保参数的合理性和安全性。
+     * 使用现代Java的Objects.requireNonNull进行空值检查。
+     *
+     * @param retryCallback   重试回调函数
+     * @param maxAttempts     最大尝试次数
+     * @param initialInterval 初始退避时间
+     * @param multiplier      退避乘数
+     * @param maxInterval     最大退避时间
+     * @param <T>             操作的返回类型
+     * @param <E>             操作可能抛出的异常类型
+     * @throws IllegalArgumentException 如果参数不合法
+     * @since 1.1.0
+     */
+    private static <T, E extends Throwable> void validateParameters(
+            RetryCallback<T, E> retryCallback,
+            int maxAttempts,
+            long initialInterval,
+            double multiplier,
+            long maxInterval) {
+
+        // 使用Objects.requireNonNull进行空值检查
+        Objects.requireNonNull(retryCallback, "retryCallback 不能为空");
+
+        // 校验最大尝试次数
+        if (maxAttempts < MIN_MAX_ATTEMPTS || maxAttempts > MAX_MAX_ATTEMPTS) {
+            throw new IllegalArgumentException(
+                    String.format("maxAttempts 必须在 %d 到 %d 之间，当前值: %d",
+                            MIN_MAX_ATTEMPTS, MAX_MAX_ATTEMPTS, maxAttempts));
         }
-        if (multiplier <= 0 || multiplier > DEFAULT_MULTIPLIER) {
-            throw new IllegalArgumentException("multiplier 必须大于 0 且不超过 " + DEFAULT_MULTIPLIER);
+
+        // 校验初始退避时间
+        if (initialInterval < MIN_INITIAL_INTERVAL || initialInterval > MAX_INITIAL_INTERVAL) {
+            throw new IllegalArgumentException(
+                    String.format("initialInterval 必须在 %d 到 %d 毫秒之间，当前值: %d",
+                            MIN_INITIAL_INTERVAL, MAX_INITIAL_INTERVAL, initialInterval));
         }
+
+        // 校验退避乘数
+        if (multiplier < MIN_MULTIPLIER || multiplier > MAX_MULTIPLIER) {
+            throw new IllegalArgumentException(
+                    String.format("multiplier 必须在 %.1f 到 %.1f 之间，当前值: %.2f",
+                            MIN_MULTIPLIER, MAX_MULTIPLIER, multiplier));
+        }
+
+        // 校验最大退避时间
+        if (maxInterval < MIN_MAX_INTERVAL || maxInterval > MAX_MAX_INTERVAL) {
+            throw new IllegalArgumentException(
+                    String.format("maxInterval 必须在 %d 到 %d 毫秒之间，当前值: %d",
+                            MIN_MAX_INTERVAL, MAX_MAX_INTERVAL, maxInterval));
+        }
+
+        // 校验退避时间的逻辑关系
+        if (initialInterval > maxInterval) {
+            throw new IllegalArgumentException(
+                    String.format("initialInterval (%d) 不能大于 maxInterval (%d)",
+                            initialInterval, maxInterval));
+        }
+    }
+
+    /**
+     * 获取重试异常映射。
+     * <p>
+     * 此方法用于处理传入的重试异常映射，如果传入的映射为空或null，则返回一个默认的重试异常映射。
+     * 默认的重试异常映射包含所有Exception类型，并设置为可重试。
+     * <p>
+     * 使用现代Java的Map.of()方法创建不可变映射，提高性能和线程安全性。
+     *
+     * @param retryExceptions 用户定义的重试异常映射，包含一系列需要重试的异常类型及其是否可重试的标志
+     * @return 如果传入的映射为空或null，返回默认的重试异常映射；否则返回用户定义的重试异常映射
+     */
+    private static Map<Class<? extends Throwable>, Boolean> getRetryableExceptionMap(
+            Map<Class<? extends Throwable>, Boolean> retryExceptions) {
+        // 检查传入的重试异常映射是否为空或null
+        if (retryExceptions == null || retryExceptions.isEmpty()) {
+            // 使用Java 9+的Map.of()创建不可变映射，性能更好
+            return Map.of(Exception.class, true);
+        }
+        // 如果不为空，直接返回用户定义的重试异常映射
+        return retryExceptions;
+    }
+
+    /**
+     * 创建并配置RetryTemplate的工厂方法。
+     * <p>
+     * 将RetryTemplate的创建和配置逻辑提取为独立方法，提高代码的可读性和可测试性。
+     * 每次调用都创建新的实例，确保线程安全。
+     *
+     * @param maxAttempts     最大尝试次数
+     * @param initialInterval 初始退避时间
+     * @param multiplier      退避乘数
+     * @param maxInterval     最大退避时间
+     * @param retryExceptions 可重试的异常映射
+     * @return 配置好的RetryTemplate实例
+     * @since 1.1.0
+     */
+    private static RetryTemplate createRetryTemplate(
+            int maxAttempts,
+            long initialInterval,
+            double multiplier,
+            long maxInterval,
+            Map<Class<? extends Throwable>, Boolean> retryExceptions) {
 
         RetryTemplate retryTemplate = new RetryTemplate();
 
@@ -307,8 +541,6 @@ public final class GXRetryUtil {
         retryTemplate.setBackOffPolicy(backOffPolicy);
 
         // 配置重试策略 (SimpleRetryPolicy)
-        // 如果 retryExceptions 为空或 null，则默认重试所有 Exception 类型的异常
-        // 否则，根据提供的 Map 配置可重试的异常
         SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy(
                 maxAttempts > 0 ? maxAttempts : DEFAULT_MAX_ATTEMPTS,
                 getRetryableExceptionMap(retryExceptions),
@@ -321,33 +553,7 @@ public final class GXRetryUtil {
         // 每次调用都创建一个新的 Listener 实例，以确保线程安全和上下文隔离
         retryTemplate.setListeners(new GXRetryListener[]{new GXRetryListener()});
 
-        // 执行重试操作
-        // 如果提供了 recoveryCallback，则使用 execute(RetryCallback, RecoveryCallback)
-        // 否则，使用 execute(RetryCallback)
-        if (recoveryCallback != null) {
-            return retryTemplate.execute(retryCallback, recoveryCallback);
-        } else {
-            return retryTemplate.execute(retryCallback);
-        }
-    }
-
-    /**
-     * 获取重试异常映射
-     * 此方法用于处理传入的重试异常映射，如果传入的映射为空或null，则返回一个默认的重试异常映射
-     * 默认的重试异常映射包含所有Exception类型，并设置为可重试
-     *
-     * @param retryExceptions 用户定义的重试异常映射，包含一系列需要重试的异常类型及其是否可重试的标志
-     * @return 如果传入的映射为空或null，返回默认的重试异常映射；否则返回用户定义的重试异常映射
-     */
-    private static Map<Class<? extends Throwable>, Boolean> getRetryableExceptionMap(
-            Map<Class<? extends Throwable>, Boolean> retryExceptions) {
-        // 检查传入的重试异常映射是否为空或null
-        if (retryExceptions == null || retryExceptions.isEmpty()) {
-            // 如果为空或null，返回默认的重试异常映射，包含所有Exception类型，并设置为可重试
-            return Collections.singletonMap(Exception.class, true);
-        }
-        // 如果不为空，直接返回用户定义的重试异常映射
-        return retryExceptions;
+        return retryTemplate;
     }
 
 }
