@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li><b>默认重试策略 ({@link SimpleRetryPolicy})</b>:
  *     <ul>
  *       <li>最大尝试次数: 3 次 (包括首次尝试)。</li>
- *       <li>可重试异常: 默认情况下，会重试所有 {@link Exception} 及其子类。
+ *       <li>可重试异常: 默认情况下，会重试所有 {@link GXBusinessException} 及其子类。</li>
  *     </ul>
  *   </li>
  *   <li><b>默认退避策略 ({@link ExponentialBackOffPolicy})</b>:
@@ -208,6 +208,25 @@ public class GXRetryConfig {
     private static final long DEFAULT_MAX_INTERVAL = 10000L;
 
     /**
+     * 参数校验常量 - 定义重试机制的参数范围
+     */
+    // 最小和最大的重试次数
+    private static final int MIN_MAX_ATTEMPTS = 1;
+    private static final int MAX_MAX_ATTEMPTS = 100;
+
+    // 最小和最大的初始间隔时间，单位为毫秒
+    private static final long MIN_INITIAL_INTERVAL = 100L;
+    private static final long MAX_INITIAL_INTERVAL = 300000L; // 5分钟
+
+    // 最小和最大的时间倍增系数
+    private static final double MIN_MULTIPLIER = 1.0;
+    private static final double MAX_MULTIPLIER = 10.0;
+
+    // 最小和最大的最大间隔时间，单位为毫秒
+    private static final long MIN_MAX_INTERVAL = 1000L;
+    private static final long MAX_MAX_INTERVAL = 3600000L; // 1小时
+
+    /**
      * 创建并配置一个默认的 {@link RetryTemplate} Bean。
      * <p>
      * 这个 {@code RetryTemplate} 实例配置了标准的重试策略、指数退避策略，
@@ -222,35 +241,86 @@ public class GXRetryConfig {
     @Bean
     @ConditionalOnMissingBean(RetryTemplate.class)
     public RetryTemplate retryTemplate() {
+        // 使用自定义方法创建默认配置的RetryTemplate
+        // 这样可以复用代码，确保默认实例和自定义实例使用相同的创建逻辑
+        return createCustomRetryTemplate(
+                DEFAULT_MAX_ATTEMPTS,
+                DEFAULT_INITIAL_INTERVAL,
+                DEFAULT_MULTIPLIER,
+                DEFAULT_MAX_INTERVAL,
+                createDefaultRetryExceptionMap());
+    }
+
+    /**
+     * 创建默认的重试异常映射。
+     * <p>
+     * 默认情况下，配置为重试 {@link GXBusinessException} 及其子类异常。
+     * 使用 {@link ConcurrentHashMap} 确保线程安全。
+     *
+     * @return 默认的重试异常映射
+     */
+    private Map<Class<? extends Throwable>, Boolean> createDefaultRetryExceptionMap() {
+        Map<Class<? extends Throwable>, Boolean> retryExceptions = new ConcurrentHashMap<>();
+        // 默认重试所有GXBusinessException类型异常
+        retryExceptions.put(GXBusinessException.class, true);
+        //retryExceptions.put(IOException.class, true);       // 示例：网络IO异常
+        //retryExceptions.put(TimeoutException.class, true);  // 示例：超时异常
+        return retryExceptions;
+    }
+
+    /**
+     * 创建自定义配置的 {@link RetryTemplate} 实例。
+     * <p>
+     * 此方法允许根据特定需求创建定制的重试模板，可以指定最大尝试次数、
+     * 退避策略参数以及需要重试的异常类型。
+     * <p>
+     * 每次调用此方法都会创建一个新的 {@link RetryTemplate} 实例，
+     * 确保不同配置之间相互隔离，避免共享状态引起的问题。
+     *
+     * @param maxAttempts     最大尝试次数 (包括首次尝试)，必须大于等于1且小于等于100
+     * @param initialInterval 初始退避间隔 (毫秒)，必须大于等于100ms且小于等于5分钟
+     * @param multiplier      退避乘数，必须大于等于1.0且小于等于10.0
+     * @param maxInterval     最大退避间隔 (毫秒)，必须大于等于1秒且小于等于1小时
+     * @param retryExceptions 可重试的异常映射，键为异常类，值为布尔值 (true表示可重试)
+     * @return 配置好的 {@link RetryTemplate} 实例
+     * @throws IllegalArgumentException 如果任何参数不符合要求
+     */
+    public RetryTemplate createCustomRetryTemplate(
+            int maxAttempts,
+            long initialInterval,
+            double multiplier,
+            long maxInterval,
+            Map<Class<? extends Throwable>, Boolean> retryExceptions) {
+        // 参数校验
+        validateRetryParameters(maxAttempts, initialInterval, multiplier, maxInterval);
+
+        // 确保异常映射不为null
+        Map<Class<? extends Throwable>, Boolean> exceptionMap = retryExceptions != null ? retryExceptions : createDefaultRetryExceptionMap();
+
+        // 创建RetryTemplate实例
         final RetryTemplate retryTemplate = new RetryTemplate();
 
         // 1. 配置重试策略 (SimpleRetryPolicy)
-        //    - 设置最大尝试次数
-        //    - 默认情况下，SimpleRetryPolicy 会重试所有 Exception 类型的异常
-        //    - 使用ConcurrentHashMap提高并发环境下的性能
-        final Map<Class<? extends Throwable>, Boolean> retryExceptions = new ConcurrentHashMap<>();
-        // 仅重试特定的可恢复异常，避免对非法参数等不可恢复异常重试
-        retryExceptions.put(GXBusinessException.class, true); // 默认重试所有GXBusinessException类型异常
-        //retryExceptions.put(IOException.class, true);       // 示例：网络IO异常
-        //retryExceptions.put(TimeoutException.class, true);  // 示例：超时异常
-
-        // 创建线程安全的重试策略
-        final SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy(DEFAULT_MAX_ATTEMPTS, retryExceptions, true);
+        SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy(maxAttempts, exceptionMap, true);
         retryTemplate.setRetryPolicy(retryPolicy);
 
         // 2. 配置退避策略 (ExponentialBackOffPolicy)
         //    - 设置初始退避间隔、退避乘数和最大退避间隔
         //    - 指数退避策略在高并发环境下可以有效减轻系统负载
-        final ExponentialBackOffPolicy backOffPolicy = new ExponentialBackOffPolicy();
-        backOffPolicy.setInitialInterval(DEFAULT_INITIAL_INTERVAL); // 初始延迟1秒
-        backOffPolicy.setMultiplier(DEFAULT_MULTIPLIER);          // 乘数2.0，下次延迟为上次的2倍
-        backOffPolicy.setMaxInterval(DEFAULT_MAX_INTERVAL);       // 最大延迟10秒
+        ExponentialBackOffPolicy backOffPolicy = new ExponentialBackOffPolicy();
+        // 初始延迟1秒
+        backOffPolicy.setInitialInterval(initialInterval);
+        // 乘数2.0，下次延迟为上次的2倍
+        backOffPolicy.setMultiplier(multiplier);
+        // 最大延迟10秒
+        backOffPolicy.setMaxInterval(maxInterval);
         retryTemplate.setBackOffPolicy(backOffPolicy);
 
         // 3. 注册自定义的 RetryListener
         // 确保 GXRetryListener 是无状态的，否则应每次新建一个实例
         //    - GXRetryListener 用于记录重试过程中的日志信息
         //    - 每次重试操作都会创建新的上下文，确保线程安全
+        //    - 每次创建新的监听器实例，确保上下文隔离
         retryTemplate.setListeners(new GXRetryListener[]{new GXRetryListener()});
 
         // 注意：默认情况下，RetryTemplate在耗尽重试次数后会抛出最后一次异常
@@ -263,5 +333,83 @@ public class GXRetryConfig {
         //retryTemplate.setRetryContextCache(new MapRetryContextCache());
 
         return retryTemplate;
+    }
+
+    /**
+     * 创建自定义配置的 {@link RetryTemplate} 实例，使用默认的异常映射。
+     * <p>
+     * 此方法是 {@link #createCustomRetryTemplate(int, long, double, long, Map)} 的简化版本，
+     * 使用默认的异常映射 (重试 {@link GXBusinessException} 及其子类)。
+     *
+     * @param maxAttempts     最大尝试次数 (包括首次尝试)
+     * @param initialInterval 初始退避间隔 (毫秒)
+     * @param multiplier      退避乘数
+     * @param maxInterval     最大退避间隔 (毫秒)
+     * @return 配置好的 {@link RetryTemplate} 实例
+     * @throws IllegalArgumentException 如果任何参数不符合要求
+     */
+    public RetryTemplate createCustomRetryTemplate(
+            int maxAttempts,
+            long initialInterval,
+            double multiplier,
+            long maxInterval) {
+        return createCustomRetryTemplate(
+                maxAttempts,
+                initialInterval,
+                multiplier,
+                maxInterval,
+                createDefaultRetryExceptionMap());
+    }
+
+    /**
+     * 验证重试参数的有效性。
+     * <p>
+     * 此方法检查所有重试参数是否在有效范围内，如果任何参数无效，则抛出异常。
+     *
+     * @param maxAttempts     最大尝试次数
+     * @param initialInterval 初始退避间隔
+     * @param multiplier      退避乘数
+     * @param maxInterval     最大退避间隔
+     * @throws IllegalArgumentException 如果任何参数不符合要求
+     */
+    private void validateRetryParameters(
+            int maxAttempts,
+            long initialInterval,
+            double multiplier,
+            long maxInterval) {
+        // 校验最大尝试次数
+        if (maxAttempts < MIN_MAX_ATTEMPTS || maxAttempts > MAX_MAX_ATTEMPTS) {
+            throw new IllegalArgumentException(
+                    String.format("maxAttempts 必须在 %d 到 %d 之间，当前值: %d",
+                            MIN_MAX_ATTEMPTS, MAX_MAX_ATTEMPTS, maxAttempts));
+        }
+
+        // 校验初始退避时间
+        if (initialInterval < MIN_INITIAL_INTERVAL || initialInterval > MAX_INITIAL_INTERVAL) {
+            throw new IllegalArgumentException(
+                    String.format("initialInterval 必须在 %d 到 %d 毫秒之间，当前值: %d",
+                            MIN_INITIAL_INTERVAL, MAX_INITIAL_INTERVAL, initialInterval));
+        }
+
+        // 校验退避乘数
+        if (multiplier < MIN_MULTIPLIER || multiplier > MAX_MULTIPLIER) {
+            throw new IllegalArgumentException(
+                    String.format("multiplier 必须在 %.1f 到 %.1f 之间，当前值: %.2f",
+                            MIN_MULTIPLIER, MAX_MULTIPLIER, multiplier));
+        }
+
+        // 校验最大退避时间
+        if (maxInterval < MIN_MAX_INTERVAL || maxInterval > MAX_MAX_INTERVAL) {
+            throw new IllegalArgumentException(
+                    String.format("maxInterval 必须在 %d 到 %d 毫秒之间，当前值: %d",
+                            MIN_MAX_INTERVAL, MAX_MAX_INTERVAL, maxInterval));
+        }
+
+        // 校验退避时间的逻辑关系
+        if (initialInterval > maxInterval) {
+            throw new IllegalArgumentException(
+                    String.format("initialInterval (%d) 不能大于 maxInterval (%d)",
+                            initialInterval, maxInterval));
+        }
     }
 }
