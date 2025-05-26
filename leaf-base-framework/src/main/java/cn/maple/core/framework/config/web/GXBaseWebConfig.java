@@ -290,7 +290,7 @@ public class GXBaseWebConfig {
                     if (Objects.nonNull(webClientService)) {
                         String token = webClientService.generateHttpAuthToken();
                         if (Objects.nonNull(token) && !token.isEmpty()) {
-                            headers.set(GXCommonConstant.WEB_CLIENT_AUTH_TOKEN, token);
+                            headers.set(GXCommonConstant.X_AUTH_TOKEN, token);
                             LOGGER.debug("已添加WebClient认证Token到请求头");
                         }
                         String platform = webClientService.getPlatform();

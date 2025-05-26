@@ -147,7 +147,12 @@ public class GXCommonConstant {
     /**
      * 使用WebClient传递的认证Token
      */
-    public static final String WEB_CLIENT_AUTH_TOKEN = "Web-Client-Auth-Token";
+    public static final String X_AUTH_TOKEN = "X-Auth-Token";
+
+    /**
+     * HMAC签名, 用于需要验证数据一致性的场景
+     */
+    public static final String X_HMAC_SIGNATURE = "X-HMAC-Signature";
 
     private GXCommonConstant() {
     }

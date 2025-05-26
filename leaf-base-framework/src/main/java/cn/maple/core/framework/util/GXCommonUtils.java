@@ -3,6 +3,7 @@ package cn.maple.core.framework.util;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.codec.Base64;
+import cn.hutool.core.codec.Base64Encoder;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.convert.ConvertException;
@@ -15,6 +16,7 @@ import cn.hutool.core.util.ClassUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.ReUtil;
 import cn.hutool.core.util.ReflectUtil;
+import cn.hutool.crypto.SecureUtil;
 import cn.hutool.http.*;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.constant.GXCommonConstant;
@@ -29,7 +31,9 @@ import cn.maple.core.framework.exception.GXConvertException;
 import cn.maple.core.framework.util.cglib.GXCglibUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.google.common.collect.Table;
 import com.google.common.reflect.TypeToken;
 import lombok.Getter;
@@ -37,8 +41,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
+import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -1933,5 +1942,185 @@ public class GXCommonUtils {
             LOG.error(CharSequenceUtil.format("访问URL时发生错误: {}，URL: {}", e.getMessage(), urlString), e);
         }
         return -1;
+    }
+
+    /**
+     * 生成HMAC-SHA256签名
+     * <p>
+     * 流程说明：
+     * 1. 创建HMAC对象并初始化密钥
+     * 2. 从Spring上下文获取ObjectMapper
+     * 3. 将数据对象序列化为JSON字符串
+     * 4. 计算HMAC值并进行Base64编码
+     * </p>
+     * <p>
+     * 线程安全性：
+     * - 该方法是线程安全的，可在多线程环境下调用
+     * - Mac实例在每次调用时创建，不存在状态共享问题
+     * - ObjectMapper是线程安全的，可以安全地在多线程间共享
+     * </p>
+     * <p>
+     * 性能优化：
+     * - 使用StandardCharsets常量替代字符串指定编码，提高性能
+     * - 对异常进行精确分类和处理，提供更准确的错误信息
+     * </p>
+     * <p>
+     * 安全性：
+     * - 使用标准的HMAC-SHA256算法，提供高强度的密码学安全性
+     * - 使用Base64编码输出，避免二进制数据处理问题
+     * - 异常信息中不暴露敏感数据
+     * </p>
+     * <p>
+     * 使用示例：
+     * <pre>
+     * // 示例1：对简单对象生成签名
+     * User user = new User("张三", 30);
+     * String secret = "your-secret-key";
+     * String signature = GXCommonUtils.generateHmac(user, secret);
+     *
+     * // 示例2：对Map数据生成签名
+     * Map<String, Object> payload = new HashMap<>();
+     * payload.put("userId", 12345);
+     * payload.put("timestamp", System.currentTimeMillis());
+     * String signature = GXCommonUtils.generateHmac(payload, secret);
+     * </pre>
+     * </p>
+     *
+     * @param data   待签名的数据对象，不能为null
+     * @param secret 签名密钥，不能为null或空
+     * @return Base64编码的HMAC签名结果
+     * @throws GXBusinessException 当签名过程发生异常时抛出，包含详细错误信息
+     */
+    public static String generateHmac(Object data, String secret) {
+        // 参数校验
+        if (data == null) {
+            throw new GXBusinessException("待签名数据不能为null");
+        }
+        if (CharSequenceUtil.isBlank(secret)) {
+            throw new GXBusinessException("签名密钥不能为空");
+        }
+        try {
+            // 创建HMAC对象
+            Mac mac = SecureUtil.createMac("HmacSHA256");
+            // 初始化密钥，统一使用UTF-8编码
+            SecretKeySpec secretKeySpec = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            mac.init(secretKeySpec);
+            // 从Spring上下文获取ObjectMapper实例
+            ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
+            if (objectMapper == null) {
+                // 如果Spring上下文中没有ObjectMapper，创建一个默认实例
+                objectMapper = new ObjectMapper();
+                objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+                objectMapper.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
+            }
+
+            // 序列化数据对象为JSON字符串
+            String jsonData = objectMapper.writeValueAsString(data);
+            // 计算HMAC值并进行Base64编码，统一使用UTF-8编码
+            byte[] hmacBytes = mac.doFinal(jsonData.getBytes(StandardCharsets.UTF_8));
+            return Base64Encoder.encode(hmacBytes);
+        } catch (JsonProcessingException e) {
+            throw new GXBusinessException("JSON序列化失败: " + e.getMessage(), e);
+        } catch (InvalidKeyException e) {
+            throw new GXBusinessException("无效的HMAC密钥: " + e.getMessage(), e);
+        } catch (Exception e) {
+            throw new GXBusinessException("HMAC签名生成失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 验证客户端提供的HMAC签名是否与服务器端计算的签名一致
+     * <p>
+     * 流程说明：
+     * 1. 创建HMAC对象并初始化密钥
+     * 2. 序列化待验证的数据负载
+     * 3. 计算服务器端HMAC签名
+     * 4. 比较服务器端签名与客户端签名是否匹配
+     * </p>
+     * <p>
+     * 线程安全性：
+     * - 该方法是线程安全的，可在多线程环境下调用
+     * - Mac实例在每次调用时创建，不存在状态共享问题
+     * - ObjectMapper是线程安全的，可以安全地在多线程间共享
+     * </p>
+     * <p>
+     * 性能优化：
+     * - 使用StandardCharsets常量替代字符串指定编码，提高性能
+     * - 使用常量时间比较方法，防止时序攻击
+     * - 对异常进行精确分类和处理，提供更准确的错误信息
+     * </p>
+     * <p>
+     * 安全性：
+     * - 使用标准的HMAC-SHA256算法，提供高强度的密码学安全性
+     * - 使用常量时间比较，防止时序攻击
+     * - 异常信息中不暴露敏感数据
+     * - 验证失败时返回false而不是抛出异常，防止信息泄露
+     * </p>
+     * <p>
+     * 使用示例：
+     * <pre>
+     * // 示例：验证客户端传入的签名
+     * Map<String, Object> payload = new HashMap<>();
+     * payload.put("userId", 12345);
+     * payload.put("timestamp", 1634567890123L);
+     *
+     * String secret = "your-secret-key";
+     * String clientHmac = request.getHeader("X-Signature");
+     *
+     * if (GXCommonUtils.checkHmac(secret, clientHmac, payload)) {
+     *     // 签名验证通过，处理业务逻辑
+     * } else {
+     *     // 签名验证失败，拒绝请求
+     *     throw new GXBusinessException("无效的签名");
+     * }
+     * </pre>
+     * </p>
+     *
+     * @param secret     用于HMAC计算的共享密钥，不能为null或空
+     * @param clientHmac 客户端传入的HMAC签名，不能为null或空
+     * @param payload    待验证的数据负载，不能为null
+     * @return 当签名匹配时返回true，否则返回false
+     * @throws GXBusinessException 当验证过程发生异常时抛出，包含详细错误信息
+     */
+    public static boolean checkHmac(String secret, String clientHmac, Object payload) {
+        // 参数校验
+        if (CharSequenceUtil.isBlank(secret)) {
+            throw new GXBusinessException("签名密钥不能为空");
+        }
+        if (CharSequenceUtil.isBlank(clientHmac)) {
+            return false; // 客户端签名为空，直接返回验证失败
+        }
+        if (payload == null) {
+            throw new GXBusinessException("待验证数据不能为null");
+        }
+        try {
+            // 创建HMAC-SHA256算法的Mac实例
+            Mac mac = SecureUtil.createMac("HmacSHA256");
+            // 初始化密钥规格，统一使用UTF-8编码
+            SecretKeySpec secretKeySpec = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            mac.init(secretKeySpec);
+            // 获取ObjectMapper实例用于序列化payload
+            ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
+            if (objectMapper == null) {
+                // 如果Spring上下文中没有ObjectMapper，创建一个默认实例
+                objectMapper = new ObjectMapper();
+                objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+                objectMapper.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
+            }
+            // 序列化payload为JSON字符串
+            String jsonData = objectMapper.writeValueAsString(payload);
+            // 计算服务器端HMAC并进行Base64编码
+            byte[] hmacBytes = mac.doFinal(jsonData.getBytes(StandardCharsets.UTF_8));
+            String serverHmac = Base64Encoder.encode(hmacBytes);
+            // 使用常量时间比较，防止时序攻击
+            return MessageDigest.isEqual(
+                    serverHmac.getBytes(StandardCharsets.UTF_8),
+                    clientHmac.getBytes(StandardCharsets.UTF_8)
+            );
+        } catch (Exception e) {
+            // 记录异常但不暴露详细信息给调用者
+            LOG.error("HMAC验证失败: {}", e.getMessage(), e);
+            return false;
+        }
     }
 }

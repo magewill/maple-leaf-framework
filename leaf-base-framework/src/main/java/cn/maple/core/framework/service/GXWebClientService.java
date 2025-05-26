@@ -259,7 +259,7 @@ public interface GXWebClientService {
      * @return true 有效 ; false 无效
      */
     default boolean checkTokenValidity() {
-        String webClientToken = GXCurrentRequestContextUtils.getHeader(GXCommonConstant.WEB_CLIENT_AUTH_TOKEN);
+        String webClientToken = GXCurrentRequestContextUtils.getHeader(GXCommonConstant.X_AUTH_TOKEN);
         if (CharSequenceUtil.isBlank(webClientToken)) {
             return false; // Token为空，直接返回无效
         }
@@ -386,8 +386,8 @@ public interface GXWebClientService {
         return Map.of(
                 "Authorization", "******",
                 "Cookie", "******",
-                "Web-Client-Auth-Token", "******",
                 "X-Auth-Token", "******",
+                "X-HMAC-Signature", "******",
                 "X-API-Key", "******"
         );
     }
@@ -402,5 +402,28 @@ public interface GXWebClientService {
      */
     default String getPlatform() {
         return GXCurrentRequestContextUtils.getHeader(GXTokenConstant.PLATFORM);
+    }
+
+    /**
+     * 生成HMAC加密字符串。
+     *
+     * @param data   需要加密的数据对象
+     * @param secret 密钥字符串
+     * @return 生成的HMAC加密结果
+     */
+    default String generateHmac(Object data, String secret) {
+        return GXCommonUtils.generateHmac(data, secret);
+    }
+
+    /**
+     * 验证HMAC签名是否匹配
+     *
+     * @param secret     用于生成HMAC的密钥
+     * @param clientHmac 客户端提供的HMAC值
+     * @param payload    原始数据负载
+     * @return boolean true表示验证通过，false表示验证失败
+     */
+    default boolean checkHmac(String secret, String clientHmac, Object payload) {
+        return GXCommonUtils.checkHmac(secret, clientHmac, payload);
     }
 }
