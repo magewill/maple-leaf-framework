@@ -386,9 +386,21 @@ public interface GXWebClientService {
         return Map.of(
                 "Authorization", "******",
                 "Cookie", "******",
-                GXCommonConstant.WEB_CLIENT_AUTH_TOKEN, "******",
+                "Web-Client-Auth-Token", "******",
                 "X-Auth-Token", "******",
                 "X-API-Key", "******"
         );
+    }
+
+    /**
+     * 获取当前请求的平台信息
+     * 从HTTP请求头中提取平台标识字段
+     *
+     * @return 平台标识字符串
+     * 可能返回null或空字符串（当请求头未设置时）
+     * 典型值如：WEB/APP/ADMIN等
+     */
+    default String getPlatform() {
+        return GXCurrentRequestContextUtils.getHeader(GXTokenConstant.PLATFORM);
     }
 }

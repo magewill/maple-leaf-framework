@@ -1,8 +1,10 @@
 package cn.maple.core.framework.config.web;
 
+import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.api.dto.res.GXErrorApiResDto;
 import cn.maple.core.framework.constant.GXCommonConstant;
+import cn.maple.core.framework.constant.GXTokenConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.filter.GXBaseRequestLoggingFilter;
 import cn.maple.core.framework.service.GXWebClientService;
@@ -289,12 +291,16 @@ public class GXBaseWebConfig {
                         String token = webClientService.generateHttpAuthToken();
                         if (Objects.nonNull(token) && !token.isEmpty()) {
                             headers.set(GXCommonConstant.WEB_CLIENT_AUTH_TOKEN, token);
-                            headers.set("requestStartTime", String.valueOf(System.currentTimeMillis()));
                             LOGGER.debug("已添加WebClient认证Token到请求头");
+                        }
+                        String platform = webClientService.getPlatform();
+                        if (CharSequenceUtil.isNotBlank(platform)) {
+                            headers.set(GXTokenConstant.PLATFORM, platform);
                         }
                     } else {
                         LOGGER.warn("未找到GXWebClientService实现，HTTP请求将不包含认证Token");
                     }
+                    headers.set("requestStartTime", String.valueOf(System.currentTimeMillis()));
                 })
                 // 设置连接超时和响应超时
                 .clientConnector(new ReactorClientHttpConnector(HttpClient.create()
