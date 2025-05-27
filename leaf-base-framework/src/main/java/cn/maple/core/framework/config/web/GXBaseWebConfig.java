@@ -1,391 +1,250 @@
 package cn.maple.core.framework.config.web;
 
-import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.core.util.ObjectUtil;
-import cn.hutool.json.JSONUtil;
-import cn.maple.core.framework.api.dto.res.GXErrorApiResDto;
-import cn.maple.core.framework.constant.GXCommonConstant;
-import cn.maple.core.framework.constant.GXTokenConstant;
-import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.filter.GXBaseRequestLoggingFilter;
-import cn.maple.core.framework.service.GXWebClientService;
-import cn.maple.core.framework.util.GXCommonUtils;
-import cn.maple.core.framework.util.GXSpringContextUtils;
-import cn.maple.core.framework.util.GXTraceIdContextUtils;
-import io.netty.channel.ChannelOption;
-import io.netty.handler.timeout.ReadTimeoutHandler;
-import io.netty.handler.timeout.WriteTimeoutHandler;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpStatusCode;
-import org.springframework.http.client.reactive.ReactorClientHttpConnector;
-import org.springframework.web.reactive.function.client.ClientRequest;
-import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
-import org.springframework.web.reactive.function.client.ExchangeStrategies;
-import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.support.WebClientAdapter;
-import org.springframework.web.service.invoker.HttpServiceProxyFactory;
-import reactor.core.publisher.Mono;
-import reactor.netty.http.client.HttpClient;
-import reactor.netty.resources.ConnectionProvider;
-
-import java.time.Duration;
-import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Web基础配置类
  * <p>
- * 该配置类提供了Web应用的基础配置，包括请求日志记录过滤器和WebClient配置等组件。
+ * 该配置类提供了Web应用的基础配置，包括请求日志记录过滤器等组件。
  * 通过Spring的@Configuration注解，在应用启动时自动注册相关Bean。
  * 该配置类是线程安全的，所有Bean都是单例模式，在应用上下文中共享。
  * </p>
- *
- * <p><strong>核心功能：</strong></p>
- * <ul>
- *   <li>配置HTTP请求日志记录过滤器，便于调试和问题排查</li>
- *   <li>配置WebClient和HttpServiceProxyFactory，支持声明式HTTP客户端</li>
- *   <li>自动添加认证Token到HTTP请求头</li>
- *   <li>提供合理的默认配置，如超时设置、内存限制等</li>
- *   <li>支持分布式追踪，自动传递TraceId</li>
- *   <li>提供高性能的连接池管理，优化高并发场景</li>
- * </ul>
- *
- * <p><strong>线程安全性：</strong></p>
- * <ul>
- *   <li>所有Bean都是线程安全的，适合在多线程环境中使用</li>
- *   <li>WebClient实例是线程安全的，可以在多个线程间共享</li>
- *   <li>使用不可变对象和函数式编程风格，减少状态共享</li>
- *   <li>依赖的GXWebClientService实现应确保线程安全</li>
- *   <li>连接池配置支持高并发场景，避免连接资源竞争</li>
- * </ul>
- *
- * <p><strong>性能优化：</strong></p>
- * <ul>
- *   <li>WebClient使用非阻塞响应式编程模型，提高并发处理能力</li>
- *   <li>配置合理的内存限制，避免大请求导致内存溢出</li>
- *   <li>设置适当的超时时间，防止请求长时间挂起</li>
- *   <li>使用连接池管理HTTP连接，提高连接复用效率</li>
- *   <li>优化连接获取策略，减少连接建立的开销</li>
- *   <li>支持连接空闲超时，自动释放长时间不用的连接</li>
- * </ul>
- *
- * <p><strong>使用示例：</strong></p>
+ * <p>
+ * <b>主要功能</b>：
+ * 1. 注册请求日志记录过滤器(GXBaseRequestLoggingFilter)，用于记录HTTP请求的详细信息
+ * 2. 支持分布式系统中的请求链路追踪，通过TraceId机制关联同一请求的所有日志
+ * 3. 自动统计请求处理时间，便于性能监控和问题排查
+ * 4. 提供请求上下文管理，确保请求信息在整个处理链路中可用
+ * 5. 支持与GXWebClientConfig配合，实现全链路追踪和日志记录
+ * 6. 自动处理请求头中的TraceId，支持跨服务调用的链路追踪
+ * 7. 提供请求时间统计，记录请求处理耗时，便于性能分析
+ * </p>
+ * <p>
+ * <b>技术特点</b>：
+ * 1. 基于Spring的过滤器链机制，每个请求由独立的线程处理，不存在线程安全问题
+ * 2. 使用ThreadLocal(通过MDC实现)存储TraceId，确保在高并发环境下的线程隔离
+ * 3. 在请求结束时自动清理ThreadLocal资源，防止可能的内存泄漏
+ * 4. 采用AOP思想，无侵入式地为所有请求添加日志记录和追踪功能
+ * 5. 支持异步处理场景，通过GXMdcThreadUtils确保TraceId在子线程中传递
+ * 6. 使用try-finally结构确保资源清理，即使在异常情况下也能正确释放资源
+ * 7. 支持多种TraceId获取方式，包括请求头、MDC和自动生成
+ * </p>
+ * <p>
+ * <b>使用示例</b>：
  * <pre>
- * // 1. 在Spring Boot应用中引入该配置
+ * // 1. 在Spring Boot应用中，只需引入该配置类所在的包即可自动启用配置
+ * // 例如在启动类上添加包扫描
  * @SpringBootApplication(scanBasePackages = {"cn.maple.core.framework"})
  * public class Application {
  *     public static void main(String[] args) {
  *         SpringApplication.run(Application.class, args);
  *     }
  * }
+ * <p>
+ * // 2. 在日志配置文件中添加%X{X-B3-TraceId}占位符，输出TraceId
+ * // logback.xml示例
+ * &lt;configuration&gt;
+ *     &lt;appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender"&gt;
+ *         &lt;encoder&gt;
+ *             &lt;pattern&gt;%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{X-B3-TraceId}] %-5level %logger{36} - %msg%n&lt;/pattern&gt;
+ *         &lt;/encoder&gt;
+ *     &lt;/appender&gt;
+ * <p>
+ *     &lt;appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender"&gt;
+ *         &lt;file&gt;logs/application.log&lt;/file&gt;
+ *         &lt;rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy"&gt;
+ *             &lt;fileNamePattern&gt;logs/application.%d{yyyy-MM-dd}.log&lt;/fileNamePattern&gt;
+ *             &lt;maxHistory&gt;30&lt;/maxHistory&gt;
+ *         &lt;/rollingPolicy&gt;
+ *         &lt;encoder&gt;
+ *             &lt;pattern&gt;%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{X-B3-TraceId}] %-5level %logger{36} - %msg%n&lt;/pattern&gt;
+ *         &lt;/encoder&gt;
+ *     &lt;/appender&gt;
+ * <p>
+ *     &lt;root level="INFO"&gt;
+ *         &lt;appender-ref ref="CONSOLE" /&gt;
+ *         &lt;appender-ref ref="FILE" /&gt;
+ *     &lt;/root&gt;
+ * &lt;/configuration&gt;
+ * <p>
+ * // 3. 在Controller中可以通过MDC或GXTraceIdContextUtils获取当前请求的TraceId
+ * @RestController
+ * public class TestController {
+ *     private static final Logger log = LoggerFactory.getLogger(TestController.class);
  *
- * // 2. 创建HttpExchange接口
- * @HttpExchange(url = "https://api.example.com")
- * public interface UserApiClient {
- *     @GetExchange("/users/{id}")
- *     User getUserById(@PathVariable("id") Long id);
- *
- *     @PostExchange("/users")
- *     User createUser(@RequestBody User user);
- * }
- *
- * // 3. 注入并使用HttpExchange客户端
- * @Service
- * public class UserService {
- *     private final UserApiClient userApiClient;
- *
- *     public UserService(UserApiClient userApiClient) {
- *         this.userApiClient = userApiClient;
+ *     @GetMapping("/test")
+ *     public String test() {
+ *         // 方式一：直接从MDC获取
+ *         String traceId = MDC.get("X-B3-TraceId");
+ *         log.info("当前请求的TraceId: {}", traceId);
+ * <p>
+ *         // 方式二：通过工具类获取
+ *         String traceId2 = GXTraceIdContextUtils.getTraceId();
+ *         log.info("通过工具类获取的TraceId: {}", traceId2);
+ * <p>
+ *         // 业务处理...
+ *         return "success";
  *     }
- *
- *     public User getUserById(Long id) {
- *         return userApiClient.getUserById(id);
+ * <p>
+ *     // 4. 在异步方法中传递TraceId
+ *     @GetMapping("/async")
+ *     public CompletableFuture<String> asyncTest() {
+ *         log.info("主线程开始处理请求");
+ * <p>
+ *         // 使用GXMdcThreadUtils包装异步任务，确保TraceId传递到子线程
+ *         return CompletableFuture.supplyAsync(GXMdcThreadUtils.wrap(() -> {
+ *             log.info("子线程处理中，TraceId: {}", GXTraceIdContextUtils.getTraceId());
+ *             return "async success";
+ *         }));
+ *     }
+ * <p>
+ *     // 5. 在定时任务中使用TraceId
+ *     @Scheduled(fixedRate = 60000)
+ *     public void scheduledTask() {
+ *         // 为定时任务设置TraceId
+ *         GXTraceIdContextUtils.setTraceIdIfAbsent();
+ *         try {
+ *             log.info("定时任务执行中，TraceId: {}", GXTraceIdContextUtils.getTraceId());
+ *             // 业务处理...
+ *         } finally {
+ *             // 清理TraceId，防止内存泄漏
+ *             GXTraceIdContextUtils.removeTraceId();
+ *         }
  *     }
  * }
  * </pre>
+ * </p>
+ * <p>
+ * <b>分布式追踪集成</b>：
+ * 1. 该过滤器会自动从请求头中提取TraceId，支持与其他微服务系统的链路追踪集成
+ * 2. 如果请求头中不存在TraceId，则会自动生成新的TraceId，格式为：应用名称:UUID
+ * 3. 响应头中会包含TraceId和请求处理时间，便于全链路追踪和性能监控
+ * 4. 与GXWebClientConfig配合使用时，会自动在HTTP请求间传递TraceId
+ * 5. 与Dubbo过滤器配合使用时，会自动在RPC调用间传递TraceId
+ * 6. 支持与Spring Cloud Sleuth/Zipkin集成，使用兼容的TraceId格式
+ * 7. 支持与ELK日志系统集成，便于集中式日志分析和链路追踪
+ * </p>
+ * <p>
+ * <b>性能与安全考虑</b>：
+ * 1. 过滤器的性能开销很小，主要是字符串处理和ThreadLocal操作
+ * 2. 在高并发场景下，确保在请求结束时清理ThreadLocal资源，防止内存泄漏
+ * 3. TraceId不包含敏感信息，可以安全地在日志和请求头中传递
+ * 4. 日志记录遵循最小化原则，只记录必要的信息，避免敏感数据泄露
+ * 5. 使用静默异常处理，确保过滤器不会因异常而中断请求处理流程
+ * 6. 支持配置是否记录请求体，避免记录敏感信息或大量数据
+ * </p>
+ * <p>
+ * <b>与其他组件的集成</b>：
+ * 1. 与GXWebClientConfig配合，实现HTTP客户端请求的TraceId传递
+ * 2. 与GXDubboClientTraceIdFilter/GXDubboServerTraceIdFilter配合，实现RPC调用的TraceId传递
+ * 3. 与GXTraceIdContextUtils工具类配合，提供统一的TraceId管理接口
+ * 4. 与GXMdcThreadUtils配合，支持异步任务和线程池中的TraceId传递
+ * 5. 与GXLoggerUtils配合，提供带有TraceId的日志记录功能
+ * </p>
  *
  * @author britton chen <britton@126.com>
- * @since 1.0.0
  */
 @Configuration
 public class GXBaseWebConfig {
-    /**
-     * 日志对象
-     */
-    private static final Logger LOGGER = LoggerFactory.getLogger(GXBaseWebConfig.class);
-
-    /**
-     * 默认请求超时时间（秒）
-     */
-    private static final int DEFAULT_TIMEOUT_SECONDS = 30;
-
-    /**
-     * 默认内存缓冲区大小（MB）
-     */
-    private static final int DEFAULT_MEMORY_BUFFER_SIZE_MB = 16;
-
-    /**
-     * 默认最大连接数
-     */
-    private static final int DEFAULT_MAX_CONNECTIONS = 500;
-
-    /**
-     * 默认获取连接超时时间（毫秒）
-     */
-    private static final int DEFAULT_ACQUIRE_TIMEOUT_MILLIS = 3000;
-
-    /**
-     * 默认连接空闲超时时间（毫秒）
-     */
-    private static final int DEFAULT_IDLE_TIMEOUT_MILLIS = 30000;
-
     /**
      * 创建请求日志记录过滤器Bean
      * <p>
      * 该方法创建并配置GXBaseRequestLoggingFilter实例，用于记录HTTP请求的详细信息。
      * 过滤器会记录请求的URL、请求头、请求参数、请求体等信息，便于调试和问题排查。
+     * 同时，过滤器还负责管理TraceId，确保分布式系统中的请求链路可追踪。
      * </p>
      * <p>
-     * 线程安全说明：
+     * <b>过滤器的主要功能</b>：
+     * 1. 在请求处理前(beforeRequest)设置或获取TraceId，确保请求链路可追踪
+     * 2. 在请求处理过程中(doFilterInternal)记录请求开始时间和计算处理耗时
+     * 3. 在请求处理后(afterRequest)清理TraceId，防止内存泄漏
+     * 4. 自动从请求头中提取TraceId，支持跨服务调用时的链路追踪
+     * 5. 如果请求头中不存在TraceId，则生成新的TraceId并设置到MDC中
+     * 6. 支持从请求头中获取X-Request-Start-Time，用于计算全链路耗时
+     * 7. 在响应头中添加X-Response-Time，记录请求处理时间
+     * </p>
+     * <p>
+     * <b>线程安全说明</b>：
      * - 该过滤器是线程安全的，每个请求都有独立的处理上下文
      * - 过滤器在应用启动时创建单例，在多线程环境中共享使用
+     * - TraceId的存储基于ThreadLocal(通过MDC实现)，确保了在高并发环境下的线程隔离
+     * - 在请求结束时自动清理ThreadLocal资源，防止内存泄漏和上下文污染
+     * - 使用try-finally结构确保即使发生异常也能正确清理资源
+     * - 过滤器的所有操作都是幂等的，多次调用不会产生副作用
+     * </p>
+     * <p>
+     * <b>使用场景</b>：
+     * - 微服务架构中的请求链路追踪，通过TraceId关联同一请求的所有日志
+     * - 分布式系统中的日志聚合与分析，便于问题排查和性能优化
+     * - 多线程环境下的请求上下文传递，确保异步任务能够获取到正确的TraceId
+     * - 请求性能监控和耗时统计，自动记录请求处理时间
+     * - 与GXWebClientConfig配合，实现HTTP请求间的TraceId传递
+     * - 与ELK日志系统集成，实现分布式日志追踪和分析
+     * - 与APM工具集成，提供请求性能监控和分析
+     * </p>
+     * <p>
+     * <b>工作原理</b>：
+     * 1. 请求进入系统时，过滤器会尝试从请求头中获取TraceId（键名为X-B3-TraceId，兼容Spring Cloud Sleuth）
+     * 2. 如果请求头中不存在TraceId，则从当前线程上下文获取
+     * 3. 如果上下文中也不存在，则通过GXTraceIdContextUtils.generateTraceId()生成新的TraceId
+     * 4. 将TraceId设置到MDC中，使其在日志输出时自动包含
+     * 5. 记录请求开始时间，用于计算请求处理耗时
+     * 6. 请求处理完成后，计算处理耗时并添加到响应头
+     * 7. 从MDC中移除TraceId，释放资源
+     * 8. 所有异常都会被捕获并记录，不会影响请求的正常处理
+     * </p>
+     * <p>
+     * <b>配置示例</b>：
+     * 在logback.xml中配置日志输出格式，包含TraceId：
+     * <pre>
+     * &lt;appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender"&gt;
+     *     &lt;encoder&gt;
+     *         &lt;pattern&gt;%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{X-B3-TraceId}] %-5level %logger{36} - %msg%n&lt;/pattern&gt;
+     *     &lt;/encoder&gt;
+     * &lt;/appender&gt;
+     *
+     * &lt;appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender"&gt;
+     *     &lt;file&gt;logs/application.log&lt;/file&gt;
+     *     &lt;rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy"&gt;
+     *         &lt;fileNamePattern&gt;logs/application.%d{yyyy-MM-dd}.log&lt;/fileNamePattern&gt;
+     *         &lt;maxHistory&gt;30&lt;/maxHistory&gt;
+     *     &lt;/rollingPolicy&gt;
+     *     &lt;encoder&gt;
+     *         &lt;pattern&gt;%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] [%X{X-B3-TraceId}] %-5level %logger{36} - %msg%n&lt;/pattern&gt;
+     *     &lt;/encoder&gt;
+     * &lt;/appender&gt;
+     * </pre>
+     * </p>
+     * <p>
+     * <b>与GXWebClientConfig的集成</b>：
+     * GXBaseRequestLoggingFilter与GXWebClientConfig配合使用，可以实现全链路追踪：
+     * 1. GXBaseRequestLoggingFilter负责在服务端接收请求时设置TraceId
+     * 2. GXWebClientConfig负责在客户端发送请求时传递TraceId
+     * 3. 两者配合，可以在微服务调用链中传递TraceId，实现全链路追踪
+     * </p>
+     * <p>
+     * <b>性能优化</b>：
+     * 1. 过滤器使用静默异常处理，不会因异常而中断请求处理流程
+     * 2. 使用try-finally结构确保资源清理，防止内存泄漏
+     * 3. 日志记录使用条件判断，只在需要时记录详细信息
+     * 4. TraceId生成使用高性能的UUID生成算法
+     * 5. 请求体记录可配置，避免记录大量数据影响性能
+     * </p>
+     * <p>
+     * <b>注意事项</b>：
+     * 1. 该过滤器应该配置在过滤器链的最前面，确保所有请求都能被正确记录
+     * 2. 在异步处理场景中，需要使用GXMdcThreadUtils包装异步任务，确保TraceId传递
+     * 3. 在定时任务中，需要手动设置和清理TraceId
+     * 4. 敏感信息不应该记录在日志中，可以通过配置过滤器的includePayload属性控制
+     * 5. 在高并发场景下，应确保日志系统能够承受大量日志写入
      * </p>
      *
-     * @return 配置好的GXBaseRequestLoggingFilter实例
+     * @return 配置好的GXBaseRequestLoggingFilter实例，用于记录请求日志和管理TraceId
      */
     @Bean
     public GXBaseRequestLoggingFilter requestLoggingFilter() {
         return new GXBaseRequestLoggingFilter();
-    }
-
-    /**
-     * 创建并配置HttpServiceProxyFactory，用于生成声明式HTTP客户端
-     * <p>
-     * 该方法创建并配置WebClient实例，然后基于此构建HttpServiceProxyFactory。
-     * HttpServiceProxyFactory用于创建基于接口的声明式HTTP客户端（使用@HttpExchange注解）。
-     * 配置包括：
-     * - 添加认证Token到请求头
-     * - 设置合理的超时时间
-     * - 配置内存限制，避免大响应导致内存溢出
-     * - 添加请求/响应日志记录
-     * </p>
-     * <p>
-     * 线程安全说明：
-     * - WebClient是线程安全的，可以在多个线程间共享使用
-     * - HttpServiceProxyFactory创建的代理对象也是线程安全的
-     * - 使用函数式编程风格和不可变对象，减少状态共享
-     * </p>
-     * <p>
-     * 性能优化：
-     * - 使用非阻塞响应式编程模型，提高并发处理能力
-     * - 设置合理的超时时间，防止请求长时间挂起
-     * - 配置内存限制，避免大响应导致内存溢出
-     * - 可选地使用连接池管理HTTP连接，提高连接复用效率
-     * </p>
-     *
-     * @param webClient 配置好的WebClient实例
-     * @return 配置好的HttpServiceProxyFactory实例，用于创建声明式HTTP客户端
-     */
-    @Bean
-    public HttpServiceProxyFactory httpServiceProxyFactory(WebClient webClient) {
-        WebClientAdapter adapter = WebClientAdapter.create(webClient);
-        return HttpServiceProxyFactory.builder()
-                .exchangeAdapter(adapter)
-                .build();
-    }
-
-    /**
-     * 创建并返回WebClient实例，用于执行HTTP请求
-     * <p>
-     * 该方法创建并配置WebClient实例，用于直接执行HTTP请求。
-     * 配置包括：
-     * - 内存限制：防止大响应导致内存溢出
-     * - 日志记录：记录请求和响应信息，便于调试
-     * - 认证Token：自动添加WebClient认证Token到请求头
-     * - 超时设置：防止请求长时间挂起
-     * - 连接池：优化高并发场景下的连接管理
-     * - 分布式追踪：自动传递TraceId
-     * </p>
-     * <p>
-     * 线程安全说明：
-     * - WebClient实例是线程安全的，可以在多个线程间共享使用
-     * - 使用响应式编程模型，支持高并发非阻塞操作
-     * - 日志记录使用响应式流处理，不会阻塞请求线程
-     * - 连接池配置支持高并发场景，避免连接资源竞争
-     * </p>
-     * <p>
-     * 性能优化：
-     * - 使用响应式非阻塞模型，提高并发处理能力
-     * - 配置合理的内存限制，避免大响应导致内存溢出
-     * - 设置适当的超时时间，防止请求长时间挂起
-     * - 使用连接池管理HTTP连接，提高连接复用效率
-     * - 优化连接获取策略，减少连接建立的开销
-     * </p>
-     *
-     * @return 配置好的WebClient实例
-     * @deprecated 推荐使用httpServiceProxyFactory创建声明式HTTP客户端，
-     * 该方法保留用于向后兼容，将在未来版本中移除
-     */
-    @Bean
-    public WebClient webClient() {
-        // 配置内存限制，避免大响应导致内存溢出
-        ExchangeStrategies strategies = ExchangeStrategies.builder()
-                .codecs(configurer -> configurer.defaultCodecs()
-                        .maxInMemorySize(DEFAULT_MEMORY_BUFFER_SIZE_MB * 1024 * 1024))
-                .build();
-
-        // 创建连接池配置，优化高并发场景
-        ConnectionProvider connectionProvider = ConnectionProvider.builder("maple-leaf-webclient-connection-pool")
-                .maxConnections(DEFAULT_MAX_CONNECTIONS)
-                .pendingAcquireTimeout(Duration.ofMillis(DEFAULT_ACQUIRE_TIMEOUT_MILLIS))
-                .maxIdleTime(Duration.ofMillis(DEFAULT_IDLE_TIMEOUT_MILLIS))
-                .build();
-
-        // 获取WebClientService，用于添加认证信息
-        GXWebClientService webClientService = GXSpringContextUtils.getBean(GXWebClientService.class);
-        if (ObjectUtil.isNull(webClientService)) {
-            LOGGER.warn("未找到GXWebClientService实现，HTTP请求将不包含认证Token和追踪信息");
-        }
-
-        // 创建请求日志过滤器，记录请求信息和请求体
-        ExchangeFilterFunction requestFilter = ExchangeFilterFunction.ofRequestProcessor(clientRequest -> {
-            // 记录请求基本信息
-            LOGGER.debug("HTTP请求: {} {}", clientRequest.method(), clientRequest.url());
-
-            // 记录请求头信息（仅在TRACE级别）
-            if (LOGGER.isTraceEnabled()) {
-                clientRequest.headers().forEach((name, values) ->
-                        LOGGER.trace("请求头: {}={}", name, String.join(", ", values)));
-            }
-
-            // 构建新的请求，添加必要的头信息
-            ClientRequest.Builder requestBuilder = ClientRequest.from(clientRequest);
-
-            // 添加应用名称
-            String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class);
-            if (CharSequenceUtil.isNotBlank(appName)) {
-                requestBuilder.header("X-Request-Source", appName);
-            }
-
-            // 添加请求开始时间，用于计算请求耗时
-            requestBuilder.header("X-Request-Start-Time", String.valueOf(System.currentTimeMillis()));
-
-            // 如果存在WebClientService，添加认证和追踪信息
-            if (ObjectUtil.isNotNull(webClientService)) {
-                // 添加TraceId用于分布式追踪
-                String traceId = webClientService.getTraceId();
-                if (CharSequenceUtil.isNotBlank(traceId)) {
-                    requestBuilder.header(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
-                }
-
-                // 添加认证Token
-                String token = webClientService.generateHttpAuthToken();
-                if (CharSequenceUtil.isNotBlank(token)) {
-                    requestBuilder.header(GXCommonConstant.X_AUTH_TOKEN, token);
-                }
-
-                // 添加平台信息
-                String platform = webClientService.getPlatform();
-                if (CharSequenceUtil.isNotBlank(platform)) {
-                    requestBuilder.header(GXTokenConstant.PLATFORM, platform);
-                }
-            }
-
-            return Mono.just(requestBuilder.build());
-        });
-
-        // 创建响应日志过滤器，记录响应信息和响应体
-        ExchangeFilterFunction responseFilter = ExchangeFilterFunction.ofResponseProcessor(clientResponse -> {
-            HttpStatusCode statusCode = clientResponse.statusCode();
-            long endTime = System.currentTimeMillis();
-
-            // 获取请求开始时间，计算请求耗时
-            List<String> requestStartTimeHeaders = clientResponse.headers().header("X-Request-Start-Time");
-            if (!requestStartTimeHeaders.isEmpty()) {
-                try {
-                    long startTime = Long.parseLong(requestStartTimeHeaders.getFirst());
-                    long duration = endTime - startTime;
-                    LOGGER.debug("HTTP响应: 状态码={}, 耗时={}ms", statusCode.value(), duration);
-                } catch (NumberFormatException e) {
-                    LOGGER.debug("HTTP响应: 状态码={}, 解析X-Request-Start-Time失败", statusCode.value());
-                }
-            } else {
-                LOGGER.debug("HTTP响应: 状态码={}", statusCode.value());
-            }
-
-            // 记录响应头信息（仅在TRACE级别）
-            if (LOGGER.isTraceEnabled()) {
-                clientResponse.headers().asHttpHeaders().forEach((name, values) ->
-                        LOGGER.trace("响应头: {}={}", name, String.join(", ", values)));
-            }
-
-            // 对于成功响应，可以选择记录响应体（仅在TRACE级别）
-            if (LOGGER.isTraceEnabled() && statusCode.is2xxSuccessful()) {
-                return clientResponse.bodyToMono(String.class)
-                        .defaultIfEmpty("<空响应体>")
-                        .doOnNext(body -> LOGGER.trace("响应体: {}", body))
-                        .map(body -> clientResponse.mutate().body(body).build());
-            }
-
-            return Mono.just(clientResponse);
-        });
-
-        // 创建处理错误过滤器
-        ExchangeFilterFunction errorResponseHandleFilter = ExchangeFilterFunction.ofResponseProcessor(clientResponse -> {
-            HttpStatusCode httpStatusCode = clientResponse.statusCode();
-
-            // 记录错误响应
-            if (httpStatusCode.isError()) {
-                LOGGER.warn("HTTP请求失败: 状态码={}, 描述={}",
-                        httpStatusCode.value(),
-                        httpStatusCode);
-            }
-
-            // 处理服务端错误（4xx）
-            if (httpStatusCode.is4xxClientError()) {
-                GXErrorApiResDto errorApiResDto = new GXErrorApiResDto();
-                errorApiResDto.setMessage("未知服务端错误");
-                errorApiResDto.setCode(httpStatusCode.value());
-                return clientResponse.bodyToMono(GXErrorApiResDto.class)
-                        .defaultIfEmpty(errorApiResDto)
-                        .flatMap(errorBody -> Mono.error(new GXBusinessException(
-                                String.format("服务端请求错误(4xx): %s", errorBody.getMessage()),
-                                httpStatusCode.value())));
-            }
-            // 处理服务器错误（5xx）
-            else if (httpStatusCode.is5xxServerError()) {
-                GXErrorApiResDto errorApiResDto = new GXErrorApiResDto();
-                errorApiResDto.setMessage("未知服务端错误");
-                errorApiResDto.setCode(httpStatusCode.value());
-                return clientResponse.bodyToMono(GXErrorApiResDto.class)
-                        .defaultIfEmpty(errorApiResDto)
-                        .flatMap(body -> Mono.error(new GXBusinessException(
-                                String.format("服务器处理错误(5xx): %s", JSONUtil.toJsonStr(body)),
-                                httpStatusCode.value())));
-            }
-
-            return Mono.just(clientResponse);
-        });
-
-        // 构建WebClient，配置默认请求头、超时设置等
-        return WebClient.builder()
-                .exchangeStrategies(strategies)
-                .filter(requestFilter)
-                .filter(responseFilter)
-                .filter(errorResponseHandleFilter)
-                // 设置连接超时和响应超时
-                .clientConnector(new ReactorClientHttpConnector(HttpClient.create(connectionProvider)
-                        .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, DEFAULT_TIMEOUT_SECONDS * 1000)
-                        .compress(true)
-                        .doOnConnected(conn -> conn
-                                // 读超时：在指定时间内没有收到任何数据
-                                .addHandlerLast(new ReadTimeoutHandler(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS))
-                                // 写超时：在指定时间内没有完成数据发送
-                                .addHandlerLast(new WriteTimeoutHandler(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS)))
-                        .responseTimeout(Duration.ofSeconds(DEFAULT_TIMEOUT_SECONDS))))
-                .build();
     }
 }

@@ -1,6 +1,7 @@
 package cn.maple.core.framework.config;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.config.web.GXHashBasedTableJacksonModule;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.*;
 import lombok.extern.slf4j.Slf4j;
@@ -129,6 +130,8 @@ public class GXFrameworkConfig {
             }
         });
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        // 添加自定义模块 处理guava的HashBasedTable数据类型
+        objectMapper.registerModule(GXHashBasedTableJacksonModule.createModule());
         return objectMapper.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
     }
 
