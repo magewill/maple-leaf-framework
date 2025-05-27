@@ -8,7 +8,9 @@ import cn.maple.core.framework.constant.GXTokenConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.filter.GXBaseRequestLoggingFilter;
 import cn.maple.core.framework.service.GXWebClientService;
+import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
+import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.handler.timeout.WriteTimeoutHandler;
@@ -18,6 +20,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -27,7 +30,6 @@ import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -208,58 +210,30 @@ public class GXBaseWebConfig {
                 .build();
 
         // 创建请求日志过滤器，记录请求信息和请求体
+        GXWebClientService webClientService = GXSpringContextUtils.getBean(GXWebClientService.class);
+        assert webClientService != null;
         ExchangeFilterFunction requestLoggingFilter = ExchangeFilterFunction.ofRequestProcessor(clientRequest -> {
             // 记录请求基本信息
             LOGGER.debug("HTTP请求: {} {}", clientRequest.method(), clientRequest.url());
-
-            // 记录请求头信息（仅在TRACE级别）
-            if (LOGGER.isTraceEnabled()) {
-                clientRequest.headers().forEach((name, values) ->
-                        LOGGER.trace("请求头: {}={}", name, String.join(", ", values)));
+            // 设置TraceId
+            ClientRequest.Builder clientRequestBuilder = ClientRequest.from(clientRequest)
+                    .header(GXTraceIdContextUtils.TRACE_ID_KEY, webClientService.getTraceId());
+            // 设置token信息
+            String token = webClientService.generateHttpAuthToken();
+            if (Objects.nonNull(token) && !token.isEmpty()) {
+                clientRequestBuilder.header(GXCommonConstant.X_AUTH_TOKEN, token);
             }
-
-            // 记录请求开始时间，用于计算请求耗时
-            List<String> requestStartTime = clientRequest.headers().get("requestStartTime");
-            assert requestStartTime != null;
-            LOGGER.trace("请求开始时间: {}", requestStartTime.getFirst());
-            return Mono.just(clientRequest);
+            // 设置平台信息
+            String platform = webClientService.getPlatform();
+            if (CharSequenceUtil.isNotBlank(platform)) {
+                clientRequestBuilder.header(GXTokenConstant.PLATFORM, platform);
+            }
+            //return Mono.just(clientRequest);
+            return Mono.just(clientRequestBuilder.build());
         });
 
         // 创建响应日志过滤器，记录响应信息和响应体
-        ExchangeFilterFunction responseLoggingFilter = ExchangeFilterFunction.ofResponseProcessor(clientResponse -> {
-            long endTime = System.currentTimeMillis();
-            HttpStatusCode statusCode = clientResponse.statusCode();
-
-            // 获取请求开始时间，计算请求耗时
-            List<String> requestStartTimeHeaders = clientResponse.headers().header("requestStartTime");
-            if (!requestStartTimeHeaders.isEmpty()) {
-                try {
-                    long startTime = Long.parseLong(requestStartTimeHeaders.getFirst());
-                    long duration = endTime - startTime;
-                    LOGGER.debug("HTTP响应: 状态码={}, 耗时={}ms", statusCode.value(), duration);
-                } catch (NumberFormatException e) {
-                    LOGGER.debug("HTTP响应: 状态码={}", statusCode.value());
-                }
-            } else {
-                LOGGER.debug("HTTP响应: 状态码={}", statusCode.value());
-            }
-
-            // 记录响应头信息（仅在TRACE级别）
-            if (LOGGER.isTraceEnabled()) {
-                clientResponse.headers().asHttpHeaders().forEach((name, values) ->
-                        LOGGER.trace("响应头: {}={}", name, String.join(", ", values)));
-            }
-
-            // 对于成功响应，可以选择记录响应体（需要谨慎使用，可能影响性能）
-            if (LOGGER.isTraceEnabled() && statusCode.is2xxSuccessful()) {
-                return clientResponse.bodyToMono(String.class)
-                        .defaultIfEmpty("<空响应体>")
-                        .doOnNext(body -> LOGGER.trace("响应体: {}", body))
-                        .map(body -> clientResponse.mutate().body(body).build());
-            }
-
-            return Mono.just(clientResponse);
-        });
+        ExchangeFilterFunction responseLoggingFilter = ExchangeFilterFunction.ofResponseProcessor(Mono::just);
 
         // 创建处理错误过滤器
         ExchangeFilterFunction errorHandlingFilter = ExchangeFilterFunction.ofResponseProcessor(clientResponse -> {
@@ -286,21 +260,7 @@ public class GXBaseWebConfig {
                 .filter(responseLoggingFilter)
                 .filter(errorHandlingFilter)
                 .defaultHeaders(headers -> {
-                    GXWebClientService webClientService = GXSpringContextUtils.getBean(GXWebClientService.class);
-                    if (Objects.nonNull(webClientService)) {
-                        String token = webClientService.generateHttpAuthToken();
-                        if (Objects.nonNull(token) && !token.isEmpty()) {
-                            headers.set(GXCommonConstant.X_AUTH_TOKEN, token);
-                            LOGGER.debug("已添加WebClient认证Token到请求头");
-                        }
-                        String platform = webClientService.getPlatform();
-                        if (CharSequenceUtil.isNotBlank(platform)) {
-                            headers.set(GXTokenConstant.PLATFORM, platform);
-                        }
-                    } else {
-                        LOGGER.warn("未找到GXWebClientService实现，HTTP请求将不包含认证Token");
-                    }
-                    headers.set("requestStartTime", String.valueOf(System.currentTimeMillis()));
+                    headers.set("From-App-Name", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
                 })
                 // 设置连接超时和响应超时
                 .clientConnector(new ReactorClientHttpConnector(HttpClient.create()

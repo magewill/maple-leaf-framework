@@ -7,11 +7,14 @@ import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXAuthCodeUtils;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
+import cn.maple.core.framework.util.GXTraceIdContextUtils;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * WebClient服务接口
@@ -425,5 +428,22 @@ public interface GXWebClientService {
      */
     default boolean checkHmac(String secret, String clientHmac, Object payload) {
         return GXCommonUtils.checkHmac(secret, clientHmac, payload);
+    }
+
+    /**
+     * 获取当前请求的追踪ID(traceId)
+     *
+     * @return 返回当前请求的traceId，优先从HttpServletRequest属性中获取，
+     * 若不存在则从GXTraceIdContextUtils中获取全局traceId
+     */
+    default String getTraceId() {
+        HttpServletRequest httpServletRequest = GXCurrentRequestContextUtils.getHttpServletRequest();
+        Object traceId = httpServletRequest != null
+                ? httpServletRequest.getAttribute(GXTraceIdContextUtils.TRACE_ID_KEY)
+                : null;
+
+        return Optional.ofNullable(traceId)
+                .map(Object::toString)
+                .orElse(GXTraceIdContextUtils.getTraceId());
     }
 }
