@@ -18,7 +18,7 @@ import java.util.Map;
  * <p>
  * HTTP工具类
  * </p>
- * 
+ *
  * <p>
  * 提供HTTP请求处理的通用方法，主要用于：
  * 1. AJAX请求处理和响应 - 判断AJAX请求并返回JSON格式数据
@@ -27,7 +27,7 @@ import java.util.Map;
  * 4. 请求类型判断 - 识别GET/POST等请求方法
  * 5. 请求内容获取 - 读取请求体和构建完整URL
  * </p>
- * 
+ *
  * <p>
  * 安全特性：
  * 1. URL编码处理 - 防止URL注入和XSS攻击
@@ -36,30 +36,30 @@ import java.util.Map;
  * 4. 参数验证 - 对输入参数进行严格检查
  * 5. 日志记录 - 记录关键操作和错误信息
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
  * // 1. 判断是否为AJAX请求
  * boolean isAjax = GXHttpUtil.isAjax(request);
- * 
+ *
  * // 2. 返回AJAX错误响应
  * GXHttpUtil.ajaxStatus(response, HttpStatus.HTTP_UNAUTHORIZED, "未授权的访问");
- * 
+ *
  * // 3. 获取编码后的完整URL
  * String encodedUrl = GXHttpUtil.getQueryString(request, "UTF-8");
- * 
+ *
  * // 4. 构建带返回地址的URL
  * String returnUrl = GXHttpUtil.encodeRetURL("http://example.com/login", "returnUrl", "http://example.com/profile");
- * 
+ *
  * // 5. 执行重定向
  * GXHttpUtil.sendRedirect(response, "http://example.com/login");
- * 
+ *
  * // 6. 获取请求体内容
  * String payload = GXHttpUtil.requestPlayload(request);
  * </pre>
  * </p>
- * 
+ *
  * <p>
  * 在SSO系统中用于处理登录、注销等HTTP交互，确保安全和一致的用户体验
  * </p>
@@ -69,8 +69,14 @@ import java.util.Map;
  */
 @Slf4j
 public class GXHttpUtil {
+    /**
+     * AJAX请求标识符
+     */
     public static final String XML_HTTP_REQUEST = "XMLHttpRequest";
 
+    /**
+     * AJAX请求头标识符
+     */
     public static final String X_REQUESTED_WITH = "X-Requested-With";
 
     /**
@@ -83,7 +89,7 @@ public class GXHttpUtil {
      * <p>
      * 判断请求是否为AJAX请求
      * </p>
-     * 
+     * <p>
      * 通过检查请求头中的X-Requested-With字段判断是否为AJAX请求
      * 在SSO系统中用于区分普通请求和AJAX请求，以便返回不同格式的响应
      *
@@ -98,7 +104,7 @@ public class GXHttpUtil {
      * <p>
      * 为AJAX请求设置响应状态和内容
      * </p>
-     * 
+     * <p>
      * 用于向客户端返回JSON格式的响应数据，主要用于错误处理和状态通知
      * 设置了适当的内容类型和字符集，确保客户端能正确解析
      *
@@ -125,7 +131,7 @@ public class GXHttpUtil {
      * <p>
      * 获取当前URL（包含查询参数）并进行编码
      * </p>
-     * 
+     * <p>
      * 构建完整的请求URL，包括请求路径和查询参数，并进行URL编码
      * 在SSO系统中用于生成重定向URL，特别是在登录成功后返回原始请求页面
      *
@@ -136,7 +142,7 @@ public class GXHttpUtil {
      */
     public static String getQueryString(HttpServletRequest request, String encode) throws IOException {
         String url = request.getRequestURL().toString();
-        StringBuffer sb = new StringBuffer(url);
+        StringBuilder sb = new StringBuilder(url);
         String query = request.getQueryString();
         if (query != null && !query.isEmpty()) {
             sb.append(url.contains("?") ? "&" : "?").append(query);
@@ -148,7 +154,7 @@ public class GXHttpUtil {
      * <p>
      * 判断当前请求URL是否包含在指定的URL列表中
      * </p>
-     * 
+     * <p>
      * 用于URL白名单检查，判断当前请求是否为允许的URL
      * 在SSO系统中可用于判断是否需要进行登录拦截
      *
@@ -175,7 +181,7 @@ public class GXHttpUtil {
      * <p>
      * 构建带有返回地址参数的URL
      * </p>
-     * 
+     * <p>
      * 在URL中添加返回地址参数，常用于登录、注销等需要返回原始页面的场景
      * 返回地址会进行URL编码，确保参数传递的安全性
      *
@@ -192,7 +198,7 @@ public class GXHttpUtil {
      * <p>
      * 构建带有返回地址和额外参数的URL
      * </p>
-     * 
+     * <p>
      * 在URL中添加返回地址参数和其他自定义参数
      * 增强版的encodeRetURL方法，支持添加多个额外参数
      *
@@ -230,7 +236,7 @@ public class GXHttpUtil {
      * <p>
      * 对URL进行解码
      * </p>
-     * 
+     * <p>
      * 将编码后的URL还原为原始形式，使用系统配置的字符集
      * 处理了解码过程中可能出现的异常
      *
@@ -246,7 +252,7 @@ public class GXHttpUtil {
         try {
             retUrl = URLDecoder.decode(url, GXSSOProperties.getSsoEncoding());
         } catch (UnsupportedEncodingException e) {
-            log.error("encodeRetURL error.{} ,{}", url, e.getMessage());
+            log.error("decodeRetURL error.{} ,{}", url, e.getMessage());
         }
 
         return retUrl;
@@ -256,7 +262,7 @@ public class GXHttpUtil {
      * <p>
      * 判断是否为GET请求
      * </p>
-     * 
+     * <p>
      * 通过检查请求方法判断是否为HTTP GET请求
      * 用于在不同请求方法下执行不同的处理逻辑
      *
@@ -271,7 +277,7 @@ public class GXHttpUtil {
      * <p>
      * 判断是否为POST请求
      * </p>
-     * 
+     * <p>
      * 通过检查请求方法判断是否为HTTP POST请求
      * 用于在不同请求方法下执行不同的处理逻辑
      *
@@ -286,7 +292,7 @@ public class GXHttpUtil {
      * <p>
      * 执行HTTP重定向
      * </p>
-     * 
+     * <p>
      * 将客户端重定向到指定的URL地址
      * 封装了重定向过程中的异常处理
      *
@@ -305,7 +311,7 @@ public class GXHttpUtil {
      * <p>
      * 获取请求体(Request Payload)内容
      * </p>
-     * 
+     * <p>
      * 读取HTTP请求体中的原始内容，通常用于处理JSON、XML等格式的POST数据
      * 使用了try-with-resources确保资源正确关闭，防止内存泄漏
      *
@@ -322,8 +328,6 @@ public class GXHttpUtil {
             while ((bytesRead = bufferedReader.read(charBuffer)) > 0) {
                 stringBuilder.append(charBuffer, 0, bytesRead);
             }
-        } catch (IOException ex) {
-            throw ex;
         }
         return stringBuilder.toString();
     }
@@ -332,7 +336,7 @@ public class GXHttpUtil {
      * <p>
      * 获取当前完整请求URL
      * </p>
-     * 
+     * <p>
      * 构建包含协议、主机名、端口、路径和查询参数的完整URL
      * 与getQueryString方法不同，此方法返回未编码的原始URL
      *

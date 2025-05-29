@@ -62,22 +62,22 @@ public class GXIpHelperUtil {
     public static String HOST_NAME;
 
     static {
-        String ip = "";
+        StringBuilder ip = new StringBuilder();
         try {
             InetAddress inetAddr = InetAddress.getLocalHost();
             HOST_NAME = inetAddr.getHostName();
             byte[] addr = inetAddr.getAddress();
             for (int i = 0; i < addr.length; i++) {
                 if (i > 0) {
-                    ip += ".";
+                    ip.append(".");
                 }
-                ip += addr[i] & 0xFF;
+                ip.append(addr[i] & 0xFF);
             }
         } catch (UnknownHostException e) {
-            ip = "unknown";
+            ip = new StringBuilder("unknown");
             log.error(e.getMessage());
         } finally {
-            LOCAL_IP = ip;
+            LOCAL_IP = ip.toString();
         }
     }
 
@@ -122,7 +122,7 @@ public class GXIpHelperUtil {
                 try {
                     ip = InetAddress.getLocalHost().getHostAddress();
                 } catch (UnknownHostException e) {
-                    log.error("IpHelper error." + e.getMessage());
+                    log.error("IpHelper error.{}", e.getMessage());
                 }
             }
         }
