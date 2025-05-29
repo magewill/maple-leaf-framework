@@ -308,14 +308,24 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
             // 生成安全的加密Cookie
             Cookie ck = this.generateCookie(request, ssoToken);
 
-            // 手动构建Cookie字符串，设置安全属性
-            // 注意：此设置需要在Servlet容器支持的情况下生效
-            StringBuilder cookieBuilder = new StringBuilder();
-            cookieBuilder.append(ck.getName()).append("=").append(ck.getValue())
-                    .append("; Path=").append(ck.getPath());
+            // 设置HttpOnly标志，防止JavaScript通过脚本访问Cookie，增强安全性
+            // 此方法利用了 jakarta.servlet.http.Cookie 提供的标准API
+            if (getConfig().isCookieHttpOnly()) {
+                ck.setHttpOnly(true);
+            }
 
-            // 设置Cookie有效期
-            if (ck.getMaxAge() > 0) {
+            // 手动构建Cookie字符串以包含SameSite等现代属性
+            // jakarta.servlet.http.Cookie API本身不直接支持SameSite属性的设置
+            // 因此，我们通过构建Set-Cookie头字符串的方式来实现
+            StringBuilder cookieBuilder = new StringBuilder();
+            cookieBuilder.append(ck.getName()).append("=").append(ck.getValue());
+
+            if (ck.getPath() != null) {
+                cookieBuilder.append("; Path=").append(ck.getPath());
+            }
+
+            // 设置Cookie有效期 (Max-Age)
+            if (ck.getMaxAge() >= 0) { // Max-Age可以为0（立即删除）或正数
                 cookieBuilder.append("; Max-Age=").append(ck.getMaxAge());
             }
 
@@ -324,21 +334,28 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
                 cookieBuilder.append("; Domain=").append(ck.getDomain());
             }
 
-            // 设置Secure标志，要求HTTPS传输
+            // 设置Secure标志，要求Cookie仅通过HTTPS传输
             if (ck.getSecure()) {
                 cookieBuilder.append("; Secure");
             }
 
-            // 设置HttpOnly标志，防止JavaScript访问
-            if (getConfig().isCookieHttpOnly()) {
+            // 设置HttpOnly标志 (如果通过ck.setHttpOnly(true)设置，则此处无需重复添加，
+            // 但为确保所有属性都通过一个统一的机制（header字符串）设置，或者在不支持setHttpOnly的旧环境中，
+            // 这里的显式添加仍然有意义。当前代码已使用ck.setHttpOnly()，故理论上此处可省略，
+            // 但保留它以明确展示最终Cookie字符串的构成，或作为一种兼容性回退。
+            // 现代Servlet容器通常会正确处理通过API设置的HttpOnly属性。
+            if (ck.isHttpOnly()) { // 检查是否已通过API设置
                 cookieBuilder.append("; HttpOnly");
             }
 
-            // 设置SameSite属性，防止CSRF攻击
-            // Lax模式允许从外部站点链接导航时发送Cookie，但阻止跨站POST请求等携带Cookie
+            // 设置SameSite属性，增强CSRF防护
+            // Lax: 允许在顶级导航（如点击链接）时发送Cookie，但阻止跨站POST请求等携带Cookie。
+            // Strict: 完全禁止第三方Cookie发送。
+            // None: 允许第三方Cookie发送，但必须同时设置Secure标志。
+            // 此处选择Lax，在安全性和用户体验之间取得平衡。
             cookieBuilder.append("; SameSite=Lax");
 
-            // 应用Cookie设置
+            // 应用Cookie设置到HTTP响应头
             response.addHeader("Set-Cookie", cookieBuilder.toString());
 
             // 添加安全响应头，增强整体安全性
