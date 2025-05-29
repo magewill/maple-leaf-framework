@@ -229,6 +229,7 @@ public class GXHashBasedTableJacksonModule {
      */
     @SuppressWarnings("unchecked")
     public static Module createModule() {
+        // 创建一个SimpleModule实例，用于注册自定义序列化器和反序列化器
         SimpleModule module = new SimpleModule("GXHashBasedTableModule");
 
         // 序列化器：将HashBasedTable转换为JSON数组
@@ -339,7 +340,7 @@ public class GXHashBasedTableJacksonModule {
                                 table.put(row, column, value);
                             }
                         }
-                        
+
                         // 返回填充好的表实例
                         return table;
                     }

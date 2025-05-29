@@ -458,6 +458,7 @@ public class GXWebClientConfig {
         });
 
         ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
+        assert objectMapper != null;
         // 构建WebClient，配置默认请求头、超时设置等
         return WebClient.builder()
                 .exchangeStrategies(strategies)

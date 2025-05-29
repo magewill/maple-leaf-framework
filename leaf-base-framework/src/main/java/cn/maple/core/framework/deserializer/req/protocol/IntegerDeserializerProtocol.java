@@ -30,13 +30,12 @@ import java.io.IOException;
  * }
  * </pre>
  * </p>
- * 
+ *
  * @author britton chen
  * @since 1.0.0
  */
 @Slf4j
 public class IntegerDeserializerProtocol extends JsonDeserializer<Integer> {
-    
     /**
      * 反序列化方法，将JSON值转换为Integer对象
      * <p>
@@ -60,7 +59,7 @@ public class IntegerDeserializerProtocol extends JsonDeserializer<Integer> {
         if (p == null) {
             return null;
         }
-        
+
         try {
             // 如果是整数，直接返回  
             return p.getIntValue();
@@ -70,7 +69,7 @@ public class IntegerDeserializerProtocol extends JsonDeserializer<Integer> {
             if (text == null || text.isEmpty()) {
                 return null;
             }
-            
+
             try {
                 // 用于可解析为数字的字符串
                 return Integer.parseInt(text.trim());
