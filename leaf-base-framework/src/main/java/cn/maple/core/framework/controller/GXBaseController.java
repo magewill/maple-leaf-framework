@@ -4,8 +4,10 @@ import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.text.StrPool;
+import cn.hutool.core.util.ReflectUtil;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.constant.GXTokenConstant;
+import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.dto.protocol.res.GXBaseResProtocol;
 import cn.maple.core.framework.dto.protocol.res.GXPaginationResProtocol;
 import cn.maple.core.framework.dto.res.GXBaseResDto;
@@ -13,9 +15,11 @@ import cn.maple.core.framework.dto.res.GXPaginationResDto;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
+import org.javatuples.Quartet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
@@ -26,7 +30,7 @@ import java.util.Objects;
  * 本接口定义了控制器层通用的功能，包括对象转换、Token处理、树形结构构建等。
  * 所有业务控制器都应该直接或间接实现此接口，以复用通用功能。
  * </p>
- * 
+ *
  * <p>
  * 安全说明：
  * 1. Token处理相关方法实现了多重安全机制，包括密钥验证、过期检查和自动续期
@@ -34,28 +38,28 @@ import java.util.Objects;
  * 3. 不同类型的用户（前端用户、管理员）使用不同的密钥和缓存策略
  * 4. Token处理失败会抛出业务异常，确保未授权访问被拦截
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
  * @RestController
  * @RequestMapping("/api/users")
  * public class UserController implements GXBaseController {
- *     
+ *
  *     @Autowired
  *     private UserService userService;
- *     
+ *
  *     @GetMapping("/profile")
  *     public ResponseEntity<UserProfileVO> getUserProfile() {
  *         // 从Token中获取当前登录用户ID
  *         Long userId = getFrontEndUserId(GXTokenConstant.USER_TOKEN_SECRET_KEY, Long.class);
- *         
+ *
  *         // 获取用户信息
  *         UserEntity user = userService.getUserById(userId);
- *         
+ *
  *         // 将实体对象转换为视图对象
  *         UserProfileVO profileVO = convertSourceToTarget(user, UserProfileVO.class);
- *         
+ *
  *         return ResponseEntity.ok(profileVO);
  *     }
  * }
@@ -432,5 +436,82 @@ public interface GXBaseController {
      */
     default String concatAssertMsg(String msg, String fieldName) {
         return CharSequenceUtil.format("{}{}{}", fieldName, StrPool.COLON, msg);
+    }
+
+    /**
+     * 将Quartet列表转换为UpdateField列表
+     * <p>
+     * 该方法将包含四元组(表名,字段名,值,更新字段类名)的列表转换为可用于数据库更新操作的GXUpdateField对象列表。
+     * 通过反射动态创建指定类型的更新字段对象，支持各种数据类型的字段更新操作。
+     * </p>
+     *
+     * <p>
+     * 安全特性：
+     * 1. 使用Class.forName进行类加载，支持动态扩展不同类型的更新字段
+     * 2. 使用ReflectUtil安全地创建实例，避免直接反射调用构造函数的安全风险
+     * 3. 异常处理机制确保转换过程中的错误被正确捕获并转换为运行时异常
+     * </p>
+     *
+     * <p>
+     * 性能优化：
+     * 1. 预分配ArrayList容量，减少动态扩容开销
+     * 2. 使用forEach替代传统for循环，代码更简洁
+     * 3. 使用try-catch块仅捕获必要的异常，提高异常处理效率
+     * </p>
+     *
+     * <p>
+     * 使用示例：
+     * <pre>
+     * // 创建Quartet列表，每个Quartet包含：表名、字段名、字段值、更新字段类名
+     * List<Quartet<String, String, Object, String>> quartetList = new ArrayList<>();
+     *
+     * // 添加字符串类型的更新字段
+     * quartetList.add(Quartet.with("user", "username", "张三", "cn.maple.core.framework.dto.inner.field.GXUpdateStrField"));
+     *
+     * // 添加整数类型的更新字段
+     * quartetList.add(Quartet.with("user", "age", 25, "cn.maple.core.framework.dto.inner.field.GXUpdateIntegerField"));
+     *
+     * // 转换为UpdateField列表
+     * List<GXUpdateField<?>> updateFields = convertQuartetListToUpdateFieldList(quartetList);
+     *
+     * // 使用转换后的列表执行更新操作
+     * // dbMapper.updateByCondition(updateFields, conditions);
+     * </pre>
+     * </p>
+     *
+     * @param quartetLst Quartet列表，每个元素包含表名、字段名、值和更新字段类名
+     * @return 转换后的GXUpdateField列表，可直接用于数据库更新操作
+     * @throws RuntimeException 当类加载或实例创建失败时抛出，包含原始异常信息
+     */
+    default List<GXUpdateField<?>> convertQuartetListToUpdateFieldList(List<Quartet<String, String, Object, String>> quartetLst) {
+        // 预分配ArrayList容量，避免动态扩容
+        List<GXUpdateField<?>> updateFields = new ArrayList<>(quartetLst.size());
+
+        quartetLst.forEach(quartet -> {
+            try {
+                // 提取Quartet中的各个元素
+                String tableName = quartet.getValue0();  // 表名
+                String columnName = quartet.getValue1();  // 字段名
+                Object value = quartet.getValue2();       // 字段值
+                String className = quartet.getValue3();   // 更新字段类名
+
+                // 加载指定的更新字段类
+                Class<?> fieldClass = Class.forName(className);
+
+                // 使用ReflectUtil安全地创建实例，传入表名、字段名和值
+                Object updateFieldObj = ReflectUtil.newInstance(fieldClass, tableName, columnName, value);
+
+                // 将创建的对象添加到结果列表中
+                updateFields.add((GXUpdateField<?>) updateFieldObj);
+            } catch (ClassNotFoundException e) {
+                // 类未找到异常，通常是由于className参数错误
+                throw new GXBusinessException("更新字段类未找到: " + quartet.getValue3(), e);
+            } catch (Exception e) {
+                // 其他异常，如实例创建失败
+                throw new GXBusinessException("创建更新字段对象失败", e);
+            }
+        });
+
+        return updateFields;
     }
 }

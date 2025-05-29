@@ -92,6 +92,10 @@
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-crypto</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.flipkart.utils</groupId>
+            <artifactId>javatuples</artifactId>
+        </dependency>
         <!--导入单元测试包-->
         <dependency>
             <groupId>org.springframework.boot</groupId>
