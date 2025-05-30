@@ -17,7 +17,7 @@ import java.util.Set;
 @EqualsAndHashCode(callSuper = true)
 @SuppressWarnings("all")
 @Builder
-public class GXQueryParamApiReqDto extends GXBaseApiReqDto implements Serializable {
+public class GXRpcQueryParamApiReqDto extends GXBaseApiReqDto implements Serializable {
     /**
      * 需要查询的主表名字(在有join查询时,需要有主表、次表的区分)
      */
