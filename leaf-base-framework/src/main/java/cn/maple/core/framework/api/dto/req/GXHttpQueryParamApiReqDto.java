@@ -7,6 +7,7 @@ import org.javatuples.Quartet;
 
 import java.io.Serializable;
 import java.util.List;
+import java.util.Set;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -31,4 +32,14 @@ public class GXHttpQueryParamApiReqDto extends GXBaseApiReqDto implements Serial
      * 4. Object: 字段值
      */
     private List<Quartet<String, String, String, Object>> updateFieldLst;
+
+    /**
+     * 待查询字段列表
+     */
+    private Set<String> columns;
+
+    /**
+     * 待查询的字段名字
+     */
+    private String column;
 }
