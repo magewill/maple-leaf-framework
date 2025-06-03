@@ -4,7 +4,6 @@ import cn.hutool.core.bean.copier.CopyOptions;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.dto.inner.GXJoinDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
-import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -16,7 +15,6 @@ import java.util.Set;
 @Data
 @EqualsAndHashCode(callSuper = true)
 @SuppressWarnings("all")
-@Builder
 public class GXRpcQueryParamApiReqDto extends GXBaseApiReqDto implements Serializable {
     /**
      * 需要查询的主表名字(在有join查询时,需要有主表、次表的区分)
@@ -113,6 +111,5 @@ public class GXRpcQueryParamApiReqDto extends GXBaseApiReqDto implements Seriali
      * 忽略数据权限
      * 设置为TRUE的话 就忽略掉数据权限处理
      */
-    @Builder.Default
     private boolean ignoreDataFilter = Boolean.FALSE;
 }

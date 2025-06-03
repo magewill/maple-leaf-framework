@@ -1,7 +1,6 @@
 package cn.maple.core.framework.api.dto.req;
 
 import com.google.common.collect.HashBasedTable;
-import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import org.javatuples.Quartet;
@@ -12,7 +11,6 @@ import java.util.List;
 @Data
 @EqualsAndHashCode(callSuper = true)
 @SuppressWarnings("all")
-@Builder
 public class GXHttpQueryParamApiReqDto extends GXBaseApiReqDto implements Serializable {
     /**
      * 需要查询的主表名字(在有join查询时,需要有主表、次表的区分)
