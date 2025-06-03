@@ -1683,8 +1683,14 @@ public class GXCommonUtils {
             // 构建参数字典
             Dict data = Dict.create()
                     .set("tableNameAlias", tableNameAlias)
-                    .set("fieldName", column)
-                    .set("value", value);
+                    .set("fieldName", column);
+            // 将List转换为Set
+            if (TypeToken.of(value.getClass()).isSubtypeOf(List.class)) {
+                var valueSet = new HashSet<>(Convert.toList(value));
+                data.set("value", valueSet);
+            } else {
+                data.set("value", value);
+            }
 
             // 获取对应操作符的转换函数
             Function<Dict, GXCondition<?>> function = GXDataSourceConstant.getFunction(op);
