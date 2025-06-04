@@ -114,6 +114,12 @@ mybatis-plus:
 # 是否开启框架内置的默认功能与插件
 maple:
   framework:
+    web:
+      service:
+        base-url: http://api.maple.com
+      client:
+        token: @leaf.framework.client.token@
+        secret: @leaf.framework.client.secret@
     version: @leaf.framework.version@ # 读取pom.xml文件中的properties节中的配置信息 或者是 <profiles><profile></profile></profiles>中的properties节中的配置信息
     enable:
       file-upload: true #  启用文件删除服务
@@ -121,4 +127,4 @@ maple:
       data-change-recorder: true  # 数据变更记录插件
       data-permission: true  # 开启数据权限处理 需要实现DataPermissionHandler接口
       block-attack: true # 启防止全表更新与删除插件
-      tenant-line: true # 开启多租户插件(请在相应的表中新增tenant_id字段)
+      tenant: true # 开启多租户插件(请在相应的表中新增tenant_id字段)

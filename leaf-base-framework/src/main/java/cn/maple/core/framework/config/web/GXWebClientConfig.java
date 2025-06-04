@@ -466,6 +466,7 @@ public class GXWebClientConfig {
                 .filter(responseFilter)
                 .filter(retryFilter)
                 .filter(errorResponseHandleFilter)
+                .baseUrl(getBaseUrl())
                 // 设置连接超时和响应超时
                 .clientConnector(new ReactorClientHttpConnector(HttpClient.create(connectionProvider)
                         .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, DEFAULT_TIMEOUT_SECONDS * 1000)
@@ -487,6 +488,27 @@ public class GXWebClientConfig {
                     );
                 })
                 .build();
+    }
+
+    /**
+     * 获取服务基础URL配置
+     * 当环境变量未配置基础URL时，使用本地回环地址+端口作为默认值
+     *
+     * @return 解析后的基础URL（永远不会为空）
+     */
+    private String getBaseUrl() {
+        // 从环境变量获取基础URL配置
+        String baseurl = GXCommonUtils.getEnvironmentValue("maple.framework.web.service.base-url", String.class);
+
+        // 处理空值情况：
+        // 1. 当基础URL为空或空白字符串时
+        // 2. 从环境变量获取服务端口
+        // 3. 构建默认的本地回环地址
+        if (CharSequenceUtil.isBlank(baseurl)) {
+            String port = GXCommonUtils.getEnvironmentValue("server.port", String.class);
+            baseurl = "http://127.0.0.1:" + port;
+        }
+        return baseurl;
     }
 
     /**
