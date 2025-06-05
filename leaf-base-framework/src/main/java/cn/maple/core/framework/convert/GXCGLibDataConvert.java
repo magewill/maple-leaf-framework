@@ -159,7 +159,7 @@ public class GXCGLibDataConvert implements Converter {
      * 2. 使用Boolean.TRUE/FALSE作为值，减少对象创建
      * </p>
      */
-    private static final Map<Class<?>, Boolean> PROCESSED_CLASSES_CACHE = new ConcurrentHashMap<>(256);
+    private static final Map<Class<?>, Boolean> PROCESSED_CLASSES_CACHE = new WeakConcurrentMap<>(new ConcurrentHashMap<>(1024));
 
     /**
      * 转换器缓存 - 按目标类型缓存转换器实例
