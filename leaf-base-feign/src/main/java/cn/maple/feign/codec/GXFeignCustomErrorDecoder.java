@@ -1,11 +1,11 @@
 package cn.maple.feign.codec;
 
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.http.HttpStatus;
 import cn.maple.core.framework.exception.GXBusinessException;
 import feign.Response;
 import feign.codec.ErrorDecoder;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -68,31 +68,31 @@ public class GXFeignCustomErrorDecoder implements ErrorDecoder {
 
         // 根据HTTP状态码处理不同类型的错误
         return switch (response.status()) {
-            case HttpStatus.NOT_FOUND -> {
+            case HttpStatus.HTTP_NOT_FOUND -> {
                 log.warn("Resource not found: {}", fullErrorMessage);
                 yield new GXBusinessException("请求的资源不存在: " + requestUrl);
             }
-            case HttpStatus.UNAUTHORIZED -> {
+            case HttpStatus.HTTP_UNAUTHORIZED -> {
                 log.warn("Unauthorized access: {}", fullErrorMessage);
                 yield new GXBusinessException("未授权的访问，请检查认证信息");
             }
-            case HttpStatus.FORBIDDEN -> {
+            case HttpStatus.HTTP_FORBIDDEN -> {
                 log.warn("Access forbidden: {}", fullErrorMessage);
                 yield new GXBusinessException("禁止访问，权限不足");
             }
-            case HttpStatus.BAD_REQUEST -> {
+            case HttpStatus.HTTP_BAD_REQUEST -> {
                 log.warn("Bad request: {}", fullErrorMessage);
                 yield new GXBusinessException("请求参数错误: " + errorMessage);
             }
-            case HttpStatus.INTERNAL_SERVER_ERROR -> {
+            case HttpStatus.HTTP_INTERNAL_ERROR -> {
                 log.error("Remote service error: {}", fullErrorMessage);
                 yield new GXBusinessException("远程服务内部错误，请稍后重试");
             }
-            case HttpStatus.SERVICE_UNAVAILABLE -> {
+            case HttpStatus.HTTP_UNAVAILABLE -> {
                 log.error("Service unavailable: {}", fullErrorMessage);
                 yield new GXBusinessException("远程服务不可用，请稍后重试");
             }
-            case HttpStatus.GATEWAY_TIMEOUT -> {
+            case HttpStatus.HTTP_GATEWAY_TIMEOUT -> {
                 log.error("Gateway timeout: {}", fullErrorMessage);
                 yield new GXBusinessException("远程服务响应超时，请稍后重试");
             }

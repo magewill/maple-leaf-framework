@@ -9,7 +9,6 @@ import cn.maple.feign.service.GXFeignService;
 import feign.RequestInterceptor;
 import feign.RequestTemplate;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 
 /**
  * Feign请求拦截器
@@ -61,7 +60,6 @@ import org.springframework.stereotype.Component;
  * </p>
  */
 @Slf4j
-@Component
 public class GXFeignRequestInterceptor implements RequestInterceptor {
     /**
      * 拦截并处理Feign请求
