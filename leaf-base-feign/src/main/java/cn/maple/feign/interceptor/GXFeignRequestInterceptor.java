@@ -28,18 +28,6 @@ import lombok.extern.slf4j.Slf4j;
  * </p>
  *
  * <p>
- * 配置示例：
- * 在application.yml中添加：
- * ```yaml
- * maple:
- * feign:
- * api-key: your-api-key-here
- * auth-header-enabled: true
- * propagate-headers: true
- * ```
- * </p>
- *
- * <p>
  * 使用示例：
  * 1. 确保在Spring配置类中注册了该拦截器：
  * ```java
