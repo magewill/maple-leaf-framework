@@ -72,5 +72,15 @@
             <artifactId>leaf-base-debezium</artifactId>
             <version>${project.parent.version}</version>
         </dependency>
+        <dependency>
+            <groupId>cn.maple.framework</groupId>
+            <artifactId>leaf-base-feign</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>cn.maple.framework</groupId>
+            <artifactId>leaf-base-webclient</artifactId>
+            <version>${project.parent.version}</version>
+        </dependency>
     </dependencies>
 </project>

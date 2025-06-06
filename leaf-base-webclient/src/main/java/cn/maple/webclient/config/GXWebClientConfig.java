@@ -1,4 +1,4 @@
-package cn.maple.core.framework.config.web;
+package cn.maple.webclient.config;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;

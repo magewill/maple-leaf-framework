@@ -31,6 +31,7 @@
         <module>leaf-base-debezium</module>
         <module>leaf-base-dubbo-nacos-sentinel</module>
         <module>leaf-base-feign</module>
+        <module>leaf-base-webclient</module>
     </modules>
 
     <!-- 统一管理jar包版本 -->
