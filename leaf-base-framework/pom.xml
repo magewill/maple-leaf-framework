@@ -96,6 +96,10 @@
             <groupId>com.flipkart.utils</groupId>
             <artifactId>javatuples</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-guava</artifactId>
+        </dependency>
         <!--导入单元测试包-->
         <dependency>
             <groupId>org.springframework.boot</groupId>
