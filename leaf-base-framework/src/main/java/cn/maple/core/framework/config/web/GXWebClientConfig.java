@@ -224,14 +224,24 @@ public class GXWebClientConfig {
      * </p>
      *
      * @param webClient 配置好的WebClient实例
-     * @return 配置好的HttpServiceProxyFactory实例，用于创建声明式HTTP客户端
+     * @return 配置好的HttpServiceProxyFactory.Builder实例，用于创建声明式HTTP客户端
      */
     @Bean
-    public HttpServiceProxyFactory httpServiceProxyFactory(WebClient webClient) {
+    public HttpServiceProxyFactory.Builder httpServiceProxyFactoryBuilder(WebClient webClient) {
         WebClientAdapter adapter = WebClientAdapter.create(webClient);
         return HttpServiceProxyFactory.builder()
-                .exchangeAdapter(adapter)
-                .build();
+                .exchangeAdapter(adapter);
+    }
+
+    /**
+     * 创建并配置HttpServiceProxyFactory Bean
+     *
+     * @param httpServiceProxyFactoryBuilder 用于构建HttpServiceProxyFactory的构建器实例
+     * @return 配置完成的HttpServiceProxyFactory实例
+     */
+    @Bean
+    public HttpServiceProxyFactory httpServiceProxyFactory(HttpServiceProxyFactory.Builder httpServiceProxyFactoryBuilder) {
+        return httpServiceProxyFactoryBuilder.build();
     }
 
     /**
@@ -262,12 +272,12 @@ public class GXWebClientConfig {
      * - 优化连接获取策略，减少连接建立的开销
      * </p>
      *
-     * @return 配置好的WebClient实例
+     * @return 配置好的WebClientBuilder实例
      * @deprecated 推荐使用httpServiceProxyFactory创建声明式HTTP客户端，
      * 该方法保留用于向后兼容，将在未来版本中移除
      */
     @Bean
-    public WebClient webClient() {
+    public WebClient.Builder webClientBuilder() {
         // 配置内存限制，避免大响应导致内存溢出
         ExchangeStrategies strategies = ExchangeStrategies.builder()
                 .codecs(configurer -> configurer.defaultCodecs()
@@ -466,7 +476,6 @@ public class GXWebClientConfig {
                 .filter(responseFilter)
                 .filter(retryFilter)
                 .filter(errorResponseHandleFilter)
-                .baseUrl(getBaseUrl())
                 // 设置连接超时和响应超时
                 .clientConnector(new ReactorClientHttpConnector(HttpClient.create(connectionProvider)
                         .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, DEFAULT_TIMEOUT_SECONDS * 1000)
@@ -486,29 +495,18 @@ public class GXWebClientConfig {
                     configurer.defaultCodecs().jackson2JsonDecoder(
                             new Jackson2JsonDecoder(objectMapper)
                     );
-                })
-                .build();
+                });
     }
 
     /**
-     * 获取服务基础URL配置
-     * 当环境变量未配置基础URL时，使用本地回环地址+端口作为默认值
+     * 创建并配置WebClient实例。
      *
-     * @return 解析后的基础URL（永远不会为空）
+     * @param webClientBuilder WebClient的构建器，用于配置WebClient的属性
+     * @return 配置好的WebClient实例
      */
-    private String getBaseUrl() {
-        // 从环境变量获取基础URL配置
-        String baseurl = GXCommonUtils.getEnvironmentValue("maple.framework.web.service.base-url", String.class);
-
-        // 处理空值情况：
-        // 1. 当基础URL为空或空白字符串时
-        // 2. 从环境变量获取服务端口
-        // 3. 构建默认的本地回环地址
-        if (CharSequenceUtil.isBlank(baseurl)) {
-            String port = GXCommonUtils.getEnvironmentValue("server.port", String.class);
-            baseurl = "http://127.0.0.1:" + port;
-        }
-        return baseurl;
+    @Bean
+    public WebClient webClient(WebClient.Builder webClientBuilder) {
+        return webClientBuilder.build();
     }
 
     /**
