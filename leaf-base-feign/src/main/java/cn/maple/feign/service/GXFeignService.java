@@ -59,8 +59,8 @@ import java.util.Optional;
  * <p>
  * 配置要求：
  * 使用默认实现时，需要在配置文件中设置以下属性：
- * - maple.framework.web.client.token: 用于生成令牌的基础字符串
- * - maple.framework.web.client.secret: 用于令牌加密的密钥
+ * - maple.framework.web.feign.token: 用于生成令牌的基础字符串
+ * - maple.framework.web.feign.secret: 用于令牌加密的密钥
  * </p>
  */
 public interface GXFeignService {
@@ -82,10 +82,10 @@ public interface GXFeignService {
      * @throws GXBusinessException 当未配置基础令牌源时抛出
      */
     default String generateHttpAuthToken() {
-        String tokenSource = GXCommonUtils.getEnvironmentValue("maple.framework.web.client.token", String.class);
+        String tokenSource = GXCommonUtils.getEnvironmentValue("maple.framework.web.feign.token", String.class);
         // 校验基础令牌配置有效性，为空时抛出业务异常
         if (CharSequenceUtil.isBlank(tokenSource)) {
-            throw new GXBusinessException("请配置maple.framework.web.client.token");
+            throw new GXBusinessException("请配置maple.framework.web.feign.token");
         }
         return generateHttpAuthToken(tokenSource, GXTokenConstant.WEB_CLIENT_TOKEN_EXPIRE);
     }
@@ -152,7 +152,7 @@ public interface GXFeignService {
      * 获取Token的密钥
      * <p>
      * 该方法从环境配置中获取用于Token加密和解密的密钥。
-     * 默认实现从环境变量maple.framework.web.client.secret中获取密钥。
+     * 默认实现从环境变量maple.framework.web.feign.secret中获取密钥。
      * </p>
      * <p>
      * 实现类可以覆盖此方法，提供更安全的密钥管理策略，例如：
@@ -165,9 +165,9 @@ public interface GXFeignService {
      * @throws GXBusinessException 当未配置密钥时抛出
      */
     default String getAuthTokenSecret() {
-        String tokenSecret = GXCommonUtils.getEnvironmentValue("maple.framework.web.client.secret", String.class);
+        String tokenSecret = GXCommonUtils.getEnvironmentValue("maple.framework.web.feign.secret", String.class);
         if (CharSequenceUtil.isBlank(tokenSecret)) {
-            throw new GXBusinessException("请配置maple.framework.web.client.secret");
+            throw new GXBusinessException("请配置maple.framework.web.feign.secret");
         }
         return tokenSecret;
     }
