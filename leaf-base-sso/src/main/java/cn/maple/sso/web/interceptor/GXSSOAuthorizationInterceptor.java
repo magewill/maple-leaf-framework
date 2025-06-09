@@ -2,8 +2,8 @@ package cn.maple.sso.web.interceptor;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Dict;
+import cn.maple.core.framework.annotation.GXHttpInvokerAuthToken;
 import cn.maple.core.framework.annotation.GXIgnoreLoginIntercept;
-import cn.maple.core.framework.annotation.GXWebClientAuthToken;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.core.framework.web.interceptor.GXAuthorizationInterceptor;
 import cn.maple.sso.cache.GXSSOCache;
@@ -179,10 +179,10 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
             return true;
         }
 
-        // 检查方法是否有@GXWebClientAuthToken注解
-        GXWebClientAuthToken webClientAuthToken = handlerMethod.getMethodAnnotation(GXWebClientAuthToken.class);
+        // 检查方法是否有@GXHttpInvokerAuthToken注解
+        GXHttpInvokerAuthToken webClientAuthToken = handlerMethod.getMethodAnnotation(GXHttpInvokerAuthToken.class);
         if (Objects.nonNull(webClientAuthToken)) {
-            log.debug("方法有@GXWebClientAuthToken注解，跳过登录验证: {}", handlerMethod.getMethod().getName());
+            log.debug("方法有@GXHttpInvokerAuthToken注解，跳过登录验证: {}", handlerMethod.getMethod().getName());
             return true;
         }
 

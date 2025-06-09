@@ -1,4 +1,4 @@
-package cn.maple.core.framework.annotation;
+package cn.maple.feign.annotation;
 
 import java.lang.annotation.*;
 

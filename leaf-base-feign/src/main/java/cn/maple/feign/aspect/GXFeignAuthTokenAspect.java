@@ -197,8 +197,8 @@ public class GXFeignAuthTokenAspect {
      * - 切点匹配操作在方法调用时执行，但开销很小
      * </p>
      */
-    @Pointcut("@annotation(cn.maple.feign.annotation.GXFeignAuthToken) || " +
-            "@within(cn.maple.feign.annotation.GXFeignAuthToken) ")
+    @Pointcut("@annotation(cn.maple.core.framework.annotation.GXHttpInvokerAuthToken) || " +
+            "@within(cn.maple.core.framework.annotation.GXHttpInvokerAuthToken) ")
     public void feignAuthTokenPointCut() {
         // 这是切点标记，用于拦截需要进行验证Feign调用token的方法
     }

@@ -197,8 +197,8 @@ public class GXWebClientAuthTokenAspect {
      * - 切点匹配操作在方法调用时执行，但开销很小
      * </p>
      */
-    @Pointcut("@annotation(cn.maple.webclient.annotation.GXWebClientAuthToken) || " +
-            "@within(cn.maple.webclient.annotation.GXWebClientAuthToken) ")
+    @Pointcut("@annotation(cn.maple.core.framework.annotation.GXHttpInvokerAuthToken) || " +
+            "@within(cn.maple.core.framework.annotation.GXHttpInvokerAuthToken) ")
     public void webClientAuthTokenPointCut() {
         // 这是切点标记，用于拦截需要进行验证WebClient调用token的方法
     }
