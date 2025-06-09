@@ -1,4 +1,4 @@
-package cn.maple.core.framework.service;
+package cn.maple.webclient.service;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.constant.GXCommonConstant;

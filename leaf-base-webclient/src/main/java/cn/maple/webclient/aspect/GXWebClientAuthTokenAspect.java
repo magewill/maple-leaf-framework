@@ -1,10 +1,10 @@
-package cn.maple.core.framework.aspect;
+package cn.maple.webclient.aspect;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXWebClientAuthTokenException;
-import cn.maple.core.framework.service.GXWebClientService;
 import cn.maple.core.framework.util.GXSpringContextUtils;
+import cn.maple.webclient.service.GXWebClientService;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.JoinPoint;
 import org.aspectj.lang.annotation.Aspect;
@@ -197,8 +197,8 @@ public class GXWebClientAuthTokenAspect {
      * - 切点匹配操作在方法调用时执行，但开销很小
      * </p>
      */
-    @Pointcut("@annotation(cn.maple.core.framework.annotation.GXWebClientAuthToken) || " +
-            "@within(cn.maple.core.framework.annotation.GXWebClientAuthToken) ")
+    @Pointcut("@annotation(cn.maple.webclient.annotation.GXWebClientAuthToken) || " +
+            "@within(cn.maple.webclient.annotation.GXWebClientAuthToken) ")
     public void webClientAuthTokenPointCut() {
         // 这是切点标记，用于拦截需要进行验证WebClient调用token的方法
     }

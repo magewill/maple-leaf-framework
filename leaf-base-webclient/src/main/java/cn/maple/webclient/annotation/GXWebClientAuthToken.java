@@ -1,4 +1,4 @@
-package cn.maple.core.framework.annotation;
+package cn.maple.webclient.annotation;
 
 import java.lang.annotation.*;
 
@@ -39,7 +39,7 @@ import java.lang.annotation.*;
  *         // 方法实现...
  *     }
  * }
- *
+ * <p>
  * // 2. 在方法级别应用注解，只对特定方法进行Token验证
  * @RestController
  * @RequestMapping("/api/v1/users")
@@ -50,7 +50,7 @@ import java.lang.annotation.*;
  *     public SensitiveData getSensitiveData() {
  *         // 方法实现...
  *     }
- *
+ * <p>
  *     // 此方法不会进行Token验证
  *     @GetMapping("/public-data")
  *     public PublicData getPublicData() {
