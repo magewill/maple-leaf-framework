@@ -1,5 +1,7 @@
 package cn.maple.core.framework.annotation;
 
+import cn.maple.core.framework.constant.GXHttpInvokerConstant;
+
 import java.lang.annotation.*;
 
 /**
@@ -75,4 +77,5 @@ import java.lang.annotation.*;
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
 public @interface GXHttpInvokerAuthToken {
+    String value() default GXHttpInvokerConstant.FEIGN_INVOKER;
 }

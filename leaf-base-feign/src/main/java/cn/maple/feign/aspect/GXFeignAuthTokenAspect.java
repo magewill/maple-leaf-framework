@@ -1,6 +1,8 @@
 package cn.maple.feign.aspect;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.annotation.GXHttpInvokerAuthToken;
+import cn.maple.core.framework.constant.GXHttpInvokerConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXFeignAuthTokenException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
@@ -14,6 +16,7 @@ import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
+import java.lang.reflect.Method;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -236,6 +239,14 @@ public class GXFeignAuthTokenAspect {
      */
     @Before("feignAuthTokenPointCut()")
     public void before(JoinPoint point) {
+        MethodSignature signature = (MethodSignature) point.getSignature();
+        Method method = signature.getMethod();
+        GXHttpInvokerAuthToken httpInvokerAuthToken = method.getAnnotation(GXHttpInvokerAuthToken.class);
+        assert httpInvokerAuthToken != null;
+        String value = httpInvokerAuthToken.value();
+        if (!CharSequenceUtil.equalsIgnoreCase(value, GXHttpInvokerConstant.FEIGN_INVOKER)) {
+            return;
+        }
         GXFeignService feignService = GXSpringContextUtils.getBean(GXFeignService.class);
         if (Objects.isNull(feignService)) {
             String errorMsg = CharSequenceUtil.format("请实现{}接口", GXFeignService.class.getName());
