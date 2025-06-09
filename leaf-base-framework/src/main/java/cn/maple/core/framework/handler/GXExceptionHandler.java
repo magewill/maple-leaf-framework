@@ -5,7 +5,7 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.text.StrPool;
 import cn.hutool.http.HttpStatus;
-import cn.maple.core.framework.api.dto.res.GXErrorApiResDto;
+import cn.maple.core.framework.api.dto.res.GXHttpInvokerApiErrorResDto;
 import cn.maple.core.framework.code.GXDefaultResultStatusCode;
 import cn.maple.core.framework.exception.*;
 import cn.maple.core.framework.service.GXBotNotificationExceptionService;
@@ -323,8 +323,22 @@ public class GXExceptionHandler {
     }
 
     @ExceptionHandler(GXWebClientAuthTokenException.class)
-    public GXErrorApiResDto handleGXWebClientAuthTokenException(GXWebClientAuthTokenException e) {
-        GXErrorApiResDto apiErrorResDto = new GXErrorApiResDto();
+    public GXHttpInvokerApiErrorResDto handleGXWebClientAuthTokenException(GXWebClientAuthTokenException e) {
+        GXHttpInvokerApiErrorResDto apiErrorResDto = new GXHttpInvokerApiErrorResDto();
+        apiErrorResDto.setTimestamp(DateUtil.now());
+        apiErrorResDto.setStatus(HttpStatus.HTTP_INTERNAL_ERROR);
+        apiErrorResDto.setCode(e.getCode());
+        HttpServletRequest httpServletRequest = Objects.requireNonNull(GXCurrentRequestContextUtils.getHttpServletRequest());
+        apiErrorResDto.setPath(httpServletRequest.getRequestURI());
+        apiErrorResDto.setMessage(e.getMessage());
+        HttpServletResponse httpServletResponse = Objects.requireNonNull(GXCurrentRequestContextUtils.getHttpServletResponse());
+        httpServletResponse.setStatus(e.getCode());
+        return apiErrorResDto;
+    }
+
+    @ExceptionHandler(GXFeignAuthTokenException.class)
+    public GXHttpInvokerApiErrorResDto handleGXFeignAuthTokenException(GXFeignAuthTokenException e) {
+        GXHttpInvokerApiErrorResDto apiErrorResDto = new GXHttpInvokerApiErrorResDto();
         apiErrorResDto.setTimestamp(DateUtil.now());
         apiErrorResDto.setStatus(HttpStatus.HTTP_INTERNAL_ERROR);
         apiErrorResDto.setCode(e.getCode());

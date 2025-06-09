@@ -75,7 +75,7 @@ import lombok.ToString;
 @EqualsAndHashCode(callSuper = true)
 @Data
 @ToString(callSuper = true)
-public class GXErrorApiResDto extends GXBaseApiResDto {
+public class GXHttpInvokerApiErrorResDto extends GXBaseApiResDto {
     /**
      * 错误发生的时间戳
      * <p>

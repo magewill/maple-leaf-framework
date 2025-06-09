@@ -3,7 +3,7 @@ package cn.maple.webclient.config;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.json.JSONUtil;
-import cn.maple.core.framework.api.dto.res.GXErrorApiResDto;
+import cn.maple.core.framework.api.dto.res.GXHttpInvokerApiErrorResDto;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.constant.GXTokenConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
@@ -539,10 +539,10 @@ public class GXWebClientConfig {
      * @return 处理后的响应
      */
     private Mono<ClientResponse> handle4xxError(ClientResponse clientResponse, HttpStatusCode httpStatusCode) {
-        GXErrorApiResDto errorApiResDto = new GXErrorApiResDto();
+        GXHttpInvokerApiErrorResDto errorApiResDto = new GXHttpInvokerApiErrorResDto();
         errorApiResDto.setMessage(getHttpStatusDescription(httpStatusCode));
         errorApiResDto.setCode(httpStatusCode.value());
-        return clientResponse.bodyToMono(GXErrorApiResDto.class)
+        return clientResponse.bodyToMono(GXHttpInvokerApiErrorResDto.class)
                 .defaultIfEmpty(errorApiResDto)
                 .flatMap(errorBody -> {
                     String errorMessage = String.format("客户端请求错误(4xx): %s",
@@ -562,10 +562,10 @@ public class GXWebClientConfig {
      * @return 处理后的响应
      */
     private Mono<ClientResponse> handle5xxError(ClientResponse clientResponse, HttpStatusCode httpStatusCode) {
-        GXErrorApiResDto errorApiResDto = new GXErrorApiResDto();
+        GXHttpInvokerApiErrorResDto errorApiResDto = new GXHttpInvokerApiErrorResDto();
         errorApiResDto.setMessage(getHttpStatusDescription(httpStatusCode));
         errorApiResDto.setCode(httpStatusCode.value());
-        return clientResponse.bodyToMono(GXErrorApiResDto.class)
+        return clientResponse.bodyToMono(GXHttpInvokerApiErrorResDto.class)
                 .defaultIfEmpty(errorApiResDto)
                 .flatMap(errorBody -> {
                     String errorMessage = String.format("服务器处理错误(5xx): %s",
