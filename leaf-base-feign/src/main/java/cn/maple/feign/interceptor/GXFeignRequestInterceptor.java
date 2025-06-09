@@ -1,8 +1,10 @@
 package cn.maple.feign.interceptor;
 
+import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.constant.GXTokenConstant;
+import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import cn.maple.feign.service.GXFeignService;
@@ -91,5 +93,26 @@ public class GXFeignRequestInterceptor implements RequestInterceptor {
             requestTemplate.header(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
             log.debug("Propagated trace ID [{}] to Feign request", traceId);
         }
+
+        // 添加应用名称
+        String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class);
+        if (CharSequenceUtil.isNotBlank(appName)) {
+            requestTemplate.header("X-Request-Source", appName);
+        }
+
+        // 添加请求开始时间，用于计算请求耗时
+        requestTemplate.header("X-Request-Start-Time", String.valueOf(System.currentTimeMillis()));
+
+        // 添加安全相关头信息
+        requestTemplate.header("X-Content-Type-Options", "nosniff");
+        requestTemplate.header("X-Frame-Options", "DENY");
+        requestTemplate.header("X-XSS-Protection", "1; mode=block");
+        requestTemplate.header("Cache-Control", "no-cache, no-store, must-revalidate");
+        requestTemplate.header("Pragma", "no-cache");
+        requestTemplate.header("Expires", "0");
+
+        // 添加用户代理信息
+        String userAgent = String.format("Maple-Leaf-Feign/1.0 (%s)", System.getProperty("os.name", "Unknown"));
+        requestTemplate.header("User-Agent", userAgent);
     }
 }
