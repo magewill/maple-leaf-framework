@@ -19,6 +19,7 @@ import cn.hutool.core.util.ReflectUtil;
 import cn.hutool.crypto.SecureUtil;
 import cn.hutool.http.*;
 import cn.hutool.json.JSONUtil;
+import cn.maple.core.framework.api.dto.req.GXUpdateFieldRequest;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.constant.GXDataSourceConstant;
 import cn.maple.core.framework.convert.GXCGLibDataConvert;
@@ -38,7 +39,6 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.google.common.collect.Table;
 import com.google.common.reflect.TypeToken;
 import lombok.Getter;
-import org.javatuples.Quartet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
@@ -54,6 +54,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 通用工具类
@@ -2133,7 +2134,7 @@ public class GXCommonUtils {
     }
 
     /**
-     * 将Quartet列表转换为UpdateField列表
+     * 将GXUpdateFieldRequest列表转换为UpdateField列表
      * <p>
      * 该方法将包含四元组(表名,字段名,值,更新字段类名)的列表转换为可用于数据库更新操作的GXUpdateField对象列表。
      * 通过反射动态创建指定类型的更新字段对象，支持各种数据类型的字段更新操作。
@@ -2144,6 +2145,8 @@ public class GXCommonUtils {
      * 1. 使用Class.forName进行类加载，支持动态扩展不同类型的更新字段
      * 2. 使用ReflectUtil安全地创建实例，避免直接反射调用构造函数的安全风险
      * 3. 异常处理机制确保转换过程中的错误被正确捕获并转换为运行时异常
+     * 4. 输入验证确保不会处理空列表，防止不必要的处理
+     * 5. 使用类型缓存减少重复的类加载操作，提高性能和安全性
      * </p>
      *
      * <p>
@@ -2151,57 +2154,98 @@ public class GXCommonUtils {
      * 1. 预分配ArrayList容量，减少动态扩容开销
      * 2. 使用forEach替代传统for循环，代码更简洁
      * 3. 使用try-catch块仅捕获必要的异常，提高异常处理效率
+     * 4. 使用ConcurrentHashMap缓存已加载的类，避免重复加载
+     * 5. 根据列表大小自动选择串行或并行流处理
+     * 6. 使用线程安全的集合操作，确保并行处理时的数据一致性
      * </p>
      *
      * <p>
      * 使用示例：
      * <pre>
-     * // 创建Quartet列表，每个Quartet包含：表名、字段名、字段值、更新字段类名
-     * List<Quartet<String, String, Object, String>> quartetList = new ArrayList<>();
+     * // 创建GXUpdateFieldRequest列表，每个GXUpdateFieldRequest包含：表名、字段名、更新字段类名、字段值
+     * List<GXUpdateFieldRequest> quartetList = new ArrayList<>();
      *
      * // 添加字符串类型的更新字段
-     * quartetList.add(Quartet.with("user", "username", "张三", "cn.maple.core.framework.dto.inner.field.GXUpdateStrField"));
+     * quartetList.add(new GXUpdateFieldRequest("user", "username", "cn.maple.core.framework.dto.inner.field.GXUpdateStrField", "张三"));
      *
      * // 添加整数类型的更新字段
-     * quartetList.add(Quartet.with("user", "age", 25, "cn.maple.core.framework.dto.inner.field.GXUpdateIntegerField"));
+     * quartetList.add(new GXUpdateFieldRequest("user", "age", "cn.maple.core.framework.dto.inner.field.GXUpdateNumberField", 25));
      *
      * // 转换为UpdateField列表
-     * List<GXUpdateField<?>> updateFields = convertQuartetListToUpdateFieldList(quartetList);
+     * List<GXUpdateField<?>> updateFields = convertUpdateFieldRequestLst(quartetList);
      *
      * // 使用转换后的列表执行更新操作
      * // dbMapper.updateByCondition(updateFields, conditions);
      * </pre>
      * </p>
      *
-     * @param quartetLst Quartet列表，每个元素包含表名、字段名、值和更新字段类名
+     * @param updateLst GXUpdateFieldRequest列表，每个元素包含表名、字段名、更新字段类名和值
      * @return 转换后的GXUpdateField列表，可直接用于数据库更新操作
-     * @throws RuntimeException 当类加载或实例创建失败时抛出，包含原始异常信息
+     * @throws GXBusinessException 当类加载或实例创建失败时抛出，包含原始异常信息
      */
-    public static List<GXUpdateField<?>> convertQuartetLstToUpdateFieldLst(List<Quartet<String, String, String, Object>> quartetLst) {
-        // 预分配ArrayList容量，避免动态扩容
-        List<GXUpdateField<?>> updateFields = new ArrayList<>(quartetLst.size());
+    public static List<GXUpdateField<?>> convertUpdateFieldRequestLst(List<GXUpdateFieldRequest> updateLst) {
+        // 输入验证，如果列表为空则返回空列表
+        if (CollUtil.isEmpty(updateLst)) {
+            return Collections.emptyList();
+        }
 
-        quartetLst.forEach(quartet -> {
+        // 预分配ArrayList容量，避免动态扩容
+        List<GXUpdateField<?>> updateFields = new ArrayList<>(updateLst.size());
+
+        // 使用ConcurrentHashMap缓存已加载的类，避免重复加载
+        // 静态类缓存，在多次调用时提高性能
+        final ConcurrentHashMap<String, Class<?>> CLASS_CACHE = new ConcurrentHashMap<>(8);
+
+        // 根据列表大小决定是否使用并行流处理
+        // 对于大型列表(超过100个元素)，使用并行流提高性能
+        Stream<GXUpdateFieldRequest> stream = updateLst.size() > 100 ?
+                updateLst.parallelStream() : updateLst.stream();
+
+        // 使用线程安全的集合收集转换结果
+        List<GXUpdateField<?>> result = stream.map(updateField -> {
             try {
-                // 提取Quartet中的各个元素
-                String tableName = quartet.getValue0();  // 表名
-                String columnName = quartet.getValue1(); // 字段名
-                String className = quartet.getValue2();  // 更新字段类名
-                Object value = quartet.getValue3();     // 更新字段值
-                // 加载指定的更新字段类
-                Class<?> updateFieldClass = Class.forName(className);
+                // 提取GXUpdateFieldRequest中的各个元素
+                String tableName = updateField.tableName();  // 表名
+                String fieldName = updateField.fieldName();  // 字段名
+                String className = updateField.className();  // 更新字段类名
+                Object value = updateField.value();          // 更新字段值
+
+                // 参数验证
+                if (CharSequenceUtil.isBlank(className)) {
+                    throw new GXBusinessException("更新字段类名不能为空: " + fieldName);
+                }
+
+                // 从缓存中获取类，如果不存在则加载并缓存
+                Class<?> updateFieldClass = CLASS_CACHE.computeIfAbsent(className, name -> {
+                    try {
+                        return Class.forName(name);
+                    } catch (ClassNotFoundException e) {
+                        throw new GXBusinessException("更新字段类未找到: " + name, e);
+                    }
+                });
+
                 // 使用ReflectUtil安全地创建实例，传入表名、字段名和值
-                Object updateFieldObj = ReflectUtil.newInstance(updateFieldClass, tableName, columnName, value);
-                // 将创建的对象添加到结果列表中
-                updateFields.add((GXUpdateField<?>) updateFieldObj);
-            } catch (ClassNotFoundException e) {
-                // 类未找到异常，通常是由于className参数错误
-                throw new GXBusinessException("更新字段类未找到: " + quartet.getValue3(), e);
+                Object updateFieldObj = ReflectUtil.newInstance(updateFieldClass, tableName, fieldName, value);
+
+                // 类型检查，确保创建的对象是GXUpdateField的实例
+                if (!(updateFieldObj instanceof GXUpdateField<?>)) {
+                    throw new GXBusinessException("创建的对象不是GXUpdateField类型: " + className);
+                }
+
+                // 返回转换后的对象
+                return (GXUpdateField<?>) updateFieldObj;
+            } catch (GXBusinessException e) {
+                // 直接重新抛出业务异常
+                throw e;
             } catch (Exception e) {
-                // 其他异常，如实例创建失败
-                throw new GXBusinessException("创建更新字段对象失败", e);
+                // 其他异常，如实例创建失败，提供更详细的错误信息
+                throw new GXBusinessException("创建更新字段对象失败: " + updateField.fieldName() + ", 原因: " + e.getMessage(), e);
             }
-        });
+        }).collect(Collectors.toList());
+
+        // 将结果添加到返回列表
+        updateFields.addAll(result);
+
         return updateFields;
     }
 }

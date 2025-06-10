@@ -3,7 +3,6 @@ package cn.maple.core.framework.api.dto.req;
 import com.google.common.collect.HashBasedTable;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import org.javatuples.Quartet;
 
 import java.io.Serializable;
 import java.util.List;
@@ -31,7 +30,7 @@ public class GXHttpQueryParamApiReqDto extends GXBaseApiReqDto implements Serial
      * 3. String: GXUpdateField的子类的全名
      * 4. Object: 字段值
      */
-    private List<Quartet<String, String, String, Object>> updateFieldLst;
+    private List<GXUpdateFieldRequest> updateFieldLst;
 
     /**
      * 待查询字段列表

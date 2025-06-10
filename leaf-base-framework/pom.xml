@@ -89,10 +89,6 @@
             <artifactId>hutool-crypto</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.flipkart.utils</groupId>
-            <artifactId>javatuples</artifactId>
-        </dependency>
-        <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-guava</artifactId>
         </dependency>

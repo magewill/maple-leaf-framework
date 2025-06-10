@@ -1,7 +1,6 @@
 package cn.maple.core.framework.config;
 
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.maple.core.framework.config.web.GXQuartetJacksonModule;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.datatype.guava.GuavaModule;
@@ -133,10 +132,6 @@ public class GXFrameworkConfig {
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         // 注册guava数据类型
         objectMapper.registerModule(new GuavaModule());
-        // 添加自定义模块 处理guava的HashBasedTable数据类型
-        // objectMapper.registerModule(GXHashBasedTableJacksonModule.createModule());
-        // 添加自定义模块 处理quartet数据类型
-        objectMapper.registerModule(GXQuartetJacksonModule.createModule());
         return objectMapper.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
     }
 

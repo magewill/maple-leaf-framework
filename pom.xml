@@ -358,12 +358,6 @@
                 <version>${spring-retry.version}</version>
             </dependency>
 
-            <dependency>
-                <groupId>com.flipkart.utils</groupId>
-                <artifactId>javatuples</artifactId>
-                <version>${javatuples.vaersion}</version>
-            </dependency>
-
             <!--解决 RocketMQ、Debezium 冲突-->
             <dependency>
                 <groupId>com.github.luben</groupId>
