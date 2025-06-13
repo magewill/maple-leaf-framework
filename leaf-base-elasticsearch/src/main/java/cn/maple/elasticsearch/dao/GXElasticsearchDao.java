@@ -64,7 +64,6 @@ import java.util.stream.Collectors;
  * @param <Q>  查询对象类型，必须继承自BaseQuery
  * @param <B>  查询构建器类型，必须继承自BaseQueryBuilder
  * @param <ID> 实体主键类型，必须实现Serializable接口
- * 
  * @author britton chen <britton@126.com>
  * @since 1.0.0
  */
@@ -160,8 +159,9 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
                 .condition(condition)
                 .build();
         Query query = buildQuery(queryParamInnerDto);
+        DeleteQuery deleteQuery = DeleteQuery.builder(query).build();
         ElasticsearchTemplate elasticsearchTemplate = getElasticsearchTemplate();
-        ByQueryResponse deleteResponse = elasticsearchTemplate.delete(query, getGenericClassType());
+        ByQueryResponse deleteResponse = elasticsearchTemplate.delete(deleteQuery, getGenericClassType());
         return Math.toIntExact(deleteResponse.getDeleted());
     }
 
@@ -176,39 +176,39 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
      */
     default Dict executeQuery(GXBaseQueryParamInnerDto queryParamInnerDto) {
         Assert.notNull(queryParamInnerDto, "Query parameters must not be null");
-        
+
         // 构建查询对象
         Q query = buildQuery(queryParamInnerDto);
         query = buildOrderBy(query, queryParamInnerDto);
         query = buildPageable(query, queryParamInnerDto);
-        
+
         // 获取ElasticsearchTemplate和实体类型
         ElasticsearchTemplate elasticsearchTemplate = getElasticsearchTemplate();
         Class<?> genericClassType = GXCommonUtils.getGenericClassType((Class<?>) getClass().getGenericInterfaces()[0], 0);
-        
+
         // 执行查询，支持指定索引名称
         String indexName = queryParamInnerDto.getTableName();
-        SearchHits<?> search = CharSequenceUtil.isEmpty(indexName) 
-                ? elasticsearchTemplate.search(query, genericClassType) 
+        SearchHits<?> search = CharSequenceUtil.isEmpty(indexName)
+                ? elasticsearchTemplate.search(query, genericClassType)
                 : elasticsearchTemplate.search(query, genericClassType, IndexCoordinates.of(indexName));
-        
+
         // 处理自定义方法名和复制选项
         String[] methodName = new String[]{queryParamInnerDto.getMethodName()};
         if (CharSequenceUtil.isEmpty(methodName[0])) {
             methodName[0] = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
         }
         CopyOptions copyOptions = ObjectUtil.defaultIfNull(queryParamInnerDto.getCopyOptions(), GXCommonUtils::getDefaultCopyOptions);
-        
+
         // 定义行映射函数，将SearchHit转换为Dict
         Function<SearchHit<?>, Dict> rowMapper = obj -> {
             Object extraData = Optional.ofNullable(queryParamInnerDto.getExtraData()).orElse(Dict.create());
             return GXCommonUtils.convertSourceToTarget(obj, Dict.class, methodName[0], copyOptions, extraData);
         };
-        
+
         // 处理查询结果
         List<Dict> records = search.getSearchHits().stream().map(rowMapper).collect(Collectors.toList());
         long totalHits = search.getTotalHits();
-        
+
         return Dict.create().set("totalHits", totalHits).set("records", records);
     }
 
@@ -232,7 +232,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
     /**
      * 构造查询Builder
      * 根据查询参数构建适合的查询构建器，支持CriteriaQueryBuilder和其他类型的构建器
-     * 
+     *
      * <pre>{@code
      * // 示例1: 多字段匹配查询
      * NativeQueryBuilder nativeQueryBuilder = new NativeQueryBuilder();
@@ -243,7 +243,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
      *                         .operator(Operator.And)
      *                         .build())
      *                 .build());
-     * 
+     *
      * // 示例2: 布尔查询组合多个条件
      * Query nameMatchQuery = new MatchQuery.Builder().field("name").query("关键词").operator(Operator.Or).build()._toQuery();
      * Query summaryMatchQuery = new MatchQuery.Builder().field("summary").query("重要信息").operator(Operator.Or).build()._toQuery();
@@ -254,7 +254,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
      *
      * @param queryParamInnerDto 查询条件，包含条件、排序等信息
      * @return 查询Builder实例，类型为泛型B指定的类型
-     * @throws ClassCastException 如果类型转换失败
+     * @throws ClassCastException    如果类型转换失败
      * @throws IllegalStateException 如果无法创建查询构建器实例
      */
     @SuppressWarnings("all")
@@ -340,25 +340,25 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
      */
     default Criteria conditions2Criteria(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         Assert.notNull(dbQueryParamInnerDto, "Query parameters must not be null");
-        
+
         List<GXCondition<?>> conditions = dbQueryParamInnerDto.getCondition();
         Criteria criteria = new Criteria();
         Map<String, String> methodMapping = GXEsCriteriaMethodMappingConstant.METHOD_MAPPING;
-        
+
         if (CollUtil.isNotEmpty(conditions)) {
             conditions.forEach(condition -> {
                 // 安全检查：确保条件对象的关键属性不为空
                 if (condition == null || CharSequenceUtil.isEmpty(condition.getFieldExpression()) || condition.getValue() == null) {
                     return; // 跳过无效条件
                 }
-                
+
                 String fieldName = condition.getFieldExpression();
                 String value = ObjectUtil.toString(condition.getValue());
                 String op = condition.getOp();
-                
+
                 // 获取操作符对应的方法名
                 String methodName = methodMapping.get(op);
-                
+
                 // 只有当方法名存在且Criteria类中有对应方法时才执行
                 if (CharSequenceUtil.isNotEmpty(methodName) && GXCommonUtils.checkMethodExists(Criteria.class, methodName, value)) {
                     Criteria tmpCriteria = new Criteria(fieldName);
@@ -367,7 +367,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
                 }
             });
         }
-        
+
         // 应用自定义条件逻辑
         return buildCriteria(criteria);
     }
@@ -419,17 +419,17 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
         if (CharSequenceUtil.isEmpty(beanName)) {
             beanName = getElasticsearchTemplateName();
         }
-        
+
         // 从Spring容器中获取ElasticsearchTemplate实例
         ElasticsearchTemplate elasticsearchTemplate = GXSpringContextUtils.getBean(beanName, ElasticsearchTemplate.class);
-        
+
         // 验证获取的实例不为空，如果为空则抛出异常并提供可用的bean名称列表
-        Assert.notNull(elasticsearchTemplate, "请配置ElasticsearchTemplate对象->[" + 
+        Assert.notNull(elasticsearchTemplate, "请配置ElasticsearchTemplate对象->[" +
                 GXSpringContextUtils.getBeans(ElasticsearchTemplate.class).keySet().stream()
                         .map(name -> CharSequenceUtil.format("'{}'", name))
-                        .collect(Collectors.joining(",")) + 
+                        .collect(Collectors.joining(",")) +
                 "]");
-        
+
         return elasticsearchTemplate;
     }
 }
