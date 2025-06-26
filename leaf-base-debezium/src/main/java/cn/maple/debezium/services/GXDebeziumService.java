@@ -1,8 +1,6 @@
 package cn.maple.debezium.services;
 
 import cn.hutool.core.lang.Dict;
-import cn.hutool.core.text.CharSequenceUtil;
-import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.redisson.services.GXRedissonCacheService;
 
@@ -26,7 +24,7 @@ import cn.maple.redisson.services.GXRedissonCacheService;
  *         Dict before = Convert.convert(Dict.class, data.getObj("before"));
  *         // 获取变更后的数据
  *         Dict after = Convert.convert(Dict.class, data.getObj("after"));
- * <p>
+ *
  *         // 根据操作类型处理数据
  *         switch (op) {
  *             case "c" -> handleInsert(after);
@@ -35,15 +33,15 @@ import cn.maple.redisson.services.GXRedissonCacheService;
  *             default -> log.warn("未知的操作类型: {}", op);
  *         }
  *     }
- * <p>
+ *
  *     private void handleInsert(Dict data) {
  *         // 处理插入操作
  *     }
- * <p>
+ *
  *     private void handleUpdate(Dict before, Dict after) {
  *         // 处理更新操作
  *     }
- * <p>
+ *
  *     private void handleDelete(Dict data) {
  *         // 处理删除操作
  *     }
@@ -59,7 +57,7 @@ public interface GXDebeziumService {
     /**
      * Redis锁名称格式
      */
-    String LOCK_NAME_FORMAT = "initial-engine-flag:{}";
+    String LOCK_NAME_FORMAT = "initial-engine-lock:{}";
 
     /**
      * 自定义业务处理
@@ -89,55 +87,49 @@ public interface GXDebeziumService {
      * 该方法通过分布式锁确保在服务启动时，只有获得锁的实例才能初始化并启动Debezium引擎。
      * </p>
      * <p>
-     * 锁的命名规则为: debezium-initial-engine:{应用名}:{实例key}
-     * 锁的默认持有时间为10秒，足够完成Debezium引擎的初始化。
-     * </p>
-     * <p>
-     * 注意: 该方法应当在try块中使用，并在finally块中调用{@link #initialEngineFlag()}方法释放锁，
-     * 以确保在初始化过程中发生异常时也能正确释放锁。
+     * 锁的命名规则为: debezium-initial-engine-lock:{应用名}
      * </p>
      *
-     * @see #initialEngineFlag()
+     * @param lockKey 锁的键名
      */
-    default void initialEngineFlag() {
+    default void initialEngineLock(String lockKey) {
         GXRedissonCacheService redissonCacheService = GXSpringContextUtils.getBean(GXRedissonCacheService.class);
-        String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class);
-        String lockName = CharSequenceUtil.format(LOCK_NAME_FORMAT, appName);
         assert redissonCacheService != null;
-        redissonCacheService.setCache(BUCKET_NAME, lockName, appName);
+        redissonCacheService.setCache(BUCKET_NAME, lockKey, "locked");
     }
 
     /**
      * 初始化Debezium引擎解锁
      * <p>
-     * 该方法用于释放由{@link #initialEngineFlag()}方法获取的分布式锁。
-     * 应当在Debezium引擎初始化完成后调用此方法，以释放锁资源，允许其他操作获取该锁。
+     * 该方法用于释放由{@link #initialEngineLock(String)}方法获取的分布式锁。
+     * 应当在Debezium引擎初始化完成后调用此方法，以释放锁资源。
      * </p>
      * <p>
      * 注意: 该方法应当在finally块中调用，以确保在初始化过程中发生异常时也能正确释放锁。
-     * 如果在未持有锁的情况下调用此方法，可能会抛出IllegalMonitorStateException异常。
      * </p>
      *
-     * @see #initialEngineFlag()
+     * @param lockKey 锁的键名
+     * @see #initialEngineLock(String)
      */
-    default void removeInitialEngineFlag() {
+    default void initialEngineUnLock(String lockKey) {
         GXRedissonCacheService redissonCacheService = GXSpringContextUtils.getBean(GXRedissonCacheService.class);
-        String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class);
-        String lockName = CharSequenceUtil.format(LOCK_NAME_FORMAT, appName);
         assert redissonCacheService != null;
-        redissonCacheService.deleteCache(BUCKET_NAME, lockName);
+        redissonCacheService.deleteCache(BUCKET_NAME, lockKey);
     }
 
     /**
-     * 获取初始引擎的锁标志。
-     * 通过Redisson缓存服务获取与当前应用名称关联的锁标志，
-     * 用于控制引擎的初始化过程。
+     * 检查是否已有其他实例初始化了引擎
+     * <p>
+     * 该方法用于检查是否已有其他服务实例初始化了Debezium引擎。
+     * 通过检查分布式锁状态，避免多个服务实例重复初始化引擎。
+     * </p>
+     *
+     * @param lockKey 锁的键名
+     * @return 如果已有其他实例初始化了引擎，则返回true；否则返回false
      */
-    default Object getInitialEngineFlag() {
+    default boolean isEngineInitialized(String lockKey) {
         GXRedissonCacheService redissonCacheService = GXSpringContextUtils.getBean(GXRedissonCacheService.class);
-        String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class);
-        String lockName = CharSequenceUtil.format(LOCK_NAME_FORMAT, appName);
         assert redissonCacheService != null;
-        return redissonCacheService.getCache(BUCKET_NAME, lockName);
+        return redissonCacheService.exists(BUCKET_NAME, lockKey);
     }
 }
