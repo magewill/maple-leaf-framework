@@ -4,6 +4,7 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Dict;
+import cn.hutool.core.lang.Tuple;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.framework.constant.GXBuilderConstant;
@@ -12,7 +13,6 @@ import cn.maple.core.framework.dto.inner.GXJoinDto;
 import cn.maple.core.framework.dto.inner.GXJoinTypeEnums;
 import cn.maple.core.framework.dto.inner.GXUnionTypeEnums;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
-import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
 import cn.maple.core.framework.dto.inner.condition.GXConditionIsNULL;
 import cn.maple.core.framework.dto.inner.condition.GXExclusionDeletedFieldCondition;
 import cn.maple.core.framework.dto.inner.field.GXUpdateField;
@@ -476,35 +476,18 @@ public interface GXBaseBuilder {
         SQL sql = new SQL().SELECT(selectStr).FROM(CharSequenceUtil.format("{} {}", tableName, tableNameAlias));
         // 处理JOIN
         List<GXJoinDto> joins = dbQueryParamInnerDto.getJoins();
+        Map<String, Object> joinParamMap = new HashMap<>();
         if (Objects.nonNull(joins) && !joins.isEmpty()) {
-            handleSQLJoin(sql, joins);
+            joinParamMap = handleSQLJoin(sql, joins);
         }
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
         // 处理WHERE
         Map<String, Object> paramMap = handleSQLCondition(sql, condition);
+        paramMap.putAll(joinParamMap);
         // 将参数设置到Mybatis的参数Map中
         dbQueryParamInnerDto.getParamMap().putAll(paramMap);
         if (!CollUtil.contains(condition, (c -> GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())))) {
             sql.WHERE(CharSequenceUtil.format("{}.is_deleted = {}", tableNameAlias, 0));
-        }
-        // 处理JOIN表的Where条件
-        if (Objects.nonNull(joins) && !joins.isEmpty()) {
-            joins.forEach(joinDto -> {
-                List<GXCondition<?>> joinConditions = Optional.ofNullable(joinDto.getConditions()).orElse(new ArrayList<>());
-                if (joinDto.isAutoFillIsDeleteCondition()) {
-                    String masterTableNameAlias = joinDto.getMasterTableNameAlias();
-                    if (!CollUtil.contains(joinConditions, (c -> {
-                        String identity = c.getTableNameAlias() + "." + c.getFieldExpression();
-                        return identity.equalsIgnoreCase(masterTableNameAlias + "." + "is_deleted");
-                    }))) {
-                        GXConditionEQ isDeletedCondition = new GXConditionEQ(masterTableNameAlias, "is_deleted", 0);
-                        joinConditions.add(isDeletedCondition);
-                    }
-                }
-                Map<String, Object> joinParamMap = handleSQLCondition(sql, joinConditions);
-                // 将参数设置到Mybatis的参数Map中
-                dbQueryParamInnerDto.getParamMap().putAll(paramMap);
-            });
         }
         // 处理分组
         if (CollUtil.isNotEmpty(groupByField)) {
@@ -595,7 +578,8 @@ public interface GXBaseBuilder {
      * @param sql   SQL对象，用于构建SQL语句，不能为null
      * @param joins JOIN信息列表，包含JOIN类型、表名、条件等，不能为null
      */
-    static void handleSQLJoin(SQL sql, List<GXJoinDto> joins) {
+    static Map<String, Object> handleSQLJoin(SQL sql, List<GXJoinDto> joins) {
+        HashMap<String, Object> paramMap = new HashMap<>();
         joins.forEach(join -> {
             GXJoinTypeEnums joinType = join.getJoinType();
             String tableName = join.getJoinTableName();
@@ -605,12 +589,23 @@ public interface GXBaseBuilder {
             if (Objects.isNull(masterTableNameAlias)) {
                 masterTableNameAlias = masterTableName;
             }
+            // 处理JOIN符加条件 ON a.id = b.aid AND xx.aa="aaa"
+            List<GXCondition<?>> conditions = join.getConditions();
+            String whereStr = "";
+            if (CollUtil.isNotEmpty(conditions)) {
+                Tuple tuple = handleConditions(conditions);
+                List<String> lastWheres = tuple.get(0);
+                paramMap.putAll(tuple.get(1));
+                if (CollUtil.isNotEmpty(lastWheres)) {
+                    whereStr = " AND " + String.join(" AND ", lastWheres);
+                }
+            }
             String andClause = Optional.ofNullable(join.getAnd()).orElse(Collections.emptyList()).stream().map(GXDbJoinOp::opString).collect(Collectors.joining(GXBuilderConstant.AND_OP));
             String orClause = Optional.ofNullable(join.getOr()).orElse(Collections.emptyList()).stream().map(GXDbJoinOp::opString).collect(Collectors.joining(GXBuilderConstant.AND_OP));
-            String assemblySql = CharSequenceUtil.format("{} {} ON ({})", masterTableName, masterTableNameAlias, andClause);
+            String assemblySql = CharSequenceUtil.format("{} {} ON ({} {})", masterTableName, masterTableNameAlias, andClause, whereStr);
             if (CharSequenceUtil.isNotEmpty(orClause)) {
                 assemblySql = assemblySql.replace("ON (", "ON ((");
-                assemblySql = CharSequenceUtil.format("{} {} ({}))", assemblySql, GXBuilderConstant.OR_OP, orClause);
+                assemblySql = CharSequenceUtil.format("{} {} ({} {}))", assemblySql, GXBuilderConstant.OR_OP, orClause, whereStr);
             }
             if (CharSequenceUtil.equalsIgnoreCase(GXBuilderConstant.LEFT_JOIN_TYPE, joinType.getJoinType())) {
                 sql.LEFT_OUTER_JOIN(assemblySql);
@@ -620,6 +615,45 @@ public interface GXBaseBuilder {
                 sql.INNER_JOIN(assemblySql);
             }
         });
+        return paramMap;
+    }
+
+    /**
+     * 处理插叙条件
+     *
+     * @param conditions 查询列表参数
+     * @return Tuple
+     */
+    private static Tuple handleConditions(List<GXCondition<?>> conditions) {
+        Map<String, Object> paramMap = new HashMap<>();
+        // 如果条件为空，直接返回空参数映射
+        if (Objects.isNull(conditions) || conditions.isEmpty()) {
+            LOGGER.debug("条件为空，不添加任何条件");
+            return new Tuple(new ArrayList<>(), paramMap);
+        }
+        // 收集所有有效的WHERE条件
+        List<String> lastWheres = new ArrayList<>();
+        // 遍历处理每个条件
+        conditions.forEach(c -> {
+            // 跳过排除已删除记录的特殊条件
+            if (!GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())) {
+                // 安全检查：确保非NULL条件的值不为null，防止意外的全表操作
+                if (ObjectUtil.isNull(c.getFieldValue()) && !GXConditionIsNULL.class.isAssignableFrom(c.getClass())) {
+                    String msg = CharSequenceUtil.format("数据查询条件错误【查询字段{}.{}的值是null】", c.getTableNameAlias(), c.getFieldExpression());
+                    throw new GXDBConditionException(msg);
+                }
+                // 获取条件的SQL表达式
+                String str = c.whereString();
+                // 只添加非空条件
+                if (CharSequenceUtil.isNotEmpty(str)) {
+                    lastWheres.add(str);
+                    // 收集参数映射，用于参数化查询
+                    paramMap.putAll(c.getParamMap());
+                    LOGGER.trace("添加WHERE条件: {}, 参数: {}", str, c.getParamMap());
+                }
+            }
+        });
+        return new Tuple(lastWheres, paramMap);
     }
 
     /**
@@ -985,51 +1019,31 @@ public interface GXBaseBuilder {
      * // paramMap包含: {"u_status": 1, "u_name": "%张%", "u_age_min": 18, "u_age_max": 30}
      * </pre>
      *
-     * @param sql       SQL对象，用于构建SQL语句，不能为null
-     * @param condition 条件列表，可以为null或空列表
+     * @param sql        SQL对象，用于构建SQL语句，不能为null
+     * @param conditions 条件列表，可以为null或空列表
      * @return 参数映射，包含所有条件的参数名和值
      * @throws GXDBConditionException   当条件值为null时抛出异常，防止意外的全表操作
      * @throws IllegalArgumentException 当SQL对象为null时抛出异常
      */
-    static Map<String, Object> handleSQLCondition(SQL sql, List<GXCondition<?>> condition) {
+    static Map<String, Object> handleSQLCondition(SQL sql, List<GXCondition<?>> conditions) {
         // 参数校验
         if (sql == null) {
             throw new IllegalArgumentException("SQL对象不能为null");
         }
         Map<String, Object> paramMap = new HashMap<>();
         // 如果条件为空，直接返回空参数映射
-        if (Objects.isNull(condition) || condition.isEmpty()) {
+        if (Objects.isNull(conditions) || conditions.isEmpty()) {
             LOGGER.debug("WHERE条件为空，不添加任何条件");
             return paramMap;
         }
-        // 收集所有有效的WHERE条件
-        List<String> lastWheres = new ArrayList<>();
-        // 遍历处理每个条件
-        condition.forEach(c -> {
-            // 跳过排除已删除记录的特殊条件
-            if (!GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())) {
-                // 安全检查：确保非NULL条件的值不为null，防止意外的全表操作
-                if (ObjectUtil.isNull(c.getFieldValue()) && !GXConditionIsNULL.class.isAssignableFrom(c.getClass())) {
-                    String msg = CharSequenceUtil.format("数据查询条件错误【查询字段{}.{}的值是null】", c.getTableNameAlias(), c.getFieldExpression());
-                    throw new GXDBConditionException(msg);
-                }
-                // 获取条件的SQL表达式
-                String str = c.whereString();
-                // 只添加非空条件
-                if (CharSequenceUtil.isNotEmpty(str)) {
-                    lastWheres.add(str);
-                    // 收集参数映射，用于参数化查询
-                    paramMap.putAll(c.getParamMap());
-                    LOGGER.trace("添加WHERE条件: {}, 参数: {}", str, c.getParamMap());
-                }
-            }
-        });
+        Tuple tuple = handleConditions(conditions);
+        List<String> lastWheres = tuple.get(0);
         if (!lastWheres.isEmpty()) {
             String whereStr = String.join(" AND ", lastWheres);
             sql.WHERE(whereStr);
             LOGGER.debug("最终WHERE条件: {}", whereStr);
         }
-        return paramMap;
+        return tuple.get(1);
     }
 
     /**
