@@ -207,7 +207,12 @@ public class GXDebeziumEngineConfig implements DisposableBean {
             synchronized (GXDebeziumEngineConfig.class) {
                 executorService = executorServiceRef.get();
                 if (executorService == null) {
-                    Thread.Builder.OfVirtual ofVirtual = Thread.ofVirtual().name("debezium-virtual-thread#", 1);
+                    Thread.Builder.OfVirtual ofVirtual = Thread.ofVirtual().name("debezium-virtual-thread#", 0)
+                            .uncaughtExceptionHandler((thread, throwable) -> {
+                                // 处理未捕获的异常，防止虚拟线程异常导致应用崩溃
+                                log.error("Debezium虚拟线程[{}]发生未捕获异常: {}",
+                                        thread.getName(), throwable.getMessage(), throwable);
+                            });
                     ThreadFactory factory = ofVirtual.factory();
                     ExecutorService newExecutorService = Executors.newThreadPerTaskExecutor(factory);
                     executorServiceRef.set(newExecutorService);
@@ -343,22 +348,6 @@ public class GXDebeziumEngineConfig implements DisposableBean {
         }
     }
 
-    /**
-     * 销毁Debezium引擎并释放资源
-     * <p>
-     * 该方法在Spring容器关闭时自动执行，负责优雅地关闭Debezium引擎和释放相关资源。
-     * 确保在应用关闭时能够正确地释放数据库连接和线程资源，避免资源泄漏。
-     * </p>
-     * <p>
-     * 销毁流程：
-     * 1. 关闭Debezium引擎
-     * 2. 关闭线程池
-     * 3. 等待线程池中的任务完成
-     * </p>
-     *
-     * @throws Exception 在关闭过程中可能发生的异常，这些异常会被记录但不会重新抛出，
-     *                   以允许其他Bean也能释放它们的资源
-     */
     /**
      * 验证Debezium配置
      * <p>

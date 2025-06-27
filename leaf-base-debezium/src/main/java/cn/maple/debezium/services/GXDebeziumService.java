@@ -52,7 +52,7 @@ public interface GXDebeziumService {
     /**
      * Redis缓存桶名称
      */
-    String BUCKET_NAME = "debezium";
+    String BUCKET_NAME = "maple-framework-debezium-engine";
 
     /**
      * Redis锁名称格式
