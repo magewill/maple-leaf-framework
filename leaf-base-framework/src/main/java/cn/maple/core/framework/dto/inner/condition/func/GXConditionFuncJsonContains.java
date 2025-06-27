@@ -1,12 +1,15 @@
 package cn.maple.core.framework.dto.inner.condition.func;
 
-import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.json.JSONUtil;
+import cn.maple.core.framework.exception.GXBusinessException;
+import cn.maple.core.framework.util.GXSpringContextUtils;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.reflect.TypeToken;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * MySQL JSON_CONTAINS函数条件构建类
@@ -14,7 +17,7 @@ import java.util.stream.Collectors;
  * 该类用于构建使用MySQL JSON_CONTAINS函数的查询条件，用于检查JSON文档是否包含特定值或路径。
  * JSON_CONTAINS函数返回1（真）如果目标JSON文档包含指定的值，或者0（假）如果不包含。
  * </p>
- * 
+ *
  * <p>安全特性：</p>
  * <ul>
  *   <li>使用MyBatis参数化查询机制(#{})，彻底防止SQL注入</li>
@@ -23,14 +26,14 @@ import java.util.stream.Collectors;
  *   <li>表名和字段名使用反引号(``)包裹，防止SQL关键字冲突</li>
  *   <li>自动处理不同类型的JSON值（字符串、数字等），避免格式错误</li>
  * </ul>
- * 
+ *
  * <p>性能优化：</p>
  * <ul>
  *   <li>参数化查询允许数据库缓存执行计划</li>
  *   <li>JSON路径表达式优化，提高JSON查询效率</li>
  *   <li>使用Stream API高效处理JSON数组元素</li>
  * </ul>
- * 
+ *
  * <p>使用示例：</p>
  * <pre>
  * // 示例1：检查tags字段是否包含指定的标签列表
@@ -40,20 +43,20 @@ import java.util.stream.Collectors;
  * GXConditionFuncJsonContains condition = new GXConditionFuncJsonContains("t_article", "tags", tagList);
  * // 生成SQL片段：JSON_CONTAINS(`t_article`.`tags`->#{dbQueryParamInnerDto.paramMap.condition_xxx_path}, CAST(#{dbQueryParamInnerDto.paramMap.condition_xxx} AS JSON))
  * // 参数值会被设置为JSON数组：["技术","Java"]
- * 
+ *
  * // 示例2：检查user_info字段中的特定路径是否包含指定值
  * Dict dict = Dict.create().set("name", "张三").set("age", 25);
  * GXConditionFuncJsonContains condition = new GXConditionFuncJsonContains("t_user", "user_info", dict, "profile");
  * // 生成SQL片段：JSON_CONTAINS(`t_user`.`user_info`->#{dbQueryParamInnerDto.paramMap.condition_xxx_path}, CAST(#{dbQueryParamInnerDto.paramMap.condition_xxx} AS JSON))
  * // 参数值会被设置为JSON对象：[{"name":"张三","age":25}]
  * // 路径参数会被设置为：$.profile
- * 
+ *
  * // 示例3：检查JSON对象中是否包含特定键值对
  * Dict userInfo = Dict.create().set("name", "张三");
  * GXConditionFuncJsonContains condition = new GXConditionFuncJsonContains("t_user", "ext", userInfo);
  * // 生成SQL片段：JSON_CONTAINS(`t_user`.`ext`->#{dbQueryParamInnerDto.paramMap.condition_xxx_path}, CAST(#{dbQueryParamInnerDto.paramMap.condition_xxx} AS JSON))
  * // 参数值会被设置为JSON对象：[{"name":"张三"}]
- * 
+ *
  * // 示例4：将条件添加到查询参数中并执行查询
  * List<GXCondition<?>> conditions = new ArrayList<>();
  * conditions.add(condition);
@@ -63,7 +66,7 @@ import java.util.stream.Collectors;
  *     .build();
  * List<UserEntity> users = userMapper.findByCondition(queryParam);
  * </pre>
- * 
+ *
  * @author 塵子曦
  * @since 1.0.0
  */
@@ -82,8 +85,8 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
      * 构造函数，使用List作为值，默认JSON路径为空
      *
      * @param tableNameAlias 表名别名，用于SQL查询
-     * @param jsonField JSON字段名，包含要检查的JSON数据
-     * @param values 要检查包含的值列表
+     * @param jsonField      JSON字段名，包含要检查的JSON数据
+     * @param values         要检查包含的值列表
      */
     public GXConditionFuncJsonContains(String tableNameAlias, String jsonField, List<Object> values) {
         this(tableNameAlias, jsonField, values, "");
@@ -93,9 +96,9 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
      * 构造函数，使用List作为值，指定JSON路径
      *
      * @param tableNameAlias 表名别名，用于SQL查询
-     * @param jsonField JSON字段名，包含要检查的JSON数据
-     * @param values 要检查包含的值列表
-     * @param jsonPath JSON路径表达式，如"$.tags"
+     * @param jsonField      JSON字段名，包含要检查的JSON数据
+     * @param values         要检查包含的值列表
+     * @param jsonPath       JSON路径表达式，如"$.tags"
      */
     public GXConditionFuncJsonContains(String tableNameAlias, String jsonField, List<Object> values, String jsonPath) {
         super(tableNameAlias, jsonField, "", null);
@@ -107,8 +110,8 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
      * 构造函数，使用Dict作为值，默认JSON路径为空
      *
      * @param tableNameAlias 表名别名，用于SQL查询
-     * @param jsonField JSON字段名，包含要检查的JSON数据
-     * @param values 要检查包含的值字典
+     * @param jsonField      JSON字段名，包含要检查的JSON数据
+     * @param values         要检查包含的值字典
      */
     public GXConditionFuncJsonContains(String tableNameAlias, String jsonField, Dict values) {
         this(tableNameAlias, jsonField, values, "");
@@ -118,9 +121,9 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
      * 构造函数，使用Dict作为值，指定JSON路径
      *
      * @param tableNameAlias 表名别名，用于SQL查询
-     * @param jsonField JSON字段名，包含要检查的JSON数据
-     * @param values 要检查包含的值字典
-     * @param jsonPath JSON路径表达式，如"$.profile"
+     * @param jsonField      JSON字段名，包含要检查的JSON数据
+     * @param values         要检查包含的值字典
+     * @param jsonPath       JSON路径表达式，如"$.profile"
      */
     public GXConditionFuncJsonContains(String tableNameAlias, String jsonField, Dict values, String jsonPath) {
         super(tableNameAlias, jsonField, "", null);
@@ -165,15 +168,14 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
         if (values.getClass().isAssignableFrom(Dict.class)) {
             return "[" + JSONUtil.toJsonStr(values) + "]";
         }
-        if (values.getClass().isAssignableFrom(List.class)) {
-            List<?> valueLst = Convert.convert(List.class, values);
-            return "[" + valueLst.stream().map(s -> {
-                String format = "\"{}\"";
-                if (s.getClass().isAssignableFrom(Integer.class) || s.getClass().isAssignableFrom(Long.class) || s.getClass().isAssignableFrom(Short.class)) {
-                    format = "{}";
-                }
-                return CharSequenceUtil.format(format, s);
-            }).collect(Collectors.joining(",")) + "]";
+        if (TypeToken.of(values.getClass()).isSubtypeOf(List.class)) {
+            ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
+            try {
+                assert objectMapper != null;
+                return objectMapper.writeValueAsString(values);
+            } catch (JsonProcessingException e) {
+                throw new GXBusinessException(e.getMessage(), e);
+            }
         }
         return values.toString();
     }
