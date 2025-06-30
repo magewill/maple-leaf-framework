@@ -774,7 +774,7 @@ public class GXCommonUtils {
             }
 
             // 复制属性
-            if (TypeToken.of(source.getClass()).isSubtypeOf(GXBaseData.class) && ObjectUtil.isNull(copyOptions)) {
+            if (!TypeToken.of(target.getClass()).isSubtypeOf(Map.class) && TypeToken.of(source.getClass()).isSubtypeOf(GXBaseData.class) && ObjectUtil.isNull(copyOptions)) {
                 LOG.info("使用CGLIB进行高效属性复制!!");
                 //GXCglibUtils.copy(source, target, new GXCGLibDataConvert(tClass));
                 GXCglibUtils.copy(source, target, GXCGLibDataConvert.getConverter(tClass));
