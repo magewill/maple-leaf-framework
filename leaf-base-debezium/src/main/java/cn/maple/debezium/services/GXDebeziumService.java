@@ -57,7 +57,7 @@ public interface GXDebeziumService {
     /**
      * Redis锁名称格式
      */
-    String LOCK_NAME_FORMAT = "initial-engine-lock:{}";
+    String LOCK_NAME_FORMAT = "initial-engine-lock:{}:{}";
 
     /**
      * 自定义业务处理
