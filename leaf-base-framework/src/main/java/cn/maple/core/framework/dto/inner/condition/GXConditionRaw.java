@@ -20,9 +20,9 @@ import lombok.extern.log4j.Log4j2;
  * <pre>
  * // 创建一个原始SQL条件（谨慎使用！）
  * GXConditionRaw condition = new GXConditionRaw("DATE(created_at) = CURDATE()");
- * String whereClause = condition.whereString(); 
+ * String whereClause = condition.whereString();
  * // 结果: DATE(created_at) = CURDATE()
- * 
+ *
  * // 在实际应用中与查询构建器结合使用
  * GXModelQueryParamDto paramDto = new GXModelQueryParamDto();
  * paramDto.addCondition(condition);
@@ -86,6 +86,30 @@ public class GXConditionRaw extends GXCondition<String> {
         if (strValue.matches("(?i).*(select|insert|update|delete|drop|alter|exec|union|into|outfile).*")) {
             log.warn("原始条件中包含可疑的SQL关键字，~~请确保使用GXDBStringEscapeUtils.escapeSql(str)函数对用户传入的数据进行了SQL注入检测~~: {}", strValue);
             //throw new GXSqlInjectionException("原始条件中包含可疑的SQL关键字: " + strValue);
+        }
+
+        log.warn("~~使用原始条件，请确保数据安全: {}~~", strValue);
+        return CharSequenceUtil.format("{}", strValue);
+    }
+
+    @Override
+    public String getFieldOriginalValue() {
+        if (value == null) {
+            return "NULL";
+        }
+
+        String strValue = value.toString();
+
+        // 检查是否存在SQL注入风险
+        if (GXDBStringEscapeUtils.check(strValue)) {
+            log.error("原始条件中检测到SQL注入风险: {}", strValue);
+            throw new GXSqlInjectionException("原始条件中检测到SQL注入风险: " + strValue);
+        }
+
+        // 使用更全面的检查 - 检查是否包含可疑的SQL关键字
+        if (strValue.matches("(?i).*(select|insert|update|delete|drop|alter|exec|union|into|outfile).*")) {
+            log.error("原始条件中包含可疑的SQL关键字: {}", strValue);
+            throw new GXSqlInjectionException("原始条件中包含可疑的SQL关键字: " + strValue);
         }
 
         log.warn("~~使用原始条件，请确保数据安全: {}~~", strValue);

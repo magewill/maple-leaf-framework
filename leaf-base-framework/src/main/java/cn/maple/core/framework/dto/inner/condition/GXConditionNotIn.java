@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
  * 该类用于构建SQL中的数字类型NOT IN条件，采用MyBatis参数化查询机制，
  * 有效防止SQL注入攻击。每个值都会被单独参数化处理，确保查询安全。
  * </p>
- * 
+ *
  * <p>
  * 安全特性：
  * <ul>
@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
  *   <li>为每个值创建独立的参数名，避免参数混淆</li>
  * </ul>
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
@@ -36,20 +36,20 @@ import java.util.stream.Collectors;
  * idSet.add(1);
  * idSet.add(2);
  * idSet.add(3);
- * 
+ *
  * // 2. 创建NOT IN条件（WHERE t.id NOT IN (1, 2, 3)）
  * GXConditionNotIn condition = new GXConditionNotIn("t", "id", idSet);
- * 
+ *
  * // 3. 在查询构建器中使用该条件
  * GXModelQueryParamDto queryParam = new GXModelQueryParamDto();
  * queryParam.addCondition(condition);
  * List<UserEntity> users = userMapper.selectByCondition(queryParam);
- * 
+ *
  * // 4. 也可以与其他条件组合使用
  * queryParam.addCondition(new GXConditionEQ("t", "is_deleted", 0));
  * </pre>
  * </p>
- * 
+ *
  * <p>
  * 性能优化：
  * <ul>
@@ -58,7 +58,7 @@ import java.util.stream.Collectors;
  *   <li>使用StringBuilder构建参数占位符列表，减少字符串连接开销</li>
  * </ul>
  * </p>
- * 
+ *
  * @author 塵渊
  */
 public class GXConditionNotIn extends GXCondition<String> {
@@ -69,10 +69,10 @@ public class GXConditionNotIn extends GXCondition<String> {
 
     /**
      * 构造函数
-     * 
+     *
      * @param tableNameAlias 表别名，如"t"、"user"等，可以为空
-     * @param fieldName 字段名，如"id"、"status"等
-     * @param value 数字值集合，用于NOT IN条件
+     * @param fieldName      字段名，如"id"、"status"等
+     * @param value          数字值集合，用于NOT IN条件
      */
     public GXConditionNotIn(String tableNameAlias, String fieldName, Set<Number> value) {
         super(tableNameAlias, fieldName, value);
@@ -81,7 +81,7 @@ public class GXConditionNotIn extends GXCondition<String> {
 
     /**
      * 获取操作符
-     * 
+     *
      * @return 返回"not in"操作符
      */
     @Override
@@ -96,7 +96,7 @@ public class GXConditionNotIn extends GXCondition<String> {
      * [tableAlias].[fieldName] NOT IN (#{param1}, #{param2}, ...)
      * 每个参数都会被单独处理，确保安全。
      * </p>
-     * 
+     *
      * @return 返回构建好的WHERE子句字符串
      * @throws GXBusinessException 当IN条件中的值数量超过限制时抛出
      */
@@ -143,7 +143,7 @@ public class GXConditionNotIn extends GXCondition<String> {
      * 该方法处理参数映射，为每个值创建单独的参数。
      * 虽然方法返回格式化的字符串，但实际上参数值存储在paramMap中用于MyBatis参数化查询。
      * </p>
-     * 
+     *
      * @return 格式化的NOT IN子句字符串，实际值存储在paramMap中
      */
     @Override
@@ -157,9 +157,15 @@ public class GXConditionNotIn extends GXCondition<String> {
             String itemParamName = paramName + "_" + index++;
             this.paramMap.put(itemParamName, num);
         }
-        
+
         // 为了兼容旧版本，返回格式化的字符串，但实际上使用whereString()方法生成的参数化查询
         String str = values.stream().map(String::valueOf).collect(Collectors.joining(","));
+        return CharSequenceUtil.format("({})", str);
+    }
+
+    @Override
+    public String getFieldOriginalValue() {
+        String str = ((Set<Number>) value).stream().map(String::valueOf).collect(Collectors.joining(","));
         return CharSequenceUtil.format("({})", str);
     }
 }

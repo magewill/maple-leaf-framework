@@ -14,4 +14,9 @@ public class GXConditionGT extends GXCondition<Number> {
     public Number getFieldValue() {
         return (Number) value;
     }
+
+    @Override
+    public Number getFieldOriginalValue() {
+        return (Number) value;
+    }
 }

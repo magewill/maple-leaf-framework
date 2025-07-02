@@ -66,6 +66,7 @@ package cn.maple.core.framework.dto.inner.condition;
  *
  * @author 塵子曦
  */
+
 /**
  * 排除已删除字段的条件类
  * <p>
@@ -141,6 +142,11 @@ public class GXExclusionDeletedFieldCondition extends GXCondition<String> {
      */
     @Override
     public String getFieldValue() {
+        return null;
+    }
+
+    @Override
+    public String getFieldOriginalValue() {
         return null;
     }
 }

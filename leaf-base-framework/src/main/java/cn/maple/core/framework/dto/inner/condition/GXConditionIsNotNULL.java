@@ -18,4 +18,9 @@ public class GXConditionIsNotNULL extends GXCondition<Object> {
     public Object getFieldValue() {
         return null;
     }
+
+    @Override
+    public Object getFieldOriginalValue() {
+        return null;
+    }
 }

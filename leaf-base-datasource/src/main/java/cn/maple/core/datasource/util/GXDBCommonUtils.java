@@ -45,7 +45,7 @@ import java.util.stream.Collectors;
  * 该类中的所有方法都是线程安全的，可以在多线程环境中安全使用。
  * 所有方法都进行了内存安全处理，避免内存泄漏和溢出风险。
  * </p>
- * 
+ *
  * @author 塵子曦
  */
 @SuppressWarnings({"unused"})
@@ -55,10 +55,6 @@ public class GXDBCommonUtils {
      */
     private static final Logger LOG = LoggerFactory.getLogger(GXDBCommonUtils.class);
 
-    /**
-     * 最大输入长度，防止超长输入导致性能问题和内存溢出
-     * 限制为1MB，足够处理大多数正常业务场景的输入
-     */
     /**
      * 最大输入长度，防止超长输入导致性能问题和内存溢出
      * 限制为1MB，足够处理大多数正常业务场景的输入
@@ -426,7 +422,8 @@ public class GXDBCommonUtils {
         condition.forEach(c -> {
             if (!GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())) {
                 String column = c.getFieldExpression();
-                Object value = c.getFieldValue();
+                //Object value = c.getFieldValue();
+                Object value = c.getFieldOriginalValue();
 
                 if (String.class.isAssignableFrom(value.getClass())) {
                     value = CharSequenceUtil.replace(value.toString(), "'", "");
@@ -571,7 +568,7 @@ public class GXDBCommonUtils {
      * @param input       需要检查的输入字符串
      * @param source      输入来源（用于日志记录，帮助定位问题）
      * @param isUserInput 是否为用户输入（如果是，则严格检测；如果不是，则放宽检测）
-     * @throws GXSqlInjectionException 如果检测到 SQL 注入攻击
+     * @throws GXSqlInjectionException  如果检测到 SQL 注入攻击
      * @throws IllegalArgumentException 如果输入长度超过最大限制
      */
     public static void checkSQLInjection(String input, String source, boolean isUserInput) {

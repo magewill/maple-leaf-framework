@@ -4,11 +4,14 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
+import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXCommonUtils;
+import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * IN条件查询构建类（数值类型）
@@ -17,7 +20,7 @@ import java.util.Set;
  * 支持参数化查询，自动生成参数占位符，并提供安全的参数绑定机制。
  * 内置查询条件数量限制，防止过大的IN查询导致性能问题。
  * </p>
- * 
+ *
  * <p>使用示例：</p>
  * <pre>
  * // 1. 创建数值类型的IN条件
@@ -26,29 +29,29 @@ import java.util.Set;
  * idSet.add(2);
  * idSet.add(3);
  * GXConditionIn condition = new GXConditionIn("t", "user_id", idSet);
- * 
+ *
  * // 2. 在查询参数中使用
  * GXBaseQueryParamInnerDto queryParam = new GXBaseQueryParamInnerDto();
  * queryParam.addCondition(condition);
- * 
+ *
  * // 3. 在Mapper方法中使用
  * List<UserEntity> users = userMapper.selectByCondition(queryParam);
  * </pre>
- * 
+ *
  * <p>生成的SQL示例：</p>
  * <pre>
  * -- 假设参数为：tableNameAlias="t", fieldName="user_id", numbers={1,2,3}
  * -- 生成的SQL片段为：
  * t.user_id in (#{dbQueryParamInnerDto.paramMap.COND_0_0}, #{dbQueryParamInnerDto.paramMap.COND_0_1}, #{dbQueryParamInnerDto.paramMap.COND_0_2})
  * </pre>
- * 
+ *
  * <p>安全特性：</p>
  * <ol>
  *   <li>参数化查询：避免SQL注入风险</li>
  *   <li>数量限制：防止过大的IN查询导致数据库性能问题</li>
  *   <li>环境感知：在开发环境和生产环境使用不同的数量限制</li>
  * </ol>
- * 
+ *
  * @author 塵渊 britton@126.com
  */
 public class GXConditionIn extends GXCondition<String> {
@@ -155,5 +158,32 @@ public class GXConditionIn extends GXCondition<String> {
         }
         // 此方法不再使用，但为了兼容性保留
         return "";
+    }
+
+    @Override
+    public String getFieldOriginalValue() {
+        String activeProfile = GXCommonUtils.getActiveProfile();
+        int limitCnt = 100000;
+        List<String> envLst = CollUtil.newArrayList(GXCommonConstant.RUN_ENV_DEV, GXCommonConstant.RUN_ENV_LOCAL);
+        if (CollUtil.contains(envLst, activeProfile)/* && GXCurrentRequestContextUtils.isHTTP()*/) {
+            limitCnt = GXCommonUtils.getEnvironmentValue("db.in.limit.cnt", Integer.class, 50);
+        }
+        if (CollUtil.size(value) > limitCnt) {
+            throw new GXBusinessException(CharSequenceUtil.format("IN查询条件不能超过{}条数据!", limitCnt));
+        }
+        String str = ((Set<Number>) value).stream().map(v -> {
+            if (v == null) {
+                return "NULL";
+            }
+
+            String numStr = String.valueOf(v);
+            // 即使是数字，也需要检查是否有SQL注入风险
+            // 例如，某些数据库可能允许在数字中嵌入SQL注入
+            if (GXDBStringEscapeUtils.check(numStr)) {
+                throw new GXSqlInjectionException("IN条件中的数值存在SQL注入风险: " + numStr);
+            }
+            return numStr;
+        }).collect(Collectors.joining(","));
+        return CharSequenceUtil.format("({})", str);
     }
 }

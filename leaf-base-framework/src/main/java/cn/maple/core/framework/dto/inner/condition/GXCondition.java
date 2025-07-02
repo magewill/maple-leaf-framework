@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * 该类为SQL条件构建提供基础功能，支持参数化查询以防止SQL注入。
  * 所有条件类型都应继承此类并实现特定的条件逻辑。
  * </p>
- * 
+ *
  * <p>
  * 安全特性：
  * - 使用MyBatis参数化查询机制(#{})，而非字符串拼接，彻底防止SQL注入
@@ -26,25 +26,25 @@ import java.util.concurrent.atomic.AtomicLong;
  * - 参数值与SQL语句分离，提高安全性
  * - 支持函数表达式，自动识别并安全处理
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
  * // 1. 创建等值条件（WHERE user.username = 'admin'）
  * GXCondition<?> eqCondition = new GXConditionEQ("user", "username", "admin");
- * 
+ *
  * // 2. 创建LIKE条件（WHERE user.email LIKE '%@example.com'）
  * GXCondition<?> likeCondition = new GXConditionLike("user", "email", "%@example.com");
- * 
+ *
  * // 3. 创建IN条件（WHERE user.status IN (1, 2, 3)）
  * GXCondition<?> inCondition = new GXConditionIN("user", "status", Arrays.asList(1, 2, 3));
- * 
+ *
  * // 4. 创建函数表达式条件（WHERE DATE(user.create_time) = '2023-01-01'）
  * GXCondition<?> funcCondition = new GXConditionEQ("user", "DATE(create_time)", "2023-01-01");
- * 
+ *
  * // 5. 将条件添加到条件列表
  * List<GXCondition<?>> conditions = Arrays.asList(eqCondition, likeCondition, inCondition, funcCondition);
- * 
+ *
  * // 6. 创建查询参数并执行查询
  * GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
  *     .tableName("user")
@@ -57,6 +57,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * @param <T> 字段值的类型参数
  * @author 塵子曦
  */
+
 /**
  * 数据库查询条件的抽象基类
  * <p>
@@ -74,7 +75,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * GXConditionEQ condition = new GXConditionEQ("user_table", "age", 18);
  * String whereClause = condition.whereString(); 
  * // 结果: user_table.age = #{dbQueryParamInnerDto.paramMap.condition_age_1}
- * 
+ *
  * // 在实际应用中与查询构建器结合使用
  * GXBaseMapper<UserEntity> mapper = ...;
  * GXModelQueryParamDto paramDto = new GXModelQueryParamDto();
@@ -162,7 +163,7 @@ public abstract class GXCondition<T> implements Serializable {
      * - 使用参数化查询而非字符串拼接，有效防止SQL注入攻击
      * - 使用CharSequenceUtil.format进行字符串格式化，避免直接拼接
      * - 参数值通过paramMap传递，而不是直接嵌入SQL中
-     * 
+     *
      * @return 完整的WHERE条件SQL片段，如 "table.field = #{dbQueryParamInnerDto.paramMap.param1}"
      */
     public String whereString() {
@@ -181,4 +182,6 @@ public abstract class GXCondition<T> implements Serializable {
     }
 
     public abstract T getFieldValue();
+
+    public abstract T getFieldOriginalValue();
 }

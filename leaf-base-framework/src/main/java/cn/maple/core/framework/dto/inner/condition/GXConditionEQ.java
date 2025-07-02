@@ -10,14 +10,14 @@ package cn.maple.core.framework.dto.inner.condition;
  * <pre>
  * // 创建一个简单的等值查询条件
  * GXConditionEQ condition = new GXConditionEQ("age", 18);
- * String whereClause = condition.whereString(); 
+ * String whereClause = condition.whereString();
  * // 结果: age = #{dbQueryParamInnerDto.paramMap.condition_age_1}
- * 
+ *
  * // 带表别名的等值查询条件
  * GXConditionEQ condition = new GXConditionEQ("user", "age", 18);
  * String whereClause = condition.whereString();
  * // 结果: user.age = #{dbQueryParamInnerDto.paramMap.condition_age_1}
- * 
+ *
  * // 在实际应用中与查询构建器结合使用
  * GXModelQueryParamDto paramDto = new GXModelQueryParamDto();
  * paramDto.addCondition(new GXConditionEQ("user_id", 1001));
@@ -37,6 +37,11 @@ public class GXConditionEQ extends GXCondition<Number> {
 
     @Override
     public Number getFieldValue() {
+        return (Number) value;
+    }
+
+    @Override
+    public Number getFieldOriginalValue() {
         return (Number) value;
     }
 }

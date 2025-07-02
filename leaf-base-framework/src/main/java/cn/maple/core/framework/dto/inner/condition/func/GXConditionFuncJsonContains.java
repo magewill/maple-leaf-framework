@@ -208,4 +208,9 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
                 getFunctionName(),
                 getFieldExpression());
     }
+
+    @Override
+    public String getFieldOriginalValue() {
+        return "";
+    }
 }

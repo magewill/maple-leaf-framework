@@ -141,4 +141,26 @@ public class GXConditionJsonEQ extends GXCondition<Object> {
         return CharSequenceUtil.format("{}.`{}`->#{dbQueryParamInnerDto.paramMap.{}} {} #{dbQueryParamInnerDto.paramMap.{}}",
                 tableNameAlias, fieldExpression, paramName + "_path", getOp(), paramName);
     }
+
+    @Override
+    public Object getFieldOriginalValue() {
+        if (value == null) {
+            return "NULL";
+        }
+
+        String strValue = value.toString();
+
+        // 检查是否存在SQL注入风险
+        if (GXDBStringEscapeUtils.check(strValue)) {
+            throw new GXSqlInjectionException("SQL注入异常");
+        }
+
+        if (NumberUtil.isNumber(strValue)) {
+            return CharSequenceUtil.format("{}", strValue);
+        }
+
+        // 使用escapeSql方法进行更全面的SQL转义
+        String escapedValue = GXDBStringEscapeUtils.escapeSql(strValue);
+        return CharSequenceUtil.format("'{}'", escapedValue);
+    }
 }

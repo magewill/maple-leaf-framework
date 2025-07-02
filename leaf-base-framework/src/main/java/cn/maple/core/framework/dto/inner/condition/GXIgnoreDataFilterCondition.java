@@ -63,6 +63,7 @@ import cn.maple.core.framework.constant.GXDataSourceConstant;
  *
  * @author 塵子曦
  */
+
 /**
  * 忽略数据权限过滤条件类
  * <p>
@@ -122,6 +123,11 @@ public class GXIgnoreDataFilterCondition extends GXCondition<String> {
      */
     @Override
     public String getFieldValue() {
+        return "";
+    }
+
+    @Override
+    public String getFieldOriginalValue() {
         return "";
     }
 }

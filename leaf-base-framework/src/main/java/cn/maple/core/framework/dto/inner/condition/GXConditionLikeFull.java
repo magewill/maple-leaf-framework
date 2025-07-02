@@ -1,5 +1,6 @@
 package cn.maple.core.framework.dto.inner.condition;
 
+import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
@@ -18,15 +19,15 @@ import cn.maple.core.framework.util.GXDBStringEscapeUtils;
  * <pre>
  * // 创建一个简单的全模糊匹配查询条件
  * GXConditionLikeFull condition = new GXConditionLikeFull("", "username", "张");
- * String whereClause = condition.whereString(); 
+ * String whereClause = condition.whereString();
  * // 结果: username like #{dbQueryParamInnerDto.paramMap.condition_username_1}
  * // 参数值会被处理为: %张%
- * 
+ *
  * // 带表别名的全模糊匹配查询条件
  * GXConditionLikeFull condition = new GXConditionLikeFull("user", "username", "张");
  * String whereClause = condition.whereString();
  * // 结果: user.username like #{dbQueryParamInnerDto.paramMap.condition_username_1}
- * 
+ *
  * // 在实际应用中与查询构建器结合使用
  * GXModelQueryParamDto paramDto = new GXModelQueryParamDto();
  * paramDto.addCondition(new GXConditionLikeFull("", "username", "张"));
@@ -56,5 +57,30 @@ public class GXConditionLikeFull extends GXCondition<String> {
         this.paramMap.clear();
         this.paramMap.put(paramName, "%" + value + "%");
         return "";
+    }
+
+    @Override
+    public String getFieldOriginalValue() {
+        if (value == null) {
+            return "NULL";
+        }
+
+        String strValue = value.toString();
+        // 首先检查是否存在SQL注入风险
+        if (GXDBStringEscapeUtils.check(strValue)) {
+            throw new GXSqlInjectionException("模糊匹配条件中检测到SQL注入风险: " + strValue);
+        }
+
+        // 使用escapeSqlForLike方法进行更全面的SQL转义，特别适合LIKE查询
+        String escapedValue = GXDBStringEscapeUtils.escapeSqlForLike(strValue);
+
+        // 根据内容选择合适的引号包裹方式
+        if (CharSequenceUtil.contains(escapedValue, "''")) {
+            // 如果包含已转义的单引号，使用双引号包裹
+            return CharSequenceUtil.format("\"%{}%\"", escapedValue);
+        } else {
+            // 否则使用单引号包裹
+            return CharSequenceUtil.format("'%{}%'", escapedValue);
+        }
     }
 }
