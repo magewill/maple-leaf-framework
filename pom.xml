@@ -44,7 +44,7 @@
         <hutool.version>5.8.39</hutool.version>
         <aspectjweaver.version>1.9.24</aspectjweaver.version>
         <guava.version>33.4.8-jre</guava.version>
-        <caffeine.version>3.2.1</caffeine.version>
+        <caffeine.version>3.2.2</caffeine.version>
         <fastjson.version>2.0.57</fastjson.version>
         <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
         <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
