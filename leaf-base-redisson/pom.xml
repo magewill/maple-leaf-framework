@@ -12,7 +12,7 @@
     <artifactId>leaf-base-redisson</artifactId>
 
     <properties>
-        <redisson.version>3.50.0</redisson.version>
+        <redisson.version>3.51.0</redisson.version>
     </properties>
 
     <dependencies>
