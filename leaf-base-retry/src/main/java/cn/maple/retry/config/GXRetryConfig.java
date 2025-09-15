@@ -1,5 +1,6 @@
 package cn.maple.retry.config;
 
+import cn.hutool.core.map.MapUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.retry.listener.GXRetryListener;
 import cn.maple.retry.util.GXRetryUtil;
@@ -12,8 +13,11 @@ import org.springframework.retry.backoff.ExponentialBackOffPolicy;
 import org.springframework.retry.policy.SimpleRetryPolicy;
 import org.springframework.retry.support.RetryTemplate;
 
+import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Spring Retry 配置类。
@@ -263,8 +267,9 @@ public class GXRetryConfig {
         Map<Class<? extends Throwable>, Boolean> retryExceptions = new ConcurrentHashMap<>();
         // 默认重试所有GXBusinessException类型异常
         retryExceptions.put(GXBusinessException.class, true);
-        //retryExceptions.put(IOException.class, true);       // 示例：网络IO异常
-        //retryExceptions.put(TimeoutException.class, true);  // 示例：超时异常
+        retryExceptions.put(IOException.class, true);
+        retryExceptions.put(TimeoutException.class, true);
+        retryExceptions.put(SocketTimeoutException.class, true);
         return retryExceptions;
     }
 
@@ -295,7 +300,7 @@ public class GXRetryConfig {
         validateRetryParameters(maxAttempts, initialInterval, multiplier, maxInterval);
 
         // 确保异常映射不为null
-        Map<Class<? extends Throwable>, Boolean> exceptionMap = retryExceptions != null ? retryExceptions : createDefaultRetryExceptionMap();
+        Map<Class<? extends Throwable>, Boolean> exceptionMap = MapUtil.isNotEmpty(retryExceptions) ? retryExceptions : createDefaultRetryExceptionMap();
 
         // 创建RetryTemplate实例
         final RetryTemplate retryTemplate = new RetryTemplate();
