@@ -12,9 +12,10 @@
     <artifactId>leaf-base-elasticsearch</artifactId>
 
     <properties>
-        <spring.data.elasticsearch.version>5.5.1</spring.data.elasticsearch.version>
+        <spring.data.elasticsearch.version>5.5.6</spring.data.elasticsearch.version>
         <t-digest.version>3.3</t-digest.version>
         <parsson.version>1.1.7</parsson.version>
+        <httpclient.version>4.5.14</httpclient.version>
     </properties>
 
     <dependencies>
@@ -67,6 +68,12 @@
             <groupId>org.eclipse.parsson</groupId>
             <artifactId>parsson</artifactId>
             <version>${parsson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+            <version>${httpclient.version}</version>
+            <scope>compile</scope>
         </dependency>
     </dependencies>
 </project>

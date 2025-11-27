@@ -12,7 +12,7 @@
     <artifactId>leaf-base-nacos</artifactId>
 
     <properties>
-        <nacos.version>2.4.2</nacos.version>
+        <nacos.version>3.0.3</nacos.version>
     </properties>
 
     <dependencies>
