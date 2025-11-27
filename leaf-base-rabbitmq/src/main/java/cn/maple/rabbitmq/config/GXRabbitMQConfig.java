@@ -5,10 +5,6 @@ import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.rabbitmq.callback.GXConfirmCallback;
 import cn.maple.rabbitmq.callback.GXRecoveryCallback;
 import cn.maple.rabbitmq.callback.GXReturnsCallback;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.AsyncRabbitTemplate;
@@ -18,7 +14,7 @@ import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitMessagingTemplate;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.DefaultClassMapper;
-import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
+import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.system.JavaVersion;
 import org.springframework.context.annotation.Bean;
@@ -28,6 +24,8 @@ import org.springframework.messaging.converter.GenericMessageConverter;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.Trigger;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.datatype.jsr310.JavaTimeModule;
 
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -157,19 +155,12 @@ public class GXRabbitMQConfig {
         defaultClassMapper.setTrustedPackages("cn.hutool.core", "cn.maple");
 
         // 创建并配置ObjectMapper，优化JSON处理
-        ObjectMapper objectMapper = new ObjectMapper();
-        // 注册Java 8日期时间模块，支持LocalDate、LocalDateTime等类型
-        objectMapper.registerModule(new JavaTimeModule());
-        // 禁用将日期时间序列化为时间戳，使用ISO-8601格式
-        objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-        // 忽略未知属性，提高兼容性
-        objectMapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
-        // 禁用空对象序列化，减少消息大小
-        objectMapper.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
+        JsonMapper jsonMapper = new JsonMapper();
+        jsonMapper.registeredModules().add(new JavaTimeModule());
 
-        Jackson2JsonMessageConverter jackson2JsonMessageConverter = new Jackson2JsonMessageConverter(objectMapper);
-        jackson2JsonMessageConverter.setClassMapper(defaultClassMapper);
-        rabbitTemplate.setMessageConverter(jackson2JsonMessageConverter);
+        JacksonJsonMessageConverter jacksonJsonMessageConverter = new JacksonJsonMessageConverter(jsonMapper);
+        jacksonJsonMessageConverter.setClassMapper(defaultClassMapper);
+        rabbitTemplate.setMessageConverter(jacksonJsonMessageConverter);
 
         // 设置消息发送失败返回回调
         rabbitTemplate.setReturnsCallback(returned -> {
@@ -205,14 +196,14 @@ public class GXRabbitMQConfig {
         });
 
         // 设置重试恢复回调
-        rabbitTemplate.setRecoveryCallback(retryContext -> {
+        rabbitTemplate.setRecoveryCallback(throwable -> {
             try {
                 GXRecoveryCallback recoveryCallback = GXSpringContextUtils.getBean(GXRecoveryCallback.class);
                 if (ObjectUtil.isNotNull(recoveryCallback)) {
-                    return recoveryCallback.recover(retryContext);
+                    return recoveryCallback.recover(throwable);
                 } else {
                     // 如果没有自定义回调实现，记录错误日志
-                    log.error("消息发送重试失败，已达到最大重试次数: {}", retryContext.getRetryCount());
+                    log.error("RabbitMQ消息发送重试失败，实现信息: {}", throwable.getMessage());
                 }
             } catch (Exception e) {
                 log.error("处理消息重试恢复回调时发生异常", e);

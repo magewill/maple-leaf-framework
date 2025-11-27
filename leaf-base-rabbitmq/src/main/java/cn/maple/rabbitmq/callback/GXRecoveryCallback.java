@@ -1,7 +1,5 @@
 package cn.maple.rabbitmq.callback;
 
-import org.springframework.retry.RetryContext;
-
 /**
  * RabbitMQ消息重试恢复回调接口
  * <p>
@@ -18,7 +16,7 @@ import org.springframework.retry.RetryContext;
  * <p>
  * 线程安全说明：实现类应当保证线程安全，因为该回调可能在多线程环境下被调用
  * </p>
- * 
+ *
  * @author maple
  */
 public interface GXRecoveryCallback {
@@ -34,9 +32,9 @@ public interface GXRecoveryCallback {
      * - 如果返回非null对象，该对象将作为重试操作的最终结果返回
      * </p>
      *
-     * @param retryContext 重试上下文，包含重试相关的信息，如异常、重试次数等
+     * @param throwable 异常信息
      * @return 恢复操作的结果，可以为null
      * @throws Exception 如果恢复过程中发生异常，可以抛出异常
      */
-    Object recover(RetryContext retryContext) throws Exception;
+    Object recover(Throwable throwable) throws Exception;
 }

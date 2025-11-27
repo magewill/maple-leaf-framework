@@ -1,7 +1,7 @@
 package cn.maple.mongodb.datasource.properties;
 
 import lombok.Data;
-import org.springframework.boot.autoconfigure.mongo.MongoProperties;
+import org.springframework.boot.mongodb.autoconfigure.MongoProperties;
 
 /**
  * 多数据源属性

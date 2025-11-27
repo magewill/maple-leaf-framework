@@ -8,7 +8,6 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.config.aware.GXApplicationContextSingleton;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
-import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.elasticsearch.properties.GXElasticsearchProperties;
 import cn.maple.elasticsearch.properties.GXElasticsearchSourceProperties;
 import cn.maple.elasticsearch.properties.local.GXLocalElasticsearchProperties;
@@ -28,7 +27,6 @@ import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.BeanDefinitionBuilder;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
-import org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchProperties;
 import org.springframework.boot.context.properties.bind.BindResult;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.*;
@@ -55,7 +53,7 @@ import java.util.Objects;
  * <p>
  * 该类负责动态注册多个Elasticsearch数据源，支持从本地配置文件或Nacos配置中心读取配置信息。
  * 实现了BeanDefinitionRegistryPostProcessor接口，在Spring容器启动时动态注册Elasticsearch相关的Bean。
- * 支持配置主从数据源，确保系统中有且仅有一个主数据源。
+ * 支持配置主从数据源,确保系统中有且仅有一个主数据源。
  * </p>
  * <p>
  * 内存安全特性：
@@ -100,44 +98,47 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
     public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry beanDefinitionRegistry) throws BeansException {
         // 检查配置中是否只有一个主数据源
         checkElasticsearchDataSourceProperties();
-        
+
         try {
             // 遍历所有配置的数据源，为每个数据源创建相应的Bean
             getSourceElasticsearchProperties().getDatasource().forEach((key, dataSourceProperties) -> {
                 try {
                     // 构建ElasticsearchClient客户端
                     ElasticsearchClient elasticsearchClient = buildElasticsearchClient(dataSourceProperties);
-                    
+
                     // 创建ElasticsearchTemplate的BeanDefinition构建对象
                     BeanDefinitionBuilder elasticsearchTemplateBeanDefinitionBuilder = BeanDefinitionBuilder.rootBeanDefinition(ElasticsearchTemplate.class);
                     elasticsearchTemplateBeanDefinitionBuilder.addConstructorArgValue(elasticsearchClient);
-                    
+
                     // 创建并初始化转换器
                     MappingElasticsearchConverter mappingElasticsearchConverter = new MappingElasticsearchConverter(new SimpleElasticsearchMappingContext());
                     mappingElasticsearchConverter.afterPropertiesSet();
                     elasticsearchTemplateBeanDefinitionBuilder.addConstructorArgValue(mappingElasticsearchConverter);
-                    
+
                     // 设置自动装配模式
                     elasticsearchTemplateBeanDefinitionBuilder.setAutowireMode(AutowireCapableBeanFactory.AUTOWIRE_BY_NAME);
-                    
+
                     // 确定Bean名称和主数据源设置
                     boolean primary = dataSourceProperties.isPrimary();
                     String beanName = key + "ElasticsearchTemplate";
-                    
+
                     // 如果是主数据源，设置相关属性并注册别名
-                    if (Boolean.TRUE.equals(primary)) {
-                        settingElasticsearchPropertiesBeanProperties(dataSourceProperties);
+                    if (primary) {
+                        // 注意：Spring Boot 4中已移除ElasticsearchProperties类
+                        // 如果需要设置主数据源属性，需要使用自定义的方式处理
+                        // settingElasticsearchPropertiesBeanProperties(dataSourceProperties);
                         elasticsearchTemplateBeanDefinitionBuilder.setPrimary(true);
                         // 为主数据源注册别名，方便其他组件引用
                         beanDefinitionRegistry.registerAlias(beanName, "elasticsearchTemplate");
+                        log.info("主Elasticsearch数据源[{}]已设置为primary", key);
                     }
-                    
+
                     // 注册ElasticsearchTemplate Bean
                     beanDefinitionRegistry.registerBeanDefinition(beanName, elasticsearchTemplateBeanDefinitionBuilder.getBeanDefinition());
-                    
+
                     // 记录数据源注册成功的日志
                     log.info("Elasticsearch数据源[{}]注册成功", key);
-                    
+
                 } catch (Exception e) {
                     // 记录详细的错误信息，但不暴露敏感数据
                     log.error("Elasticsearch数据源[{}]注册失败: {}", key, e.getMessage());
@@ -151,58 +152,15 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
     }
 
     /**
-     * 重新将IOC中的ElasticsearchProperties的bean对象填充属性
-     * <p>
-     * 该方法用于设置主数据源的属性，确保与Spring Boot自动配置兼容。
-     * 将自定义配置的属性值同步到Spring Boot的ElasticsearchProperties对象中，
-     * 使得Spring Boot的自动配置能够正确识别和使用我们配置的主数据源。
-     * </p>
-     * <p>
-     * 内存安全：
-     * - 安全处理凭证信息，避免敏感信息泄露
-     * - 对所有外部输入进行严格验证
-     * </p>
-     *
-     * @param dataSourceProperties 自定义配置的属性，不能为null
-     * @throws IllegalStateException 如果无法获取ElasticsearchProperties bean
+     * Spring Boot 4中已移除ElasticsearchProperties类
+     * 此方法已废弃，保留注释以供参考
+     * 如果需要设置主数据源属性，建议使用自定义的配置Bean或直接在配置文件中管理
      */
+    @Deprecated
     private void settingElasticsearchPropertiesBeanProperties(GXElasticsearchProperties dataSourceProperties) {
-        Assert.notNull(dataSourceProperties, "数据源配置属性不能为null");
-        
-        // 从Spring容器中获取ElasticsearchProperties实例
-        ElasticsearchProperties elasticsearchProperties = GXSpringContextUtils.getBean(ElasticsearchProperties.class);
-        if (elasticsearchProperties == null) {
-            throw new IllegalStateException("无法获取ElasticsearchProperties Bean，请检查Spring Boot自动配置");
-        }
-        
-        try {
-            // 设置认证信息
-            elasticsearchProperties.setUsername(dataSourceProperties.getUsername());
-            elasticsearchProperties.setPassword(dataSourceProperties.getPassword());
-            
-            // 设置URI列表
-            if (dataSourceProperties.getUris() != null && !dataSourceProperties.getUris().isEmpty()) {
-                elasticsearchProperties.setUris(stringToLst(dataSourceProperties.getUris().getFirst()));
-            } else {
-                log.warn("数据源URI列表为空，请检查配置");
-            }
-            
-            // 设置路径前缀（如果存在）
-            if (CharSequenceUtil.isNotEmpty(dataSourceProperties.getPathPrefix())) {
-                elasticsearchProperties.setPathPrefix(dataSourceProperties.getPathPrefix());
-            }
-            
-            // 设置超时时间
-            Duration socketTimeout = dataSourceProperties.getSocketTimeout();
-            Duration connectionTimeout = dataSourceProperties.getConnectionTimeout();
-            elasticsearchProperties.setConnectionTimeout(connectionTimeout);
-            elasticsearchProperties.setSocketTimeout(socketTimeout);
-            
-            log.debug("成功同步主数据源配置到Spring Boot ElasticsearchProperties");
-        } catch (Exception e) {
-            log.error("同步Elasticsearch属性失败: {}", e.getMessage());
-            throw new IllegalStateException("同步Elasticsearch属性失败: " + e.getMessage(), e);
-        }
+        // Spring Boot 4中此方法不再需要
+        // 原有的ElasticsearchProperties类已被移除
+        log.warn("settingElasticsearchPropertiesBeanProperties方法在Spring Boot 4中已不再使用");
     }
 
     /**
@@ -274,19 +232,19 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             if (!bind.isBound() || bind.get() == null) {
                 throw new IllegalStateException("未找到有效的Elasticsearch数据源配置，请检查配置文件中是否包含elasticsearch.datasource节点");
             }
-            
+
             // 将配置转换为数据源Map
             Map<String, GXElasticsearchProperties> datasource = Convert.convert(new TypeReference<>() {
             }, bind.get());
-            
+
             // 验证数据源配置是否有效
             if (datasource == null || datasource.isEmpty()) {
                 throw new IllegalStateException("Elasticsearch数据源配置为空，请检查配置格式是否正确");
             }
-            
+
             // 记录数据源配置信息（不包含敏感信息）
             log.info("成功加载{}个Elasticsearch数据源配置", datasource.size());
-            
+
             try {
                 // 判断是否导入了nacos，如果导入了则使用nacos的配置
                 Class.forName("com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties");
@@ -323,16 +281,16 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
      * @param elasticsearchSourceProperties 数据源配置信息，不能为null
      * @return 构建好的ElasticsearchClient实例
      * @throws IllegalArgumentException 如果配置信息为null
-     * @throws IllegalStateException 如果客户端创建失败
+     * @throws IllegalStateException    如果客户端创建失败
      */
     private ElasticsearchClient buildElasticsearchClient(GXElasticsearchProperties elasticsearchSourceProperties) {
         Assert.notNull(elasticsearchSourceProperties, "Elasticsearch数据源配置不能为null");
-        
+
         try {
             // 构建客户端配置
-            ClientConfiguration.MaybeSecureClientConfigurationBuilder configurationBuilder = 
+            ClientConfiguration.MaybeSecureClientConfigurationBuilder configurationBuilder =
                     buildElasticsearchConfigurationBuilder(elasticsearchSourceProperties);
-            
+
             // 创建并返回客户端实例
             return ElasticsearchClients.createImperative(configurationBuilder.build());
         } catch (Exception e) {
@@ -361,16 +319,16 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
      * @param elasticsearchSourceProperties 数据源配置信息，不能为null
      * @return 构建好的ClientConfiguration构建器
      * @throws IllegalArgumentException 如果配置信息为null或必要参数缺失
-     * @throws IllegalStateException 如果构建过程中发生错误
+     * @throws IllegalStateException    如果构建过程中发生错误
      */
     private ClientConfiguration.MaybeSecureClientConfigurationBuilder buildElasticsearchConfigurationBuilder(GXElasticsearchProperties elasticsearchSourceProperties) {
         Assert.notNull(elasticsearchSourceProperties, "Elasticsearch数据源配置不能为null");
-        
+
         try {
             // 获取认证信息
             String username = elasticsearchSourceProperties.getUsername();
             String password = elasticsearchSourceProperties.getPassword();
-            
+
             // 获取并解析URI列表
             List<String> uris = elasticsearchSourceProperties.getUris();
             if (uris == null || uris.isEmpty()) {
@@ -378,11 +336,11 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             }
             String uriStr = uris.getFirst();
             String[] uriArray = stringToLst(uriStr).toArray(new String[0]);
-            
+
             // 创建基础配置构建器并设置连接地址
-            ClientConfiguration.MaybeSecureClientConfigurationBuilder configurationBuilder = 
+            ClientConfiguration.MaybeSecureClientConfigurationBuilder configurationBuilder =
                     ClientConfiguration.builder().connectedTo(uriArray);
-            
+
             // 设置认证信息（如果提供）
             if (CharSequenceUtil.isAllNotEmpty(username, password)) {
                 configurationBuilder.withBasicAuth(username, password);
@@ -390,22 +348,22 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             } else {
                 log.warn("未配置Elasticsearch认证信息，将使用匿名访问");
             }
-            
+
             // 设置路径前缀（如果提供）
             if (CharSequenceUtil.isNotEmpty(elasticsearchSourceProperties.getPathPrefix())) {
                 configurationBuilder.withPathPrefix(elasticsearchSourceProperties.getPathPrefix());
                 log.debug("已配置Elasticsearch路径前缀: {}", elasticsearchSourceProperties.getPathPrefix());
             }
-            
+
             // 配置兼容性请求头
             HttpHeaders compatibilityHeaders = new HttpHeaders();
             compatibilityHeaders.add("Accept", "application/vnd.elasticsearch+json;compatible-with=7");
             compatibilityHeaders.add(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json;charset=UTF-8");
-            
+
             // 创建认证提供者并设置认证信息
             final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
             credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
-            
+
             // 配置请求头和客户端配置
             configurationBuilder.withDefaultHeaders(compatibilityHeaders)
                     .withHeaders(() -> {
@@ -420,17 +378,17 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
                         // 设置连接保持策略为60秒
                         clientBuilder.setKeepAliveStrategy((httpResponse, httpContext) -> 1000 * 60);
                         // 添加响应拦截器，设置产品标识
-                        clientBuilder.addInterceptorLast((HttpResponseInterceptor) (response, context) -> 
+                        clientBuilder.addInterceptorLast((HttpResponseInterceptor) (response, context) ->
                                 response.addHeader("X-Elastic-Product", "Elasticsearch"));
                         // 使用已创建的认证提供者
                         return clientBuilder.setDefaultCredentialsProvider(credentialsProvider);
                     }));
-            
+
             // 设置超时时间
             Duration connectionTimeout = elasticsearchSourceProperties.getConnectionTimeout();
             Duration socketTimeout = elasticsearchSourceProperties.getSocketTimeout();
             configurationBuilder.withConnectTimeout(connectionTimeout).withSocketTimeout(socketTimeout);
-            
+
             log.debug("Elasticsearch客户端配置构建成功");
             return configurationBuilder;
         } catch (Exception e) {
@@ -455,7 +413,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
      *
      * @param uriStr 待转换的字符串，例如 "{0=192.168.7.213:9200, 1=192.168.7.213:9200}"
      * @return 转换后的URI字符串列表，不会为null
-     * @throws NullPointerException 如果输入字符串为null、空字符串或无法转换为Dict对象
+     * @throws NullPointerException     如果输入字符串为null、空字符串或无法转换为Dict对象
      * @throws IllegalArgumentException 如果转换后的列表为空
      */
     private List<String> stringToLst(String uriStr) {
@@ -463,29 +421,29 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
         if (CharSequenceUtil.isEmpty(uriStr)) {
             throw new NullPointerException("URI字符串不能为空");
         }
-        
+
         try {
             // 创建结果列表
             List<String> lstUris = new ArrayList<>();
-            
+
             // 将字符串转换为Dict对象
             Dict uriDict = GXCommonUtils.convertStrToTarget(uriStr, Dict.class);
             if (uriDict == null) {
                 throw new NullPointerException("无法将URI字符串转换为Dict对象: " + uriStr);
             }
-            
+
             // 提取所有非空值作为URI
             uriDict.forEach((k, value) -> {
                 if (value != null) {
                     lstUris.add(value.toString());
                 }
             });
-            
+
             // 验证结果列表非空
             if (lstUris.isEmpty()) {
                 throw new IllegalArgumentException("转换后的URI列表为空，请检查URI字符串格式: " + uriStr);
             }
-            
+
             log.debug("成功解析{}个Elasticsearch服务器地址", lstUris.size());
             return lstUris;
         } catch (Exception e) {
@@ -508,7 +466,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
      * 内存安全：使用局部变量计数，避免共享状态
      * 线程安全：在Spring容器初始化阶段执行，不存在并发访问问题
      * </p>
-     * 
+     *
      * @throws GXBusinessException 如果没有主数据源或有多个主数据源
      */
     private void checkElasticsearchDataSourceProperties() {
@@ -518,18 +476,18 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             if (datasourceMap == null || datasourceMap.isEmpty()) {
                 throw new GXBusinessException("未找到有效的Elasticsearch数据源配置");
             }
-            
+
             // 计算主数据源数量
             int primaryBeanCount = 0;
             String primaryDataSourceName = null;
-            
+
             for (Map.Entry<String, GXElasticsearchProperties> entry : datasourceMap.entrySet()) {
                 if (entry.getValue() != null && entry.getValue().isPrimary()) {
                     primaryBeanCount++;
                     primaryDataSourceName = entry.getKey();
                 }
             }
-            
+
             // 验证主数据源数量
             if (primaryBeanCount > 1) {
                 throw new GXBusinessException("只能有一个主ElasticsearchTemplate，请检查primary是否设置了多个!");
@@ -537,7 +495,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             if (primaryBeanCount == 0) {
                 throw new GXBusinessException("必须有一个主ElasticsearchTemplate，请检查primary是否被设置!");
             }
-            
+
             log.info("已确认主Elasticsearch数据源: {}", primaryDataSourceName);
         } catch (GXBusinessException e) {
             throw e;
@@ -546,7 +504,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             throw new GXBusinessException("检查Elasticsearch数据源配置失败: " + e.getMessage());
         }
     }
-    
+
     /**
      * 设置处理器的执行顺序
      * <p>
@@ -558,6 +516,6 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
      */
     @Override
     public int getOrder() {
-        return Ordered.LOWEST_PRECEDENCE;  // within PriorityOrdered
+        return Ordered.LOWEST_PRECEDENCE;
     }
 }

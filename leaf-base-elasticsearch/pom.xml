@@ -40,11 +40,7 @@
                     <groupId>org.eclipse.parsson</groupId>
                     <artifactId>parsson</artifactId>
                 </exclusion>
-                <!--与nacos client发生了冲突 故将其排除掉-->
-                <exclusion>
-                    <groupId>org.apache.httpcomponents</groupId>
-                    <artifactId>httpclient</artifactId>
-                </exclusion>
+
             </exclusions>
         </dependency>
         <dependency>
