@@ -54,7 +54,7 @@
         <jakarta.json-api.version>2.1.3</jakarta.json-api.version>
         <spring-cloud.version>2025.0.0</spring-cloud.version>
         <spring-cloud-alibaba.version>2025.0.0.0</spring-cloud-alibaba.version>
-        <seata.spring.boot.starter.version>2.2.0</seata.spring.boot.starter.version>
+        <seata.spring.boot.starter.version>2.5.0</seata.spring.boot.starter.version>
         <netty.version>4.2.7.Final</netty.version>
         <elasticsearch.version>8.18.2</elasticsearch.version>
         <zstd-jni.version>1.5.6-3</zstd-jni.version>
@@ -68,7 +68,7 @@
         <javax.annotation-api.version>1.3.2</javax.annotation-api.version>
         <spring-retry.version>2.0.12</spring-retry.version>
         <jackson.version>2.20.1</jackson.version>
-        <tools.jackson.version>3.0.2</tools.jackson.version>
+        <tools.jackson.version>3.0.3</tools.jackson.version>
     </properties>
 
     <dependencyManagement>
