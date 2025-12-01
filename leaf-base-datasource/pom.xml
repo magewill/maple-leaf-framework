@@ -13,7 +13,7 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <mybatis-plus-boot.version>3.5.14</mybatis-plus-boot.version>
+        <mybatis-plus-boot.version>3.5.15</mybatis-plus-boot.version>
         <mysql.version>9.5.0</mysql.version>
         <druid-spring-boot.version>1.2.27</druid-spring-boot.version>
         <p6spy.version>3.9.1</p6spy.version>
@@ -52,7 +52,7 @@
         </dependency>
         <dependency>
             <groupId>com.baomidou</groupId>
-            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <artifactId>mybatis-plus-spring-boot4-starter</artifactId>
             <version>${mybatis-plus-boot.version}</version>
             <exclusions>
                 <exclusion>
