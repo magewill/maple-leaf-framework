@@ -10,6 +10,9 @@
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>leaf-base-rabbitmq</artifactId>
+    <properties>
+        <jackson.datatype.jsr310.version>3.0.0-rc2</jackson.datatype.jsr310.version>
+    </properties>
 
     <dependencies>
         <dependency>
@@ -44,6 +47,16 @@
         <dependency>
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr353</artifactId>
+            <version>${tools.jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>${jackson.datatype.jsr310.version}</version>
         </dependency>
     </dependencies>
 </project>

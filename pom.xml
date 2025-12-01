@@ -68,7 +68,7 @@
         <javax.annotation-api.version>1.3.2</javax.annotation-api.version>
         <spring-retry.version>2.0.12</spring-retry.version>
         <jackson.version>2.20.1</jackson.version>
-        <tools.jackson.version>3.0.3</tools.jackson.version>
+        <tools.jackson.version>3.0.2</tools.jackson.version>
     </properties>
 
     <dependencyManagement>
