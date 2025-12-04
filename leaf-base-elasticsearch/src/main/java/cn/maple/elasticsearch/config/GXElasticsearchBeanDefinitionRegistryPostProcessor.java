@@ -14,11 +14,12 @@ import cn.maple.elasticsearch.properties.local.GXLocalElasticsearchProperties;
 import cn.maple.elasticsearch.properties.nacos.GXNacosElasticsearchProperties;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import lombok.extern.log4j.Log4j2;
-import org.apache.http.HttpResponseInterceptor;
-import org.apache.http.auth.AuthScope;
-import org.apache.http.auth.UsernamePasswordCredentials;
-import org.apache.http.client.CredentialsProvider;
-import org.apache.http.impl.client.BasicCredentialsProvider;
+import org.apache.hc.client5.http.auth.AuthScope;
+import org.apache.hc.client5.http.auth.CredentialsStore;
+import org.apache.hc.client5.http.auth.UsernamePasswordCredentials;
+import org.apache.hc.client5.http.impl.auth.BasicCredentialsProvider;
+import org.apache.hc.core5.http.HttpHost;
+import org.apache.hc.core5.util.TimeValue;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanInitializationException;
 import org.springframework.beans.factory.InitializingBean;
@@ -37,6 +38,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.data.elasticsearch.client.ClientConfiguration;
 import org.springframework.data.elasticsearch.client.elc.ElasticsearchClients;
 import org.springframework.data.elasticsearch.client.elc.ElasticsearchTemplate;
+import org.springframework.data.elasticsearch.client.elc.rest5_client.Rest5Clients;
 import org.springframework.data.elasticsearch.core.convert.MappingElasticsearchConverter;
 import org.springframework.data.elasticsearch.core.mapping.SimpleElasticsearchMappingContext;
 import org.springframework.data.elasticsearch.support.HttpHeaders;
@@ -361,8 +363,8 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             compatibilityHeaders.add(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json;charset=UTF-8");
 
             // 创建认证提供者并设置认证信息
-            final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-            credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
+            final CredentialsStore credentialsProvider = new BasicCredentialsProvider();
+            credentialsProvider.setCredentials(new AuthScope(HttpHost.create("127.0.0.1:9200")), new UsernamePasswordCredentials(username, password.toCharArray()));
 
             // 配置请求头和客户端配置
             configurationBuilder.withDefaultHeaders(compatibilityHeaders)
@@ -372,14 +374,13 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
                         headers.add("currentDate", DateUtil.now());
                         return headers;
                     })
-                    .withClientConfigurer(ElasticsearchClients.ElasticsearchHttpClientConfigurationCallback.from(clientBuilder -> {
+                    .withClientConfigurer(Rest5Clients.ElasticsearchHttpClientConfigurationCallback.from(clientBuilder -> {
                         // 禁用认证缓存，确保每次请求都使用最新的认证信息
                         clientBuilder.disableAuthCaching();
                         // 设置连接保持策略为60秒
-                        clientBuilder.setKeepAliveStrategy((httpResponse, httpContext) -> 1000 * 60);
+                        clientBuilder.setKeepAliveStrategy((httpResponse, httpContext) -> TimeValue.ofSeconds(60));
                         // 添加响应拦截器，设置产品标识
-                        clientBuilder.addInterceptorLast((HttpResponseInterceptor) (response, context) ->
-                                response.addHeader("X-Elastic-Product", "Elasticsearch"));
+                        clientBuilder.addResponseInterceptorLast((response, entity, context) -> response.addHeader("X-Elastic-Product", "Elasticsearch"));
                         // 使用已创建的认证提供者
                         return clientBuilder.setDefaultCredentialsProvider(credentialsProvider);
                     }));
