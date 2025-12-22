@@ -21,7 +21,7 @@ import java.util.Map;
 @EqualsAndHashCode(callSuper = true)
 @ConditionalOnMissingClass({"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
 @PropertySource(value = {"classpath:/${spring.profiles.active}/redisson-mq.yml"}, factory = GXYamlPropertySourceFactory.class, encoding = "utf-8", ignoreResourceNotFound = true)
-@ConfigurationProperties(prefix = "redisson")
+@ConfigurationProperties(prefix = "redisson.mq")
 public class GXLocalRedissonMQProperties extends GXRedissonMQProperties {
     private Map<String, GXRedissonConnectProperties> config = new LinkedHashMap<>();
 
