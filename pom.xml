@@ -6,7 +6,7 @@
 
     <groupId>cn.maple.framework</groupId>
     <artifactId>maple-leaf-framework</artifactId>
-    <version>4.1.4-SNAPSHOT</version>
+    <version>4.1.5-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <modules>
@@ -48,7 +48,7 @@
         <fastjson.version>2.0.58</fastjson.version>
         <maven-compiler-plugin.version>3.14.1</maven-compiler-plugin.version>
         <maven-source-plugin.version>3.4.0</maven-source-plugin.version>
-        <spring-boot.version>3.5.8</spring-boot.version>
+        <spring-boot.version>3.5.9</spring-boot.version>
         <snakeyaml.version>2.5</snakeyaml.version>
         <objenesis.version>3.4</objenesis.version>
         <jakarta.json-api.version>2.1.3</jakarta.json-api.version>

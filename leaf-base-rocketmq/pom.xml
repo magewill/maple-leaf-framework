@@ -5,14 +5,14 @@
     <parent>
         <artifactId>maple-leaf-framework</artifactId>
         <groupId>cn.maple.framework</groupId>
-        <version>4.1.4-SNAPSHOT</version>
+        <version>4.1.5-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>leaf-base-rocketmq</artifactId>
 
     <properties>
-        <rocketmq-spring-boot-starter.version>2.3.4</rocketmq-spring-boot-starter.version>
+        <rocketmq-spring-boot-starter.version>2.3.5</rocketmq-spring-boot-starter.version>
     </properties>
 
     <dependencies>
