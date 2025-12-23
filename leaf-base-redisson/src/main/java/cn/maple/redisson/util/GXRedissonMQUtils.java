@@ -141,40 +141,38 @@ public class GXRedissonMQUtils {
      */
     public static <T> String subscribe(String topicName, Class<T> messageClass, MessageListener<T> listener) {
         if (CharSequenceUtil.isBlank(topicName) || listener == null || messageClass == null) {
-            throw new IllegalArgumentException("订阅参数不完整");
+            throw new IllegalArgumentException("订阅参数不完整 (topicName, messageClass, listener)");
         }
 
-        // 检查是否已经订阅过
+        // 使用 topicName 和 messageClass 作为唯一标识，确保同一个Topic的同一种消息类型只被一个监听器处理
         String cacheKey = topicName + ":" + messageClass.getName();
-        if (LISTENER_ID_CACHE.containsKey(cacheKey)) {
-            String existingListenerId = LISTENER_ID_CACHE.get(cacheKey);
-            LOGGER.warn("主题[{}]已经订阅过，监听器ID: {}，避免重复订阅", topicName, existingListenerId);
-            return existingListenerId;
+        // 使用 computeIfAbsent 保证原子性操作，避免并发问题
+        String listenerId = LISTENER_ID_CACHE.computeIfAbsent(cacheKey, key -> {
+            try {
+                RReliableTopic reliableTopic = getReliableTopic(topicName);
+                String newListenerId = reliableTopic.addListener(messageClass, (channel, msg) -> {
+                    try {
+                        listener.onMessage(channel, msg);
+                    } catch (Exception e) {
+                        LOGGER.error("处理主题[{}]消息时发生业务异常: {}", topicName, e.getMessage(), e);
+                        // 注意：即使这里抛出异常，消息也会被标记为已交付，不会自动重试。
+                        // 需要在这里加入重试逻辑或发送到死信队列。
+                    }
+                });
+                LOGGER.info("成功订阅主题[{}]，消息类型[{}]，监听器ID: {}", topicName, messageClass.getSimpleName(), newListenerId);
+                return newListenerId;
+            } catch (Exception e) {
+                LOGGER.error("订阅主题[{}]时发生异常: {}", topicName, e.getMessage(), e);
+                throw new GXBusinessException("订阅主题失败: " + e.getMessage(), e);
+            }
+        });
+
+        // 如果键已存在，computeIfAbsent 会返回旧值，此时记录一个警告日志
+        if (!listenerId.equals(LISTENER_ID_CACHE.get(cacheKey))) {
+            LOGGER.warn("主题[{}]的消息类型[{}]已被订阅，监听器ID: {}。本次订阅请求被忽略，以防止重复消费。", topicName, messageClass.getSimpleName(), listenerId);
         }
 
-        try {
-            RReliableTopic reliableTopic = getReliableTopic(topicName);
-
-            String listenerId = reliableTopic.addListener(messageClass, (channel, msg) -> {
-                try {
-                    listener.onMessage(channel, msg);
-                } catch (Exception e) {
-                    LOGGER.error("处理主题[{}]消息时发生异常: {}", topicName, e.getMessage(), e);
-                    // 注意：即使这里抛出异常，消息也会被标记为已交付，不会重复消费
-                }
-            });
-
-            // 缓存监听器ID
-            LISTENER_ID_CACHE.put(cacheKey, listenerId);
-
-            LOGGER.info("成功订阅主题[{}]，监听器ID: {} (消息交付后即标记为已消费)", topicName, listenerId);
-            return listenerId;
-        } catch (GXBusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            LOGGER.error("订阅主题[{}]时发生异常: {}", topicName, e.getMessage(), e);
-            throw new GXBusinessException("订阅主题失败: " + e.getMessage(), e);
-        }
+        return listenerId;
     }
 
     /**
@@ -222,20 +220,20 @@ public class GXRedissonMQUtils {
         if (CharSequenceUtil.isBlank(topicName)) {
             throw new IllegalArgumentException("主题名不能为空");
         }
-        if (CollUtil.isEmpty(Arrays.asList(listenerIds))) {
-            throw new IllegalArgumentException("监听器ID不能为空");
+        if (listenerIds == null || listenerIds.length == 0) {
+            LOGGER.warn("监听器ID为空，无需取消订阅");
+            return;
         }
 
         try {
             RReliableTopic reliableTopic = getReliableTopic(topicName);
-            for (String listenerId : listenerIds) {
-                reliableTopic.removeListener(listenerId);
+            reliableTopic.removeListener(listenerIds);
 
-                // 从缓存中移除
-                LISTENER_ID_CACHE.entrySet().removeIf(entry -> entry.getValue().equals(listenerId));
-            }
+            // 从缓存中移除
+            List<String> idList = Arrays.asList(listenerIds);
+            LISTENER_ID_CACHE.entrySet().removeIf(entry -> idList.contains(entry.getValue()));
 
-            LOGGER.info("成功取消订阅主题[{}]，监听器ID: {} (消费位置已保留)", topicName, listenerIds);
+            LOGGER.info("成功取消订阅主题[{}]，监听器ID: {}", topicName, Arrays.toString(listenerIds));
         } catch (Exception e) {
             LOGGER.error("取消订阅主题[{}]时发生异常: {}", topicName, e.getMessage(), e);
             throw new GXBusinessException("取消订阅失败: " + e.getMessage(), e);
