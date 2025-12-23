@@ -9,8 +9,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
-import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -23,11 +21,11 @@ import java.util.function.Supplier;
  * - 分布式锁
  * - API限流
  * </p>
- * 
+ *
  * <p>线程安全说明：</p>
  * <p>所有方法都是线程安全的，适合在多线程环境下使用。工具类基于Redisson的线程安全特性，
  * 所有操作都是原子的，可以安全地在多线程环境中使用。</p>
- * 
+ *
  * <p>性能优化：</p>
  * <p>1. 使用了参数验证提取，减少代码重复</p>
  * <p>2. 统一的异常处理机制，提高代码可靠性</p>
@@ -44,9 +42,14 @@ public class GXRedissonUtils {
     private static final Logger LOG = LoggerFactory.getLogger(GXRedissonUtils.class);
 
     /**
-     * 计数器缓存的名字，所有计数器相关操作都使用此缓存
+     * 默认锁等待时间（秒）
      */
-    private static final String COUNTER_MAP_CACHE_NAME = "counter_map_cache_name";
+    private static final long DEFAULT_LOCK_WAIT_TIME = 10L;
+
+    /**
+     * 默认锁租约时间（秒），-1表示使用看门狗机制
+     */
+    private static final long DEFAULT_LOCK_LEASE_TIME = -1L;
 
     /**
      * 私有构造函数，防止实例化
@@ -67,42 +70,33 @@ public class GXRedissonUtils {
      * @param value    数据值，不能为null
      * @param expire   过期时间，大于0时生效
      * @param timeUnit 时间单位，不能为null
-     * @return 之前存储在key位置的值，如果没有则返回null
-     * @throws IllegalArgumentException 如果key或timeUnit为null
      */
-    public static Object set(String key, String value, int expire, TimeUnit timeUnit) {
-        validateKeyAndTimeUnit(key, timeUnit);
-        final RMap<Object, Object> rMap = getRedissonClient().getMap(key);
-        if (expire > 0) {
-            Duration duration = Duration.of(expire, timeUnit.toChronoUnit());
-            rMap.expire(duration);
+    public static void set(String key, Object value, int expire, TimeUnit timeUnit) {
+        validateKey(key);
+        if (value == null) {
+            throw new IllegalArgumentException("Value不能为空");
         }
-        return rMap.put(key, value);
-    }
-    
-    /**
-     * 验证key和timeUnit参数
-     * 
-     * @param key      键名，不能为null或空
-     * @param timeUnit 时间单位，不能为null
-     * @throws IllegalArgumentException 如果key或timeUnit为null
-     */
-    private static void validateKeyAndTimeUnit(String key, TimeUnit timeUnit) {
-        if (CharSequenceUtil.isBlank(key) || timeUnit == null) {
-            throw new IllegalArgumentException("Key和TimeUnit不能为空");
+        if (expire > 0 && timeUnit == null) {
+            throw new IllegalArgumentException("当设置过期时间时，TimeUnit不能为空");
+        }
+        try {
+            RBucket<Object> bucket = getRedissonClient().getBucket(key);
+            if (expire > 0) {
+                bucket.set(value, Duration.of(expire, timeUnit.toChronoUnit()));
+            } else {
+                bucket.set(value);
+            }
+        } catch (Exception e) {
+            LOG.error("设置数据失败，key: {}", key, e);
+            throw new RuntimeException("设置数据失败", e);
         }
     }
-    
+
     /**
-     * 验证key参数
-     * 
-     * @param key 键名，不能为null或空
-     * @throws IllegalArgumentException 如果key为null
+     * 设置数据到Redis（永不过期）
      */
-    private static void validateKey(String key) {
-        if (CharSequenceUtil.isBlank(key)) {
-            throw new IllegalArgumentException("Key不能为空");
-        }
+    public static void set(String key, Object value) {
+        set(key, value, 0, null);
     }
 
     /**
@@ -114,15 +108,48 @@ public class GXRedissonUtils {
      * @param key   数据key，不能为null或空
      * @param clazz 返回数据的类型，不能为null
      * @return 转换为指定类型的数据，如果不存在则返回null
-     * @throws IllegalArgumentException 如果key或clazz为null
      */
     public static <R> R get(String key, Class<R> clazz) {
         validateKey(key);
         if (clazz == null) {
             throw new IllegalArgumentException("Class类型不能为空");
         }
-        final RMap<Object, Object> rMap = getRedissonClient().getMap(key);
-        return Convert.convert(clazz, rMap.get(key));
+        RBucket<Object> bucket = getRedissonClient().getBucket(key);
+        Object value = bucket.get();
+        return value == null ? null : Convert.convert(clazz, value);
+    }
+
+    /**
+     * 获取Redis中存储的字符串数据
+     * <p>
+     * 从RBucket中获取字符串数据
+     * </p>
+     *
+     * @param key 数据key，不能为null或空
+     * @return 字符串数据，如果不存在则返回null
+     */
+    public static String get(String key) {
+        return get(key, String.class);
+    }
+
+    /**
+     * 检查key是否存在
+     * <p>
+     * 检查Redis中是否存在指定的key
+     * </p>
+     *
+     * @param key 数据key，不能为null或空
+     * @return 如果key存在返回true，否则返回false
+     */
+    public static boolean exists(String key) {
+        validateKey(key);
+        try {
+            RBucket<Object> bucket = getRedissonClient().getBucket(key);
+            return bucket.isExists();
+        } catch (Exception e) {
+            LOG.error("检查key存在性失败，key: {}", key, e);
+            return false;
+        }
     }
 
     /**
@@ -133,69 +160,196 @@ public class GXRedissonUtils {
      *
      * @param key 数据key，不能为null或空
      * @return 如果数据被成功删除返回true，否则返回false
-     * @throws IllegalArgumentException 如果key为null
      */
     public static boolean delete(String key) {
         validateKey(key);
-        final RMap<Object, Object> rMap = getRedissonClient().getMap(key);
-        return Objects.nonNull(rMap.remove(key));
-    }
-
-    /**
-     * 获取并递增计数器的值
-     * <p>
-     * 该方法是线程安全的，使用分布式锁确保计数器的原子性操作
-     * 如果计数器不存在，则创建并设置初始值为1，同时设置过期时间
-     * 如果计数器已存在，则将其值加1并返回
-     * </p>
-     *
-     * @param key      计数器的key，不能为null或空
-     * @param expire   过期时间，大于0时生效
-     * @param timeUnit 时间单位，不能为null
-     * @return 递增后的计数器值
-     * @throws IllegalArgumentException 如果key或timeUnit为null
-     */
-    public static long getCounter(String key, int expire, TimeUnit timeUnit) {
-        validateKeyAndTimeUnit(key, timeUnit);
-        final RLock rLock = getLock(key);
-        RMapCache<Object, Object> rMapCache = getRedissonClient().getMapCache(COUNTER_MAP_CACHE_NAME);
         try {
-            rLock.lock();
-            return Optional.ofNullable(rMapCache.get(key))
-                .map(oldCount -> {
-                    long counter = (long) oldCount + 1L;
-                    rMapCache.put(key, counter);
-                    return counter;
-                })
-                .orElseGet(() -> {
-                    long counter = 1;
-                    rMapCache.put(key, counter, expire, timeUnit);
-                    return counter;
-                });
-        } finally {
-            if (rLock.isLocked() && rLock.isHeldByCurrentThread()) {
-                rLock.unlock();
-            }
+            RBucket<Object> bucket = getRedissonClient().getBucket(key);
+            return bucket.delete();
+        } catch (Exception e) {
+            LOG.error("删除数据失败，key: {}", key, e);
+            return false;
         }
     }
 
     /**
-     * 获取当前计数器的值，不会修改计数器
+     * 递增计数器并设置过期时间（线程安全，使用Lua脚本）
      * <p>
-     * 该方法仅查询计数器的当前值，不会对计数器进行任何修改
-     * 如果计数器不存在，则返回-1
+     * 特性：
+     * 1. 原子性操作：increment和expire在同一个Lua脚本中执行
+     * 2. 性能优化：避免了分布式锁的开销
+     * 3. 过期时间策略：每次increment都会刷新过期时间
+     * </p>
+     *
+     * @param key      计数器的key
+     * @param expire   过期时间，大于0时生效
+     * @param timeUnit 时间单位
+     * @return 递增后的值
+     */
+    public static long incrementAndGet(String key, long expire, TimeUnit timeUnit) {
+        validateKey(key);
+        if (expire > 0 && timeUnit == null) {
+            throw new IllegalArgumentException("当设置过期时间时，TimeUnit不能为空");
+        }
+
+        try {
+            if (expire > 0) {
+                // 使用Lua脚本保证increment和expire的原子性
+                long expireSeconds = timeUnit.toSeconds(expire);
+
+                // Lua脚本说明：
+                // 1. INCR递增计数器
+                // 2. EXPIRE设置过期时间
+                // 3. 返回递增后的值
+                String luaScript =
+                        "local current = redis.call('incr', KEYS[1]);" +
+                                "redis.call('expire', KEYS[1], ARGV[1]);" +
+                                "return current";
+
+                RScript script = getRedissonClient().getScript();
+                Long result = script.eval(
+                        RScript.Mode.READ_WRITE,
+                        luaScript,
+                        RScript.ReturnType.LONG,
+                        java.util.Collections.singletonList(key),
+                        expireSeconds
+                );
+
+                return result != null ? result : 0L;
+            } else {
+                // 无过期时间，直接使用原子操作
+                RAtomicLong atomicLong = getRedissonClient().getAtomicLong(key);
+                return atomicLong.incrementAndGet();
+            }
+        } catch (Exception e) {
+            LOG.error("递增计数器失败，key: {}", key, e);
+            throw new RuntimeException("递增计数器失败", e);
+        }
+    }
+
+
+    /**
+     * 递增计数器（无过期时间）
+     */
+    public static long incrementAndGet(String key) {
+        return incrementAndGet(key, 0, null);
+    }
+
+    /**
+     * 递减计数器并设置过期时间（线程安全）
+     */
+    public static long decrementAndGet(String key, long expire, TimeUnit timeUnit) {
+        validateKey(key);
+        if (expire > 0 && timeUnit == null) {
+            throw new IllegalArgumentException("当设置过期时间时，TimeUnit不能为空");
+        }
+
+        try {
+            if (expire > 0) {
+                long expireSeconds = timeUnit.toSeconds(expire);
+
+                String luaScript =
+                        "local current = redis.call('decr', KEYS[1]);" +
+                                "redis.call('expire', KEYS[1], ARGV[1]);" +
+                                "return current";
+
+                RScript script = getRedissonClient().getScript();
+                Long result = script.eval(
+                        RScript.Mode.READ_WRITE,
+                        luaScript,
+                        RScript.ReturnType.LONG,
+                        java.util.Collections.singletonList(key),
+                        expireSeconds
+                );
+
+                return result != null ? result : 0L;
+            } else {
+                RAtomicLong atomicLong = getRedissonClient().getAtomicLong(key);
+                return atomicLong.decrementAndGet();
+            }
+        } catch (Exception e) {
+            LOG.error("递减计数器失败，key: {}", key, e);
+            throw new RuntimeException("递减计数器失败", e);
+        }
+    }
+
+    /**
+     * 递减计数器（无过期时间）
+     */
+    public static long decrementAndGet(String key) {
+        return decrementAndGet(key, 0, null);
+    }
+
+    /**
+     * 获取计数器当前值（不修改）
+     *
+     * @return 计数器的当前值，key不存在时返回0
+     */
+    public static long getCounterValue(String key) {
+        validateKey(key);
+        try {
+            RAtomicLong atomicLong = getRedissonClient().getAtomicLong(key);
+            return atomicLong.get();
+        } catch (Exception e) {
+            LOG.error("获取计数器值失败，key: {}", key, e);
+            return 0;
+        }
+    }
+
+    /**
+     * 检查计数器是否存在
+     */
+    public static boolean counterExists(String key) {
+        validateKey(key);
+        try {
+            RAtomicLong atomicLong = getRedissonClient().getAtomicLong(key);
+            return atomicLong.isExists();
+        } catch (Exception e) {
+            LOG.error("检查计数器存在性失败，key: {}", key, e);
+            return false;
+        }
+    }
+
+    /**
+     * 设置计数器的值
+     */
+    public static void setCounterValue(String key, long value, long expire, TimeUnit timeUnit) {
+        validateKey(key);
+        if (expire > 0 && timeUnit == null) {
+            throw new IllegalArgumentException("当设置过期时间时，TimeUnit不能为空");
+        }
+
+        try {
+            RAtomicLong atomicLong = getRedissonClient().getAtomicLong(key);
+            atomicLong.set(value);
+
+            if (expire > 0) {
+                atomicLong.expire(Duration.of(expire, timeUnit.toChronoUnit()));
+            }
+        } catch (Exception e) {
+            LOG.error("设置计数器值失败，key: {}", key, e);
+            throw new RuntimeException("设置计数器值失败", e);
+        }
+    }
+
+    /**
+     * 重置计数器
+     * <p>
+     * 删除指定的计数器
      * </p>
      *
      * @param key 计数器的key，不能为null或空
-     * @return 计数器的当前值，如果不存在则返回-1
+     * @return 如果计数器被成功删除返回true，否则返回false
      * @throws IllegalArgumentException 如果key为null
      */
-    public static long getCounter(String key) {
+    public static boolean resetCounter(String key) {
         validateKey(key);
-        RMapCache<Object, Object> rMapCache = getRedissonClient().getMapCache(COUNTER_MAP_CACHE_NAME);
-        return Optional.ofNullable(rMapCache.get(key))
-            .map(o -> Convert.convert(Long.class, o))
-            .orElse(-1L);
+        try {
+            return getRedissonClient().getAtomicLong(key).delete();
+        } catch (Exception e) {
+            LOG.error("重置计数器失败，key: {}", key, e);
+            return false;
+        }
     }
 
     /**
@@ -224,15 +378,19 @@ public class GXRedissonUtils {
      * @param lockPrefix 锁前缀，不能为null或空
      * @param lockName   锁的名字，不能为null或空
      * @return Redisson分布式锁对象
-     * @throws IllegalArgumentException 如果lockPrefix或lockName为null
      */
     public static RLock getLock(String lockPrefix, String lockName) {
         if (CharSequenceUtil.isBlank(lockPrefix) || CharSequenceUtil.isBlank(lockName)) {
             throw new IllegalArgumentException("锁前缀和锁名称不能为空");
         }
-        return getRedissonClient().getLock(CharSequenceUtil.format("{}:{}", lockPrefix, lockName));
+        try {
+            return getRedissonClient().getLock(CharSequenceUtil.format("{}:{}", lockPrefix, lockName));
+        } catch (Exception e) {
+            LOG.error("获取锁失败，lockPrefix: {}, lockName: {}", lockPrefix, lockName, e);
+            throw new RuntimeException("获取锁失败", e);
+        }
     }
-    
+
     /**
      * 在锁保护的情况下执行操作
      * <p>
@@ -244,22 +402,113 @@ public class GXRedissonUtils {
      * @param operation 要执行的操作，不能为null
      * @param <T>       操作返回值的类型
      * @return 操作的返回值
-     * @throws IllegalArgumentException 如果lockName或operation为null
-     * @throws RuntimeException         如果操作执行过程中发生异常
      */
     public static <T> T executeWithLock(String lockName, Supplier<T> operation) {
+        return executeWithLock(lockName, DEFAULT_LOCK_WAIT_TIME, DEFAULT_LOCK_LEASE_TIME,
+                TimeUnit.SECONDS, operation);
+    }
+
+    /**
+     * 在锁保护下执行操作（自定义超时时间）
+     *
+     * @param lockName  锁的名字
+     * @param waitTime  等待获取锁的最长时间
+     * @param leaseTime 锁的过期时间，-1表示使用看门狗自动续期
+     * @param timeUnit  时间单位
+     * @param operation 要执行的操作
+     * @return 操作的返回值，获取锁失败返回null
+     */
+    public static <T> T executeWithLock(String lockName, long waitTime, long leaseTime,
+                                        TimeUnit timeUnit, Supplier<T> operation) {
         validateKey(lockName);
         if (operation == null) {
             throw new IllegalArgumentException("操作不能为空");
         }
-        
+        if (timeUnit == null) {
+            throw new IllegalArgumentException("时间单位不能为空");
+        }
+
         RLock lock = getLock(lockName);
+        boolean acquired = false;
         try {
-            lock.lock();
+            // 尝试获取锁，带超时控制
+            acquired = lock.tryLock(waitTime, leaseTime, timeUnit);
+            if (!acquired) {
+                LOG.warn("获取锁超时，lockName: {}, waitTime: {}{}", lockName, waitTime, timeUnit);
+                return null;
+            }
+
             return operation.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.error("获取锁被中断，lockName: {}", lockName, e);
+            throw new RuntimeException("获取锁被中断", e);
+        } catch (Exception e) {
+            LOG.error("执行锁保护操作失败，lockName: {}", lockName, e);
+            throw new RuntimeException("执行锁保护操作失败", e);
         } finally {
-            if (lock.isLocked() && lock.isHeldByCurrentThread()) {
-                lock.unlock();
+            if (acquired) {
+                safeUnlock(lock);
+            }
+        }
+    }
+
+    /**
+     * 尝试获取锁并执行操作（不等待）
+     *
+     * @param lockName  锁的名字
+     * @param operation 要执行的操作
+     * @return 操作的返回值，获取锁失败返回null
+     */
+    public static <T> T tryExecuteWithLock(String lockName, Supplier<T> operation) {
+        return tryExecuteWithLock(lockName, 0, DEFAULT_LOCK_LEASE_TIME, TimeUnit.SECONDS, operation);
+    }
+
+    /**
+     * 尝试获取锁并执行操作
+     * <p>
+     * 该方法尝试获取锁，如果获取成功则执行操作，否则返回null
+     * 支持设置等待时间和锁的过期时间
+     * </p>
+     *
+     * @param lockName  锁的名字，不能为null或空
+     * @param waitTime  等待获取锁的最长时间
+     * @param leaseTime 锁的过期时间（自动释放时间）
+     * @param timeUnit  时间单位
+     * @param operation 要执行的操作，不能为null
+     * @param <T>       操作返回值的类型
+     * @return 操作的返回值，如果获取锁失败则返回null
+     */
+    public static <T> T tryExecuteWithLock(String lockName, long waitTime, long leaseTime,
+                                           TimeUnit timeUnit, Supplier<T> operation) {
+        validateKey(lockName);
+        if (operation == null) {
+            throw new IllegalArgumentException("操作不能为空");
+        }
+        if (timeUnit == null) {
+            throw new IllegalArgumentException("时间单位不能为空");
+        }
+
+        RLock lock = getLock(lockName);
+        boolean acquired = false;
+        try {
+            acquired = lock.tryLock(waitTime, leaseTime, timeUnit);
+            if (!acquired) {
+                LOG.debug("未能获取锁，lockName: {}", lockName);
+                return null;
+            }
+
+            return operation.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.error("获取锁被中断，lockName: {}", lockName, e);
+            throw new RuntimeException("获取锁被中断", e);
+        } catch (Exception e) {
+            LOG.error("执行锁保护操作异常，lockName: {}", lockName, e);
+            throw new RuntimeException("执行锁保护操作异常", e);
+        } finally {
+            if (acquired) {
+                safeUnlock(lock);
             }
         }
     }
@@ -279,15 +528,24 @@ public class GXRedissonUtils {
      * @throws IllegalArgumentException 如果参数不合法
      */
     public static boolean throttling(String name, int rate, int rateInterval, TimeUnit timeUnit) {
-        validateKeyAndTimeUnit(name, timeUnit);
+        validateKey(name);
         if (rate <= 0 || rateInterval <= 0) {
             throw new IllegalArgumentException("限流参数不合法：rate和rateInterval必须大于0");
         }
-        final RRateLimiter rateLimiter = getRedissonClient().getRateLimiter(name);
-        Duration duration = Duration.of(rateInterval, timeUnit.toChronoUnit());
-        return rateLimiter.trySetRate(RateType.OVERALL, rate, duration);
+        if (timeUnit == null) {
+            throw new IllegalArgumentException("时间单位不能为空");
+        }
+
+        try {
+            RRateLimiter rateLimiter = getRedissonClient().getRateLimiter(name);
+            Duration duration = Duration.of(rateInterval, timeUnit.toChronoUnit());
+            return rateLimiter.trySetRate(RateType.OVERALL, rate, duration);
+        } catch (Exception e) {
+            LOG.error("设置限流器失败，name: {}", name, e);
+            return false;
+        }
     }
-    
+
     /**
      * 尝试获取限流许可
      * <p>
@@ -300,9 +558,67 @@ public class GXRedissonUtils {
      * @throws IllegalArgumentException 如果name为null
      */
     public static boolean tryAcquire(String name) {
+        return tryAcquire(name, 1);
+    }
+
+    /**
+     * 尝试获取指定数量的限流许可
+     * <p>
+     * 尝试从指定的限流器中获取指定数量的许可
+     * 该方法不会阻塞，立即返回结果
+     * </p>
+     *
+     * @param name    限流器的名字，不能为null或空
+     * @param permits 需要获取的许可数量，必须大于0
+     * @return 如果获取许可成功返回true，否则返回false
+     * @throws IllegalArgumentException 如果参数不合法
+     */
+    public static boolean tryAcquire(String name, int permits) {
         validateKey(name);
-        final RRateLimiter rateLimiter = getRedissonClient().getRateLimiter(name);
-        return rateLimiter.tryAcquire(1);
+        if (permits <= 0) {
+            throw new IllegalArgumentException("许可数量必须大于0");
+        }
+
+        try {
+            final RRateLimiter rateLimiter = getRedissonClient().getRateLimiter(name);
+            // 只有当限流器配置过（存在）时，才能获取令牌，否则默认通过或抛异常取决于Redisson配置
+            // 建议确保 throttling 方法在系统启动时被调用
+            return rateLimiter.tryAcquire(permits);
+        } catch (Exception e) {
+            LOG.error("获取限流许可失败，name: {}, permits: {}", name, permits, e);
+            // 降级策略：默认拒绝还是放行？这里选择拒绝(false)以保护系统
+            return false;
+        }
+    }
+
+    /**
+     * 阻塞获取限流许可（等待直到获取成功）
+     *
+     * @param name 限流器的名字
+     */
+    public static void acquire(String name) {
+        acquire(name, 1);
+    }
+
+    /**
+     * 阻塞获取指定数量的限流许可
+     *
+     * @param name    限流器的名字
+     * @param permits 需要获取的许可数量
+     */
+    public static void acquire(String name, int permits) {
+        validateKey(name);
+        if (permits <= 0) {
+            throw new IllegalArgumentException("许可数量必须大于0");
+        }
+
+        try {
+            RRateLimiter rateLimiter = getRedissonClient().getRateLimiter(name);
+            rateLimiter.acquire(permits);
+        } catch (Exception e) {
+            LOG.error("获取限流许可失败（阻塞模式），name: {}, permits: {}", name, permits, e);
+            throw new RuntimeException("获取限流许可失败", e);
+        }
     }
 
     /**
@@ -313,13 +629,52 @@ public class GXRedissonUtils {
      * </p>
      *
      * @return RedissonClient实例，不会为null
-     * @throws IllegalStateException 如果无法获取RedissonClient实例
      */
     public static RedissonClient getRedissonClient() {
-        RedissonClient redissonClient = GXSpringContextUtils.getBean("redissonClient", RedissonClient.class);
-        if (ObjectUtil.isNotNull(redissonClient)) {
-            return redissonClient;
+        try {
+            RedissonClient redissonClient = GXSpringContextUtils.getBean("redissonClient", RedissonClient.class);
+            if (ObjectUtil.isNotNull(redissonClient)) {
+                return redissonClient;
+            }
+            return GXSpringContextUtils.getBean(RedissonClient.class);
+        } catch (Exception e) {
+            LOG.error("获取RedissonClient Bean失败", e);
+            throw new IllegalStateException("无法获取RedissonClient实例", e);
         }
-        return GXSpringContextUtils.getBean(RedissonClient.class);
+    }
+
+    /**
+     * 验证key参数
+     *
+     * @param key 键名，不能为null或空
+     */
+    private static void validateKey(String key) {
+        if (CharSequenceUtil.isBlank(key)) {
+            throw new IllegalArgumentException("Key不能为空");
+        }
+    }
+
+    /**
+     * 安全释放锁
+     * <p>
+     * 仅当当前线程持有锁且锁未被强制释放时才执行unlock
+     * </p>
+     */
+    private static void safeUnlock(RLock lock) {
+        if (lock == null) {
+            return;
+        }
+        try {
+            // 必须同时满足：锁已被锁定 && 当前线程持有锁
+            if (lock.isLocked() && lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        } catch (IllegalMonitorStateException e) {
+            // 锁已经被释放或不是当前线程持有
+            LOG.warn("尝试释放未持有的锁: {}", e.getMessage());
+        } catch (Exception e) {
+            // 其他异常（如网络问题），记录但不影响业务
+            LOG.error("释放锁异常: {}", e.getMessage(), e);
+        }
     }
 }

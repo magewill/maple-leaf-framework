@@ -193,7 +193,7 @@ public class GXRedissonDelayMQUtils {
             throw new IllegalArgumentException("队列名不能为空");
         }
         if (message == null) {
-            throw new IllegalArgumentException("消息内容不能为null");
+            throw new IllegalArgumentException("消息内容不能为空");
         }
 
         String msg = convertMessageToString(message);

@@ -20,15 +20,26 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * 该工具类提供了基于Redisson的可靠主题(ReliableTopic)操作，包括：
  * - 同步和异步发布消息
- * - 获取特定编码的主题实例
- * - 支持Debezium集成的主题操作
+ * - 订阅消息（避免重复消费的关键：使用单例模式管理Topic实例）
+ * - 批量发布消息
+ * - 订阅者管理
  * </p>
  * <p>
- * 安全性说明：
- * 1. 所有方法都进行了空值检查，避免空指针异常
- * 2. 异步操作提供了异常处理机制，确保异常信息能够被正确捕获和处理
- * 3. 工具类使用私有构造函数防止实例化，所有方法都是静态的
- * 4. 所有方法都是线程安全的，适合在多线程环境下使用
+ * ⚠️ 重要提示 - RReliableTopic的消费机制：
+ * <p>
+ * 1. RReliableTopic会为每个客户端实例自动分配唯一的订阅者ID（由Redisson内部管理）
+ * 2. 消费位置是根据 "客户端实例 + Topic名称" 来记录的
+ * 3. 避免重复消费的关键：确保每个应用实例对同一个Topic只创建一次监听器
+ * <p>
+ * 实现方式：
+ * - 本工具类使用单例模式缓存Topic实例（TOPIC_CACHE）
+ * - 同一个Topic在应用生命周期内只会创建一次监听器
+ * - 应用重启后，Redisson会使用相同的客户端ID继续从上次位置消费
+ * <p>
+ * 注意事项：
+ * - 不要在运行时重复调用subscribe()方法
+ * - 建议在@PostConstruct中初始化所有订阅
+ * - 确保RedissonClient配置了固定的客户端ID（通过Config.setConnectionPoolSize等）
  * </p>
  */
 public class GXRedissonMQUtils {
@@ -38,13 +49,17 @@ public class GXRedissonMQUtils {
     private static final Logger LOGGER = LoggerFactory.getLogger(GXRedissonMQUtils.class);
 
     /**
-     * 缓存 ReliableTopic 实例
+     * 缓存 ReliableTopic 实例（单例模式，避免重复订阅）
      */
     private static final ConcurrentHashMap<String, RReliableTopic> TOPIC_CACHE = new ConcurrentHashMap<>();
 
     /**
+     * 缓存监听器ID，用于后续取消订阅
+     */
+    private static final ConcurrentHashMap<String, String> LISTENER_ID_CACHE = new ConcurrentHashMap<>();
+
+    /**
      * 私有构造函数，防止实例化
-     * 工具类应使用静态方法，不应被实例化
      */
     private GXRedissonMQUtils() {
         throw new UnsupportedOperationException("工具类不能实例化");
@@ -52,14 +67,10 @@ public class GXRedissonMQUtils {
 
     /**
      * 同步发布Redis的可靠主题消息
-     * <p>
-     * 将消息发布到指定的Redisson可靠主题中，该操作是同步的，会阻塞直到消息发布完成。
-     * 该方法会进行参数验证，确保主题名和消息不为空，并处理可能的异常。
-     * </p>
      *
      * @param topicName 主题名字，不能为null或空
      * @param message   发布的消息，不能为null
-     * @return 目前主题中的消息数量
+     * @return 接收消息的订阅者数量
      */
     public static long publish(String topicName, Object message) {
         validatePublishParameters(topicName, message);
@@ -71,7 +82,7 @@ public class GXRedissonMQUtils {
                 LOGGER.warn("发布消息到主题[{}]失败，当前消息数: {}", topicName, subscribersReceived);
             }
             if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug("发布消息到主题[{}]成功，当前消息数: {}", topicName, subscribersReceived);
+                LOGGER.debug("发布消息到主题[{}]成功，订阅者数: {}", topicName, subscribersReceived);
             }
             return subscribersReceived;
         } catch (GXBusinessException e) {
@@ -83,14 +94,11 @@ public class GXRedissonMQUtils {
     }
 
     /**
-     * 异步发布Redis的可靠主题消息（真正异步版本）
-     * <p>
-     * 将消息异步发布到指定的Redisson可靠主题中，立即返回Future对象，不阻塞调用线程。
-     * </p>
+     * 异步发布Redis的可靠主题消息
      *
      * @param topicName 主题名字，不能为null或空
      * @param message   发布的消息，不能为null
-     * @return CompletableFuture，包含发布后的消息数量
+     * @return CompletableFuture，包含接收消息的订阅者数量
      */
     public static CompletableFuture<Long> publishAsync(String topicName, Object message) {
         validatePublishParameters(topicName, message);
@@ -116,34 +124,67 @@ public class GXRedissonMQUtils {
     }
 
     /**
-     * 获取可靠主题实例（带缓存）
-     */
-    public static RReliableTopic getReliableTopic(String topicName) {
-        if (CharSequenceUtil.isBlank(topicName)) {
-            throw new IllegalArgumentException("主题名称不能为空");
-        }
-        return TOPIC_CACHE.computeIfAbsent(topicName, name -> {
-            RedissonClient redissonClient = getRedissonMQClient();
-            return redissonClient.getReliableTopic(name);
-        });
-    }
-
-    /**
-     * 订阅可靠主题消息
+     * 订阅可靠主题消息（单例模式，避免重复消费）
      * <p>
-     * 注册一个消息监听器来处理主题中的消息。
-     * 可靠主题会确保消息不会丢失，即使消费者暂时离线。
+     * ⚠️ 重要说明：
+     * RReliableTopic 无法阻止消息被标记为已交付。
+     * 即使监听器抛出异常，消息也会被视为已交付，不会重复消费。
+     * <p>
+     * 如果需要失败重试机制，请使用 subscribeWithRetry() 方法。
      * </p>
      *
      * @param topicName    主题名字，不能为null或空
      * @param messageClass 消息类型的Class对象
      * @param listener     消息监听器，不能为null
      * @param <T>          消息类型
-     * @return 监听器ID，用于后续取消订阅
-     * @throws IllegalArgumentException 如果参数不合法
-     * @throws GXBusinessException      如果订阅过程中发生异常
+     * @return 监听器ID（由Redisson自动生成）
      */
     public static <T> String subscribe(String topicName, Class<T> messageClass, MessageListener<T> listener) {
+        if (CharSequenceUtil.isBlank(topicName) || listener == null || messageClass == null) {
+            throw new IllegalArgumentException("订阅参数不完整");
+        }
+
+        // 检查是否已经订阅过
+        String cacheKey = topicName + ":" + messageClass.getName();
+        if (LISTENER_ID_CACHE.containsKey(cacheKey)) {
+            String existingListenerId = LISTENER_ID_CACHE.get(cacheKey);
+            LOGGER.warn("主题[{}]已经订阅过，监听器ID: {}，避免重复订阅", topicName, existingListenerId);
+            return existingListenerId;
+        }
+
+        try {
+            RReliableTopic reliableTopic = getReliableTopic(topicName);
+
+            String listenerId = reliableTopic.addListener(messageClass, (channel, msg) -> {
+                try {
+                    listener.onMessage(channel, msg);
+                } catch (Exception e) {
+                    LOGGER.error("处理主题[{}]消息时发生异常: {}", topicName, e.getMessage(), e);
+                    // 注意：即使这里抛出异常，消息也会被标记为已交付，不会重复消费
+                }
+            });
+
+            // 缓存监听器ID
+            LISTENER_ID_CACHE.put(cacheKey, listenerId);
+
+            LOGGER.info("成功订阅主题[{}]，监听器ID: {} (消息交付后即标记为已消费)", topicName, listenerId);
+            return listenerId;
+        } catch (GXBusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.error("订阅主题[{}]时发生异常: {}", topicName, e.getMessage(), e);
+            throw new GXBusinessException("订阅主题失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 强制订阅（即使已订阅过也会重新订阅）
+     * <p>
+     * ⚠️ 慎用：这会导致同一个Topic有多个监听器，可能会重复消费消息！
+     * 仅在特殊场景下使用，比如需要多个不同的处理逻辑。
+     * </p>
+     */
+    public static <T> String forceSubscribe(String topicName, Class<T> messageClass, MessageListener<T> listener) {
         if (CharSequenceUtil.isBlank(topicName) || listener == null || messageClass == null) {
             throw new IllegalArgumentException("订阅参数不完整");
         }
@@ -156,22 +197,23 @@ public class GXRedissonMQUtils {
                     listener.onMessage(channel, msg);
                 } catch (Exception e) {
                     LOGGER.error("处理主题[{}]消息时发生异常: {}", topicName, e.getMessage(), e);
-                    // 不要抛出异常，否则可能导致 Redisson 监听线程中断或打印过多内部错误
                 }
             });
 
-            LOGGER.info("成功订阅主题[{}]，监听器ID: {}", topicName, listenerId);
+            LOGGER.warn("⚠️ 强制订阅主题[{}]，监听器ID: {}，可能导致重复消费！", topicName, listenerId);
             return listenerId;
-        } catch (GXBusinessException e) {
-            throw e;
         } catch (Exception e) {
-            LOGGER.error("订阅主题[{}]时发生异常: {}", topicName, e.getMessage(), e);
-            throw new GXBusinessException("订阅主题失败: " + e.getMessage(), e);
+            LOGGER.error("强制订阅主题[{}]时发生异常: {}", topicName, e.getMessage(), e);
+            throw new GXBusinessException("强制订阅主题失败: " + e.getMessage(), e);
         }
     }
 
     /**
-     * 取消订阅
+     * 取消订阅（移除监听器）
+     * <p>
+     * 注意：取消订阅后，Redisson仍会记录消费位置。
+     * 如果重新订阅，会从上次的位置继续消费。
+     * </p>
      *
      * @param topicName   主题名字
      * @param listenerIds 监听器ID（可以是多个）
@@ -188,9 +230,12 @@ public class GXRedissonMQUtils {
             RReliableTopic reliableTopic = getReliableTopic(topicName);
             for (String listenerId : listenerIds) {
                 reliableTopic.removeListener(listenerId);
+
+                // 从缓存中移除
+                LISTENER_ID_CACHE.entrySet().removeIf(entry -> entry.getValue().equals(listenerId));
             }
 
-            LOGGER.info("成功取消订阅主题[{}]，监听器ID: {}", topicName, listenerIds);
+            LOGGER.info("成功取消订阅主题[{}]，监听器ID: {} (消费位置已保留)", topicName, listenerIds);
         } catch (Exception e) {
             LOGGER.error("取消订阅主题[{}]时发生异常: {}", topicName, e.getMessage(), e);
             throw new GXBusinessException("取消订阅失败: " + e.getMessage(), e);
@@ -198,19 +243,38 @@ public class GXRedissonMQUtils {
     }
 
     /**
-     * 彻底移除某个订阅者（慎用）
+     * 彻底移除订阅者（删除消费位置，慎用！）
      * <p>
-     * 移除后，Redis 中为该订阅者保存的消息偏移量会被删除。
+     * ⚠️ 警告：此操作会删除Redis中保存的订阅者消费位置。
+     * 如果重新订阅，将从最新消息开始消费（历史消息会被跳过）。
      * </p>
+     *
+     * @param topicName   主题名字
+     * @param listenerIds 监听器ID（可以是多个）
      */
     public static void removeSubscriber(String topicName, String... listenerIds) {
-        if (CollUtil.isEmpty(Arrays.asList(listenerIds))) return;
+        if (CharSequenceUtil.isBlank(topicName)) {
+            throw new IllegalArgumentException("主题名不能为空");
+        }
+        if (CollUtil.isEmpty(Arrays.asList(listenerIds))) {
+            LOGGER.warn("订阅者ID列表为空，无需移除");
+            return;
+        }
+
         try {
             RReliableTopic reliableTopic = getReliableTopic(topicName);
             reliableTopic.removeListener(listenerIds);
-            LOGGER.info("已移除订阅者 [{}] 来自主题 [{}]", listenerIds, topicName);
+
+            // 从缓存中移除
+            for (String listenerId : listenerIds) {
+                LISTENER_ID_CACHE.entrySet().removeIf(entry -> entry.getValue().equals(listenerId));
+            }
+
+            LOGGER.warn("⚠️ 已彻底移除订阅者 {} 来自主题 [{}]，消费位置已删除！",
+                    Arrays.toString(listenerIds), topicName);
         } catch (Exception e) {
-            LOGGER.error("移除订阅者异常: {}", e.getMessage());
+            LOGGER.error("移除订阅者异常: {}", e.getMessage(), e);
+            throw new GXBusinessException("移除订阅者失败: " + e.getMessage(), e);
         }
     }
 
@@ -232,7 +296,6 @@ public class GXRedissonMQUtils {
         try {
             RReliableTopic reliableTopic = getReliableTopic(topicName);
             int successCount = 0;
-            // RReliableTopic 目前没有原生的 publishAll，循环发布是标准做法
             for (Object message : messages) {
                 try {
                     reliableTopic.publish(message);
@@ -251,6 +314,9 @@ public class GXRedissonMQUtils {
 
     /**
      * 获取主题的订阅者数量
+     *
+     * @param topicName 主题名
+     * @return 订阅者数量
      */
     public static int countSubscribers(String topicName) {
         if (CharSequenceUtil.isBlank(topicName)) {
@@ -267,10 +333,63 @@ public class GXRedissonMQUtils {
     }
 
     /**
-     * 参数验证
+     * 获取已缓存的监听器ID
+     *
+     * @param topicName    主题名
+     * @param messageClass 消息类型
+     * @return 监听器ID，如果未订阅返回null
+     */
+    public static String getCachedListenerId(String topicName, Class<?> messageClass) {
+        String cacheKey = topicName + ":" + messageClass.getName();
+        return LISTENER_ID_CACHE.get(cacheKey);
+    }
+
+    /**
+     * 检查主题是否已订阅
+     *
+     * @param topicName    主题名
+     * @param messageClass 消息类型
+     * @return true表示已订阅
+     */
+    public static boolean isSubscribed(String topicName, Class<?> messageClass) {
+        return getCachedListenerId(topicName, messageClass) != null;
+    }
+
+    /**
+     * 获取可靠主题实例（带缓存）
      *
      * @param topicName 主题名
-     * @param message   消息内容
+     * @return RReliableTopic实例
+     */
+    public static RReliableTopic getReliableTopic(String topicName) {
+        if (CharSequenceUtil.isBlank(topicName)) {
+            throw new IllegalArgumentException("主题名称不能为空");
+        }
+        return TOPIC_CACHE.computeIfAbsent(topicName, name -> {
+            RedissonClient redissonClient = getRedissonMQClient();
+            return redissonClient.getReliableTopic(name);
+        });
+    }
+
+    /**
+     * 清除主题缓存（一般不需要调用）
+     *
+     * @param topicName 主题名，如果为null则清除所有缓存
+     */
+    public static void clearTopicCache(String topicName) {
+        if (CharSequenceUtil.isBlank(topicName)) {
+            TOPIC_CACHE.clear();
+            LISTENER_ID_CACHE.clear();
+            LOGGER.info("已清除所有主题缓存");
+        } else {
+            TOPIC_CACHE.remove(topicName);
+            LISTENER_ID_CACHE.entrySet().removeIf(entry -> entry.getKey().startsWith(topicName + ":"));
+            LOGGER.info("已清除主题[{}]的缓存", topicName);
+        }
+    }
+
+    /**
+     * 参数验证
      */
     private static void validatePublishParameters(String topicName, Object message) {
         if (CharSequenceUtil.isBlank(topicName)) {
@@ -287,7 +406,7 @@ public class GXRedissonMQUtils {
     private static RedissonClient getRedissonMQClient() {
         RedissonClient redissonMQClient = GXSpringContextUtils.getBean("redissonMQClient", RedissonClient.class);
         if (redissonMQClient == null) {
-            throw new GXBusinessException("无法获取redissonMQClient实例，请确保已正确配置！！");
+            throw new GXBusinessException("无法获取redissonMQClient实例，请确保已正确配置！");
         }
         return redissonMQClient;
     }
