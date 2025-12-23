@@ -1,17 +1,19 @@
 package cn.maple.redisson.util;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
-import org.redisson.api.RFuture;
 import org.redisson.api.RReliableTopic;
 import org.redisson.api.RedissonClient;
-import org.redisson.client.codec.Codec;
+import org.redisson.api.listener.MessageListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.ExecutionException;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Redisson消息队列工具类
@@ -36,6 +38,11 @@ public class GXRedissonMQUtils {
     private static final Logger LOGGER = LoggerFactory.getLogger(GXRedissonMQUtils.class);
 
     /**
+     * 缓存 ReliableTopic 实例
+     */
+    private static final ConcurrentHashMap<String, RReliableTopic> TOPIC_CACHE = new ConcurrentHashMap<>();
+
+    /**
      * 私有构造函数，防止实例化
      * 工具类应使用静态方法，不应被实例化
      */
@@ -53,24 +60,20 @@ public class GXRedissonMQUtils {
      * @param topicName 主题名字，不能为null或空
      * @param message   发布的消息，不能为null
      * @return 目前主题中的消息数量
-     * @throws GXBusinessException 如果获取RedissonClient失败或发布过程中发生异常
      */
     public static long publish(String topicName, Object message) {
-        if (CharSequenceUtil.isBlank(topicName)) {
-            throw new IllegalArgumentException("主题名不能为空");
-        }
-        if (message == null) {
-            throw new IllegalArgumentException("消息内容不能为null");
-        }
+        validatePublishParameters(topicName, message);
 
         try {
-            RedissonClient redissonMQClient = GXSpringContextUtils.getBean("redissonMQClient", RedissonClient.class);
-            if (redissonMQClient == null) {
-                throw new GXBusinessException("无法获取redissonMQClient实例");
+            RReliableTopic reliableTopic = getReliableTopic(topicName);
+            long subscribersReceived = reliableTopic.publish(message);
+            if (subscribersReceived < 0) {
+                LOGGER.warn("发布消息到主题[{}]失败，当前消息数: {}", topicName, subscribersReceived);
             }
-
-            RReliableTopic reliableTopic = redissonMQClient.getReliableTopic(topicName);
-            return reliableTopic.publish(message);
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("发布消息到主题[{}]成功，当前消息数: {}", topicName, subscribersReceived);
+            }
+            return subscribersReceived;
         } catch (GXBusinessException e) {
             throw e;
         } catch (Exception e) {
@@ -80,95 +83,212 @@ public class GXRedissonMQUtils {
     }
 
     /**
-     * 异步发布Redis的可靠主题消息
+     * 异步发布Redis的可靠主题消息（真正异步版本）
      * <p>
-     * 将消息异步发布到指定的Redisson可靠主题中，该操作不会阻塞调用线程。
-     * 该方法会进行参数验证，确保主题名和消息不为空，并处理可能的异常。
+     * 将消息异步发布到指定的Redisson可靠主题中，立即返回Future对象，不阻塞调用线程。
      * </p>
      *
      * @param topicName 主题名字，不能为null或空
      * @param message   发布的消息，不能为null
-     * @return 目前主题中的消息数量
-     * @throws GXBusinessException  如果获取RedissonClient失败或发布过程中发生异常
-     * @throws ExecutionException   如果异步操作执行过程中发生异常
-     * @throws InterruptedException 如果当前线程在等待结果时被中断
+     * @return CompletableFuture，包含发布后的消息数量
      */
-    public static long publishAsync(String topicName, Object message) throws ExecutionException, InterruptedException {
+    public static CompletableFuture<Long> publishAsync(String topicName, Object message) {
+        validatePublishParameters(topicName, message);
+
+        try {
+            RReliableTopic reliableTopic = getReliableTopic(topicName);
+            return reliableTopic
+                    .publishAsync(message)
+                    .toCompletableFuture()
+                    .whenComplete((count, ex) -> {
+                        if (ex != null) {
+                            LOGGER.error("异步发布消息到主题[{}]失败", topicName, ex);
+                        } else if (LOGGER.isDebugEnabled()) {
+                            LOGGER.debug("异步发布消息到主题[{}]成功，接收者数量: {}", topicName, count);
+                        }
+                    });
+        } catch (GXBusinessException e) {
+            return CompletableFuture.failedFuture(e);
+        } catch (Exception e) {
+            LOGGER.error("异步发布消息到主题[{}]时发生异常: {}", topicName, e.getMessage(), e);
+            return CompletableFuture.failedFuture(new GXBusinessException("异步发布消息失败: " + e.getMessage(), e));
+        }
+    }
+
+    /**
+     * 获取可靠主题实例（带缓存）
+     */
+    public static RReliableTopic getReliableTopic(String topicName) {
+        if (CharSequenceUtil.isBlank(topicName)) {
+            throw new IllegalArgumentException("主题名称不能为空");
+        }
+        return TOPIC_CACHE.computeIfAbsent(topicName, name -> {
+            RedissonClient redissonClient = getRedissonMQClient();
+            return redissonClient.getReliableTopic(name);
+        });
+    }
+
+    /**
+     * 订阅可靠主题消息
+     * <p>
+     * 注册一个消息监听器来处理主题中的消息。
+     * 可靠主题会确保消息不会丢失，即使消费者暂时离线。
+     * </p>
+     *
+     * @param topicName    主题名字，不能为null或空
+     * @param messageClass 消息类型的Class对象
+     * @param listener     消息监听器，不能为null
+     * @param <T>          消息类型
+     * @return 监听器ID，用于后续取消订阅
+     * @throws IllegalArgumentException 如果参数不合法
+     * @throws GXBusinessException      如果订阅过程中发生异常
+     */
+    public static <T> String subscribe(String topicName, Class<T> messageClass, MessageListener<T> listener) {
+        if (CharSequenceUtil.isBlank(topicName) || listener == null || messageClass == null) {
+            throw new IllegalArgumentException("订阅参数不完整");
+        }
+
+        try {
+            RReliableTopic reliableTopic = getReliableTopic(topicName);
+
+            String listenerId = reliableTopic.addListener(messageClass, (channel, msg) -> {
+                try {
+                    listener.onMessage(channel, msg);
+                } catch (Exception e) {
+                    LOGGER.error("处理主题[{}]消息时发生异常: {}", topicName, e.getMessage(), e);
+                    // 不要抛出异常，否则可能导致 Redisson 监听线程中断或打印过多内部错误
+                }
+            });
+
+            LOGGER.info("成功订阅主题[{}]，监听器ID: {}", topicName, listenerId);
+            return listenerId;
+        } catch (GXBusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.error("订阅主题[{}]时发生异常: {}", topicName, e.getMessage(), e);
+            throw new GXBusinessException("订阅主题失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 取消订阅
+     *
+     * @param topicName   主题名字
+     * @param listenerIds 监听器ID（可以是多个）
+     */
+    public static void unsubscribe(String topicName, String... listenerIds) {
+        if (CharSequenceUtil.isBlank(topicName)) {
+            throw new IllegalArgumentException("主题名不能为空");
+        }
+        if (CollUtil.isEmpty(Arrays.asList(listenerIds))) {
+            throw new IllegalArgumentException("监听器ID不能为空");
+        }
+
+        try {
+            RReliableTopic reliableTopic = getReliableTopic(topicName);
+            for (String listenerId : listenerIds) {
+                reliableTopic.removeListener(listenerId);
+            }
+
+            LOGGER.info("成功取消订阅主题[{}]，监听器ID: {}", topicName, listenerIds);
+        } catch (Exception e) {
+            LOGGER.error("取消订阅主题[{}]时发生异常: {}", topicName, e.getMessage(), e);
+            throw new GXBusinessException("取消订阅失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 彻底移除某个订阅者（慎用）
+     * <p>
+     * 移除后，Redis 中为该订阅者保存的消息偏移量会被删除。
+     * </p>
+     */
+    public static void removeSubscriber(String topicName, String... listenerIds) {
+        if (CollUtil.isEmpty(Arrays.asList(listenerIds))) return;
+        try {
+            RReliableTopic reliableTopic = getReliableTopic(topicName);
+            reliableTopic.removeListener(listenerIds);
+            LOGGER.info("已移除订阅者 [{}] 来自主题 [{}]", listenerIds, topicName);
+        } catch (Exception e) {
+            LOGGER.error("移除订阅者异常: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 批量发布消息
+     *
+     * @param topicName 主题名
+     * @param messages  消息列表
+     * @return 成功发布的消息数量
+     */
+    public static int publishBatch(String topicName, List<Object> messages) {
+        if (CharSequenceUtil.isBlank(topicName)) {
+            throw new IllegalArgumentException("主题名不能为空");
+        }
+        if (messages == null || messages.isEmpty()) {
+            throw new IllegalArgumentException("消息列表不能为空");
+        }
+
+        try {
+            RReliableTopic reliableTopic = getReliableTopic(topicName);
+            int successCount = 0;
+            // RReliableTopic 目前没有原生的 publishAll，循环发布是标准做法
+            for (Object message : messages) {
+                try {
+                    reliableTopic.publish(message);
+                    successCount++;
+                } catch (Exception e) {
+                    LOGGER.error("批量发布中单条失败，主题: {}", topicName, e);
+                }
+            }
+            LOGGER.info("批量发布消息到主题[{}]完成，成功: {}, 总数: {}", topicName, successCount, messages.size());
+            return successCount;
+        } catch (Exception e) {
+            LOGGER.error("批量发布消息到主题[{}]时发生异常: {}", topicName, e.getMessage(), e);
+            throw new GXBusinessException("批量发布消息失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 获取主题的订阅者数量
+     */
+    public static int countSubscribers(String topicName) {
+        if (CharSequenceUtil.isBlank(topicName)) {
+            throw new IllegalArgumentException("主题名不能为空");
+        }
+
+        try {
+            RReliableTopic reliableTopic = getReliableTopic(topicName);
+            return reliableTopic.countSubscribers();
+        } catch (Exception e) {
+            LOGGER.error("获取主题[{}]订阅者数量时发生异常: {}", topicName, e.getMessage(), e);
+            throw new GXBusinessException("获取订阅者数量失败: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 参数验证
+     *
+     * @param topicName 主题名
+     * @param message   消息内容
+     */
+    private static void validatePublishParameters(String topicName, Object message) {
         if (CharSequenceUtil.isBlank(topicName)) {
             throw new IllegalArgumentException("主题名不能为空");
         }
         if (message == null) {
-            throw new IllegalArgumentException("消息内容不能为null");
-        }
-
-        try {
-            RedissonClient redissonMQClient = GXSpringContextUtils.getBean("redissonMQClient", RedissonClient.class);
-            if (redissonMQClient == null) {
-                throw new GXBusinessException("无法获取redissonMQClient实例");
-            }
-
-            RReliableTopic reliableTopic = redissonMQClient.getReliableTopic(topicName);
-            RFuture<Long> longRFuture = reliableTopic.publishAsync(message);
-            return longRFuture.get();
-        } catch (GXBusinessException e) {
-            throw e;
-        } catch (ExecutionException | InterruptedException e) {
-            LOGGER.error("异步发布消息到主题[{}]时发生异常: {}", topicName, e.getMessage(), e);
-            throw e; // 重新抛出原始异常，保留调用栈信息
-        } catch (Exception e) {
-            LOGGER.error("异步发布消息到主题[{}]时发生未知异常: {}", topicName, e.getMessage(), e);
-            throw new GXBusinessException("异步发布消息失败: " + e.getMessage(), e);
+            throw new IllegalArgumentException("消息内容不能为空");
         }
     }
 
     /**
-     * 获取处理debezium server的可靠主题
-     * <p>
-     * 使用指定的编解码器创建或获取一个Redisson可靠主题实例，用于处理Debezium事件。
-     * 该方法会检查参数的有效性，并确保返回有效的主题实例。
-     * </p>
-     *
-     * @param redissonMQClient Redisson客户端对象，不能为null
-     * @param name             主题名称，不能为null或空
-     * @param codec            消息编解码器，可以为null，此时使用客户端默认编解码器
-     * @return 可靠主题实例
-     * @throws IllegalArgumentException 如果redissonMQClient为null或name为空
+     * 获取 RedissonClient 实例
      */
-    public static RReliableTopic getDebeziumReliableTopic(RedissonClient redissonMQClient, String name, Codec codec) {
+    private static RedissonClient getRedissonMQClient() {
+        RedissonClient redissonMQClient = GXSpringContextUtils.getBean("redissonMQClient", RedissonClient.class);
         if (redissonMQClient == null) {
-            throw new IllegalArgumentException("Redisson客户端不能为null");
+            throw new GXBusinessException("无法获取redissonMQClient实例，请确保已正确配置！！");
         }
-        if (CharSequenceUtil.isBlank(name)) {
-            throw new IllegalArgumentException("主题名称不能为空");
-        }
-
-        if (ObjectUtil.isNull(codec)) {
-            codec = redissonMQClient.getConfig().getCodec();
-        }
-        return redissonMQClient.getReliableTopic(name, codec);
-    }
-
-    /**
-     * 获取处理debezium server的可靠主题（使用默认编解码器）
-     * <p>
-     * 使用客户端默认的编解码器创建或获取一个Redisson可靠主题实例，用于处理Debezium事件。
-     * 该方法是{@link #getDebeziumReliableTopic(RedissonClient, String, Codec)}的简化版本。
-     * </p>
-     *
-     * @param redissonMQClient Redisson客户端对象，不能为null
-     * @param name             主题名称，不能为null或空
-     * @return 可靠主题实例
-     * @throws IllegalArgumentException 如果redissonMQClient为null或name为空
-     */
-    public static RReliableTopic getDebeziumReliableTopic(RedissonClient redissonMQClient, String name) {
-        if (redissonMQClient == null) {
-            throw new IllegalArgumentException("Redisson客户端不能为null");
-        }
-        if (CharSequenceUtil.isBlank(name)) {
-            throw new IllegalArgumentException("主题名称不能为空");
-        }
-
-        Codec codec = redissonMQClient.getConfig().getCodec();
-        return getDebeziumReliableTopic(redissonMQClient, name, codec);
+        return redissonMQClient;
     }
 }
