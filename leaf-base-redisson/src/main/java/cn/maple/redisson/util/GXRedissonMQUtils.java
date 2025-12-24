@@ -10,10 +10,8 @@ import org.redisson.api.listener.MessageListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.net.InetAddress;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -145,7 +143,7 @@ public class GXRedissonMQUtils {
         }
 
         // 使用 topicName 和 messageClass 作为唯一标识，确保同一个Topic的同一种消息类型只被一个监听器处理
-        String cacheKey = topicName + ":" + messageClass.getName();
+        String cacheKey = generateCacheKey(topicName, messageClass);//getInstanceId() + ":" + topicName + ":" + messageClass.getName();
         // 使用 computeIfAbsent 保证原子性操作，避免并发问题
         String listenerId = LISTENER_ID_CACHE.computeIfAbsent(cacheKey, key -> {
             try {
@@ -466,5 +464,42 @@ public class GXRedissonMQUtils {
             throw new GXBusinessException("无法获取redissonMQClient实例，请确保已正确配置！");
         }
         return redissonMQClient;
+    }
+
+    /**
+     * 获取 全局唯一的ListenerId, 用于标识订阅者
+     */
+    public static String getInstanceId() {
+        return InstanceIdHolder.get();
+    }
+
+    /**
+     * 生成带实例信息的缓存键
+     */
+    private static String generateCacheKey(String topicName, Class<?> messageClass) {
+        return getInstanceId() + ":" + topicName + ":" + messageClass.getName();
+    }
+
+    private static class InstanceIdHolder {
+        private static final String INSTANCE_ID = generateInstanceId();
+
+        private static String generateInstanceId() {
+            // 格式：timestamp-hostname-randomId
+            String hostname = getHostname();
+            String randomId = UUID.randomUUID().toString().substring(0, 8);
+            return System.currentTimeMillis() + "-" + hostname + "-" + randomId;
+        }
+
+        private static String getHostname() {
+            try {
+                return InetAddress.getLocalHost().getHostName();
+            } catch (Exception e) {
+                return "unknown";
+            }
+        }
+
+        static String get() {
+            return INSTANCE_ID;
+        }
     }
 }

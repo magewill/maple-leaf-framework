@@ -5,6 +5,7 @@ import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.redisson.annotation.GXRedissonDelayMQToTopic;
 import cn.maple.redisson.listener.GXRedissonDelayMQListener;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import lombok.extern.log4j.Log4j2;
 import org.redisson.api.RBlockingQueue;
 import org.redisson.api.RDelayedQueue;
@@ -150,12 +151,12 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
     /**
      * 批量拉取消息的数量
      */
-    private static final int BATCH_POLL_SIZE = 10;
+    private static final int BATCH_POLL_SIZE = 20;
 
     /**
      * 批量拉取超时时间（毫秒）
      */
-    private static final long BATCH_POLL_TIMEOUT = 100L;
+    private static final long BATCH_POLL_TIMEOUT = 1000L;
 
     /**
      * 心跳日志打印间隔：5分钟
@@ -194,22 +195,26 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
      */
     @SuppressWarnings("deprecation")
     private final Map<String, RDelayedQueue<String>> delayedQueueMap = new ConcurrentHashMap<>();
-
+    /**
+     * 重试调度器
+     */
+    private final ScheduledExecutorService retryScheduler =
+            Executors.newScheduledThreadPool(2, new ThreadFactoryBuilder()
+                    .setNameFormat("retry-scheduler-%d")
+                    .setDaemon(true)
+                    .build());
     /**
      * 运行状态标志：使用 volatile 保证可见性
      */
     private volatile boolean running = true;
-
     /**
      * 关闭中标志：用于区分正常运行和关闭过程
      */
     private volatile boolean shuttingDown = false;
-
     /**
      * RedissonClient 缓存引用，避免重复获取
      */
     private volatile RedissonClient redissonClient;
-
     /**
      * Redisson 是否已关闭的标志
      */
@@ -273,11 +278,12 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
     /**
      * 启动延迟队列的监听任务（优化版）
      */
-    private void startListenerTask(GXRedissonDelayMQListener listener,
-                                   String blockingQueueName,
-                                   String topicName) {
+    private void startListenerTask(GXRedissonDelayMQListener listener, String blockingQueueName, String topicName) {
+        // ✅ 使用 putIfAbsent 原子操作避免重复创建
+        QueueListenerConfig existingConfig = listenerConfigs.get(blockingQueueName);
+
         // 检查是否已存在该队列的监听任务
-        if (listenerConfigs.containsKey(blockingQueueName)) {
+        if (existingConfig != null) {
             log.warn("⚠️  队列 [{}] 已有监听任务，跳过创建", blockingQueueName);
             return;
         }
@@ -298,7 +304,17 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
                     blockingQueue,
                     new LinkedBlockingQueue<>(LOCAL_QUEUE_CAPACITY)
             );
-            listenerConfigs.put(blockingQueueName, config);
+
+            // ✅ 原子性检查并设置
+            QueueListenerConfig prev = listenerConfigs.putIfAbsent(blockingQueueName, config);
+
+            if (prev != null) {
+                log.warn("⚠️  队列 [{}] 已有监听任务（并发竞争），跳过创建", blockingQueueName);
+                return;
+            }
+
+            // ✅ 只有成功注册才放入 delayedQueueMap
+            delayedQueueMap.put(blockingQueueName, delayedQueue);
 
             log.info("✅ 延迟队列已初始化: {}", blockingQueueName);
 
@@ -322,12 +338,10 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
             String threadName = "fetch-" + config.queueName;
             Thread.currentThread().setName(threadName);
             log.info("🎯 【{}】异步拉取线程已启动", threadName);
-
             long lastHeartbeat = System.currentTimeMillis();
-
             while (running && !shuttingDown && !redissonShutdown) {
                 try {
-                    // 批量拉取消息
+                    // 批量拉取消息（内部已有阻塞等待）
                     List<String> messages = pollBatch(config.blockingQueue);
                     if (!messages.isEmpty()) {
                         // 将消息放入本地缓冲队列
@@ -349,10 +363,9 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
                             log.info("💓 【{}】拉取中...", threadName);
                             lastHeartbeat = now;
                         }
-                        // 短暂休眠避免空轮询
-                        Thread.sleep(100);
+                        // ✅ 移除 Thread.sleep(100)，因为 pollBatch 内部已经阻塞等待
+                        // pollBatch 的 poll(BATCH_POLL_TIMEOUT) 已经提供了防空轮询机制
                     }
-
                 } catch (InterruptedException e) {
                     log.info("⚠️  【{}】拉取被中断", threadName);
                     Thread.currentThread().interrupt();
@@ -382,12 +395,10 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
      */
     private List<String> pollBatch(RBlockingQueue<String> blockingQueue) {
         List<String> messages = new ArrayList<>();
-
         // 如果正在关闭或 Redisson 已关闭，直接返回空列表
         if (shuttingDown || redissonShutdown) {
             return messages;
         }
-
         try {
             // 使用 drainTo 批量拉取
             blockingQueue.drainTo(messages, BATCH_POLL_SIZE);
@@ -396,6 +407,8 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
                 String message = blockingQueue.poll(BATCH_POLL_TIMEOUT, TimeUnit.MILLISECONDS);
                 if (message != null) {
                     messages.add(message);
+                    // 这时可能有更多消息到达，可以一次性处理
+                    blockingQueue.drainTo(messages, BATCH_POLL_SIZE - 1);
                 }
             }
         } catch (Exception e) {
@@ -417,98 +430,129 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
      */
     private void startLocalQueueConsumer(QueueListenerConfig config) {
         // 启动多个消费者线程提高并发
-        int consumerCount = Math.min(4, Math.max(1, WORKER_CORE_POOL_SIZE / Math.max(1, listenerConfigs.size())));
+        int consumerCount = getConsumerCountForQueue(config.queueName);
         for (int i = 0; i < consumerCount; i++) {
             final int consumerIndex = i;
-            workerExecutor.submit(() -> {
-                String threadName = "consumer-" + config.queueName + "-" + consumerIndex;
-                Thread.currentThread().setName(threadName);
-                log.info("🎯 【{}】消费者线程已启动", threadName);
-                while (running && !shuttingDown) {
-                    try {
-                        // 从本地队列获取消息
-                        String message = config.localQueue.poll(1, TimeUnit.SECONDS);
-                        if (message != null) {
-                            // 再次检查是否正在关闭
-                            if (shuttingDown) {
-                                log.info("【{}】检测到关闭信号，停止处理消息", threadName);
-                                break;
-                            }
-                            log.debug("📨 【{}】收到消息: {}", threadName, message);
-                            // 处理消息（带重试）
-                            processMessageWithRetry(config, message, threadName);
-                        }
-                    } catch (InterruptedException e) {
-                        log.info("⚠️  【{}】消费被中断", threadName);
-                        Thread.currentThread().interrupt();
-                        break;
-                    } catch (Exception e) {
-                        // 如果是关闭过程中的异常，不打印错误日志
-                        if (!shuttingDown) {
-                            log.error("❌ 【{}】消费异常", threadName, e);
-                        }
-                        sleepQuietly(Duration.ofSeconds(1));
-                    }
-                }
-                log.info("🛑 【{}】消费已停止", threadName);
-            });
+            workerExecutor.submit(() -> consumeMessages(config, consumerIndex));
         }
+    }
+
+    /**
+     * 获取队列的消费者数量（可配置化）
+     */
+    private int getConsumerCountForQueue(String queueName) {
+        // 可以从配置中心读取，或使用默认值
+        int totalQueues = Math.max(1, listenerConfigs.size() + 1); // +1 包含当前正在添加的
+        int perQueueConsumers = Math.max(1, WORKER_CORE_POOL_SIZE / totalQueues);
+        return Math.min(4, Math.max(1, perQueueConsumers));
+    }
+
+    /**
+     * 提取消费逻辑为独立方法（提高可读性）
+     */
+    private void consumeMessages(QueueListenerConfig config, int consumerIndex) {
+        String threadName = "consumer-" + config.queueName + "-" + consumerIndex;
+        Thread.currentThread().setName(threadName);
+        log.info("🎯 【{}】消费者线程已启动", threadName);
+        while (running && !shuttingDown) {
+            try {
+                // 从本地队列获取消息
+                String message = config.localQueue.poll(1, TimeUnit.SECONDS);
+                if (message != null) {
+                    // 再次检查是否正在关闭
+                    if (shuttingDown) {
+                        log.info("【{}】检测到关闭信号，停止处理消息", threadName);
+                        break;
+                    }
+                    log.debug("📨 【{}】收到消息: {}", threadName, message);
+                    // 处理消息（带重试）
+                    processMessageWithRetry(config, message, threadName);
+                }
+            } catch (InterruptedException e) {
+                log.info("⚠️  【{}】消费被中断", threadName);
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                // 如果是关闭过程中的异常，不打印错误日志
+                if (!shuttingDown) {
+                    log.error("❌ 【{}】消费异常", threadName, e);
+                }
+                sleepQuietly(Duration.ofSeconds(1));
+            }
+        }
+        log.info("🛑 【{}】消费已停止", threadName);
     }
 
     /**
      * 处理消息（带重试机制）
      */
     private void processMessageWithRetry(QueueListenerConfig config, String message, String threadName) {
-        long startTime = System.currentTimeMillis();
+        processMessageAsync(config, message, threadName, 1);
+    }
 
-        for (int attempt = 1; attempt <= MAX_RETRY_TIMES; attempt++) {
-            // 检查是否正在关闭
-            if (shuttingDown) {
-                log.info("【{}】检测到关闭信号，停止重试", threadName);
-                return;
+    /**
+     * 异步递归重试
+     */
+    private void processMessageAsync(QueueListenerConfig config, String message, String threadName, int attempt) {
+        if (shuttingDown || attempt > MAX_RETRY_TIMES) {
+            if (!shuttingDown && attempt > MAX_RETRY_TIMES) {
+                log.error("❌ 【{}】消息处理最终失败，已重试 {} 次 - 消息: {}", threadName, MAX_RETRY_TIMES, message);
             }
-            try {
-                log.debug("⚙️  【{}】处理消息 (尝试 {}/{}) - 队列: {} -> 主题: {}",
-                        threadName, attempt, MAX_RETRY_TIMES, config.queueName, config.topicName);
-                // 调用监听器处理
-                CompletableFuture<Boolean> result = config.listener.execute(config.topicName, message);
-                // 等待结果（带超时）
-                int finalAttempt = attempt;
-                Boolean success = result
-                        .completeOnTimeout(false, TASK_EXECUTION_TIMEOUT, TimeUnit.SECONDS)
-                        .exceptionally(ex -> {
-                            // 如果不是关闭过程中的异常，才记录错误
-                            if (!shuttingDown) {
-                                log.error("❌ 【{}】处理异常 (尝试 {}) {}", threadName, finalAttempt, ex);
-                            }
-                            return false;
-                        })
-                        .join();
-                if (Boolean.TRUE.equals(success)) {
-                    long duration = System.currentTimeMillis() - startTime;
-                    log.info("✅ 【{}】消息处理成功 (耗时: {}ms, 尝试: {})", threadName, duration, attempt);
-                    return; // 成功，退出重试
-                } else {
-                    log.warn("⚠️  【{}】消息处理失败 (尝试 {})", threadName, attempt);
-                    // 如果不是最后一次尝试，等待后重试
-                    if (attempt < MAX_RETRY_TIMES && !shuttingDown) {
-                        Thread.sleep(RETRY_DELAY * attempt); // 递增延迟
-                    }
-                }
-            } catch (Exception e) {
-                // 如果是关闭过程中的异常，不打印错误日志
-                if (!shuttingDown) {
-                    log.error("❌ 【{}】处理消息异常 (尝试 {})", threadName, attempt, e);
-                }
-                if (attempt < MAX_RETRY_TIMES && !shuttingDown) {
-                    sleepQuietly(Duration.ofMillis(RETRY_DELAY * attempt));
-                }
+            return;
+        }
+
+        long startTime = System.currentTimeMillis();
+        log.debug("⚙️  【{}】处理消息 (尝试 {}/{}) - 队列: {} -> 主题: {}", threadName, attempt, MAX_RETRY_TIMES, config.queueName, config.topicName);
+
+        try {
+            CompletableFuture<Boolean> result = config.listener.execute(config.topicName, message);
+
+            // ✅ 异步处理，不阻塞当前线程
+            result
+                    .orTimeout(TASK_EXECUTION_TIMEOUT, TimeUnit.SECONDS) // Java 9+
+                    .whenComplete((success, ex) -> {
+                        if (shuttingDown) {
+                            return; // 关闭中，不处理结果
+                        }
+
+                        if (ex != null) {
+                            log.error("❌ 【{}】处理异常 (尝试 {})", threadName, attempt, ex);
+                            scheduleRetry(config, message, threadName, attempt);
+                        } else if (Boolean.TRUE.equals(success)) {
+                            long duration = System.currentTimeMillis() - startTime;
+                            log.info("✅ 【{}】消息处理成功 (耗时: {}ms, 尝试: {})",
+                                    threadName, duration, attempt);
+                        } else {
+                            log.warn("⚠️  【{}】消息处理失败 (尝试 {})", threadName, attempt);
+                            scheduleRetry(config, message, threadName, attempt);
+                        }
+                    });
+
+        } catch (Exception e) {
+            if (!shuttingDown) {
+                log.error("❌ 【{}】提交任务异常 (尝试 {})", threadName, attempt, e);
             }
+            scheduleRetry(config, message, threadName, attempt);
         }
-        // 所有重试都失败（且不是关闭过程）
-        if (!shuttingDown) {
-            log.error("❌ 【{}】消息处理最终失败，已重试 {} 次 - 消息: {}", threadName, MAX_RETRY_TIMES, message);
+    }
+
+    /**
+     * 调度重试（使用延迟调度器）
+     */
+    private void scheduleRetry(QueueListenerConfig config, String message, String threadName, int attempt) {
+        if (shuttingDown || attempt >= MAX_RETRY_TIMES) {
+            return;
         }
+
+        int nextAttempt = attempt + 1;
+        long delay = RETRY_DELAY * attempt; // 递增延迟：1s, 2s, 3s
+
+        // ✅ 使用调度器延迟重试，不阻塞线程
+        retryScheduler.schedule(
+                () -> processMessageAsync(config, message, threadName, nextAttempt),
+                delay,
+                TimeUnit.MILLISECONDS
+        );
     }
 
     /**
@@ -549,7 +593,6 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
         if (delayedQueueMap.isEmpty()) {
             return;
         }
-
         log.info("正在销毁 {} 个延迟队列...", delayedQueueMap.size());
         delayedQueueMap.forEach((queueName, delayedQueue) -> {
             try {
@@ -662,11 +705,19 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
     }
 
     /**
-     * 安全休眠
+     * 安全休眠（支持提前中断）
      */
     private void sleepQuietly(Duration duration) {
         try {
-            Thread.sleep(duration.toMillis());
+            long millis = duration.toMillis();
+            long sleepUnit = 100; // 每100ms检查一次
+            long slept = 0;
+
+            while (slept < millis && running && !shuttingDown) {
+                long toSleep = Math.min(sleepUnit, millis - slept);
+                Thread.sleep(toSleep);
+                slept += toSleep;
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -701,17 +752,7 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
      * 获取 RedissonClient 实例（使用缓存避免重复获取）
      */
     private RedissonClient getRedissonClient() {
-        if (redissonClient == null) {
-            synchronized (this) {
-                if (redissonClient == null) {
-                    redissonClient = GXSpringContextUtils.getBean("redissonMQClient", RedissonClient.class);
-                    if (redissonClient == null) {
-                        throw new GXBusinessException("无法获取redissonMQClient实例，请确保已正确配置");
-                    }
-                }
-            }
-        }
-        return redissonClient;
+        return RedissonClientHolder.INSTANCE;
     }
 
     @Override
@@ -724,5 +765,18 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
      */
     private record QueueListenerConfig(String queueName, String topicName, GXRedissonDelayMQListener listener,
                                        RBlockingQueue<String> blockingQueue, BlockingQueue<String> localQueue) {
+    }
+
+    // ✅ 最佳方案：利用类加载机制保证线程安全
+    private static class RedissonClientHolder {
+        private static final RedissonClient INSTANCE = initClient();
+
+        private static RedissonClient initClient() {
+            RedissonClient redissonMQClient = GXSpringContextUtils.getBean("redissonMQClient", RedissonClient.class);
+            if (redissonMQClient == null) {
+                throw new GXBusinessException("无法获取redissonMQClient实例，请确保已正确配置");
+            }
+            return redissonMQClient;
+        }
     }
 }

@@ -1,28 +1,28 @@
 package cn.maple.redisson.processor;
 
-import cn.hutool.core.util.ObjectUtil;
+import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ReflectUtil;
 import cn.maple.redisson.listener.GXRedissonMQListener;
 import cn.maple.redisson.util.GXRedissonMQUtils;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.aop.framework.AopProxyUtils;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
-import org.springframework.context.ApplicationListener;
-import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.core.Ordered;
 import org.springframework.core.PriorityOrdered;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /**
  * Redisson消息队列监听器服务处理器
@@ -112,7 +112,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Component
 @Log4j2
 @ConditionalOnExpression("${maple.framework.mq.redisson.enable:false}")
-public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableBean, ApplicationListener<ContextRefreshedEvent>, PriorityOrdered {
+public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableBean, PriorityOrdered {
     /**
      * 目标接口类
      */
@@ -139,7 +139,14 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
      * 已注册的监听器集合，用于记录当前应用实例注册的监听器
      * 使用ConcurrentHashMap.newKeySet()确保线程安全的Set操作
      */
-    private final Set<String> registeredListeners = ConcurrentHashMap.newKeySet();
+    //private final Set<String> registeredListeners = ConcurrentHashMap.newKeySet();
+    private final Map<String, String> registeredListeners = new ConcurrentHashMap<>();
+
+    /**
+     * 注册成功计数
+     */
+    private final AtomicInteger successCount = new AtomicInteger(0);
+
 
     /**
      * 应用启动标识，确保清理逻辑只在应用启动时执行一次
@@ -182,45 +189,30 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
      */
     @Override
     public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
-        // 空值检查
-        if (ObjectUtil.isNull(bean)) {
-            return null;
-        }
-
         try {
-            // 获取单例目标对象，处理可能的AOP代理情况
+            Class<?> beanClass = bean.getClass();
+            // ✅ 先快速检查接口实现（使用缓存），大部分 bean 会在这里就返回
+            if (!implementsTargetInterface(beanClass)) {
+                // ✅ 如果是代理对象，再检查目标类
+                if (AopUtils.isAopProxy(bean)) {
+                    Object targetBean = AopProxyUtils.getSingletonTarget(bean);
+                    if (targetBean != null) {
+                        Class<?> targetClass = targetBean.getClass();
+                        if (implementsTargetInterface(targetClass)) {
+                            registerListener(targetBean, beanName);
+                        }
+                    }
+                }
+                return bean;
+            }
+            // ✅ 实现了接口的 bean，获取真实对象并注册
             Object targetBean = AopProxyUtils.getSingletonTarget(bean);
             Object actualBean = targetBean != null ? targetBean : bean;
-            Class<?> beanClass = actualBean.getClass();
-
-            // 检查Bean是否实现了目标接口
-            if (implementsTargetInterface(beanClass)) {
-                registerListener(actualBean, beanName);
-            }
+            registerListener(actualBean, beanName);
         } catch (Exception e) {
-            // 记录异常但不中断处理流程，确保其他Bean不受影响
             log.error("处理Bean [{}] 时发生异常: {}", beanName, e.getMessage(), e);
         }
-
         return bean;
-    }
-
-    /**
-     * 应用上下文刷新完成后的处理
-     * <p>
-     * 在应用启动时清理上次遗留的订阅者信息，防止订阅者累加
-     * 使用AtomicBoolean确保该操作只执行一次
-     * </p>
-     *
-     * @param event 上下文刷新事件
-     */
-    @Override
-    public void onApplicationEvent(ContextRefreshedEvent event) {
-        // 确保清理逻辑只在根应用上下文刷新时执行一次
-        if (event.getApplicationContext().getParent() == null
-                && applicationStarted.compareAndSet(false, true)) {
-            cleanupStaleSubscriptions();
-        }
     }
 
     /**
@@ -232,23 +224,74 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
      */
     private void cleanupStaleSubscriptions() {
         try {
-            Map<String, String> allLocalListeners = GXRedissonMQUtils.getAllLocalListeners();
-            if (allLocalListeners != null && !allLocalListeners.isEmpty()) {
-                log.info("检测到 {} 个遗留订阅者，开始清理...", allLocalListeners.size());
-                for (Map.Entry<String, String> entry : allLocalListeners.entrySet()) {
-                    String topicName = entry.getKey();
-                    String listenerId = entry.getValue();
+            // 获取 Redis 中所有订阅
+            Map<String, String> allListeners = GXRedissonMQUtils.getAllLocalListeners();
+
+            // 过滤出疑似僵尸订阅（可选：通过命名规则或时间戳判断）
+            Map<String, String> staleListeners = filterStaleListeners(allListeners);
+
+            if (!staleListeners.isEmpty()) {
+                log.info("🧹 检测到 {} 个遗留订阅，开始清理...", staleListeners.size());
+
+                for (Map.Entry<String, String> entry : staleListeners.entrySet()) {
                     try {
-                        GXRedissonMQUtils.unsubscribe(topicName, listenerId);
+                        GXRedissonMQUtils.unsubscribe(entry.getKey(), entry.getValue());
                     } catch (Exception e) {
-                        log.warn("清理遗留订阅失败: {} - {}", topicName, e.getMessage());
+                        log.warn("清理遗留订阅失败: {}", entry.getKey());
                     }
                 }
-                log.info("遗留订阅者清理完成");
+                log.info("✅ 遗留订阅清理完成");
             }
         } catch (Exception e) {
-            log.error("清理遗留订阅者时发生异常: {}", e.getMessage(), e);
+            log.error("清理遗留订阅时发生异常", e);
         }
+    }
+
+    /**
+     * 过滤遗留订阅（可根据实际情况调整策略）
+     */
+    private Map<String, String> filterStaleListeners(Map<String, String> allListeners) {
+        String currentInstanceId = GXRedissonMQUtils.getInstanceId();
+
+        return allListeners.entrySet().stream()
+                .filter(entry -> {
+                    String key = entry.getKey();
+                    // 检查1：如果已在 registeredListeners 中，不清理
+                    if (registeredListeners.containsKey(key)) {
+                        return false;
+                    }
+                    // 检查2：如果有 instanceId 前缀，确保不是当前实例的
+                    List<String> split = CharSequenceUtil.split(key, ':');
+                    if (!split.isEmpty()) {
+                        String instanceId = split.get(0);
+                        // 如果是当前实例的但不在 registeredListeners 中
+                        // 说明是异常情况，保守起见不清理
+                        if (instanceId.equals(currentInstanceId)) {
+                            log.warn("⚠️  发现当前实例的未注册订阅: {}", key);
+                            return false;
+                        }
+                    }
+                    // 其他情况：清理
+                    return true;
+                })
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    /**
+     * 判断是否为遗留订阅
+     */
+    private boolean isStaleListener(String listenerId, long threshold) {
+        // 假设 listenerId 格式：listener-{timestamp}-{uuid}
+        try {
+            String[] parts = listenerId.split("-");
+            if (parts.length >= 2) {
+                long timestamp = Long.parseLong(parts[1]);
+                return timestamp < threshold;
+            }
+        } catch (Exception e) {
+            // 解析失败，保守起见不清理
+        }
+        return false;
     }
 
     /**
@@ -263,9 +306,7 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
      */
     private boolean implementsTargetInterface(Class<?> beanClass) {
         // 首先检查缓存中是否已有结果
-        return interfaceImplementationCache.computeIfAbsent(beanClass, clazz ->
-                TARGET_INTERFACE.isAssignableFrom(clazz)
-        );
+        return interfaceImplementationCache.computeIfAbsent(beanClass, TARGET_INTERFACE::isAssignableFrom);
     }
 
     /**
@@ -282,15 +323,36 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
         String className = bean.getClass().getSimpleName();
         try {
             // 尝试获取目标方法
-            Method method = findTargetMethod(bean.getClass())
-                    .orElseThrow(() -> new NoSuchMethodException("Method '" + TARGET_METHOD_NAME + "' not found"));
-
+            Method method = findTargetMethod(bean.getClass()).orElseThrow(() -> new NoSuchMethodException("Method '" + TARGET_METHOD_NAME + "' not found"));
             // 调用方法注册监听器
             method.setAccessible(true);
+
+            // ✅ 记录注册前的监听器（使用 Set 避免并发问题）
+            Set<String> beforeKeys = new HashSet<>(GXRedissonMQUtils.getAllLocalListeners().keySet());
+
+            // ✅ 调用方法注册监听器
             method.invoke(bean);
 
             // 记录当前应用实例注册的监听器
-            registeredListeners.add(beanName);
+            //registeredListeners.add(beanName);
+            // ✅ 记录新注册的监听器
+            Map<String, String> afterListeners = GXRedissonMQUtils.getAllLocalListeners();
+            // ✅ 找出新增的监听器
+            int newListenerCount = 0;
+            for (Map.Entry<String, String> entry : afterListeners.entrySet()) {
+                if (!beforeKeys.contains(entry.getKey())) {
+                    registeredListeners.put(entry.getKey(), entry.getValue());
+                    newListenerCount++;
+                    log.debug("记录新注册的监听器: {} -> {}", entry.getKey(), entry.getValue());
+                }
+            }
+
+            if (newListenerCount == 0) {
+                log.warn("⚠️  监听器 {} 注册后未发现新增订阅，可能重复注册或注册失败", className);
+            } else {
+                successCount.incrementAndGet();
+                log.info("✅ 成功注册监听器: {}, 新增 {} 个订阅", className, newListenerCount);
+            }
             log.info("成功注册Redisson的PUB/SUB监听器: {}", className);
         } catch (Exception e) {
             // 记录详细的异常信息，便于问题排查
@@ -310,27 +372,21 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
      * @return 包含目标方法的Optional对象，如果未找到则为空
      */
     private Optional<Method> findTargetMethod(Class<?> clazz) {
-        // 首先检查缓存中是否已有结果
         return methodCache.computeIfAbsent(clazz, cls -> {
-            try {
-                // 使用ReflectUtil工具类简化反射操作
-                Method method = ReflectUtil.getMethod(cls, TARGET_METHOD_NAME);
-                return Optional.ofNullable(method);
-            } catch (Exception e) {
-                // 如果在当前类中未找到方法，则递归检查父类
-                Class<?> superClass = cls.getSuperclass();
-                if (superClass != null && superClass != Object.class) {
-                    // 注意：这里直接调用findTargetMethod会导致重复缓存
-                    // 应该直接递归查找而不是通过computeIfAbsent
-                    try {
-                        Method method = ReflectUtil.getMethod(superClass, TARGET_METHOD_NAME);
-                        return Optional.ofNullable(method);
-                    } catch (Exception ex) {
-                        return Optional.empty();
+            // ✅ 遍历完整的类继承链
+            Class<?> currentClass = cls;
+            while (currentClass != null && currentClass != Object.class) {
+                try {
+                    Method method = ReflectUtil.getMethod(currentClass, TARGET_METHOD_NAME);
+                    if (method != null) {
+                        return Optional.of(method);
                     }
+                } catch (Exception e) {
+                    // 继续查找父类
                 }
-                return Optional.empty();
+                currentClass = currentClass.getSuperclass();
             }
+            return Optional.empty();
         });
     }
 
@@ -344,47 +400,46 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
      * @throws Exception 如果清理过程中发生异常
      */
     @Override
-    public void destroy() throws Exception {
-        // 取消所有订阅
-        unsubscribeAll();
-
-        // 清空缓存，释放内存资源
-        interfaceImplementationCache.clear();
-        methodCache.clear();
-        registeredListeners.clear();
-
-        log.info("Redisson消息队列监听器服务处理器关闭完成");
-    }
-
-    /**
-     * 取消所有订阅
-     * <p>
-     * 遍历所有主题，批量取消订阅
-     * 使用try-catch确保单个主题的取消失败不影响其他主题
-     * </p>
-     */
-    private void unsubscribeAll() {
-        Map<String, String> allLocalListeners = GXRedissonMQUtils.getAllLocalListeners();
-        if (allLocalListeners == null || allLocalListeners.isEmpty()) {
+    public void destroy() {
+        String instanceId = GXRedissonMQUtils.getInstanceId();
+        if (registeredListeners.isEmpty()) {
+            log.info("无需取消订阅");
             return;
         }
+
+        log.info("🛑 开始取消订阅 - 实例: {}, 共 {} 个", instanceId, registeredListeners.size());
 
         int successCount = 0;
         int failCount = 0;
 
-        for (Map.Entry<String, String> entry : allLocalListeners.entrySet()) {
-            String topicName = entry.getKey();
-            String listenerId = entry.getValue();
+        log.info("🛑 开始取消 {} 个订阅...", registeredListeners.size());
+        for (Map.Entry<String, String> entry : registeredListeners.entrySet()) {
             try {
-                GXRedissonMQUtils.unsubscribe(topicName, listenerId);
+                GXRedissonMQUtils.unsubscribe(entry.getKey(), entry.getValue());
                 successCount++;
             } catch (Exception e) {
                 failCount++;
-                log.error("取消订阅失败: {} - {}", topicName, e.getMessage(), e);
+                log.error("取消订阅失败: {} - {}", entry.getKey(), e.getMessage());
             }
         }
 
-        log.info("订阅取消完成 - 成功: {}, 失败: {}", successCount, failCount);
+        log.info("✅ 订阅取消完成 - 成功: {}, 失败: {}", successCount, failCount);
+
+        // 清空缓存
+        interfaceImplementationCache.clear();
+        methodCache.clear();
+        registeredListeners.clear();
+    }
+
+    /**
+     * 应用完全启动后的处理
+     * 使用 ApplicationReadyEvent 确保所有 Bean 都已初始化完成
+     */
+    @EventListener
+    public void onApplicationReady(ApplicationReadyEvent event) {
+        if (applicationStarted.compareAndSet(false, true)) {
+            cleanupStaleSubscriptions();
+        }
     }
 
     /**
