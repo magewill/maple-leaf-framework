@@ -3,6 +3,7 @@ package cn.maple.redisson.processor;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.ReflectUtil;
 import cn.maple.redisson.listener.GXRedissonMQListener;
+import cn.maple.redisson.util.GXRedissonMQUtils;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.aop.framework.AopProxyUtils;
 import org.springframework.beans.BeansException;
@@ -111,7 +112,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Log4j2
 @Lazy
 @ConditionalOnExpression("${maple.framework.mq.redisson.enable:false}")
-public class GXRedissonMQListenerServicePostProcessor implements BeanPostProcessor, DisposableBean, PriorityOrdered {
+public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableBean, PriorityOrdered {
     /**
      * 目标接口类
      */
@@ -294,9 +295,33 @@ public class GXRedissonMQListenerServicePostProcessor implements BeanPostProcess
         // 记录监听器注册统计信息
         log.info("Redisson消息队列监听器服务处理器关闭，共注册监听器: {} 个", registeredListenerCount.get());
 
+        // 取消所有订阅
+        unsubscribeAll();
+
         // 清空缓存，释放内存资源
         interfaceImplementationCache.clear();
         methodCache.clear();
+    }
+
+    /**
+     * 取消所有订阅
+     * <p>
+     * 遍历所有主题，批量取消订阅
+     * 使用try-catch确保单个主题的取消失败不影响其他主题
+     * </p>
+     */
+    private void unsubscribeAll() {
+        Map<String, String> allLocalListeners = GXRedissonMQUtils.getAllLocalListeners();
+        for (Map.Entry<String, String> entry : allLocalListeners.entrySet()) {
+            String topicName = entry.getKey();
+            String listenerId = entry.getValue();
+            try {
+                GXRedissonMQUtils.unsubscribe(topicName, listenerId);
+            } catch (Exception e) {
+                log.error("取消订阅失败: {} - {}", topicName, e.getMessage(), e);
+            }
+        }
+        log.info("所有Redisson订阅取消成功！！！");
     }
 
     /**

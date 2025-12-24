@@ -8,9 +8,8 @@ public interface GXRedissonMQListener {
      * RReliableTopic reliableTopic = redissonClient.getReliableTopic("topic");
      * reliableTopic.addListener(Object.class, new MessageListener<Object>() {
      *
-     * @Override
-     * public void onMessage(CharSequence channel, Object msg) {
-     *      System.out.println("topic msg" + JSONUtil.toJsonStr(msg));
+     * @Override public void onMessage(CharSequence channel, Object msg) {
+     * System.out.println("topic msg" + JSONUtil.toJsonStr(msg));
      * }
      * });
      * }

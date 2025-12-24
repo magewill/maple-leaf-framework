@@ -11,9 +11,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * Redisson消息队列工具类
@@ -129,9 +132,6 @@ public class GXRedissonMQUtils {
      * ⚠️ 重要说明：
      * RReliableTopic 无法阻止消息被标记为已交付。
      * 即使监听器抛出异常，消息也会被视为已交付，不会重复消费。
-     * <p>
-     * 如果需要失败重试机制，请使用 subscribeWithRetry() 方法。
-     * </p>
      *
      * @param topicName    主题名字，不能为null或空
      * @param messageClass 消息类型的Class对象
@@ -328,6 +328,65 @@ public class GXRedissonMQUtils {
             LOGGER.error("获取主题[{}]订阅者数量时发生异常: {}", topicName, e.getMessage(), e);
             throw new GXBusinessException("获取订阅者数量失败: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 获取本地缓存的所有监听器信息
+     * （这是当前应用实例订阅的监听器）
+     *
+     * @return Map<主题:消息类型, 监听器ID>
+     */
+    public static Map<String, String> getAllLocalListeners() {
+        return new HashMap<>(LISTENER_ID_CACHE);
+    }
+
+    /**
+     * 获取指定主题在本地的所有监听器
+     *
+     * @param topicName 主题名
+     * @return Map<消息类型, 监听器ID>
+     */
+    public static Map<String, String> getLocalListenersByTopic(String topicName) {
+        if (CharSequenceUtil.isBlank(topicName)) {
+            throw new IllegalArgumentException("主题名不能为空");
+        }
+
+        Map<String, String> result = new HashMap<>();
+        String prefix = topicName + ":";
+
+        LISTENER_ID_CACHE.forEach((key, value) -> {
+            if (key.startsWith(prefix)) {
+                // 提取消息类型（去掉前缀 "topicName:"）
+                String messageClass = key.substring(prefix.length());
+                result.put(messageClass, value);
+            }
+        });
+
+        return result;
+    }
+
+    /**
+     * 检查监听器是否存在
+     *
+     * @param topicName    主题名
+     * @param messageClass 消息类型
+     * @return true表示监听器存在
+     */
+    public static boolean hasListener(String topicName, Class<?> messageClass) {
+        String cacheKey = topicName + ":" + messageClass.getName();
+        return LISTENER_ID_CACHE.containsKey(cacheKey);
+    }
+
+    /**
+     * 获取所有已订阅的主题名称列表
+     *
+     * @return 主题名称列表
+     */
+    public static List<String> getAllSubscribedTopics() {
+        return LISTENER_ID_CACHE.keySet().stream()
+                .map(key -> key.substring(0, key.lastIndexOf(":")))
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     /**
