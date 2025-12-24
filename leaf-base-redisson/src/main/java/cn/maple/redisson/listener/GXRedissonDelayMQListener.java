@@ -1,7 +1,6 @@
 package cn.maple.redisson.listener;
 
 import cn.hutool.core.util.ObjectUtil;
-import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import org.redisson.api.RReliableTopic;
 import org.redisson.api.RedissonClient;
@@ -60,11 +59,11 @@ import java.util.concurrent.TimeUnit;
  * - 提供超时控制，防止长时间阻塞
  * </p>
  */
-public interface GXRedissonDelayQueueListener {
+public interface GXRedissonDelayMQListener {
     /**
      * 日志记录器
      */
-    Logger log = LoggerFactory.getLogger(GXRedissonDelayQueueListener.class);
+    Logger log = LoggerFactory.getLogger(GXRedissonDelayMQListener.class);
 
     /**
      * 处理延迟队列中的消息并发布到指定主题

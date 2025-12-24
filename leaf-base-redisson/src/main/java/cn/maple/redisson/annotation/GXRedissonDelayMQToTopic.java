@@ -9,7 +9,7 @@ import java.lang.annotation.*;
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-public @interface GXConvertRedissonDelayQueueToTopic {
+public @interface GXRedissonDelayMQToTopic {
     /**
      * 延迟队列的名字
      * 该队列只是使用来存储延迟的数据
