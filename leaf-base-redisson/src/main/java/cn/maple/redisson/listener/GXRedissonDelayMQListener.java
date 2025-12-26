@@ -1,7 +1,6 @@
 package cn.maple.redisson.listener;
 
 import cn.hutool.core.util.ObjectUtil;
-import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import org.redisson.api.RReliableTopic;
 import org.redisson.api.RedissonClient;
@@ -60,11 +59,11 @@ import java.util.concurrent.TimeUnit;
  * - 提供超时控制，防止长时间阻塞
  * </p>
  */
-public interface GXRedissonDelayQueueListener {
+public interface GXRedissonDelayMQListener {
     /**
      * 日志记录器
      */
-    Logger log = LoggerFactory.getLogger(GXRedissonDelayQueueListener.class);
+    Logger log = LoggerFactory.getLogger(GXRedissonDelayMQListener.class);
 
     /**
      * 处理延迟队列中的消息并发布到指定主题
@@ -80,22 +79,33 @@ public interface GXRedissonDelayQueueListener {
     default CompletableFuture<Boolean> execute(String topicName, String message) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                // 从Spring上下文获取RedissonClient实例
+                log.debug("🔄 开始发布消息到主题 [{}]", topicName);
+
+                // 获取 RedissonClient
                 RedissonClient redissonMQClient = GXSpringContextUtils.getBean("redissonMQClient", RedissonClient.class);
                 if (ObjectUtil.isNull(redissonMQClient)) {
-                    log.error("无法获取redissonMQClient实例，消息处理失败 - 主题: {}, 消息: {}", topicName, message);
+                    log.error("❌ 无法获取 redissonMQClient 实例");
                     return false;
                 }
 
                 // 获取可靠主题并发布消息
                 RReliableTopic reliableTopic = redissonMQClient.getReliableTopic(topicName);
-                long publishResult = reliableTopic.publish(message);
+                if (reliableTopic == null) {
+                    log.error("❌ 无法获取可靠主题: {}", topicName);
+                    return false;
+                }
 
-                log.debug("消息已发布到主题 {} - 消息ID: {}, 内容: {}", topicName, publishResult, message);
+                // 发布消息
+                long subscriberCount = reliableTopic.publish(message);
+
+                log.info("✅ 消息已发布到主题 [{}]，订阅者数: {}", topicName, subscriberCount);
+                log.debug("   消息内容: {}", message);
+
                 return true;
             } catch (Exception e) {
-                log.error("发布消息到主题 {} 时发生异常: {}", topicName, e.getMessage(), e);
-                throw new GXBusinessException("发布消息失败: " + e.getMessage(), e);
+                log.error("❌ 发布消息到主题 [{}] 时发生异常: {}", topicName, e.getMessage(), e);
+                // ⚠️ 关键修复：返回 false 而不是抛出异常
+                return false;
             }
         });
     }

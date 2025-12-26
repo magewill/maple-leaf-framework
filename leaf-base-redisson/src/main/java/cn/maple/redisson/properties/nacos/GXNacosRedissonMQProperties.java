@@ -27,7 +27,7 @@ import java.util.Map;
                 namespace = "${spring.cloud.nacos.config.namespace:${nacos.config.namespace:}}",
                 username = "${spring.cloud.nacos.username:${nacos.config.username:}}",
                 password = "${spring.cloud.nacos.password:${nacos.config.password:}}"))
-@ConfigurationProperties(prefix = "redisson")
+@ConfigurationProperties(prefix = "redisson.mq")
 public class GXNacosRedissonMQProperties extends GXRedissonMQProperties {
     private Map<String, GXRedissonConnectProperties> config = new LinkedHashMap<>();
 
