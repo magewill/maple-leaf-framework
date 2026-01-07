@@ -21,7 +21,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
 
 import java.util.Map;
 import java.util.Objects;
@@ -107,7 +106,6 @@ public class GXRedissonSpringDataConfig {
      * @return RedissonClient实例
      */
     @Bean(destroyMethod = "shutdown")
-    @Primary
     public RedissonClient redissonClient(Config config) {
         // 创建并配置编解码器
         Codec jsonJacksonCodec = new JsonJacksonCodec();
