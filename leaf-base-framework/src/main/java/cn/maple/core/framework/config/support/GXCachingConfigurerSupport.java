@@ -4,6 +4,7 @@ import jakarta.annotation.Resource;
 import jakarta.validation.constraints.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -11,7 +12,7 @@ import org.springframework.cache.annotation.CachingConfigurer;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.cache.interceptor.CacheErrorHandler;
 import org.springframework.cache.interceptor.SimpleCacheErrorHandler;
-import org.springframework.stereotype.Component;
+import org.springframework.context.annotation.Configuration;
 
 /**
  * 解决多CacheManager配置的支持类
@@ -26,10 +27,11 @@ import org.springframework.stereotype.Component;
  *
  * @author britton
  */
-@Component
+@Configuration
 @ConditionalOnMissingBean(value = {CachingConfigurer.class})
 public class GXCachingConfigurerSupport implements CachingConfigurer {
     @Resource
+    @Qualifier("caffeineCacheManager")
     private CaffeineCacheManager caffeineCacheManager;
 
     /**

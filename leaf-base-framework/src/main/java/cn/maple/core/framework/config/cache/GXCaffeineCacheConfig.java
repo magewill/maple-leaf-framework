@@ -7,6 +7,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -40,6 +41,7 @@ public class GXCaffeineCacheConfig {
      * @return 配置好的CaffeineCacheManager实例
      */
     @Bean("caffeineCacheManager")
+    @Primary
     public CaffeineCacheManager caffeineCacheManager() {
         log.info("初始化Caffeine缓存管理器");
         CaffeineCacheManager caffeineCacheManager = new CaffeineCacheManager();
