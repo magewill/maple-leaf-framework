@@ -3,6 +3,7 @@ package cn.maple.core.datasource.config;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Objects;
+import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 
 /**
@@ -425,5 +426,56 @@ public class GXDynamicContextHolder {
         public void close() {
             poll();
         }
+    }
+
+    /**
+     * 包装Runnable任务，将当前线程的数据源上下文传递给异步线程
+     * <p>
+     * 用于解决异步跨线程执行时丢失数据源上下文的问题
+     * </p>
+     *
+     * @param task 原始任务
+     * @return 带有数据源上下文的包装任务
+     */
+    public static Runnable wrap(Runnable task) {
+        String currentDataSource = peek();
+        return () -> {
+            if (currentDataSource != null) {
+                push(currentDataSource);
+            }
+            try {
+                task.run();
+            } finally {
+                if (currentDataSource != null) {
+                    poll();
+                }
+            }
+        };
+    }
+
+    /**
+     * 包装Callable任务，将当前线程的数据源上下文传递给异步线程
+     * <p>
+     * 用于解决异步跨线程执行时丢失数据源上下文的问题
+     * </p>
+     *
+     * @param task 原始任务
+     * @param <V> 返回值类型
+     * @return 带有数据源上下文的包装任务
+     */
+    public static <V> Callable<V> wrap(Callable<V> task) {
+        String currentDataSource = peek();
+        return () -> {
+            if (currentDataSource != null) {
+                push(currentDataSource);
+            }
+            try {
+                return task.call();
+            } finally {
+                if (currentDataSource != null) {
+                    poll();
+                }
+            }
+        };
     }
 }

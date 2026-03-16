@@ -9,7 +9,6 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Pointcut;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.aop.support.AopUtils;
-import org.springframework.core.Ordered;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -23,7 +22,7 @@ import java.util.Map;
  */
 @Aspect
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(-1000) // 显式设定较高的优先级，保证在@Transactional(默认最低优先级)前执行，但避免使用HIGHEST_PRECEDENCE造成的隐式冲突
 @Slf4j
 public class GXDataSourceAspect {
     /**
@@ -33,10 +32,15 @@ public class GXDataSourceAspect {
     private static final Map<Class<?>, DataSourceCacheEntry> CLASS_ANNOTATION_CACHE = new ConcurrentReferenceHashMap<>();
 
     /**
+     * 方法注解缓存用的键
+     */
+    private record MethodCacheKey(Class<?> targetClass, Method method) {}
+
+    /**
      * 方法注解缓存，用于存储方法上的@GXDataSource注解信息
      * 避免频繁反射调用带来的性能损耗
      */
-    private static final Map<Method, DataSourceCacheEntry> METHOD_ANNOTATION_CACHE = new ConcurrentReferenceHashMap<>();
+    private static final Map<MethodCacheKey, DataSourceCacheEntry> METHOD_ANNOTATION_CACHE = new ConcurrentReferenceHashMap<>();
 
     /**
      * 定义数据源切换的切点
@@ -48,7 +52,7 @@ public class GXDataSourceAspect {
     @Pointcut("@annotation(cn.maple.core.datasource.annotation.GXDataSource) || " +
             "@within(cn.maple.core.datasource.annotation.GXDataSource) || " +
             "target(cn.maple.core.datasource.repository.GXMyBatisRepository+) || " +
-            "execution(public * cn.maple.core.datasource.service.GXMyBatisBaseService.*(..))")
+            "target(cn.maple.core.datasource.service.GXMyBatisBaseService+)")
     public void dataSourcePointCut() {
         // 这是切点标记，用于拦截需要进行数据源切换的方法调用
     }
@@ -67,18 +71,24 @@ public class GXDataSourceAspect {
         return CLASS_ANNOTATION_CACHE.computeIfAbsent(targetClass, clazz -> {
             GXDataSource annotation = AnnotatedElementUtils.findMergedAnnotation(clazz, GXDataSource.class);
             if (annotation != null) {
-                log.debug("在类{}上找到@GXDataSource注解，数据源值为{}", clazz.getName(), annotation.value());
+                if (log.isDebugEnabled()) {
+                    log.debug("在类{}上找到@GXDataSource注解，数据源值为{}", clazz.getName(), annotation.value());
+                }
                 return new DataSourceCacheEntry(true, annotation.value());
             }
             // 如果是代理类，主动扫描其实现的接口
             for (Class<?> ifc : clazz.getInterfaces()) {
                 annotation = AnnotatedElementUtils.findMergedAnnotation(ifc, GXDataSource.class);
                 if (annotation != null) {
-                    log.debug("在类{}的接口{}上找到@GXDataSource注解，数据源值为{}", clazz.getName(), ifc.getName(), annotation.value());
+                    if (log.isDebugEnabled()) {
+                        log.debug("在类{}的接口{}上找到@GXDataSource注解，数据源值为{}", clazz.getName(), ifc.getName(), annotation.value());
+                    }
                     return new DataSourceCacheEntry(true, annotation.value());
                 }
             }
-            log.trace("类{}及其接口上未找到@GXDataSource注解", clazz.getName());
+            if (log.isTraceEnabled()) {
+                log.trace("类{}及其接口上未找到@GXDataSource注解", clazz.getName());
+            }
             return new DataSourceCacheEntry(false, "");
         });
     }
@@ -86,18 +96,23 @@ public class GXDataSourceAspect {
     /**
      * 获取方法级别的数据源注解信息
      *
-     * @param method 目标方法
+     * @param targetClass 目标类
+     * @param method 原始方法
      * @return 数据源缓存条目
      */
-    private DataSourceCacheEntry getDataSourceAnnotationFromMethod(Method method) {
-        if (method == null) {
+    private DataSourceCacheEntry getDataSourceAnnotationFromMethod(Class<?> targetClass, Method method) {
+        if (targetClass == null || method == null) {
             return new DataSourceCacheEntry(false, "");
         }
 
-        return METHOD_ANNOTATION_CACHE.computeIfAbsent(method, m -> {
-            GXDataSource annotation = AnnotatedElementUtils.findMergedAnnotation(m, GXDataSource.class);
+        MethodCacheKey cacheKey = new MethodCacheKey(targetClass, method);
+        return METHOD_ANNOTATION_CACHE.computeIfAbsent(cacheKey, k -> {
+            Method targetMethod = AopUtils.getMostSpecificMethod(k.method(), k.targetClass());
+            GXDataSource annotation = AnnotatedElementUtils.findMergedAnnotation(targetMethod, GXDataSource.class);
             if (annotation != null) {
-                log.debug("在方法{}上找到@GXDataSource注解，数据源值为{}", m.getName(), annotation.value());
+                if (log.isDebugEnabled()) {
+                    log.debug("在方法{}上找到@GXDataSource注解，数据源值为{}", targetMethod.getName(), annotation.value());
+                }
                 return new DataSourceCacheEntry(true, annotation.value());
             }
             return new DataSourceCacheEntry(false, "");
@@ -120,34 +135,44 @@ public class GXDataSourceAspect {
 
         // 验证切点签名类型
         if (!(point.getSignature() instanceof MethodSignature signature)) {
-            log.error("切点签名类型不是MethodSignature，无法执行数据源切换");
+            if (log.isErrorEnabled()) {
+                log.error("切点签名类型不是MethodSignature，无法执行数据源切换");
+            }
             return point.proceed();
         }
 
         Object target = point.getTarget();
         if (target == null) {
-            log.trace("目标对象为空，跳过数据源切换");
+            if (log.isTraceEnabled()) {
+                log.trace("目标对象为空，跳过数据源切换");
+            }
             return point.proceed();
         }
 
         Class<?> targetClass = target.getClass();
         Method method = signature.getMethod();
 
-        // 获取最具体的方法，解决代理接口对应实现类获取不到注解的问题
-        Method targetMethod = AopUtils.getMostSpecificMethod(method, targetClass);
+        boolean isTraceEnabled = log.isTraceEnabled();
+        boolean isDebugEnabled = log.isDebugEnabled();
+        String threadName = null;
+        String methodName = null;
+        String className = null;
 
-        String methodName = targetMethod.getName();
-        String className = targetClass.getName();
-        String threadName = Thread.currentThread().getName();
-
-        log.trace("开始处理数据源切换，线程: {}, 类: {}, 方法: {}", threadName, className, methodName);
+        if (isTraceEnabled || isDebugEnabled) {
+            threadName = Thread.currentThread().getName();
+            methodName = method.getName();
+            className = targetClass.getName();
+            if (isTraceEnabled) {
+                log.trace("开始处理数据源切换，线程: {}, 类: {}, 方法: {}", threadName, className, methodName);
+            }
+        }
 
         // 检查是否需要切换数据源
         boolean needSwitchDataSource = false;
         String dataSourceValue = "";
 
         // 优先检查方法上的注解（支持元注解和组合注解），使用缓存避免频繁反射
-        DataSourceCacheEntry methodEntry = getDataSourceAnnotationFromMethod(targetMethod);
+        DataSourceCacheEntry methodEntry = getDataSourceAnnotationFromMethod(targetClass, method);
         if (methodEntry.needSwitch()) {
             needSwitchDataSource = true;
             dataSourceValue = methodEntry.dataSourceValue();
@@ -157,35 +182,42 @@ public class GXDataSourceAspect {
             needSwitchDataSource = classEntry.needSwitch();
             dataSourceValue = classEntry.dataSourceValue();
 
-            if (!needSwitchDataSource) {
+            if (!needSwitchDataSource && isTraceEnabled) {
                 log.trace("类{}及其父类/接口上均未找到@GXDataSource注解，使用默认数据源", className);
             }
         }
 
-        if (needSwitchDataSource) {
-            // 获取当前数据源，用于日志记录
-            String previousDataSource = GXDynamicContextHolder.peek();
-            GXDynamicContextHolder.push(dataSourceValue);
-            log.debug("{}线程数据源从[{}]切换为[{}]", threadName,
-                    (previousDataSource != null ? previousDataSource : "默认"), dataSourceValue);
-        }
-
+        boolean pushed = false;
         try {
-            log.trace("{}线程执行方法: {}.{}", threadName, className, methodName);
+            if (needSwitchDataSource) {
+                String previousDataSource = GXDynamicContextHolder.peek();
+                GXDynamicContextHolder.push(dataSourceValue);
+                pushed = true;
+                
+                if (isDebugEnabled) {
+                    log.debug("{}线程数据源从[{}]切换为[{}]", threadName,
+                            (previousDataSource != null ? previousDataSource : "默认"), dataSourceValue);
+                }
+            }
+
+            if (isTraceEnabled) {
+                log.trace("{}线程执行方法: {}.{}", threadName, className, methodName);
+            }
             Object result = point.proceed();
-            log.trace("{}线程成功执行方法: {}.{}", threadName, className, methodName);
+            if (isTraceEnabled) {
+                log.trace("{}线程成功执行方法: {}.{}", threadName, className, methodName);
+            }
             return result;
-        } catch (Throwable e) {
-            log.error("{}线程执行方法{}时发生异常: {}", threadName, methodName, e.getMessage(), e);
-            throw e;
         } finally {
             // 只有在当前切面实际进行了数据源切换时才清除，避免清除上层设置的数据源
-            if (needSwitchDataSource) {
+            if (pushed) {
                 GXDynamicContextHolder.poll();
-                // 获取恢复后的数据源，用于日志记录
-                String restoredDataSource = GXDynamicContextHolder.peek();
-                log.debug("{}线程清除数据源[{}]，恢复为[{}]", threadName, dataSourceValue,
-                        (restoredDataSource != null ? restoredDataSource : "默认"));
+                if (isDebugEnabled) {
+                    // 获取恢复后的数据源，用于日志记录
+                    String restoredDataSource = GXDynamicContextHolder.peek();
+                    log.debug("{}线程清除数据源[{}]，恢复为[{}]", threadName, dataSourceValue,
+                            (restoredDataSource != null ? restoredDataSource : "默认"));
+                }
             }
         }
     }

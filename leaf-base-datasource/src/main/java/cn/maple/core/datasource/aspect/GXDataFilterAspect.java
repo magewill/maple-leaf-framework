@@ -146,19 +146,18 @@ public class GXDataFilterAspect {
 
         } finally {
             // 3. 恢复外层的 ThreadLocal 环境
-            // 如果存在外层环境，则恢复外层环境；如果不存在，说明当前是顶层调用，则清理上下文，防止内存泄露
-            if (oldFilterDto != null) {
-                if (hasSetNewFilter) {
-                    log.debug("当前方法执行完毕，恢复外层数据过滤条件: {}", oldFilterDto.getSqlFilter());
-                }
-                GXDataFilterThreadLocalUtils.setDataFilterInnerDto(oldFilterDto);
-            } else {
-                if (hasSetNewFilter) {
-                    log.debug("当前方法执行完毕，清除数据过滤条件");
+            // 只有当前切面确实介入并改变了上下文（hasSetNewFilter为true）时，才需要进行恢复或清理动作
+            // 防范异常中断陷阱：如果在获取SQL过滤条件时就报错，尚未设置新值，此时不应破坏原有的上下文状态
+            if (hasSetNewFilter) {
+                if (oldFilterDto != null) {
+                    log.debug("当前方法执行完毕(或中断)，恢复外层数据过滤条件: {}", oldFilterDto.getSqlFilter());
+                    GXDataFilterThreadLocalUtils.setDataFilterInnerDto(oldFilterDto);
                 } else {
-                    log.trace("执行完成，未设置新过滤条件，执行预防性清理");
+                    log.debug("当前方法执行完毕(或中断)，清除当前挂载的数据过滤条件");
+                    GXDataFilterThreadLocalUtils.cleanDataFilterInnerDto();
                 }
-                GXDataFilterThreadLocalUtils.cleanDataFilterInnerDto();
+            } else {
+                log.trace("当前切面未挂载新过滤条件，跳过上下文恢复/清理");
             }
         }
     }

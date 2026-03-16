@@ -777,13 +777,13 @@ public class GXCommonUtils {
 
             // 复制属性
             if (!TypeToken.of(target.getClass()).isSubtypeOf(Map.class) && TypeToken.of(source.getClass()).isSubtypeOf(GXBaseData.class) && ObjectUtil.isNull(copyOptions)) {
-                LOG.info("使用CGLIB进行高效属性复制!!");
+                LOG.warn("使用CGLIB进行高效属性复制!!");
                 //GXCglibUtils.copy(source, target, new GXCGLibDataConvert(tClass));
                 GXCglibUtils.copy(source, target, GXCGLibDataConvert.getConverter(tClass));
             } else {
                 // 使用默认的复制选项（如果未指定）
                 copyOptions = ObjectUtil.defaultIfNull(copyOptions, GXCommonUtils::getDefaultCopyOptions);
-                LOG.info("使用BeanUtil进行属性复制!!");
+                LOG.warn("使用BeanUtil进行属性复制!!");
                 BeanUtil.copyProperties(source, target, copyOptions);
             }
 

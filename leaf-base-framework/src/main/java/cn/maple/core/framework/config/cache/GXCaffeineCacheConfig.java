@@ -52,30 +52,54 @@ public class GXCaffeineCacheConfig {
                 // 获取缓存配置参数
                 Integer initialCapacity = caffeineCacheProperties.getInitialCapacity();
                 Integer expireAfterAccess = caffeineCacheProperties.getExpireAfterAccess();
+                Integer expireAfterWrite = caffeineCacheProperties.getExpireAfterWrite();
+                Integer refreshAfterWrite = caffeineCacheProperties.getRefreshAfterWrite();
                 Long maximumSize = caffeineCacheProperties.getMaximumSize();
-                boolean recordStats = caffeineCacheProperties.getRecordStats();
-                boolean softValues = caffeineCacheProperties.getSoftValues();
+                Long maximumWeight = caffeineCacheProperties.getMaximumWeight();
+                Boolean recordStats = caffeineCacheProperties.getRecordStats();
+                Boolean softValues = caffeineCacheProperties.getSoftValues();
+                Boolean weakKeys = caffeineCacheProperties.getWeakKeys();
+                Boolean weakValues = caffeineCacheProperties.getWeakValues();
                 
                 // 构建Caffeine缓存实例
-                Caffeine<Object, Object> caffeine = Caffeine.newBuilder()
-                        .initialCapacity(initialCapacity) // 初始容量
-                        .expireAfterAccess(expireAfterAccess, TimeUnit.SECONDS) // 访问后过期时间
-                        .maximumSize(maximumSize); // 最大缓存条目数
+                Caffeine<Object, Object> caffeine = Caffeine.newBuilder();
                 
-                // 是否记录缓存统计信息
-                if (recordStats) {
-                    caffeine.recordStats();
+                if (initialCapacity != null) {
+                    caffeine.initialCapacity(initialCapacity);
+                }
+                if (expireAfterAccess != null) {
+                    caffeine.expireAfterAccess(expireAfterAccess, TimeUnit.SECONDS);
+                }
+                if (expireAfterWrite != null) {
+                    caffeine.expireAfterWrite(expireAfterWrite, TimeUnit.SECONDS);
+                }
+                if (refreshAfterWrite != null) {
+                    caffeine.refreshAfterWrite(refreshAfterWrite, TimeUnit.SECONDS);
+                }
+                if (maximumSize != null) {
+                    caffeine.maximumSize(maximumSize);
+                }
+                if (maximumWeight != null) {
+                    caffeine.maximumWeight(maximumWeight);
                 }
                 
-                // 是否使用软引用存储值（有助于内存敏感场景的GC）
-                if (softValues) {
+                // 引用相关与统计信息
+                if (Boolean.TRUE.equals(recordStats)) {
+                    caffeine.recordStats();
+                }
+                if (Boolean.TRUE.equals(softValues)) {
                     caffeine.softValues();
+                }
+                if (Boolean.TRUE.equals(weakKeys)) {
+                    caffeine.weakKeys();
+                }
+                if (Boolean.TRUE.equals(weakValues)) {
+                    caffeine.weakValues();
                 }
                 
                 // 注册自定义缓存
                 caffeineCacheManager.registerCustomCache(name, caffeine.build());
-                log.debug("注册自定义缓存: {}, 初始容量: {}, 过期时间: {}秒, 最大容量: {}", 
-                        name, initialCapacity, expireAfterAccess, maximumSize);
+                log.debug("注册自定义缓存: {}", name);
             } catch (Exception e) {
                 log.error("注册缓存{}时发生异常: {}", name, e.getMessage(), e);
             }
