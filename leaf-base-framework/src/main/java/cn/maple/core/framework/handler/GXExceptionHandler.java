@@ -249,6 +249,17 @@ public class GXExceptionHandler {
         return GXResultUtils.error(e.getCode(), e.getMsg(), data);
     }
 
+    @ExceptionHandler(GXConciseBusinessException.class)
+    public GXResultUtils<Dict> handleConciseBusinessException(GXConciseBusinessException e) {
+        log.error(e.getMessage());
+        Dict data = e.getData();
+        if (Objects.nonNull(e.getCause())) {
+            data = ((GXConciseBusinessException) e.getCause()).getData();
+        }
+        exceptionNotify(e);
+        return GXResultUtils.error(e.getCode(), e.getMsg(), data);
+    }
+
     @ExceptionHandler(MissingServletRequestParameterException.class)
     public GXResultUtils<Dict> handleMissingServletRequestParameterException(MissingServletRequestParameterException e) {
         log.error(e.getMessage(), e);

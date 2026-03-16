@@ -45,6 +45,8 @@ import org.springframework.core.env.Environment;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.lang.management.ManagementFactory;
+import java.lang.management.OperatingSystemMXBean;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -2247,5 +2249,43 @@ public class GXCommonUtils {
         updateFields.addAll(result);
 
         return updateFields;
+    }
+
+    /**
+     * 获取系统平均负载
+     * 返回值范围通常在0.0到1.0之间，值越大表示系统负载越高
+     * 在Windows系统上可能不准确，仅作参考
+     *
+     * @return 系统负载值，范围0.0-1.0，如果无法获取则返回-1
+     */
+    public static double getSystemLoadAverage() {
+        try {
+            OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
+            double loadAverage = osBean.getSystemLoadAverage();
+
+            // 某些系统可能返回负值表示不支持
+            if (loadAverage < 0) {
+                // 尝试使用CPU使用率作为替代指标
+                if (osBean instanceof com.sun.management.OperatingSystemMXBean sunOsBean) {
+                    double cpuLoad = sunOsBean.getProcessCpuLoad();
+                    // getProcessCpuLoad() 返回 -1 表示不可用，返回值已经在 0-1 范围内
+                    return cpuLoad;
+                }
+                return -1;
+            }
+
+            // 将负载平均值标准化到0-1范围
+            // 通常loadAverage是基于处理器核心数的，所以除以可用处理器数
+            int processors = osBean.getAvailableProcessors();
+            if (processors <= 0) {
+                LOG.warn("获取到的处理器数量无效: {}", processors);
+                return loadAverage;
+            }
+
+            return Math.min(loadAverage / processors, 1.0);
+        } catch (Exception e) {
+            LOG.error("获取系统负载失败: {}", e.getMessage());
+            return -1;
+        }
     }
 }

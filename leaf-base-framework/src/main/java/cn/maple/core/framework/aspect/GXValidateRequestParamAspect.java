@@ -138,7 +138,7 @@ public class GXValidateRequestParamAspect implements Ordered {
             throw e;
         } catch (Throwable e) {
             // 记录其他异常并重新抛出
-            log.error("参数验证过程中发生异常: {}", e.getMessage(), e);
+            //log.error("参数验证过程中发生异常: {}", e.getMessage(), e);
             throw e;
         }
     }
