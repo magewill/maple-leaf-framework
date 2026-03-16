@@ -8,9 +8,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
-import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 import org.springframework.stereotype.Component;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
@@ -57,13 +57,12 @@ public class GXFrameworkConfig {
      * - ObjectMapper实例是线程安全的，可以在多线程环境中共享使用
      * - 自定义序列化器在每次序列化调用时都会创建新的上下文，不存在状态共享问题
      *
-     * @param builder Jackson2ObjectMapperBuilder实例，由Spring自动注入
      * @return 配置好的ObjectMapper实例
      */
     @Bean
     @ConditionalOnMissingBean(ObjectMapper.class)
-    public ObjectMapper objectMapper(Jackson2ObjectMapperBuilder builder) {
-        final ObjectMapper objectMapper = builder.createXmlMapper(false).build();
+    public ObjectMapper objectMapper() {
+        final ObjectMapper objectMapper = JsonMapper.builder().build();
         final SerializerProvider serializerProvider = objectMapper.getSerializerProvider();
         // 1. 首先，我们创建了一个匿名内部类，实现了JsonSerializer接口。
         // 2. 然后，我们重写了serialize()方法，该方法在序列化时被调用。
