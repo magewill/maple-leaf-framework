@@ -12,8 +12,8 @@
     <artifactId>leaf-base-debezium</artifactId>
 
     <properties>
-        <debezium.version>3.4.0.Final</debezium.version>
-        <jaxb-api.version>2.3.1</jaxb-api.version>
+        <debezium.version>3.4.2.Final</debezium.version>
+        <jaxb-api.version>2.4.0-b180830.0359</jaxb-api.version>
     </properties>
 
     <dependencies>
