@@ -31,9 +31,10 @@ import cn.maple.core.datasource.dto.GXDataFilterInnerDto;
 public class GXDataFilterThreadLocalUtils {
     /**
      * 存储数据过滤条件的ThreadLocal对象
-     * 使用inheritable=true参数，支持子线程继承父线程的数据
+     * 注意：不要使用 inheritable=true，因为在线程池环境下会导致严重的数据乱串和内存泄漏。
+     * 如果需要在线程间传递，请使用显式的传递机制或 TransmittableThreadLocal。
      */
-    private static final ThreadLocal<GXDataFilterInnerDto> DATA_FILTER_INNER_DTO = ThreadUtil.createThreadLocal(true);
+    private static final ThreadLocal<GXDataFilterInnerDto> DATA_FILTER_INNER_DTO = ThreadUtil.createThreadLocal(false);
 
     /**
      * 私有构造函数，防止实例化

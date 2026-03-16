@@ -586,7 +586,8 @@ public class GXDBCommonUtils {
         }
 
         // 如果不是用户输入，且输入是合法的子查询，则豁免检测
-        if (!isUserInput && LEGITIMATE_SUBQUERY_PATTERN.matcher(input).matches()) {
+        // 限制长度以防止正则表达式引起的 ReDoS 攻击
+        if (!isUserInput && input.length() <= 2048 && LEGITIMATE_SUBQUERY_PATTERN.matcher(input).matches()) {
             LOG.debug("输入是合法的子查询，豁免检测: {} (来源: {})", input, source);
             return;
         }
@@ -638,7 +639,7 @@ public class GXDBCommonUtils {
 
         // 表名通常不应包含特殊字符，但为了安全起见，仍然进行检查
         // 如果表名包含特殊字符（如点号以外的特殊字符），可能表示SQL注入尝试
-        if (tableName.matches(".*[;'\"\\\\].*")) {
+        if (CharSequenceUtil.containsAny(tableName, ";", "'", "\"", "\\", "/*", "--", "#")) {
             throw new GXSqlInjectionException("表名包含不允许的特殊字符: " + tableName);
         }
 
@@ -670,7 +671,7 @@ public class GXDBCommonUtils {
 
         // 表别名通常不应包含特殊字符，但为了安全起见，仍然进行检查
         // 如果表别名包含特殊字符，可能表示SQL注入尝试
-        if (tableAlias.matches(".*[;'\"\\\\].*")) {
+        if (CharSequenceUtil.containsAny(tableAlias, ";", "'", "\"", "\\", "/*", "--", "#")) {
             throw new GXSqlInjectionException("表别名包含不允许的特殊字符: " + tableAlias);
         }
 
@@ -710,14 +711,14 @@ public class GXDBCommonUtils {
             // 列名通常不应包含特殊字符，但为了安全起见，仍然进行检查
             // 如果列名包含特殊字符（如点号以外的特殊字符），可能表示SQL注入尝试
             // 允许点号是因为有时列名可能包含表名前缀，如 table.column
-            if (columnName.matches(".*[;'\"\\\\].*")) {
+            if (CharSequenceUtil.containsAny(columnName, ";", "'", "\"", "\\", "/*", "--", "#")) {
                 throw new GXSqlInjectionException("列名包含不允许的特殊字符: " + columnName);
                 //LOGGER.error("列名包含不允许的特殊字符: {}", columnName);
             }
         } else {
             // 对于SQL函数调用，进行基本的安全检查，但允许函数语法
             // 检查是否包含明显的SQL注入尝试，如多条语句、注释等
-            if (columnName.matches(".*[;].*") || columnName.matches(".*--.*") || columnName.matches(".*#.*")) {
+            if (CharSequenceUtil.containsAny(columnName, ";", "--", "#", "/*")) {
                 LOG.error("SQL函数调用中包含可疑字符: {}", columnName);
                 throw new GXSqlInjectionException("SQL函数调用中包含可疑字符: " + columnName);
             }
