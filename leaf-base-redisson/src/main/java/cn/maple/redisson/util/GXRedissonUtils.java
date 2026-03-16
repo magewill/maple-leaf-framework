@@ -3,10 +3,12 @@ package cn.maple.redisson.util;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import org.redisson.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.redisson.client.codec.StringCodec;
 
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
@@ -194,25 +196,25 @@ public class GXRedissonUtils {
 
         try {
             if (expire > 0) {
-                // 使用Lua脚本保证increment和expire的原子性
-                long expireSeconds = timeUnit.toSeconds(expire);
+                // 使用Lua脚本保证increment和pexpire的原子性
+                long expireMillis = timeUnit.toMillis(expire);
 
                 // Lua脚本说明：
                 // 1. INCR递增计数器
-                // 2. EXPIRE设置过期时间
+                // 2. PEXPIRE设置毫秒级过期时间
                 // 3. 返回递增后的值
                 String luaScript =
                         "local current = redis.call('incr', KEYS[1]);" +
-                                "redis.call('expire', KEYS[1], ARGV[1]);" +
+                                "redis.call('pexpire', KEYS[1], ARGV[1]);" +
                                 "return current";
 
-                RScript script = getRedissonClient().getScript();
+                RScript script = getRedissonClient().getScript(StringCodec.INSTANCE);
                 Long result = script.eval(
                         RScript.Mode.READ_WRITE,
                         luaScript,
                         RScript.ReturnType.LONG,
                         java.util.Collections.singletonList(key),
-                        expireSeconds
+                        expireMillis
                 );
 
                 return result != null ? result : 0L;
@@ -246,20 +248,20 @@ public class GXRedissonUtils {
 
         try {
             if (expire > 0) {
-                long expireSeconds = timeUnit.toSeconds(expire);
+                long expireMillis = timeUnit.toMillis(expire);
 
                 String luaScript =
                         "local current = redis.call('decr', KEYS[1]);" +
-                                "redis.call('expire', KEYS[1], ARGV[1]);" +
+                                "redis.call('pexpire', KEYS[1], ARGV[1]);" +
                                 "return current";
 
-                RScript script = getRedissonClient().getScript();
+                RScript script = getRedissonClient().getScript(org.redisson.client.codec.StringCodec.INSTANCE);
                 Long result = script.eval(
                         RScript.Mode.READ_WRITE,
                         luaScript,
                         RScript.ReturnType.LONG,
                         java.util.Collections.singletonList(key),
-                        expireSeconds
+                        expireMillis
                 );
 
                 return result != null ? result : 0L;
@@ -445,6 +447,9 @@ public class GXRedissonUtils {
             throw new RuntimeException("获取锁被中断", e);
         } catch (Exception e) {
             LOG.error("执行锁保护操作失败，lockName: {}", lockName, e);
+            if (e instanceof GXBusinessException) {
+                throw (GXBusinessException) e;
+            }
             throw new RuntimeException("执行锁保护操作失败", e);
         } finally {
             if (acquired) {
@@ -505,6 +510,9 @@ public class GXRedissonUtils {
             throw new RuntimeException("获取锁被中断", e);
         } catch (Exception e) {
             LOG.error("执行锁保护操作异常，lockName: {}", lockName, e);
+            if (e instanceof GXBusinessException) {
+                throw (GXBusinessException) e;
+            }
             throw new RuntimeException("执行锁保护操作异常", e);
         } finally {
             if (acquired) {

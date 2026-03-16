@@ -350,11 +350,11 @@ public class GXRedissonMQUtils {
         }
 
         Map<String, String> result = new HashMap<>();
-        String prefix = topicName + ":";
+        String prefix = getInstanceId() + ":" + topicName + ":";
 
         LISTENER_ID_CACHE.forEach((key, value) -> {
             if (key.startsWith(prefix)) {
-                // 提取消息类型（去掉前缀 "topicName:"）
+                // 提取消息类型
                 String messageClass = key.substring(prefix.length());
                 result.put(messageClass, value);
             }
@@ -371,7 +371,7 @@ public class GXRedissonMQUtils {
      * @return true表示监听器存在
      */
     public static boolean hasListener(String topicName, Class<?> messageClass) {
-        String cacheKey = topicName + ":" + messageClass.getName();
+        String cacheKey = generateCacheKey(topicName, messageClass);
         return LISTENER_ID_CACHE.containsKey(cacheKey);
     }
 
@@ -382,7 +382,11 @@ public class GXRedissonMQUtils {
      */
     public static List<String> getAllSubscribedTopics() {
         return LISTENER_ID_CACHE.keySet().stream()
-                .map(key -> key.substring(0, key.lastIndexOf(":")))
+                .map(key -> {
+                    String[] parts = key.split(":");
+                    return parts.length > 2 ? parts[1] : "";
+                })
+                .filter(CharSequenceUtil::isNotBlank)
                 .distinct()
                 .collect(Collectors.toList());
     }
@@ -395,7 +399,7 @@ public class GXRedissonMQUtils {
      * @return 监听器ID，如果未订阅返回null
      */
     public static String getCachedListenerId(String topicName, Class<?> messageClass) {
-        String cacheKey = topicName + ":" + messageClass.getName();
+        String cacheKey = generateCacheKey(topicName, messageClass);
         return LISTENER_ID_CACHE.get(cacheKey);
     }
 
@@ -433,13 +437,36 @@ public class GXRedissonMQUtils {
      */
     public static void clearTopicCache(String topicName) {
         if (CharSequenceUtil.isBlank(topicName)) {
+            for (Map.Entry<String, String> entry : LISTENER_ID_CACHE.entrySet()) {
+                String[] parts = entry.getKey().split(":");
+                if (parts.length > 2) {
+                    try {
+                        RReliableTopic reliableTopic = getReliableTopic(parts[1]);
+                        reliableTopic.removeListener(entry.getValue());
+                    } catch (Exception e) {
+                        LOGGER.error("清除缓存时取消订阅主题[{}]失败", parts[1], e);
+                    }
+                }
+            }
             TOPIC_CACHE.clear();
             LISTENER_ID_CACHE.clear();
-            LOGGER.info("已清除所有主题缓存");
+            LOGGER.info("已清除所有主题缓存及订阅!");
         } else {
+            String prefix = getInstanceId() + ":" + topicName + ":";
+            LISTENER_ID_CACHE.entrySet().removeIf(entry -> {
+                if (entry.getKey().startsWith(prefix)) {
+                    try {
+                        RReliableTopic reliableTopic = getReliableTopic(topicName);
+                        reliableTopic.removeListener(entry.getValue());
+                    } catch (Exception e) {
+                        LOGGER.error("清除缓存时取消订阅主题[{}]失败", topicName, e);
+                    }
+                    return true;
+                }
+                return false;
+            });
             TOPIC_CACHE.remove(topicName);
-            LISTENER_ID_CACHE.entrySet().removeIf(entry -> entry.getKey().startsWith(topicName + ":"));
-            LOGGER.info("已清除主题[{}]的缓存", topicName);
+            LOGGER.info("已清除主题[{}]的缓存及订阅", topicName);
         }
     }
 
