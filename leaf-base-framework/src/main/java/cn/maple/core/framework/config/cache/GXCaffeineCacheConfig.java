@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -45,7 +46,7 @@ public class GXCaffeineCacheConfig {
     public CaffeineCacheManager caffeineCacheManager() {
         log.info("初始化Caffeine缓存管理器");
         CaffeineCacheManager caffeineCacheManager = new CaffeineCacheManager();
-        
+
         // 从配置文件加载自定义缓存配置
         caffeineCacheManagerProperties.getConfig().forEach((name, caffeineCacheProperties) -> {
             try {
@@ -60,10 +61,10 @@ public class GXCaffeineCacheConfig {
                 Boolean softValues = caffeineCacheProperties.getSoftValues();
                 Boolean weakKeys = caffeineCacheProperties.getWeakKeys();
                 Boolean weakValues = caffeineCacheProperties.getWeakValues();
-                
+
                 // 构建Caffeine缓存实例
                 Caffeine<Object, Object> caffeine = Caffeine.newBuilder();
-                
+
                 if (initialCapacity != null) {
                     caffeine.initialCapacity(initialCapacity);
                 }
@@ -80,9 +81,9 @@ public class GXCaffeineCacheConfig {
                     caffeine.maximumSize(maximumSize);
                 }
                 if (maximumWeight != null) {
-                    caffeine.maximumWeight(maximumWeight);
+                    throw new IllegalArgumentException("maximumWeight配置需要配合Weigher使用，当前暂不支持，请使用maximumSize");
                 }
-                
+
                 // 引用相关与统计信息
                 if (Boolean.TRUE.equals(recordStats)) {
                     caffeine.recordStats();
@@ -96,23 +97,28 @@ public class GXCaffeineCacheConfig {
                 if (Boolean.TRUE.equals(weakValues)) {
                     caffeine.weakValues();
                 }
-                
+
                 // 注册自定义缓存
                 caffeineCacheManager.registerCustomCache(name, caffeine.build());
                 log.debug("注册自定义缓存: {}", name);
             } catch (Exception e) {
                 log.error("注册缓存{}时发生异常: {}", name, e.getMessage(), e);
+                throw new IllegalStateException("注册Caffeine缓存[" + name + "]失败, 请检查配置是否冲突", e);
             }
         });
 
         // 配置默认的缓存实例
         List<String> defaultCacheNames = CollUtil.newArrayList(
-                "FRAMEWORK-CACHE", "__DEFAULT__", "UNIVERSAL-CACHE", 
+                "FRAMEWORK-CACHE", "__DEFAULT__", "UNIVERSAL-CACHE",
                 "BIZ-BACKEND-APP-CACHE", "BIZ-FRONTEND-APP-CACHE"
         );
-        
+
         defaultCacheNames.forEach(name -> {
             try {
+                if (caffeineCacheManager.getCacheNames().contains(name)) {
+                    log.debug("缓存[{}]已在配置文件中自定义，跳过默认配置", name);
+                    return;
+                }
                 // 为默认缓存配置合理的参数
                 // - 初始容量50，避免频繁扩容
                 // - 访问后24小时过期，避免长期占用内存
@@ -125,17 +131,18 @@ public class GXCaffeineCacheConfig {
                         .maximumSize(10000)
                         .softValues() // 内存敏感
                         .recordStats(); // 记录统计信息
-                
+
                 caffeineCacheManager.registerCustomCache(name, caffeine.build());
                 log.debug("注册默认缓存: {}", name);
             } catch (Exception e) {
                 log.error("注册默认缓存{}时发生异常: {}", name, e.getMessage(), e);
+                throw new IllegalStateException("注册默认Caffeine缓存[" + name + "]失败", e);
             }
         });
-        
+
         // 设置caffeineCacheManager.dynamic=false，禁止自动创建缓存
         // 这样可以避免缓存泄漏和内存溢出风险
-        caffeineCacheManager.setCacheNames(CollUtil.newArrayList("__IGNORE-CACHE__"));
+        caffeineCacheManager.setCacheNames(Collections.emptyList());
         log.info("Caffeine缓存管理器初始化完成");
         return caffeineCacheManager;
     }
