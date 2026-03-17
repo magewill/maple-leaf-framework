@@ -83,6 +83,7 @@ import java.util.stream.Collectors;
  * </p>
  *
  * @author 塵渊 britton@126.com
+ * @deprecated 推荐使用MyBatis-Plus官方的DataPermissionInterceptor及其配合的DataPermissionHandler
  */
 public interface GXDataScopeService {
     /**

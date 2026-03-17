@@ -8,8 +8,8 @@ import com.baomidou.mybatisplus.extension.plugins.inner.InnerInterceptor;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.JSQLParserException;
 import net.sf.jsqlparser.expression.Expression;
-import net.sf.jsqlparser.expression.StringValue;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
+import net.sf.jsqlparser.expression.operators.relational.ParenthesedExpressionList;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
@@ -29,6 +29,7 @@ import java.util.Objects;
  * </p>
  *
  * @author 塵渊 britton@126.com
+ * @deprecated 推荐使用MyBatis-Plus官方的DataPermissionInterceptor
  */
 @Slf4j
 public class GXDataFilterInterceptor implements InnerInterceptor {
@@ -108,33 +109,40 @@ public class GXDataFilterInterceptor implements InnerInterceptor {
         try {
             // 解析SQL语句为抽象语法树
             Select select = (Select) CCJSqlParserUtil.parse(originalSql);
+            // 注意：若涉及UNION等复杂查询，这里可能不直接是PlainSelect，严格方案应处理SetOperationList
             PlainSelect plainSelect = select.getPlainSelect();
+
+            if (plainSelect == null) {
+                log.error("不支持的查询结构(可能是UNION等复杂查询)，为防止数据越权，拒绝执行");
+                throw new UnsupportedOperationException("数据权限过滤暂不支持UNION等复杂查询结构，为防数据越权已拦截请求");
+            }
 
             // 获取原WHERE条件
             Expression expression = plainSelect.getWhere();
-            // 创建数据过滤条件，使用StringValue确保特殊字符被正确处理
-            StringValue stringValue = new StringValue("'" + sqlFilter + "'");
+            
+            // 将过滤条件作为正确的 SQL 表达式解析，而不是作为字符串常量包裹
+            Expression filterExpression = CCJSqlParserUtil.parseCondExpression(sqlFilter);
 
             // 如果原SQL没有WHERE条件，直接设置过滤条件
             if (expression == null) {
                 log.debug("原SQL没有WHERE条件，直接添加过滤条件");
-                plainSelect.setWhere(stringValue);
+                plainSelect.setWhere(new ParenthesedExpressionList<>(filterExpression));
             }
             // 如果原SQL有WHERE条件，使用AND连接原条件和过滤条件
             else {
                 log.debug("原SQL已有WHERE条件，使用AND连接过滤条件");
-                AndExpression andExpression = new AndExpression(expression, stringValue);
+                AndExpression andExpression = new AndExpression(new ParenthesedExpressionList<>(expression), new ParenthesedExpressionList<>(filterExpression));
                 plainSelect.setWhere(andExpression);
             }
 
-            // 处理特殊占位符并返回最终SQL
-            String resultSql = select.toString().replace("'$$'", "");
+            // 直接返回生成的SQL，无需进行容易出错的黑科技字符串替换
+            String resultSql = select.toString();
             log.debug("应用数据权限过滤后的SQL: {}", resultSql);
             return resultSql;
         } catch (JSQLParserException e) {
-            // 解析失败时返回原SQL，确保查询能够继续执行
-            log.warn("SQL解析失败，无法应用数据权限过滤: {}, 原因: {}", e.getMessage(), e.getCause() != null ? e.getCause().getMessage() : "未知");
-            return originalSql;
+            // 解析失败时拦截执行，防止越权
+            log.error("SQL解析失败，无法应用数据权限过滤: {}, 原因: {}", e.getMessage(), e.getCause() != null ? e.getCause().getMessage() : "未知");
+            throw new RuntimeException("SQL解析失败，无法应用数据权限过滤，为防止数据越权已拦截请求", e);
         }
     }
 }

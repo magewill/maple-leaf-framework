@@ -14,6 +14,7 @@ import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Pointcut;
 import org.aspectj.lang.reflect.MethodSignature;
+import org.springframework.core.MethodClassKey;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.ClassUtils;
@@ -32,6 +33,7 @@ import java.util.Objects;
  * </p>
  *
  * @author 塵渊 britton@126.com
+ * @deprecated 推荐使用MyBatis-Plus官方的DataPermissionInterceptor
  */
 @Aspect
 @Component
@@ -40,7 +42,7 @@ public class GXDataFilterAspect {
     /**
      * 方法注解缓存，避免频繁反射计算
      */
-    private static final Map<Method, DataFilterCacheEntry> METHOD_ANNOTATION_CACHE = new ConcurrentReferenceHashMap<>();
+    private static final Map<MethodClassKey, DataFilterCacheEntry> METHOD_ANNOTATION_CACHE = new ConcurrentReferenceHashMap<>();
 
     /**
      * 服务单例缓存，避免频繁从容器中获取
@@ -180,30 +182,24 @@ public class GXDataFilterAspect {
         Method method = signature.getMethod();
         Object target = point.getTarget();
 
-        // 获取真正的目标实现方法，防止由于代理/接口/泛型导致的找不到注解
-        if (target != null) {
-            method = ClassUtils.getMostSpecificMethod(method, target.getClass());
-        }
+        Class<?> targetClass = target != null ? target.getClass() : method.getDeclaringClass();
 
-        Method finalMethod = method;
+        // 获取真正的目标实现方法，防止由于代理/接口/泛型导致的找不到注解
+        Method specificMethod = ClassUtils.getMostSpecificMethod(method, targetClass);
+
+        MethodClassKey cacheKey = new MethodClassKey(specificMethod, targetClass);
+
         // 尝试从缓存中获取，或自动沿着层级或组合注解寻找（先找方法，再找类）
-        DataFilterCacheEntry cacheEntry = METHOD_ANNOTATION_CACHE.computeIfAbsent(finalMethod, m -> {
-            GXDataFilter annotation = AnnotatedElementUtils.findMergedAnnotation(m, GXDataFilter.class);
+        DataFilterCacheEntry cacheEntry = METHOD_ANNOTATION_CACHE.computeIfAbsent(cacheKey, key -> {
+            GXDataFilter annotation = AnnotatedElementUtils.findMergedAnnotation(specificMethod, GXDataFilter.class);
             if (annotation != null) {
                 return new DataFilterCacheEntry(true, annotation);
             }
             if (target != null) {
                 // 如果方法上没有，则查看类上是否有
-                annotation = AnnotatedElementUtils.findMergedAnnotation(target.getClass(), GXDataFilter.class);
+                annotation = AnnotatedElementUtils.findMergedAnnotation(targetClass, GXDataFilter.class);
                 if (annotation != null) {
                     return new DataFilterCacheEntry(true, annotation);
-                }
-                // 扫描实现的接口
-                for (Class<?> ifc : target.getClass().getInterfaces()) {
-                    annotation = AnnotatedElementUtils.findMergedAnnotation(ifc, GXDataFilter.class);
-                    if (annotation != null) {
-                        return new DataFilterCacheEntry(true, annotation);
-                    }
                 }
             }
             return new DataFilterCacheEntry(false, null);

@@ -34,6 +34,7 @@ import java.lang.annotation.*;
  * <p>3. 可以同时过滤用户ID和部门ID</p>
  * 
  * @author 塵渊 britton@126.com
+ * @deprecated 推荐使用MyBatis-Plus官方的DataPermissionInterceptor
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)
