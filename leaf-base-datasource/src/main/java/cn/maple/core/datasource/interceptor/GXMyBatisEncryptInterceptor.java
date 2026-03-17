@@ -22,28 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 该拦截器用于在MyBatis执行SQL前自动加密标记了{@link GXSensitiveData}注解的实体类中的敏感字段。
  * 通过拦截{@link ParameterHandler}的setParameters方法，在参数设置到PreparedStatement前进行加密处理。
  * </p>
- * 
- * <p>使用示例：</p>
- * <pre>
- * // 1. 在需要加密字段的实体类上添加@GXSensitiveData注解
- * @GXSensitiveData
- * public class UserEntity {
- *     private String username;
- *     private String password; // 将被加密
- *     private String idCard;   // 将被加密
- *     // getter和setter方法
- * }
- * 
- * // 2. 确保GXSensitiveDataEncryptService的实现类已注册到Spring容器中
- * // 3. 确保本拦截器已通过@Component注解注册到Spring容器中
- * </pre>
- * 
- * <p>线程安全说明：</p>
- * <p>本拦截器是线程安全的，因为：</p>
- * <p>1. 不维护任何可变状态</p>
- * <p>2. 所有操作都基于方法参数</p>
- * <p>3. 使用了线程安全的ReflectionUtils工具类</p>
- * 
+ *
  * @author britton <britton@126.com>
  */
 
@@ -54,6 +33,13 @@ import java.util.concurrent.ConcurrentHashMap;
 })
 public class GXMyBatisEncryptInterceptor implements Interceptor {
     /**
+     * 注解缓存，用于提高性能，避免重复反射查找相同类的注解
+     * <p>
+     * 使用ConcurrentHashMap确保线程安全
+     * </p>
+     */
+    private final ConcurrentHashMap<Class<?>, Boolean> annotationCache = new ConcurrentHashMap<>();
+    /**
      * 敏感数据加密服务
      * <p>
      * 用于执行实际的字段加密操作，通过Spring的依赖注入机制获取实现类
@@ -61,14 +47,6 @@ public class GXMyBatisEncryptInterceptor implements Interceptor {
      */
     @Resource
     private GXSensitiveDataEncryptService sensitiveDataEncryptService;
-    
-    /**
-     * 注解缓存，用于提高性能，避免重复反射查找相同类的注解
-     * <p>
-     * 使用ConcurrentHashMap确保线程安全
-     * </p>
-     */
-    private final ConcurrentHashMap<Class<?>, Boolean> annotationCache = new ConcurrentHashMap<>();
 
     /**
      * 拦截方法，在MyBatis执行SQL前处理参数
@@ -88,26 +66,26 @@ public class GXMyBatisEncryptInterceptor implements Interceptor {
             // 获取参数处理器
             // @Signature 指定了 type=parameterHandler 后，这里的 invocation.getTarget() 便是parameterHandler
             ParameterHandler parameterHandler = (ParameterHandler) invocation.getTarget();
-            
+
             // 安全地获取参数对象字段
             Field parameterField = ReflectionUtils.findField(parameterHandler.getClass(), "parameterObject");
             if (parameterField == null) {
                 log.warn("无法找到parameterObject字段，跳过敏感数据加密处理");
                 return invocation.proceed();
             }
-            
+
             // 设置字段可访问
             parameterField.setAccessible(true);
-            
+
             // 获取参数对象实例
             Object parameterObject = parameterField.get(parameterHandler);
             if (parameterObject == null) {
                 return invocation.proceed();
             }
-            
+
             // 获取参数对象类型
             Class<?> parameterObjectClass = parameterObject.getClass();
-            
+
             // 检查类是否需要进行敏感数据加密（使用缓存提高性能）
             Boolean hasAnnotation = annotationCache.get(parameterObjectClass);
             if (hasAnnotation == null) {
@@ -116,7 +94,7 @@ public class GXMyBatisEncryptInterceptor implements Interceptor {
                 hasAnnotation = Objects.nonNull(sensitiveData);
                 annotationCache.put(parameterObjectClass, hasAnnotation);
             }
-            
+
             // 如果类标记了敏感数据注解，执行加密处理
             if (hasAnnotation) {
                 log.debug("检测到敏感数据类: {}, 执行加密处理", parameterObjectClass.getName());
@@ -129,7 +107,7 @@ public class GXMyBatisEncryptInterceptor implements Interceptor {
             // 记录异常但不中断流程，确保SQL能够继续执行
             log.error("敏感数据加密过程发生异常: {}", e.getMessage(), e);
         }
-        
+
         // 继续执行原方法
         return invocation.proceed();
     }

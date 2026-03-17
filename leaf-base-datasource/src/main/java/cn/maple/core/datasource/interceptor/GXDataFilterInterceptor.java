@@ -28,39 +28,6 @@ import java.util.Objects;
  * 配合@GXDataFilter注解使用，实现基于用户权限的数据行级访问控制。
  * </p>
  *
- * <p>工作原理：</p>
- * <p>1. 通过ThreadLocal获取当前线程的数据过滤条件</p>
- * <p>2. 使用JSqlParser解析原始SQL语句</p>
- * <p>3. 将数据过滤条件动态添加到SQL的WHERE子句中</p>
- * <p>4. 重写原始SQL语句</p>
- *
- * <p>使用示例：</p>
- * <pre>
- * // 1. 在Spring配置中注册拦截器
- * @Configuration
- * public class MybatisPlusConfig {
- *     @Bean
- *     public MybatisPlusInterceptor mybatisPlusInterceptor() {
- *         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
- *         // 添加数据过滤拦截器
- *         interceptor.addInnerInterceptor(new GXDataFilterInterceptor());
- *         return interceptor;
- *     }
- * }
- *
- * // 2. 在Service方法上使用@GXDataFilter注解
- * @GXDataFilter(tableAlias = "t", userIdFieldNames = {"creator_id"})
- * public List<UserEntity> getUserList(Map<String, Object> params) {
- *     return baseDao.selectByMap(params);
- * }
- * </pre>
- *
- * <p>线程安全说明：</p>
- * <p>本拦截器是线程安全的，因为：</p>
- * <p>1. 不维护任何可变状态</p>
- * <p>2. 通过ThreadLocal隔离不同线程的数据</p>
- * <p>3. 所有操作都基于方法参数</p>
- *
  * @author 塵渊 britton@126.com
  */
 @Slf4j
@@ -119,24 +86,6 @@ public class GXDataFilterInterceptor implements InnerInterceptor {
      * 使用JSqlParser解析原SQL，并添加数据过滤条件。该方法通过解析SQL语句的抽象语法树，
      * 在保持原SQL结构的基础上，安全地添加数据权限过滤条件。
      * </p>
-     *
-     * <p>安全特性：</p>
-     * <ol>
-     *   <li>使用JSqlParser进行SQL解析和重构，而非简单字符串拼接</li>
-     *   <li>通过StringValue封装过滤条件，确保特殊字符被正确处理</li>
-     *   <li>使用AND连接原条件和过滤条件，确保查询范围只会缩小不会扩大</li>
-     *   <li>异常处理机制确保即使解析失败也不会影响原SQL执行</li>
-     *   <li>过滤条件应使用参数化查询语法(#{param})，防止SQL注入</li>
-     * </ol>
-     *
-     * <p>工作原理：</p>
-     * <ol>
-     *   <li>解析原始SQL语句为抽象语法树</li>
-     *   <li>获取原SQL的WHERE条件（如果存在）</li>
-     *   <li>将数据过滤条件转换为SQL表达式</li>
-     *   <li>根据原SQL是否有WHERE条件，决定直接设置或使用AND连接</li>
-     *   <li>重新生成包含过滤条件的SQL语句</li>
-     * </ol>
      *
      * @param originalSql 原始SQL语句，不能为null
      * @param scope       数据过滤条件对象，包含SQL过滤条件

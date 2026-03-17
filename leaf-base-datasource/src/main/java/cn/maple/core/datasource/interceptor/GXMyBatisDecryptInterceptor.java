@@ -26,28 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 该拦截器用于在MyBatis查询结果返回前自动解密标记了{@link GXSensitiveData}注解的实体类中的敏感字段。
  * 通过拦截{@link ResultSetHandler}的handleResultSets方法，在结果集处理后进行解密处理。
  * </p>
- * 
- * <p>使用示例：</p>
- * <pre>
- * // 1. 在需要解密字段的实体类上添加@GXSensitiveData注解
- * @GXSensitiveData
- * public class UserEntity {
- *     private String username;
- *     private String password; // 将被解密
- *     private String idCard;   // 将被解密
- *     // getter和setter方法
- * }
- * 
- * // 2. 确保GXSensitiveDataDecryptService的实现类已注册到Spring容器中
- * // 3. 确保本拦截器已通过@Component注解注册到Spring容器中
- * </pre>
- * 
- * <p>线程安全说明：</p>
- * <p>本拦截器是线程安全的，因为：</p>
- * <p>1. 不维护任何可变状态（除了线程安全的缓存）</p>
- * <p>2. 所有操作都基于方法参数</p>
- * <p>3. 使用了线程安全的工具类</p>
- * 
+ *
  * @author britton <britton@126.com>
  */
 
@@ -56,6 +35,13 @@ import java.util.concurrent.ConcurrentHashMap;
 @Intercepts({@Signature(type = ResultSetHandler.class, method = "handleResultSets", args = {Statement.class})})
 public class GXMyBatisDecryptInterceptor implements Interceptor {
     /**
+     * 注解缓存，用于提高性能，避免重复反射查找相同类的注解
+     * <p>
+     * 使用ConcurrentHashMap确保线程安全
+     * </p>
+     */
+    private final ConcurrentHashMap<Class<?>, Boolean> annotationCache = new ConcurrentHashMap<>();
+    /**
      * 敏感数据解密服务
      * <p>
      * 用于执行实际的字段解密操作，通过Spring的依赖注入机制获取实现类
@@ -63,14 +49,6 @@ public class GXMyBatisDecryptInterceptor implements Interceptor {
      */
     @Resource
     private GXSensitiveDataDecryptService sensitiveDataDecryptService;
-    
-    /**
-     * 注解缓存，用于提高性能，避免重复反射查找相同类的注解
-     * <p>
-     * 使用ConcurrentHashMap确保线程安全
-     * </p>
-     */
-    private final ConcurrentHashMap<Class<?>, Boolean> annotationCache = new ConcurrentHashMap<>();
 
     /**
      * 拦截方法，在MyBatis查询结果返回前处理结果集
@@ -91,11 +69,12 @@ public class GXMyBatisDecryptInterceptor implements Interceptor {
             if (Objects.isNull(resultObject)) {
                 return null;
             }
-            
+
             // 处理List类型的查询结果（selectList方法的返回值）
             if (ArrayList.class.getName().equalsIgnoreCase(TypeUtil.getClass(resultObject.getClass()).getName())) {
-                List<?> resultList = Convert.convert(new TypeReference<>() {}, resultObject);
-                
+                List<?> resultList = Convert.convert(new TypeReference<>() {
+                }, resultObject);
+
                 // 检查列表是否为空，以及第一个元素是否需要解密
                 if (!CollectionUtils.isEmpty(resultList) && Objects.nonNull(resultList.get(0))) {
                     // 获取第一个元素的类型，检查是否需要解密
@@ -108,7 +87,7 @@ public class GXMyBatisDecryptInterceptor implements Interceptor {
                         }
                     }
                 }
-            } 
+            }
             // 处理单个对象的查询结果（selectOne方法的返回值）
             else {
                 if (checkNeedToDecrypt(resultObject)) {
@@ -116,7 +95,7 @@ public class GXMyBatisDecryptInterceptor implements Interceptor {
                     sensitiveDataDecryptService.decrypt(resultObject);
                 }
             }
-            
+
             return resultObject;
         } catch (Exception e) {
             // 记录异常但不中断流程，确保查询结果能够正常返回
@@ -139,10 +118,10 @@ public class GXMyBatisDecryptInterceptor implements Interceptor {
         if (object == null) {
             return false;
         }
-        
+
         // 获取对象类型
         Class<?> objectClass = object.getClass();
-        
+
         // 从缓存中查找是否已检查过该类型
         Boolean hasAnnotation = annotationCache.get(objectClass);
         if (hasAnnotation == null) {
@@ -151,7 +130,7 @@ public class GXMyBatisDecryptInterceptor implements Interceptor {
             hasAnnotation = Objects.nonNull(sensitiveData);
             annotationCache.put(objectClass, hasAnnotation);
         }
-        
+
         return hasAnnotation;
     }
 

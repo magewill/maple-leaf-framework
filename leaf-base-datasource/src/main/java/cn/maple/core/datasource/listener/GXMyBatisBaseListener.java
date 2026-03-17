@@ -18,20 +18,8 @@ import java.lang.reflect.Type;
  * 该接口定义了处理MyBatis操作事件的基本方法，包括实体保存、更新、字段更新、软删除和批量保存等操作的事件监听。
  * 实现类可以选择同步或异步方式处理这些事件，分别通过{@link GXMyBatisSyncListener}和{@link GXMyBatisAsyncListener}实现。
  * <p>
- * 线程安全说明：
- * 1. 接口中的默认方法实现是无状态的，主要进行参数转换和反射调用
- * 2. 实现类需要确保在并发环境下的线程安全性，特别是在异步处理时
- * 3. 所有方法内部使用的反射调用通过{@link GXCommonUtils#reflectCallObjectMethod}进行，该方法内部已处理异常
- * <p>
- * 使用示例：
- * <pre>
- * // 自定义监听器实现
- * public class CustomEntityListener implements GXEntityListener<CustomEntity> {
- *     public void saveEntityListener(CustomEntity entity) {
- *         // 处理实体保存后的业务逻辑
- *     }
- * }
- * </pre>
+ *
+ * @author 塵渊 britton@126.com
  */
 @SuppressWarnings("all")
 interface GXMyBatisBaseListener {
@@ -39,12 +27,7 @@ interface GXMyBatisBaseListener {
      * 监听保存实体(Entity)事件
      * <p>
      * 该方法处理实体保存后触发的事件，通过反射调用目标监听器的saveEntityListener方法。
-     * 处理流程：
-     * 1. 从事件中获取源数据和参数
-     * 2. 获取目标监听器类名和类对象
-     * 3. 获取目标参数类型并进行类型转换
-     * 4. 通过Spring容器获取监听器实例
-     * 5. 反射调用监听器的saveEntityListener方法
+     * </p>
      *
      * @param saveEntityEvent 保存实体事件对象，包含已保存的实体数据
      * @throws GXBusinessException 如果反射调用失败或类型转换异常
