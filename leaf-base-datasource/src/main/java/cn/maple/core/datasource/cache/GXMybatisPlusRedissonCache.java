@@ -21,12 +21,6 @@ import java.util.concurrent.locks.ReadWriteLock;
  * 该类实现了MyBatis的Cache接口，使用Redisson作为缓存存储介质，
  * 提供了线程安全的缓存操作，支持缓存过期时间设置，并使用MD5对缓存键进行处理以节省内存。
  * </p>
- * <p>
- * 缓存安全性：
- * - 使用Redisson的分布式锁机制确保缓存操作的线程安全
- * - 对缓存键进行MD5处理，减少内存占用并提高查找效率
- * - 支持自定义缓存过期时间，防止缓存无限增长
- * </p>
  *
  * @author 塵渊 britton@126.com
  */
@@ -48,17 +42,10 @@ public class GXMybatisPlusRedissonCache implements Cache {
      */
     private static final GXRedissonCacheService redissonCacheService;
 
-    /**
-     * 静态初始化块
-     * <p>
-     * 从Spring上下文中获取RedissonClient和GXRedissonCacheService实例
-     * 添加空指针检查，确保服务可用性
-     * </p>
-     */
     static {
         redissonClient = GXSpringContextUtils.getBean(RedissonClient.class);
         redissonCacheService = GXSpringContextUtils.getBean(GXRedissonCacheService.class);
-        
+
         // 安全检查：确保必要的服务已正确初始化
         if (redissonClient == null) {
             log.error("初始化MyBatis二级缓存失败：RedissonClient未找到，请检查Redisson配置");
@@ -97,7 +84,7 @@ public class GXMybatisPlusRedissonCache implements Cache {
      *
      * @param id 缓存实例ID，通常是Mapper接口的全限定名
      * @throws IllegalArgumentException 如果ID为null
-     * @throws GXBusinessException 如果找不到对应的类或获取注解失败
+     * @throws GXBusinessException      如果找不到对应的类或获取注解失败
      */
     public GXMybatisPlusRedissonCache(final String id) {
         if (id == null) {
@@ -134,7 +121,7 @@ public class GXMybatisPlusRedissonCache implements Cache {
      * 使用MD5处理缓存键以节省内存空间
      * </p>
      *
-     * @param key 缓存键，通常是SQL语句
+     * @param key   缓存键，通常是SQL语句
      * @param value 缓存值，通常是查询结果
      * @throws AssertionError 如果redissonCacheService为null
      */
@@ -144,11 +131,11 @@ public class GXMybatisPlusRedissonCache implements Cache {
             log.warn("缓存服务不可用，无法存储缓存数据");
             return;
         }
-        
+
         if (Objects.nonNull(value)) {
             String storeKey = generateCacheKey(key);
             log.debug("MyBatis缓存：向[{}]缓存桶中存入缓存，key: {}", id, storeKey);
-            
+
             try {
                 if (flushInterval > 0) {
                     redissonCacheService.setCache(getId(), storeKey, value, flushInterval, TimeUnit.MILLISECONDS);
@@ -178,10 +165,10 @@ public class GXMybatisPlusRedissonCache implements Cache {
             log.warn("缓存服务不可用，无法获取缓存数据");
             return null;
         }
-        
+
         String storeKey = generateCacheKey(key);
         log.debug("MyBatis缓存：从[{}]缓存桶中获取缓存，key: {}", id, storeKey);
-        
+
         try {
             Object cache = redissonCacheService.getCache(getId(), storeKey);
             if (Objects.isNull(cache)) {
@@ -210,10 +197,10 @@ public class GXMybatisPlusRedissonCache implements Cache {
             log.warn("缓存服务不可用，无法删除缓存数据");
             return null;
         }
-        
+
         String storeKey = generateCacheKey(key);
         log.debug("MyBatis缓存：从[{}]缓存桶中删除缓存，key: {}", id, storeKey);
-        
+
         try {
             return redissonCacheService.deleteCache(getId(), storeKey);
         } catch (Exception e) {
@@ -236,9 +223,9 @@ public class GXMybatisPlusRedissonCache implements Cache {
             log.warn("缓存服务不可用，无法清空缓存数据");
             return;
         }
-        
+
         log.debug("MyBatis缓存：清空[{}]缓存桶中的所有数据", id);
-        
+
         try {
             redissonCacheService.clear(getId());
         } catch (Exception e) {
@@ -262,9 +249,9 @@ public class GXMybatisPlusRedissonCache implements Cache {
             log.warn("缓存服务不可用，无法获取缓存数量");
             return 0;
         }
-        
+
         log.debug("MyBatis缓存：获取[{}]缓存桶中数据的数量", id);
-        
+
         try {
             return redissonCacheService.size(getId());
         } catch (Exception e) {
@@ -293,14 +280,14 @@ public class GXMybatisPlusRedissonCache implements Cache {
                 public java.util.concurrent.locks.Lock readLock() {
                     return new java.util.concurrent.locks.ReentrantLock();
                 }
-                
+
                 @Override
                 public java.util.concurrent.locks.Lock writeLock() {
                     return new java.util.concurrent.locks.ReentrantLock();
                 }
             };
         }
-        
+
         return redissonClient.getReadWriteLock("MP:LOCK:" + getId());
     }
 
@@ -318,13 +305,13 @@ public class GXMybatisPlusRedissonCache implements Cache {
         if (key == null) {
             return "null";
         }
-        
+
         String keyString = key.toString();
         // 对较长的键进行MD5处理，减少内存占用
         if (keyString.length() > 64) {
             return DigestUtils.md5DigestAsHex(keyString.getBytes());
         }
-        
+
         // 对于较短的键，直接使用，提高可读性
         return keyString;
     }
