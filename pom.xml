@@ -45,7 +45,7 @@
         <aspectjweaver.version>1.9.25</aspectjweaver.version>
         <guava.version>33.5.0-jre</guava.version>
         <caffeine.version>3.2.3</caffeine.version>
-        <fastjson.version>2.0.58</fastjson.version>
+        <fastjson.version>2.0.61</fastjson.version>
         <maven-compiler-plugin.version>3.14.1</maven-compiler-plugin.version>
         <maven-source-plugin.version>3.4.0</maven-source-plugin.version>
         <spring-boot.version>4.0.3</spring-boot.version>
@@ -70,6 +70,7 @@
         <jackson.version>2.21.0</jackson.version>
         <tools.jackson.version>3.0.3</tools.jackson.version>
         <bcprov-jdk18on.version>1.83</bcprov-jdk18on.version>
+        <druid.version>1.2.28</druid.version>
     </properties>
 
     <dependencyManagement>
@@ -125,6 +126,18 @@
                         <artifactId>fastjson2</artifactId>
                     </exclusion>
                 </exclusions>
+            </dependency>
+
+            <dependency>
+                <groupId>com.alibaba</groupId>
+                <artifactId>fastjson</artifactId>
+                <version>${fastjson.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.alibaba</groupId>
+                <artifactId>druid</artifactId>
+                <version>${druid.version}</version>
             </dependency>
 
             <dependency>
