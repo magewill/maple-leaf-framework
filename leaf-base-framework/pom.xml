@@ -88,8 +88,16 @@
             <groupId>cn.hutool</groupId>
             <artifactId>hutool-crypto</artifactId>
         </dependency>
-        <dependency>
+        <!--<dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-guava</artifactId>
+        </dependency>-->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.datatype</groupId>
             <artifactId>jackson-datatype-guava</artifactId>
         </dependency>
         <dependency>
