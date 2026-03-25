@@ -31,10 +31,9 @@ import java.util.Map;
  */
 @Configuration
 @ComponentScan({"cn.maple"})
-@Slf4j
 public class GXFrameworkConfig {
     @Value("${maple.framework.validator.fail-fast:true}")
-    private String failFast;
+    private boolean failFast;
 
     /**
      * 通过 JsonMapperBuilderCustomizer 注入自定义的 ValueSerializerModifier
@@ -49,8 +48,9 @@ public class GXFrameworkConfig {
             builder.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
             // 3. 注册 Guava 类型支持（Jackson 3 版本）
             builder.addModule(new GuavaModule());
+
             SimpleModule module = new SimpleModule();
-            module.setSerializerModifier(new GxValueSerializerModifier());
+            module.setSerializerModifier(new GXValueSerializerModifier());
             builder.addModule(module);
         };
     }
@@ -58,14 +58,18 @@ public class GXFrameworkConfig {
     @Bean
     public LocalValidatorFactoryBean localValidatorFactoryBean() {
         LocalValidatorFactoryBean bean = new LocalValidatorFactoryBean();
-        bean.getValidationPropertyMap().put("hibernate.validator.fail_fast", failFast);
+        bean.getValidationPropertyMap().put("hibernate.validator.fail_fast", String.valueOf(failFast));
         return bean;
     }
 
     /**
      * Jackson 3 中 BeanSerializerModifier → ValueSerializerModifier
      */
-    public static class GxValueSerializerModifier extends ValueSerializerModifier {
+    public static class GXValueSerializerModifier extends ValueSerializerModifier {
+        private static final ValueSerializer<Object> NULL_STRING_SERIALIZER = new NullStringJsonSerializer();
+        private static final ValueSerializer<Object> NULL_ARRAY_COLLECTION_SERIALIZER = new NullArrayOrCollectionJsonSerializer();
+        private static final ValueSerializer<Object> NULL_MAP_SERIALIZER = new NullMapJsonSerializer();
+
         @Override
         public List<BeanPropertyWriter> changeProperties(
                 SerializationConfig config,
@@ -74,14 +78,11 @@ public class GXFrameworkConfig {
             for (BeanPropertyWriter writer : beanProperties) {
                 Class<?> clazz = writer.getType().getRawClass();
                 if (CharSequence.class.isAssignableFrom(clazz)) {
-                    writer.assignNullSerializer(new NullStringJsonSerializer());
-                } else if (Collection.class.isAssignableFrom(clazz)) {
-                    writer.assignNullSerializer(new NullCollectionJsonSerializer());
+                    writer.assignNullSerializer(NULL_STRING_SERIALIZER);
+                } else if (Collection.class.isAssignableFrom(clazz) || clazz.isArray()) {
+                    writer.assignNullSerializer(NULL_ARRAY_COLLECTION_SERIALIZER);
                 } else if (Map.class.isAssignableFrom(clazz)) {
-                    writer.assignNullSerializer(new NullMapJsonSerializer());
-                } else if (clazz.isArray()) {
-                    writer.assignNullSerializer(new NullArrayJsonSerializer());
-
+                    writer.assignNullSerializer(NULL_MAP_SERIALIZER);
                 }
             }
             return beanProperties;
@@ -91,14 +92,17 @@ public class GXFrameworkConfig {
     // ★ Jackson 3: JsonSerializer → ValueSerializer，IOException 变为 unchecked
     public static class NullStringJsonSerializer extends ValueSerializer<Object> {
         @Override
-        public void serialize(Object value, tools.jackson.core.JsonGenerator gen, SerializationContext ctxt) throws JacksonException {
+        public void serialize(Object value, JsonGenerator gen, SerializationContext ctxt) throws JacksonException {
             gen.writeString("");
         }
     }
 
-    public static class NullCollectionJsonSerializer extends ValueSerializer<Object> {
+    /**
+     * 原生数组 (String[]/int[] 等) 与 集合类型：null → []
+     */
+    public static class NullArrayOrCollectionJsonSerializer extends ValueSerializer<Object> {
         @Override
-        public void serialize(Object value, tools.jackson.core.JsonGenerator gen, SerializationContext ctxt) throws JacksonException {
+        public void serialize(Object value, JsonGenerator gen, SerializationContext ctxt) throws JacksonException {
             gen.writeStartArray();
             gen.writeEndArray();
         }
@@ -106,20 +110,9 @@ public class GXFrameworkConfig {
 
     public static class NullMapJsonSerializer extends ValueSerializer<Object> {
         @Override
-        public void serialize(Object value, tools.jackson.core.JsonGenerator gen, SerializationContext ctxt) throws JacksonException {
+        public void serialize(Object value, JsonGenerator gen, SerializationContext ctxt) throws JacksonException {
             gen.writeStartObject();
             gen.writeEndObject();
-        }
-    }
-
-    /**
-     * 原生数组 (String[]/int[] 等)：null → []
-     */
-    public static class NullArrayJsonSerializer extends ValueSerializer<Object> {
-        @Override
-        public void serialize(Object value, JsonGenerator gen, SerializationContext ctxt) throws JacksonException {
-            gen.writeStartArray();
-            gen.writeEndArray();
         }
     }
 }
