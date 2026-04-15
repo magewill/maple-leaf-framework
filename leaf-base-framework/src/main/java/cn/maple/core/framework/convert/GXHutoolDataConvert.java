@@ -16,10 +16,10 @@ import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.dto.GXBaseData;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.reflect.TypeToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.ObjectMapper;
 
 import java.lang.reflect.Array;
 import java.lang.reflect.Type;

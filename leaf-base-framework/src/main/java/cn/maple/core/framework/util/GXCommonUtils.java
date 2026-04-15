@@ -31,17 +31,15 @@ import cn.maple.core.framework.exception.GXBeanValidateException;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXConvertException;
 import cn.maple.core.framework.util.cglib.GXCglibUtils;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.google.common.collect.Table;
 import com.google.common.reflect.TypeToken;
 import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -351,7 +349,7 @@ public class GXCommonUtils {
 
             return objectMapper.readValue(envValue, new TypeReference<>() {
             });
-        } catch (JsonProcessingException exception) {
+        } catch (JacksonException exception) {
             LOG.error("配置值[{}]转换为类型[{}]失败: {}", key, clazzType.getName(), exception.getMessage());
             throw new GXConvertException("转换失败", exception);
         } catch (Exception e) {
@@ -2019,10 +2017,7 @@ public class GXCommonUtils {
             // 从Spring上下文获取ObjectMapper实例
             ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
             if (objectMapper == null) {
-                // 如果Spring上下文中没有ObjectMapper，创建一个默认实例
-                objectMapper = new ObjectMapper();
-                objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-                objectMapper.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
+                throw new GXBusinessException("Spring容器中不存在ObjectMapper Bean!!!");
             }
 
             // 序列化数据对象为JSON字符串
@@ -2030,7 +2025,7 @@ public class GXCommonUtils {
             // 计算HMAC值并进行Base64编码，统一使用UTF-8编码
             byte[] hmacBytes = mac.doFinal(jsonData.getBytes(StandardCharsets.UTF_8));
             return Base64Encoder.encode(hmacBytes);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new GXBusinessException("JSON序列化失败: " + e.getMessage(), e);
         } catch (InvalidKeyException e) {
             throw new GXBusinessException("无效的HMAC密钥: " + e.getMessage(), e);
@@ -2113,10 +2108,7 @@ public class GXCommonUtils {
             // 获取ObjectMapper实例用于序列化payload
             ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
             if (objectMapper == null) {
-                // 如果Spring上下文中没有ObjectMapper，创建一个默认实例
-                objectMapper = new ObjectMapper();
-                objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-                objectMapper.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);
+                throw new GXBusinessException("Spring上下文中没有ObjectMapper");
             }
             // 序列化payload为JSON字符串
             String jsonData = objectMapper.writeValueAsString(payload);

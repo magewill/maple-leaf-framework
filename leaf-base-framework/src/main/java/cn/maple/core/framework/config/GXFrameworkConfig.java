@@ -1,6 +1,5 @@
 package cn.maple.core.framework.config;
 
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer;
 import org.springframework.context.annotation.Bean;
@@ -40,7 +39,7 @@ public class GXFrameworkConfig {
      * 这是 Spring Boot 4 + Jackson 3 的标准扩展方式
      */
     @Bean
-    public JsonMapperBuilderCustomizer nullHandlingCustomizer() {
+    public JsonMapperBuilderCustomizer jsonMapperBuilderCustomizer() {
         return builder -> {
             // 1. 关闭空 Bean 序列化报错
             builder.disable(SerializationFeature.FAIL_ON_EMPTY_BEANS);

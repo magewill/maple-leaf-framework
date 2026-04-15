@@ -24,12 +24,13 @@
 package cn.maple.core.datasource.handler.type.mybatis;
 
 import cn.maple.core.framework.exception.GXBusinessException;
-import com.fasterxml.jackson.core.*;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.core.*;
+import tools.jackson.databind.JsonNode;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.Iterator;
+import java.util.Collection;
+import java.util.List;
 
 /**
  * Lazy JSON node wrapper, that will create generate real TreeNode after first call to it's methods.
@@ -84,8 +85,8 @@ public class GXTreeNodeLazyWrapper implements TreeNode, Serializable {
     }
 
     @Override
-    public boolean isContainerNode() {
-        return tree().isContainerNode();
+    public boolean isContainer() {
+        return false;
     }
 
     @Override
@@ -101,6 +102,16 @@ public class GXTreeNodeLazyWrapper implements TreeNode, Serializable {
     @Override
     public boolean isObject() {
         return tree().isObject();
+    }
+
+    @Override
+    public boolean isNull() {
+        return false;
+    }
+
+    @Override
+    public boolean isEmbeddedValue() {
+        return false;
     }
 
     @Override
@@ -124,13 +135,13 @@ public class GXTreeNodeLazyWrapper implements TreeNode, Serializable {
     }
 
     @Override
-    public Iterator<String> fieldNames() {
-        return tree().fieldNames();
+    public Collection<String> propertyNames() {
+        return List.of();
     }
 
     @Override
-    public TreeNode at(JsonPointer jp) {
-        return tree().at(jp);
+    public TreeNode at(JsonPointer jsonPointer) {
+        return null;
     }
 
     @Override
@@ -139,13 +150,8 @@ public class GXTreeNodeLazyWrapper implements TreeNode, Serializable {
     }
 
     @Override
-    public JsonParser traverse() {
-        return tree().traverse();
-    }
-
-    @Override
-    public JsonParser traverse(ObjectCodec oc) {
-        return tree().traverse(oc);
+    public JsonParser traverse(ObjectReadContext objectReadContext) {
+        return null;
     }
 
     @Override

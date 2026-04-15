@@ -24,17 +24,16 @@
 package cn.maple.core.datasource.handler.type.mybatis;
 
 import cn.maple.core.framework.exception.GXBusinessException;
-import com.fasterxml.jackson.core.TreeNode;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.MissingNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.ibatis.executor.result.ResultMapException;
 import org.apache.ibatis.type.BaseTypeHandler;
 import org.apache.ibatis.type.JdbcType;
 import org.apache.ibatis.type.MappedTypes;
+import tools.jackson.core.TreeNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.MissingNode;
+import tools.jackson.databind.node.ObjectNode;
 
-import java.io.IOException;
 import java.sql.CallableStatement;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -53,7 +52,7 @@ public class GXTreeNodeTypeHandler extends BaseTypeHandler<TreeNode> {
     public void setNonNullParameter(PreparedStatement ps, int i, TreeNode parameter, JdbcType jdbcType) throws SQLException {
         try {
             ps.setString(i, GXReaderWriter.write(parameter));
-        } catch (IOException ex) {
+        } catch (SQLException ex) {
             throw new GXBusinessException(ex.getMessage(), ex);
         }
     }

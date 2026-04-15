@@ -12,8 +12,6 @@ import cn.maple.core.framework.service.GXBotNotificationExceptionService;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.core.framework.util.GXResultUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
-import com.fasterxml.jackson.databind.exc.InvalidFormatException;
-import com.fasterxml.jackson.databind.exc.MismatchedInputException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.UnexpectedTypeException;
@@ -31,6 +29,8 @@ import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import tools.jackson.databind.exc.InvalidFormatException;
+import tools.jackson.databind.exc.MismatchedInputException;
 
 import java.sql.SQLException;
 import java.sql.SQLIntegrityConstraintViolationException;
@@ -137,7 +137,7 @@ public class GXExceptionHandler {
         Object value = e.getValue();
         String[] msg = new String[]{""};
         e.getPath().forEach(path -> {
-            String fieldName = path.getFieldName();
+            String fieldName = path.getPropertyName();
             msg[0] = CharSequenceUtil.format("{}字段的值{}为{}类型不能转换为{}类型,请提供正确的类型!", fieldName, value, value.getClass().getSimpleName(), targetTypeSimpleName);
         });
         exceptionNotify(e);

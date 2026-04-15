@@ -1,9 +1,10 @@
 package cn.maple.core.framework.deserializer.req.protocol;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.DeserializationContext;
-import com.fasterxml.jackson.databind.JsonDeserializer;
 import lombok.extern.slf4j.Slf4j;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.JsonParser;
+import tools.jackson.databind.DeserializationContext;
+import tools.jackson.databind.deser.std.StdDeserializer;
 
 import java.io.IOException;
 
@@ -35,7 +36,11 @@ import java.io.IOException;
  * @since 1.0.0
  */
 @Slf4j
-public class IntegerDeserializerProtocol extends JsonDeserializer<Integer> {
+public class IntegerDeserializerProtocol extends StdDeserializer<Integer> {
+    public IntegerDeserializerProtocol() {
+        super(Integer.class);
+    }
+
     /**
      * 反序列化方法，将JSON值转换为Integer对象
      * <p>
@@ -55,7 +60,7 @@ public class IntegerDeserializerProtocol extends JsonDeserializer<Integer> {
      * @throws IOException 如果发生I/O错误
      */
     @Override
-    public Integer deserialize(JsonParser p, DeserializationContext ct) throws IOException {
+    public Integer deserialize(JsonParser p, DeserializationContext ct) throws JacksonException {
         if (p == null) {
             return null;
         }

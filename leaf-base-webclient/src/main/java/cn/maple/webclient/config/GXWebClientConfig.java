@@ -11,7 +11,6 @@ import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import cn.maple.webclient.service.GXWebClientService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.handler.timeout.WriteTimeoutHandler;
@@ -21,14 +20,15 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
-import org.springframework.http.codec.json.Jackson2JsonDecoder;
-import org.springframework.http.codec.json.Jackson2JsonEncoder;
+import org.springframework.http.codec.json.JacksonJsonDecoder;
+import org.springframework.http.codec.json.JacksonJsonEncoder;
 import org.springframework.web.reactive.function.client.*;
 import org.springframework.web.reactive.function.client.support.WebClientAdapter;
 import org.springframework.web.service.invoker.HttpServiceProxyFactory;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.resources.ConnectionProvider;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.time.Duration;
 import java.util.List;
@@ -467,8 +467,8 @@ public class GXWebClientConfig {
             return Mono.just(clientResponse);
         });
 
-        ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
-        assert objectMapper != null;
+        JsonMapper jsonMapper = GXSpringContextUtils.getBean(JsonMapper.class);
+        assert jsonMapper != null;
         // 构建WebClient，配置默认请求头、超时设置等
         return WebClient.builder()
                 .exchangeStrategies(strategies)
@@ -489,11 +489,11 @@ public class GXWebClientConfig {
                         .responseTimeout(Duration.ofSeconds(DEFAULT_TIMEOUT_SECONDS))))
                 // 设置编解码器
                 .codecs(configurer -> {
-                    configurer.defaultCodecs().jackson2JsonEncoder(
-                            new Jackson2JsonEncoder(objectMapper)
+                    configurer.defaultCodecs().jacksonJsonEncoder(
+                            new JacksonJsonEncoder(jsonMapper)
                     );
-                    configurer.defaultCodecs().jackson2JsonDecoder(
-                            new Jackson2JsonDecoder(objectMapper)
+                    configurer.defaultCodecs().jacksonJsonDecoder(
+                            new JacksonJsonDecoder(jsonMapper)
                     );
                 });
     }

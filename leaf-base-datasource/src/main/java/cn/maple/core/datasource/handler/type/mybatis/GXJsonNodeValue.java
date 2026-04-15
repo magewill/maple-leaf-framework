@@ -24,8 +24,9 @@
 package cn.maple.core.datasource.handler.type.mybatis;
 
 import cn.maple.core.framework.exception.GXBusinessException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.MissingNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.MissingNode;
 
 import java.io.IOException;
 import java.io.ObjectOutputStream;
@@ -187,7 +188,7 @@ public class GXJsonNodeValue implements Serializable {
         oos.defaultWriteObject();
     }
 
-    private synchronized JsonNode getNodeInstance() throws IOException {
+    private synchronized JsonNode getNodeInstance() throws JacksonException {
         if (value == null) {
             value = GXReaderWriter.readTree(source);
         }

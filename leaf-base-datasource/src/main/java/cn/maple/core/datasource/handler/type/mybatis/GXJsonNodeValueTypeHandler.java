@@ -28,8 +28,8 @@ import org.apache.ibatis.executor.result.ResultMapException;
 import org.apache.ibatis.type.BaseTypeHandler;
 import org.apache.ibatis.type.JdbcType;
 import org.apache.ibatis.type.MappedTypes;
+import tools.jackson.core.JacksonException;
 
-import java.io.IOException;
 import java.sql.CallableStatement;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -53,7 +53,7 @@ public class GXJsonNodeValueTypeHandler extends BaseTypeHandler<GXJsonNodeValue>
             } else {
                 try {
                     json = GXReaderWriter.write(parameter.get());
-                } catch (IOException ex) {
+                } catch (JacksonException ex) {
                     throw new GXBusinessException(ex.getMessage(), ex);
                 }
             }

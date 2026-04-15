@@ -24,15 +24,13 @@
 package cn.maple.core.datasource.handler.type.mybatis;
 
 import cn.maple.core.framework.util.GXSpringContextUtils;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.TreeNode;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectReader;
-import com.fasterxml.jackson.databind.ObjectWriter;
-
-import java.io.IOException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.TreeNode;
+import tools.jackson.core.json.JsonReadFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectReader;
+import tools.jackson.databind.ObjectWriter;
 
 final class GXReaderWriter {
     private static final ObjectReader READER;
@@ -42,21 +40,22 @@ final class GXReaderWriter {
     static {
         ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
         assert objectMapper != null;
+        READER = objectMapper.reader()
+                .with(JsonReadFeature.ALLOW_UNQUOTED_PROPERTY_NAMES)    // 允许未引号的字段名
+                .with(JsonReadFeature.ALLOW_LEADING_ZEROS_FOR_NUMBERS) // 允许数字前导零
+                .with(JsonReadFeature.ALLOW_SINGLE_QUOTES);           // 允许单引号
+
         WRITER = objectMapper.writer();
-        objectMapper.configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
-        objectMapper.configure(JsonParser.Feature.ALLOW_NUMERIC_LEADING_ZEROS, true);
-        objectMapper.configure(JsonParser.Feature.ALLOW_SINGLE_QUOTES, true);
-        READER = objectMapper.reader();
     }
 
     private GXReaderWriter() {
     }
 
-    static JsonNode readTree(String json) throws IOException {
+    static JsonNode readTree(String json) throws JacksonException {
         return READER.readTree(json);
     }
 
-    static String write(TreeNode tree) throws JsonProcessingException {
+    static String write(TreeNode tree) throws JacksonException {
         return WRITER.writeValueAsString(tree);
     }
 }

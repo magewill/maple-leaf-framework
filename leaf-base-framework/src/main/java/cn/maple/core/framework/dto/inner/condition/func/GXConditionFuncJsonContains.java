@@ -5,9 +5,9 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.reflect.TypeToken;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 
@@ -173,7 +173,7 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
             try {
                 assert objectMapper != null;
                 return objectMapper.writeValueAsString(values);
-            } catch (JsonProcessingException e) {
+            } catch (JacksonException e) {
                 throw new GXBusinessException(e.getMessage(), e);
             }
         }
