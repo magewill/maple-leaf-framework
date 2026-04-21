@@ -1,5 +1,6 @@
 package cn.maple.core.framework.config;
 
+import cn.maple.core.framework.util.GXCommonUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
@@ -80,7 +81,9 @@ public class GXFrameworkConfig {
         private static final ValueSerializer<Object> NULL_ARRAY_COLLECTION_SERIALIZER = new NullArrayOrCollectionJsonSerializer();
         private static final ValueSerializer<Object> NULL_MAP_SERIALIZER = new NullMapJsonSerializer();
         private static final ValueSerializer<Object> NULL_NUMBER_SERIALIZER = new NullNumberJsonSerializer();
-        private static final ValueSerializer<Object> NULL_BOOLEAN_SERIALIZER = new NullNumberJsonSerializer();
+        private static final ValueSerializer<Object> NULL_BOOLEAN_SERIALIZER = new NullBooleanJsonSerializer();
+        private static final boolean NULL_NUMBER_CONVERT_ZERO = GXCommonUtils.getEnvironmentValue("maple.framework.jackson.null_number_convertor_zero", Boolean.class, false);
+        private static final boolean NULL_BOOLEAN_CONVERT_FALSE = GXCommonUtils.getEnvironmentValue("maple.framework.jackson.null_number_convertor_false", Boolean.class, false);
 
         @Override
         public List<BeanPropertyWriter> changeProperties(
@@ -95,9 +98,9 @@ public class GXFrameworkConfig {
                     writer.assignNullSerializer(NULL_ARRAY_COLLECTION_SERIALIZER);
                 } else if (Map.class.isAssignableFrom(clazz)) {
                     writer.assignNullSerializer(NULL_MAP_SERIALIZER);
-                } else if (Number.class.isAssignableFrom(clazz)) {
+                } else if (Number.class.isAssignableFrom(clazz) && NULL_NUMBER_CONVERT_ZERO) {
                     writer.assignNullSerializer(NULL_NUMBER_SERIALIZER);
-                } else if (Boolean.class.isAssignableFrom(clazz)) {
+                } else if (Boolean.class.isAssignableFrom(clazz) && NULL_BOOLEAN_CONVERT_FALSE) {
                     writer.assignNullSerializer(NULL_BOOLEAN_SERIALIZER);
                 }
             }
