@@ -2,9 +2,12 @@ package cn.maple.core.framework.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer;
+import org.springframework.boot.validation.autoconfigure.ValidationAutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 import tools.jackson.core.JacksonException;
@@ -31,7 +34,11 @@ import java.util.Map;
  */
 //@Configuration
 //@ComponentScan({"cn.maple"})
-@AutoConfiguration(after = JacksonAutoConfiguration.class)
+@AutoConfiguration(
+        after = JacksonAutoConfiguration.class,
+        before = ValidationAutoConfiguration.class
+)
+@ImportAutoConfiguration
 public class GXFrameworkConfig {
     @Value("${maple.framework.validator.fail-fast:true}")
     private boolean failFast;
@@ -41,7 +48,7 @@ public class GXFrameworkConfig {
      * 这是 Spring Boot 4 + Jackson 3 的标准扩展方式
      */
     @Bean
-    @ConditionalOnMissingBean(JsonMapperBuilderCustomizer.class)
+    @ConditionalOnClass(name = "tools.jackson.datatype.guava.GuavaModule")
     public JsonMapperBuilderCustomizer jsonMapperBuilderCustomizer() {
         return builder -> {
             // 1. 关闭空 Bean 序列化报错
@@ -72,6 +79,8 @@ public class GXFrameworkConfig {
         private static final ValueSerializer<Object> NULL_STRING_SERIALIZER = new NullStringJsonSerializer();
         private static final ValueSerializer<Object> NULL_ARRAY_COLLECTION_SERIALIZER = new NullArrayOrCollectionJsonSerializer();
         private static final ValueSerializer<Object> NULL_MAP_SERIALIZER = new NullMapJsonSerializer();
+        private static final ValueSerializer<Object> NULL_NUMBER_SERIALIZER = new NullNumberJsonSerializer();
+        private static final ValueSerializer<Object> NULL_BOOLEAN_SERIALIZER = new NullNumberJsonSerializer();
 
         @Override
         public List<BeanPropertyWriter> changeProperties(
@@ -86,6 +95,10 @@ public class GXFrameworkConfig {
                     writer.assignNullSerializer(NULL_ARRAY_COLLECTION_SERIALIZER);
                 } else if (Map.class.isAssignableFrom(clazz)) {
                     writer.assignNullSerializer(NULL_MAP_SERIALIZER);
+                } else if (Number.class.isAssignableFrom(clazz)) {
+                    writer.assignNullSerializer(NULL_NUMBER_SERIALIZER);
+                } else if (Boolean.class.isAssignableFrom(clazz)) {
+                    writer.assignNullSerializer(NULL_BOOLEAN_SERIALIZER);
                 }
             }
             return beanProperties;
@@ -97,6 +110,22 @@ public class GXFrameworkConfig {
         @Override
         public void serialize(Object value, JsonGenerator gen, SerializationContext ctxt) throws JacksonException {
             gen.writeString("");
+        }
+    }
+
+    public static class NullNumberJsonSerializer extends ValueSerializer<Object> {
+        @Override
+        public void serialize(Object value, JsonGenerator gen, SerializationContext ctxt)
+                throws JacksonException {
+            gen.writeNumber(0);
+        }
+    }
+
+    public static class NullBooleanJsonSerializer extends ValueSerializer<Object> {
+        @Override
+        public void serialize(Object value, JsonGenerator gen, SerializationContext ctxt)
+                throws JacksonException {
+            gen.writeBoolean(false);
         }
     }
 
