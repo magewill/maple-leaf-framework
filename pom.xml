@@ -60,7 +60,7 @@
         <zstd-jni.version>1.5.7-7</zstd-jni.version>
         <antlr4-runtime.version>4.13.2</antlr4-runtime.version>
         <checker-qual.version>3.54.0</checker-qual.version>
-        <javassist.version>3.30.2-GA</javassist.version>
+        <javassist.version>3.31.0-GA</javassist.version>
         <rocketmq.version>5.3.2</rocketmq.version>
         <reflections.version>0.10.2</reflections.version>
         <protobuf.java.version>4.34.1</protobuf.java.version>
