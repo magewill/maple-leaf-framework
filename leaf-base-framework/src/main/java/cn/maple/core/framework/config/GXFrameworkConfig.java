@@ -1,10 +1,11 @@
 package cn.maple.core.framework.config;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.boot.jackson.autoconfigure.JsonMapperBuilderCustomizer;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.ComponentScan;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonGenerator;
@@ -28,8 +29,9 @@ import java.util.Map;
  *
  * @author britton chen <britton@126.com>
  */
-@Configuration
-@ComponentScan({"cn.maple"})
+//@Configuration
+//@ComponentScan({"cn.maple"})
+@AutoConfiguration(after = JacksonAutoConfiguration.class)
 public class GXFrameworkConfig {
     @Value("${maple.framework.validator.fail-fast:true}")
     private boolean failFast;
@@ -39,6 +41,7 @@ public class GXFrameworkConfig {
      * 这是 Spring Boot 4 + Jackson 3 的标准扩展方式
      */
     @Bean
+    @ConditionalOnMissingBean(JsonMapperBuilderCustomizer.class)
     public JsonMapperBuilderCustomizer jsonMapperBuilderCustomizer() {
         return builder -> {
             // 1. 关闭空 Bean 序列化报错
@@ -55,6 +58,7 @@ public class GXFrameworkConfig {
     }
 
     @Bean
+    @ConditionalOnMissingBean(LocalValidatorFactoryBean.class)
     public LocalValidatorFactoryBean localValidatorFactoryBean() {
         LocalValidatorFactoryBean bean = new LocalValidatorFactoryBean();
         bean.getValidationPropertyMap().put("hibernate.validator.fail_fast", String.valueOf(failFast));
