@@ -13,7 +13,6 @@
 
     <properties>
         <dubbo.version>3.3.6</dubbo.version>
-        <javassist.version>3.30.2-GA</javassist.version>
     </properties>
 
     <dependencies>
