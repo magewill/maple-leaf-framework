@@ -40,7 +40,7 @@
         <java.version>21</java.version>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
-        <lombok.version>1.18.44</lombok.version>
+        <lombok.version>1.18.46</lombok.version>
         <hutool.version>5.8.44</hutool.version>
         <aspectjweaver.version>1.9.25.1</aspectjweaver.version>
         <guava.version>33.6.0-jre</guava.version>
