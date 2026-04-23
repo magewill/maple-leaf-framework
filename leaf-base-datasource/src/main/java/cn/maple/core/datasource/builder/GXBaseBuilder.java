@@ -144,8 +144,29 @@ public interface GXBaseBuilder {
             String tableAliasName = join.getJoinTableNameAlias();
             String masterTableName = join.getMasterTableName();
             String masterTableNameAlias = join.getMasterTableNameAlias();
-            if (Objects.isNull(masterTableNameAlias)) {
+            if (CharSequenceUtil.isBlank(masterTableNameAlias)) {
                 masterTableNameAlias = masterTableName;
+            }
+            if (CharSequenceUtil.isBlank(tableAliasName)) {
+                tableAliasName = tableName;
+            }
+            List<GXDbJoinOp> andOps = Optional.ofNullable(join.getAnd()).orElse(Collections.emptyList());
+            for (GXDbJoinOp op : andOps) {
+                if (CharSequenceUtil.isBlank(op.getMasterTableNameAlias())) {
+                    op.setMasterTableNameAlias(masterTableNameAlias);
+                }
+                if (CharSequenceUtil.isBlank(op.getJoinTableNameAlias())) {
+                    op.setJoinTableNameAlias(tableAliasName);
+                }
+            }
+            List<GXDbJoinOp> orOps = Optional.ofNullable(join.getOr()).orElse(Collections.emptyList());
+            for (GXDbJoinOp op : orOps) {
+                if (CharSequenceUtil.isBlank(op.getMasterTableNameAlias())) {
+                    op.setMasterTableNameAlias(masterTableNameAlias);
+                }
+                if (CharSequenceUtil.isBlank(op.getJoinTableNameAlias())) {
+                    op.setJoinTableNameAlias(tableAliasName);
+                }
             }
             List<GXCondition<?>> conditions = join.getConditions();
             String whereStr = "";
@@ -157,13 +178,11 @@ public interface GXBaseBuilder {
                     whereStr = " AND " + String.join(" AND ", lastWheres);
                 }
             }
-            String andClause = Optional.ofNullable(join.getAnd())
-                    .orElse(Collections.emptyList())
+            String andClause = andOps
                     .stream()
                     .map(GXDbJoinOp::opString)
                     .collect(Collectors.joining(GXBuilderConstant.AND_OP));
-            String orClause = Optional.ofNullable(join.getOr())
-                    .orElse(Collections.emptyList())
+            String orClause = orOps
                     .stream()
                     .map(GXDbJoinOp::opString)
                     .collect(Collectors.joining(GXBuilderConstant.OR_OP));
