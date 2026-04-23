@@ -1,4 +1,4 @@
-package cn.maple.core.framework.dto.inner.condition;
+﻿package cn.maple.core.framework.dto.inner.condition;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
@@ -13,6 +13,25 @@ public class GXConditionRaw extends GXCondition<String> {
 
     public GXConditionRaw(String value) {
         super("", "", value);
+    }
+
+    private static String normalizeAndValidateRawSql(String raw) {
+        if (CharSequenceUtil.isBlank(raw)) {
+            throw new GXSqlInjectionException("原始SQL条件不能为空");
+        }
+        String normalized = raw.trim();
+        if (GXDBStringEscapeUtils.check(normalized)) {
+            throw new GXSqlInjectionException("原始条件中检测到SQL注入风险");
+        }
+
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (lower.contains(";") || lower.contains("--") || lower.contains("/*") || lower.contains("*/")) {
+            throw new GXSqlInjectionException("原始条件包含非法SQL控制符");
+        }
+        if (DANGEROUS_PATTERN.matcher(normalized).find()) {
+            throw new GXSqlInjectionException("原始条件包含危险SQL关键字");
+        }
+        return normalized;
     }
 
     @Override
@@ -38,26 +57,5 @@ public class GXConditionRaw extends GXCondition<String> {
     @Override
     public GXConditionSegment toSegment() {
         return new GXConditionSegment(normalizeAndValidateRawSql(value == null ? null : value.toString()), Collections.emptyMap());
-    }
-
-    private static String normalizeAndValidateRawSql(String raw) {
-        if (CharSequenceUtil.isBlank(raw)) {
-            throw new GXSqlInjectionException("原始SQL条件不能为空");
-        }
-        String normalized = raw.trim();
-        if (GXDBStringEscapeUtils.check(normalized)) {
-            throw new GXSqlInjectionException("原始条件中检测到SQL注入风险");
-        }
-
-        String lower = normalized.toLowerCase(Locale.ROOT);
-        if (lower.contains(";") || lower.contains("--") || lower.contains("/*") || lower.contains("*/")) {
-            throw new GXSqlInjectionException("原始条件包含非法SQL控制符");
-        }
-
-        if (DANGEROUS_PATTERN.matcher(normalized).find()) {
-            throw new GXSqlInjectionException("原始条件包含危险SQL关键字");
-        }
-
-        return normalized;
     }
 }

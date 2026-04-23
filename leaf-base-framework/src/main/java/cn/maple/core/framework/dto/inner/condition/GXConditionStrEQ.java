@@ -7,7 +7,6 @@ import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 public class GXConditionStrEQ extends GXCondition<String> {
     public GXConditionStrEQ(String tableNameAlias, String fieldName, String value) {
         super(tableNameAlias, fieldName, value);
-
     }
 
     @Override
