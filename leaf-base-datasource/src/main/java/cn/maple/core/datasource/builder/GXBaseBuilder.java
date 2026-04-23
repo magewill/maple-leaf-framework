@@ -40,6 +40,7 @@ public interface GXBaseBuilder {
     Pattern SAFE_IDENTIFIER_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_\\.]*$");
     Pattern HAVING_TOKEN_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_\\.]*");
     Pattern DANGEROUS_SQL_TOKEN_PATTERN = Pattern.compile("(?i)\\b(update|delete|insert|alter|drop|truncate|create|grant|revoke|call|exec|merge)\\b");
+    Set<String> LOGIC_DELETE_FALLBACK_WARNED_TABLES = Collections.synchronizedSet(new HashSet<>());
     Set<String> HAVING_KEYWORD_WHITELIST = Set.of(
             "AND", "OR", "NOT", "NULL", "IS", "LIKE", "IN", "BETWEEN", "AS", "DISTINCT",
             "CASE", "WHEN", "THEN", "ELSE", "END", "SUM", "COUNT", "AVG", "MIN", "MAX", "FILTER", "OVER"
@@ -395,6 +396,10 @@ public interface GXBaseBuilder {
         if (CharSequenceUtil.isBlank(logicColumn) && hasColumn(tableName, "is_deleted")) {
             logicColumn = "is_deleted";
             logicNotDeletedValue = "0";
+            if (LOGIC_DELETE_FALLBACK_WARNED_TABLES.add(tableName)) {
+                LOGGER.warn("Table [{}] has no @TableLogic configuration, fallback to logical-delete condition [{}.{} = {}].",
+                        tableName, alias, logicColumn, logicNotDeletedValue);
+            }
         }
         if (CharSequenceUtil.isBlank(logicColumn)) {
             return null;
@@ -444,26 +449,22 @@ public interface GXBaseBuilder {
         if (Objects.isNull(tableInfo)) {
             return null;
         }
-        try {
-            Method method = tableInfo.getClass().getMethod("getLogicDeleteValue");
-            Object result = method.invoke(tableInfo);
-            return Objects.toString(result, null);
-        } catch (Exception ignored) {
+        TableFieldInfo logicDeleteFieldInfo = tableInfo.getLogicDeleteFieldInfo();
+        if (Objects.isNull(logicDeleteFieldInfo)) {
             return null;
         }
+        return logicDeleteFieldInfo.getLogicDeleteValue();
     }
 
     private static String getLogicNotDeleteValue(TableInfo tableInfo) {
         if (Objects.isNull(tableInfo)) {
             return null;
         }
-        try {
-            Method method = tableInfo.getClass().getMethod("getLogicNotDeleteValue");
-            Object result = method.invoke(tableInfo);
-            return Objects.toString(result, null);
-        } catch (Exception ignored) {
+        TableFieldInfo logicDeleteFieldInfo = tableInfo.getLogicDeleteFieldInfo();
+        if (Objects.isNull(logicDeleteFieldInfo)) {
             return null;
         }
+        return logicDeleteFieldInfo.getLogicNotDeleteValue();
     }
 
     private static String toSqlLiteral(String rawValue) {
@@ -611,6 +612,10 @@ public interface GXBaseBuilder {
 
     private static String sanitizeStructuralColumn(String column, Set<String> allowedColumns, String clauseName, boolean whitelistRequired) {
         String trimmed = CharSequenceUtil.trim(column);
+        if ("SELECT".equalsIgnoreCase(clauseName) && "*".equals(trimmed)) {
+            LOGGER.warn("SELECT field '*' is allowed for compatibility, please prefer explicit columns when possible.");
+            return trimmed;
+        }
         if (CharSequenceUtil.isBlank(trimmed) || !SAFE_IDENTIFIER_PATTERN.matcher(trimmed).matches()) {
             throw new GXDBConditionException(CharSequenceUtil.format("{} field is invalid: {}", clauseName, column));
         }

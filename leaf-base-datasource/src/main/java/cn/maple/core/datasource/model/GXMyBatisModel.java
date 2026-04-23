@@ -4,6 +4,7 @@ import cn.hutool.core.lang.Dict;
 import cn.maple.core.framework.model.GXBaseModel;
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -15,7 +16,7 @@ import lombok.EqualsAndHashCode;
  * 继承此类的实体将自动获得创建时间、更新时间、创建人、更新人等审计功能，
  * 以及可灵活存储额外数据的扩展字段。
  * </p>
- * 
+ *
  * <p>
  * 特性：
  * <ul>
@@ -25,7 +26,7 @@ import lombok.EqualsAndHashCode;
  *   <li>扩展存储：通过ext字段存储不固定结构的扩展数据</li>
  * </ul>
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
@@ -36,14 +37,14 @@ import lombok.EqualsAndHashCode;
  * public class UserEntity extends GXMyBatisModel {
  *     @TableId(type = IdType.AUTO)
  *     private Long id;
- *     
+ *
  *     private String username;
- *     
+ *
  *     private String email;
- *     
+ *
  *     // 无需定义createdAt、updatedAt等字段，已由父类提供
  * }
- * 
+ *
  * // 2. 创建新实体时，审计字段会自动填充
  * UserEntity user = new UserEntity();
  * user.setUsername("张三");
@@ -53,20 +54,20 @@ import lombok.EqualsAndHashCode;
  *     .set("address", "北京市海淀区")
  *     .set("phoneNumber", "13800138000");
  * user.setExt(extInfo);
- * 
+ *
  * // 3. 保存实体，createdAt和createdBy会自动填充
  * userMapper.insert(user);
- * 
+ *
  * // 4. 更新实体，updatedAt和updatedBy会自动填充
  * user.setEmail("zhangsan_new@example.com");
  * userMapper.updateById(user);
- * 
+ *
  * // 5. 查询时可以获取扩展字段中的数据
  * UserEntity queryUser = userMapper.selectById(1L);
  * String address = queryUser.getExt().getStr("address");
  * </pre>
  * </p>
- * 
+ *
  * <p>
  * 注意事项：
  * <ul>
@@ -75,7 +76,7 @@ import lombok.EqualsAndHashCode;
  *   <li>审计字段的自动填充依赖于MetaObjectHandler的实现</li>
  * </ul>
  * </p>
- * 
+ *
  * @author 塵渊
  */
 @EqualsAndHashCode(callSuper = true)
@@ -120,6 +121,13 @@ public class GXMyBatisModel extends GXBaseModel {
      */
     @TableField(fill = FieldFill.UPDATE)
     protected String updatedBy;
+
+    /**
+     * 是否逻辑删除 (0: 未删除 id:已删除)
+     */
+    @TableField
+    @TableLogic(value = "0", delval = "id")
+    protected Integer isDeleted;
 
     /**
      * 扩展字段
