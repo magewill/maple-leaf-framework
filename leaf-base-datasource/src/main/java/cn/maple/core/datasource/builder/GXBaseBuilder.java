@@ -40,7 +40,6 @@ public interface GXBaseBuilder {
     Pattern SAFE_IDENTIFIER_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_\\.]*$");
     Pattern HAVING_TOKEN_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_\\.]*");
     Pattern DANGEROUS_SQL_TOKEN_PATTERN = Pattern.compile("(?i)\\b(update|delete|insert|alter|drop|truncate|create|grant|revoke|call|exec|merge)\\b");
-    Set<String> LOGIC_DELETE_FALLBACK_WARNED_TABLES = Collections.synchronizedSet(new HashSet<>());
     Set<String> HAVING_KEYWORD_WHITELIST = Set.of(
             "AND", "OR", "NOT", "NULL", "IS", "LIKE", "IN", "BETWEEN", "AS", "DISTINCT",
             "CASE", "WHEN", "THEN", "ELSE", "END", "SUM", "COUNT", "AVG", "MIN", "MAX", "FILTER", "OVER"
@@ -381,25 +380,26 @@ public interface GXBaseBuilder {
         if (CollUtil.contains(conditions, c -> GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass()))) {
             return null;
         }
-        if (CharSequenceUtil.isBlank(tableName) || tableName.trim().startsWith("(")) {
+        String trimmedName = CharSequenceUtil.trimToEmpty(tableName);
+        if (trimmedName.isEmpty() || trimmedName.startsWith("(")) {
             return null;
         }
         String alias = CharSequenceUtil.isBlank(tableAliasName) ? tableName : tableAliasName;
-        TableInfo tableInfo = getTableInfoSafely(tableName);
         String logicColumn = null;
         String logicNotDeletedValue = null;
-        Optional<TableFieldInfo> logicFieldInfo = getLogicDeleteFieldInfo(tableInfo);
-        if (logicFieldInfo.isPresent()) {
-            logicColumn = logicFieldInfo.get().getColumn();
-            logicNotDeletedValue = getLogicNotDeleteValue(tableInfo);
+        TableInfo tableInfo = getTableInfoSafely(tableName);
+        if (tableInfo != null) {
+            Optional<TableFieldInfo> logicFieldInfo = getLogicDeleteFieldInfo(tableInfo);
+            if (logicFieldInfo.isPresent()) {
+                logicColumn = logicFieldInfo.get().getColumn();
+                logicNotDeletedValue = getLogicNotDeleteValue(tableInfo);
+            }
         }
         if (CharSequenceUtil.isBlank(logicColumn) && hasColumn(tableName, "is_deleted")) {
             logicColumn = "is_deleted";
             logicNotDeletedValue = "0";
-            if (LOGIC_DELETE_FALLBACK_WARNED_TABLES.add(tableName)) {
-                LOGGER.warn("Table [{}] has no @TableLogic configuration, fallback to logical-delete condition [{}.{} = {}].",
-                        tableName, alias, logicColumn, logicNotDeletedValue);
-            }
+            LOGGER.warn("Table [{}] has no @TableLogic configuration, fallback to logical-delete condition [{}.{} = {}].",
+                    tableName, alias, logicColumn, logicNotDeletedValue);
         }
         if (CharSequenceUtil.isBlank(logicColumn)) {
             return null;
@@ -415,19 +415,45 @@ public interface GXBaseBuilder {
         if (Objects.isNull(tableInfo)) {
             return null;
         }
+        String logicColumn = null;
+        String logicDeletedValue = null;
+        boolean useColumnRef = false;
         Optional<TableFieldInfo> logicFieldInfo = getLogicDeleteFieldInfo(tableInfo);
-        String logicColumn = logicFieldInfo.map(TableFieldInfo::getColumn).orElse(null);
-        String logicDeletedValue = getLogicDeleteValue(tableInfo);
+        if (logicFieldInfo.isPresent()) {
+            logicColumn = logicFieldInfo.get().getColumn();
+            logicDeletedValue = getLogicDeleteValue(tableInfo);
+        }
         if (CharSequenceUtil.isBlank(logicColumn)) {
-            if (tableInfo.getFieldList().stream().anyMatch(f -> CharSequenceUtil.equalsIgnoreCase("is_deleted", f.getColumn()))) {
-                logicColumn = "is_deleted";
-                logicDeletedValue = "1";
-            } else {
+            boolean hasIsDeleted = tableInfo.getFieldList().stream()
+                    .anyMatch(f -> CharSequenceUtil.equalsIgnoreCase("is_deleted", f.getColumn()));
+            if (!hasIsDeleted) {
                 return null;
             }
+            String keyColumn = tableInfo.getKeyColumn();
+            if (CharSequenceUtil.isBlank(keyColumn)) {
+                LOGGER.warn("Table [{}] fallback logical-delete field [is_deleted] requires primary key column, but got null.",
+                        tableInfo.getTableName());
+                return null;
+            }
+            logicColumn = "is_deleted";
+            logicDeletedValue = keyColumn;
+            useColumnRef = true;
         }
-        String literal = toSqlLiteral(logicDeletedValue);
-        return CharSequenceUtil.format("{} = {}", logicColumn, Optional.ofNullable(literal).orElse("NULL"));
+        String deletedValueSql;
+        if (useColumnRef) {
+            deletedValueSql = logicDeletedValue;
+        } else {
+            String literal = toSqlLiteral(logicDeletedValue);
+            deletedValueSql = literal != null ? literal : "NULL";
+        }
+        String logicDeletedSetSql = CharSequenceUtil.format("{} = {}", logicColumn, deletedValueSql);
+        boolean hasDeletedAt = tableInfo.getFieldList().stream()
+                .anyMatch(f -> CharSequenceUtil.equalsIgnoreCase("deleted_at", f.getColumn()));
+        if (hasDeletedAt) {
+            long currentTimestamp = System.currentTimeMillis() / 1000L;
+            logicDeletedSetSql = CharSequenceUtil.format("{}, deleted_at = {}", logicDeletedSetSql, currentTimestamp);
+        }
+        return logicDeletedSetSql;
     }
 
     private static Optional<TableFieldInfo> getLogicDeleteFieldInfo(TableInfo tableInfo) {
