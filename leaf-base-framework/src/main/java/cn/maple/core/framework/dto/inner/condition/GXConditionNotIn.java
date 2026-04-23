@@ -7,7 +7,9 @@ import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -167,5 +169,16 @@ public class GXConditionNotIn extends GXCondition<String> {
     public String getFieldOriginalValue() {
         String str = ((Set<Number>) value).stream().map(String::valueOf).collect(Collectors.joining(","));
         return CharSequenceUtil.format("({})", str);
+    }
+
+    @Override
+    public GXConditionSegment toSegment() {
+        String sql = whereString();
+        Map<String, Object> params = new HashMap<>();
+        int index = 0;
+        for (Number num : values) {
+            params.put(paramName + "_" + index++, num);
+        }
+        return new GXConditionSegment(sql, params);
     }
 }

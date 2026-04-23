@@ -4,6 +4,9 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class GXConditionLikeLeft extends GXCondition<String> {
     public GXConditionLikeLeft(String tableNameAlias, String fieldName, String value) {
         super(tableNameAlias, fieldName, value);
@@ -48,5 +51,18 @@ public class GXConditionLikeLeft extends GXCondition<String> {
             // 否则使用单引号包裹
             return CharSequenceUtil.format("'%{}'", escapedValue);
         }
+    }
+
+    @Override
+    public GXConditionSegment toSegment() {
+        if (value == null || GXDBStringEscapeUtils.check(value.toString())) {
+            throw new GXSqlInjectionException("SQL注入异常");
+        }
+        String sql = CharSequenceUtil.isEmpty(tableNameAlias)
+                ? CharSequenceUtil.format("{} {} #{{dbQueryParamInnerDto.paramMap.{}}}", getFieldExpression(), getOp(), paramName)
+                : CharSequenceUtil.format("{}.{} {} #{{dbQueryParamInnerDto.paramMap.{}}}", tableNameAlias, getFieldExpression(), getOp(), paramName);
+        Map<String, Object> params = new HashMap<>();
+        params.put(paramName, "%" + value);
+        return new GXConditionSegment(sql, params);
     }
 }

@@ -181,6 +181,10 @@ public abstract class GXCondition<T> implements Serializable {
         return CharSequenceUtil.toUnderlineCase(fieldExpression);
     }
 
+    public GXConditionSegment toSegment() {
+        return new GXConditionSegment(whereString(), new HashMap<>(paramMap));
+    }
+
     public abstract T getFieldValue();
 
     public abstract T getFieldOriginalValue();

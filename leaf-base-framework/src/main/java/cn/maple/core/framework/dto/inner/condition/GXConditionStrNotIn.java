@@ -9,7 +9,9 @@ import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -205,5 +207,19 @@ public class GXConditionStrNotIn extends GXCondition<String> {
             return CharSequenceUtil.format(format, val);
         }).collect(Collectors.joining(","));
         return CharSequenceUtil.format("({})", str);
+    }
+
+    @Override
+    public GXConditionSegment toSegment() {
+        String sql = whereString();
+        Map<String, Object> params = new HashMap<>();
+        int index = 0;
+        for (String str : values) {
+            if (GXDBStringEscapeUtils.check(str)) {
+                throw new GXSqlInjectionException("检测到SQL注入风险：包含可疑字符或SQL关键字");
+            }
+            params.put(paramName + "_" + index++, str);
+        }
+        return new GXConditionSegment(sql, params);
     }
 }

@@ -6,7 +6,6 @@ import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.Tuple;
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.datasource.properties.GXDataSourceProperties;
 import cn.maple.core.framework.constant.GXBuilderConstant;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
@@ -14,7 +13,10 @@ import cn.maple.core.framework.dto.inner.GXJoinDto;
 import cn.maple.core.framework.dto.inner.GXJoinTypeEnums;
 import cn.maple.core.framework.dto.inner.GXUnionTypeEnums;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
+import cn.maple.core.framework.dto.inner.condition.GXConditionJsonEQ;
+import cn.maple.core.framework.dto.inner.condition.GXConditionIsNotNULL;
 import cn.maple.core.framework.dto.inner.condition.GXConditionIsNULL;
+import cn.maple.core.framework.dto.inner.condition.GXConditionSegment;
 import cn.maple.core.framework.dto.inner.condition.GXExclusionDeletedFieldCondition;
 import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.dto.inner.op.GXDbJoinOp;
@@ -40,19 +42,21 @@ import java.util.stream.Collectors;
 public interface GXBaseBuilder {
     Logger LOGGER = LoggerFactory.getLogger(GXBaseBuilder.class);
     Pattern NUMERIC_PATTERN = Pattern.compile("^-?\\d+(\\.\\d+)?$");
+    Pattern SAFE_IDENTIFIER_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_\\.]*$");
+    Pattern HAVING_TOKEN_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_\\.]*");
 
     static String updateFieldByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> fieldList) {
         if (dbQueryParamInnerDto == null) {
-            throw new GXBusinessException("查询参数对象不能为空!");
+            throw new GXBusinessException("鏌ヨ鍙傛暟瀵硅薄涓嶈兘涓虹┖!");
         }
         if (CollUtil.isEmpty(fieldList)) {
-            throw new GXBusinessException("更新字段列表不能为空!");
+            throw new GXBusinessException("鏇存柊瀛楁鍒楄〃涓嶈兘涓虹┖!");
         }
 
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
         String tableName = dbQueryParamInnerDto.getTableName();
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("更新条件不能为空，为防止全表更新风险!");
+            throw new GXBusinessException("鏇存柊鏉′欢涓嶈兘涓虹┖锛屼负闃叉鍏ㄨ〃鏇存柊椋庨櫓!");
         }
 
         final SQL sql = new SQL().UPDATE(tableName);
@@ -74,14 +78,14 @@ public interface GXBaseBuilder {
         }
 
         String resultSql = sql.toString();
-        LOGGER.debug("生成的更新SQL: {}", resultSql);
+        LOGGER.debug("鐢熸垚鐨勬洿鏂癝QL: {}", resultSql);
         return resultSql;
     }
 
     static String checkRecordIsExists(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
-        dbQueryParamInnerDto.setLimit(1);
         dbQueryParamInnerDto.setColumns(CollUtil.newHashSet("1"));
-        return findOneByCondition(dbQueryParamInnerDto);
+        String innerSql = findByCondition(dbQueryParamInnerDto);
+        return CharSequenceUtil.format("SELECT CASE WHEN EXISTS ({}) THEN 1 ELSE 0 END", innerSql);
     }
 
     static String findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
@@ -91,11 +95,13 @@ public interface GXBaseBuilder {
         Set<String> groupByField = dbQueryParamInnerDto.getGroupByField();
         Map<String, String> orderByField = dbQueryParamInnerDto.getOrderByField();
         Set<String> having = dbQueryParamInnerDto.getHaving();
-        Integer limit = dbQueryParamInnerDto.getLimit();
+        Set<String> allowedColumns = buildAllowedColumns(tableName, tableNameAlias, dbQueryParamInnerDto.getJoins());
 
         String selectStr = CharSequenceUtil.format("{}.*", tableNameAlias);
         if (CollUtil.isNotEmpty(columns)) {
-            List<String> columnsCollect = columns.stream().map(CharSequenceUtil::toUnderlineCase).collect(Collectors.toList());
+            List<String> columnsCollect = columns.stream()
+                    .map(column -> sanitizeSelectColumn(column, allowedColumns))
+                    .collect(Collectors.toList());
             selectStr = String.join(",", columnsCollect);
         }
 
@@ -118,19 +124,25 @@ public interface GXBaseBuilder {
         }
 
         if (CollUtil.isNotEmpty(groupByField)) {
-            sql.GROUP_BY(groupByField.toArray(new String[0]));
+            String[] groupByColumns = groupByField.stream()
+                    .map(column -> sanitizeStructuralColumn(column, allowedColumns, "GROUP BY"))
+                    .toArray(String[]::new);
+            sql.GROUP_BY(groupByColumns);
         }
         if (CollUtil.isNotEmpty(having)) {
-            sql.HAVING(having.toArray(new String[0]));
+            String[] havingColumns = having.stream()
+                    .map(clause -> sanitizeHavingClause(clause, allowedColumns))
+                    .toArray(String[]::new);
+            sql.HAVING(havingColumns);
         }
         if (Objects.nonNull(orderByField) && !orderByField.isEmpty()) {
             String[] orderColumns = new String[orderByField.size()];
             Integer[] idx = new Integer[]{0};
-            orderByField.forEach((k, v) -> orderColumns[idx[0]++] = CharSequenceUtil.format("{} {}", k, v));
+            orderByField.forEach((k, v) -> orderColumns[idx[0]++] = sanitizeOrderBy(k, v, allowedColumns));
             sql.ORDER_BY(orderColumns);
         }
 
-        return appendDialectLimit(sql.toString(), limit);
+        return sql.toString();
     }
 
     static Map<String, Object> handleSQLJoin(SQL sql, List<GXJoinDto> joins) {
@@ -214,15 +226,17 @@ public interface GXBaseBuilder {
         List<String> lastWheres = new ArrayList<>();
         conditions.forEach(c -> {
             if (!GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())) {
-                if (ObjectUtil.isNull(c.getFieldValue()) && !GXConditionIsNULL.class.isAssignableFrom(c.getClass())) {
-                    String msg = CharSequenceUtil.format("数据查询条件错误【查询字段{}.{}的值是null】", c.getTableNameAlias(), c.getFieldExpression());
+                if (Objects.isNull(c.getValue())
+                        && !GXConditionIsNULL.class.isAssignableFrom(c.getClass())
+                        && !GXConditionIsNotNULL.class.isAssignableFrom(c.getClass())) {
+                    String msg = CharSequenceUtil.format("查询条件错误，字段{}.{}的值为null", c.getTableNameAlias(), c.getFieldExpression());
                     throw new GXDBConditionException(msg);
                 }
-                String str = c.whereString();
-                if (CharSequenceUtil.isNotEmpty(str)) {
-                    lastWheres.add(str);
-                    paramMap.putAll(c.getParamMap());
-                    LOGGER.trace("添加WHERE条件: {}, 参数: {}", str, c.getParamMap());
+                GXConditionSegment segment = renderCondition(c);
+                if (Objects.nonNull(segment) && CharSequenceUtil.isNotEmpty(segment.getSql())) {
+                    lastWheres.add(segment.getSql());
+                    paramMap.putAll(segment.getParams());
+                    LOGGER.trace("条件为空，不添加任何条件: {}, 参数: {}", segment.getSql(), segment.getParams());
                 }
             }
         });
@@ -231,22 +245,12 @@ public interface GXBaseBuilder {
 
     static <R> String paginate(IPage<R> page, GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         if (CharSequenceUtil.isNotBlank(dbQueryParamInnerDto.getRawSQL())) {
-            String rawSQL = dbQueryParamInnerDto.getRawSQL();
-            if (GXDBStringEscapeUtils.check(rawSQL)) {
-                LOGGER.error("检测到SQL注入风险！原始SQL：{}", rawSQL);
-                throw new GXSqlInjectionException("检测到SQL注入风险，查询已被阻止");
-            }
-            return rawSQL;
+            return validateRawSqlStrict(dbQueryParamInnerDto.getRawSQL());
         }
         return findByCondition(dbQueryParamInnerDto);
     }
 
     static String findOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
-        int limit = Optional.ofNullable(dbQueryParamInnerDto.getLimit()).orElse(1);
-        if (limit <= 0) {
-            limit = 1;
-        }
-        dbQueryParamInnerDto.setLimit(limit);
         return findByCondition(dbQueryParamInnerDto);
     }
 
@@ -360,11 +364,6 @@ public interface GXBaseBuilder {
     }
 
     static String unionFindOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        int limit = Optional.ofNullable(dbQueryParamInnerDto.getLimit()).orElse(1);
-        if (limit <= 0) {
-            limit = 1;
-        }
-        dbQueryParamInnerDto.setLimit(limit);
         unionQueryParamInnerDtoLst.forEach(queryParamInnerDto -> {
             String tableNameAlias = queryParamInnerDto.getTableNameAlias();
             if (CharSequenceUtil.isEmpty(tableNameAlias)) {
@@ -376,7 +375,7 @@ public interface GXBaseBuilder {
 
     static <R> String unionPaginate(IPage<R> page, GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
         if (CharSequenceUtil.isNotBlank(dbQueryParamInnerDto.getRawSQL())) {
-            return dbQueryParamInnerDto.getRawSQL();
+            return validateRawSqlStrict(dbQueryParamInnerDto.getRawSQL());
         }
         return unionFindByCondition(dbQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
     }
@@ -526,26 +525,157 @@ public interface GXBaseBuilder {
         }
     }
 
-    private static String appendDialectLimit(String baseSql, Integer limit) {
-        if (Objects.isNull(limit) || limit <= 0 || CharSequenceUtil.isBlank(baseSql)) {
-            return baseSql;
+    private static GXConditionSegment renderCondition(GXCondition<?> condition) {
+        if (condition instanceof GXConditionJsonEQ jsonEq) {
+            return renderJsonEqCondition(jsonEq);
         }
-        String lowerSql = baseSql.toLowerCase(Locale.ROOT);
-        if (lowerSql.contains(" limit ") || lowerSql.contains(" fetch first ") || lowerSql.contains(" top ")) {
-            return baseSql;
+        return condition.toSegment();
+    }
+
+    private static GXConditionSegment renderJsonEqCondition(GXConditionJsonEQ condition) {
+        String dbType = resolveDbTypeFromContext().toLowerCase(Locale.ROOT);
+        String field = qualifyConditionField(condition.getTableNameAlias(), condition.getFieldExpression());
+        String pathParam = CharSequenceUtil.format("#{{dbQueryParamInnerDto.paramMap.{}}}", condition.getParamName() + "_path");
+        String valueParam = CharSequenceUtil.format("#{{dbQueryParamInnerDto.paramMap.{}}}", condition.getParamName());
+        String normalizedPathExpr = CharSequenceUtil.format("replace({}, '$.', '')", pathParam);
+        String sql;
+
+        if (CollUtil.contains(Arrays.asList("mysql", "mariadb", "h2", "sqlite"), dbType)) {
+            sql = CharSequenceUtil.format("JSON_EXTRACT({}, {}) = {}", field, pathParam, valueParam);
+        } else if (CollUtil.contains(Arrays.asList("postgres", "postgresql", "postgre_sql"), dbType)) {
+            sql = CharSequenceUtil.format("CAST({} AS jsonb) #>> string_to_array({}, '.') = CAST({} AS text)", field, normalizedPathExpr, valueParam);
+        } else if (CollUtil.contains(Arrays.asList("sqlserver", "sql_server", "mssql", "sql-server"), dbType)) {
+            sql = CharSequenceUtil.format("JSON_VALUE({}, {}) = CAST({} AS NVARCHAR)", field, pathParam, valueParam);
+        } else {
+            sql = CharSequenceUtil.format("JSON_VALUE({}, {}) = CAST({} AS VARCHAR)", field, pathParam, valueParam);
         }
 
-        String dbType = resolveDbTypeFromContext().toLowerCase(Locale.ROOT);
-        if (CollUtil.contains(Arrays.asList("mysql", "mariadb", "h2", "sqlite", "postgresql", "postgres"), dbType)) {
-            return baseSql + " LIMIT " + limit;
+        Map<String, Object> params = new HashMap<>();
+        params.put(condition.getParamName(), condition.getValue());
+        params.put(condition.getParamName() + "_path", condition.getJsonPath());
+        return new GXConditionSegment(sql, params);
+    }
+
+    private static String qualifyConditionField(String tableAlias, String fieldExpression) {
+        if (SAFE_IDENTIFIER_PATTERN.matcher(fieldExpression).matches()) {
+            if (CharSequenceUtil.isBlank(tableAlias) || fieldExpression.contains(".")) {
+                return fieldExpression;
+            }
+            return CharSequenceUtil.format("{}.{}", tableAlias, fieldExpression);
         }
-        if (CollUtil.contains(Arrays.asList("oracle", "oracle12c", "oracle_12c", "db2", "dm"), dbType)) {
-            return baseSql + " FETCH FIRST " + limit + " ROWS ONLY";
+        throw new GXDBConditionException(CharSequenceUtil.format("非法字段表达式: {}", fieldExpression));
+    }
+
+    private static Set<String> buildAllowedColumns(String tableName, String tableAlias, List<GXJoinDto> joins) {
+        Set<String> allowedColumns = new HashSet<>();
+        collectAllowedColumns(allowedColumns, tableName, tableAlias);
+        if (CollUtil.isNotEmpty(joins)) {
+            for (GXJoinDto join : joins) {
+                collectAllowedColumns(allowedColumns, join.getJoinTableName(), join.getJoinTableNameAlias());
+            }
         }
-        if (CollUtil.contains(Arrays.asList("sqlserver", "sql_server", "mssql", "sql-server"), dbType)) {
-            return "SELECT TOP " + limit + " * FROM (" + baseSql + ") tmp_limit";
+        return allowedColumns;
+    }
+
+    private static void collectAllowedColumns(Set<String> allowedColumns, String tableName, String tableAlias) {
+        TableInfo tableInfo = getTableInfoSafely(tableName);
+        if (Objects.isNull(tableInfo)) {
+            return;
         }
-        return baseSql + " LIMIT " + limit;
+        String alias = CharSequenceUtil.isBlank(tableAlias) ? tableName : tableAlias;
+
+        List<String> columns = new ArrayList<>();
+        if (CharSequenceUtil.isNotBlank(tableInfo.getKeyColumn())) {
+            columns.add(CharSequenceUtil.toUnderlineCase(tableInfo.getKeyColumn()));
+        }
+        tableInfo.getFieldList().forEach(fieldInfo -> {
+            if (CharSequenceUtil.isNotBlank(fieldInfo.getColumn())) {
+                columns.add(CharSequenceUtil.toUnderlineCase(fieldInfo.getColumn()));
+            }
+            if (CharSequenceUtil.isNotBlank(fieldInfo.getProperty())) {
+                columns.add(CharSequenceUtil.toUnderlineCase(fieldInfo.getProperty()));
+            }
+        });
+        for (String column : columns) {
+            allowedColumns.add(column.toLowerCase(Locale.ROOT));
+            allowedColumns.add(CharSequenceUtil.format("{}.{}", alias, column).toLowerCase(Locale.ROOT));
+        }
+    }
+
+    private static String sanitizeSelectColumn(String column, Set<String> allowedColumns) {
+        String trimmed = CharSequenceUtil.trim(column);
+        if ("1".equals(trimmed)) {
+            return "1";
+        }
+        return sanitizeStructuralColumn(trimmed, allowedColumns, "SELECT");
+    }
+
+    private static String sanitizeStructuralColumn(String column, Set<String> allowedColumns, String clauseName) {
+        String trimmed = CharSequenceUtil.trim(column);
+        if (CharSequenceUtil.isBlank(trimmed) || !SAFE_IDENTIFIER_PATTERN.matcher(trimmed).matches()) {
+            throw new GXDBConditionException(CharSequenceUtil.format("{} 字段不合法: {}", clauseName, column));
+        }
+        if (GXDBStringEscapeUtils.check(trimmed)) {
+            throw new GXSqlInjectionException(CharSequenceUtil.format("{} 字段存在SQL注入风险: {}", clauseName, column));
+        }
+        if (!allowedColumns.isEmpty() && !allowedColumns.contains(trimmed.toLowerCase(Locale.ROOT))) {
+            throw new GXDBConditionException(CharSequenceUtil.format("{} 字段不在白名单中: {}", clauseName, column));
+        }
+        return trimmed;
+    }
+
+    private static String sanitizeOrderBy(String column, String direction, Set<String> allowedColumns) {
+        String safeColumn = sanitizeStructuralColumn(column, allowedColumns, "ORDER BY");
+        String safeDirection = Optional.ofNullable(direction).map(CharSequenceUtil::trim).orElse("").toUpperCase(Locale.ROOT);
+        if (!"ASC".equals(safeDirection) && !"DESC".equals(safeDirection)) {
+            throw new GXDBConditionException(CharSequenceUtil.format("ORDER BY 排序方向不合法: {}", direction));
+        }
+        return CharSequenceUtil.format("{} {}", safeColumn, safeDirection);
+    }
+
+    private static String sanitizeHavingClause(String clause, Set<String> allowedColumns) {
+        String trimmed = CharSequenceUtil.trim(clause);
+        if (CharSequenceUtil.isBlank(trimmed)) {
+            throw new GXDBConditionException("HAVING 子句不能为空");
+        }
+        if (GXDBStringEscapeUtils.check(trimmed) || trimmed.contains(";") || trimmed.contains("--") || trimmed.contains("/*")) {
+            throw new GXSqlInjectionException(CharSequenceUtil.format("HAVING 子句存在SQL注入风险: {}", clause));
+        }
+        Set<String> keywordWhitelist = new HashSet<>(Arrays.asList("AND", "OR", "NOT", "NULL", "IS", "LIKE", "IN", "BETWEEN", "AS", "DISTINCT", "CASE", "WHEN", "THEN", "ELSE", "END",
+                "SUM", "COUNT", "AVG", "MIN", "MAX"));
+        java.util.regex.Matcher matcher = HAVING_TOKEN_PATTERN.matcher(trimmed);
+        while (matcher.find()) {
+            String token = matcher.group();
+            String upper = token.toUpperCase(Locale.ROOT);
+            if (keywordWhitelist.contains(upper)) {
+                continue;
+            }
+            if (!allowedColumns.isEmpty() && !allowedColumns.contains(token.toLowerCase(Locale.ROOT))) {
+                throw new GXDBConditionException(CharSequenceUtil.format("HAVING 字段不在白名单中: {}", token));
+            }
+        }
+        return trimmed;
+    }
+
+    private static String validateRawSqlStrict(String rawSQL) {
+        if (CharSequenceUtil.isBlank(rawSQL)) {
+            throw new GXSqlInjectionException("原始SQL不能为空");
+        }
+        String normalized = rawSQL.trim();
+        if (GXDBStringEscapeUtils.check(normalized)) {
+            throw new GXSqlInjectionException("检测到SQL注入风险，查询已被阻止");
+        }
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (lower.contains(";") || lower.contains("--") || lower.contains("/*") || lower.contains("*/")) {
+            throw new GXSqlInjectionException("原始SQL包含非法控制符");
+        }
+        if (!(lower.startsWith("select") || lower.startsWith("with"))) {
+            throw new GXSqlInjectionException("原始SQL仅允许SELECT/WITH查询");
+        }
+        if (Pattern.compile("(?i)\\b(update|delete|insert|alter|drop|truncate|create|grant|revoke|call|exec|merge)\\b").matcher(normalized).find()) {
+            throw new GXSqlInjectionException("原始SQL包含危险关键字");
+        }
+        return normalized;
     }
 
     private static String resolveDbTypeFromContext() {
@@ -560,3 +690,4 @@ public interface GXBaseBuilder {
         return "mysql";
     }
 }
+

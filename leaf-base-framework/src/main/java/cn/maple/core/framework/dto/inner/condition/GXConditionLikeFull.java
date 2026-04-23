@@ -4,6 +4,9 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * 全模糊匹配查询条件实现类
  * <p>
@@ -82,5 +85,18 @@ public class GXConditionLikeFull extends GXCondition<String> {
             // 否则使用单引号包裹
             return CharSequenceUtil.format("'%{}%'", escapedValue);
         }
+    }
+
+    @Override
+    public GXConditionSegment toSegment() {
+        if (value == null || GXDBStringEscapeUtils.check(value.toString())) {
+            throw new GXSqlInjectionException("SQL注入异常");
+        }
+        String sql = CharSequenceUtil.isEmpty(tableNameAlias)
+                ? CharSequenceUtil.format("{} {} #{{dbQueryParamInnerDto.paramMap.{}}}", getFieldExpression(), getOp(), paramName)
+                : CharSequenceUtil.format("{}.{} {} #{{dbQueryParamInnerDto.paramMap.{}}}", tableNameAlias, getFieldExpression(), getOp(), paramName);
+        Map<String, Object> params = new HashMap<>();
+        params.put(paramName, "%" + value + "%");
+        return new GXConditionSegment(sql, params);
     }
 }

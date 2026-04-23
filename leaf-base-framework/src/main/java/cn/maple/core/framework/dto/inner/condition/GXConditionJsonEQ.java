@@ -5,6 +5,9 @@ import cn.hutool.core.util.NumberUtil;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * JSON字段等值查询条件类
  * <p>
@@ -162,5 +165,21 @@ public class GXConditionJsonEQ extends GXCondition<Object> {
         // 使用escapeSql方法进行更全面的SQL转义
         String escapedValue = GXDBStringEscapeUtils.escapeSql(strValue);
         return CharSequenceUtil.format("'{}'", escapedValue);
+    }
+
+    public String getJsonPath() {
+        return jsonPath;
+    }
+
+    @Override
+    public GXConditionSegment toSegment() {
+        if (value == null || GXDBStringEscapeUtils.check(value.toString())) {
+            throw new GXSqlInjectionException("SQL注入异常");
+        }
+        String sql = whereString();
+        Map<String, Object> params = new HashMap<>();
+        params.put(paramName, value);
+        params.put(paramName + "_path", jsonPath);
+        return new GXConditionSegment(sql, params);
     }
 }
