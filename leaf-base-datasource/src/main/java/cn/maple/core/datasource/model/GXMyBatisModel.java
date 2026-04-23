@@ -130,6 +130,12 @@ public class GXMyBatisModel extends GXBaseModel {
     protected Integer isDeleted;
 
     /**
+     * 删除时间
+     */
+    @TableField
+    protected Integer deletedAt;
+
+    /**
      * 扩展字段
      * <p>
      * 用于存储不固定结构的扩展数据，采用键值对形式
