@@ -4,6 +4,7 @@ import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.datasource.interceptor.GXDataFilterInterceptor;
+import cn.maple.core.datasource.properties.GXDataSourceProperties;
 import cn.maple.core.datasource.service.GXTenantIdService;
 import cn.maple.core.framework.config.aware.GXApplicationContextSingleton;
 import cn.maple.core.framework.util.GXCommonUtils;
@@ -28,8 +29,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * MyBatis-Plus配置类
@@ -140,6 +143,8 @@ import java.util.Objects;
 public class GXMyBatisPlusConfig {
     @Resource
     private ApplicationContext applicationContext;
+    @Resource
+    private GXDataSourceProperties dataSourceProperties;
 
     /**
      * 自定义MyBatis配置
@@ -235,7 +240,7 @@ public class GXMyBatisPlusConfig {
         interceptor.addInnerInterceptor(dynamicTableNameInnerInterceptor);
 
         // 开启分页插件，设置数据库类型为MySQL
-        PaginationInnerInterceptor paginationInnerInterceptor = new PaginationInnerInterceptor(DbType.MYSQL);
+        PaginationInnerInterceptor paginationInnerInterceptor = new PaginationInnerInterceptor(resolvePaginationDbType());
         // 关闭优化JOIN查询，避免某些复杂查询场景下的问题
         paginationInnerInterceptor.setOptimizeJoin(false);
         interceptor.addInnerInterceptor(paginationInnerInterceptor);
@@ -275,6 +280,31 @@ public class GXMyBatisPlusConfig {
     @ConditionalOnExpression("'${use-camel-case-mapping}'.equals('true')")
     public ConfigurationCustomizer configurationCustomizer() {
         return GXMyBatisPlusConfig::customize;
+    }
+
+    private DbType resolvePaginationDbType() {
+        String configuredDbType = Optional.ofNullable(dataSourceProperties)
+                .map(GXDataSourceProperties::getDbType)
+                .orElse("mysql");
+        String normalized = configuredDbType.trim().toUpperCase(Locale.ROOT).replace('-', '_');
+        return switch (normalized) {
+            case "MYSQL" -> DbType.MYSQL;
+            case "MARIADB" -> DbType.MARIADB;
+            case "POSTGRES", "POSTGRESQL", "POSTGRE_SQL" -> DbType.POSTGRE_SQL;
+            case "ORACLE" -> DbType.ORACLE;
+            case "ORACLE12C", "ORACLE_12C" -> DbType.ORACLE_12C;
+            case "DB2" -> DbType.DB2;
+            case "H2" -> DbType.H2;
+            case "HSQL" -> DbType.HSQL;
+            case "SQLITE" -> DbType.SQLITE;
+            case "SQLSERVER", "SQL_SERVER", "MSSQL" -> DbType.SQL_SERVER;
+            case "SQL_SERVER2005", "SQLSERVER2005" -> DbType.SQL_SERVER2005;
+            case "DM" -> DbType.DM;
+            default -> {
+                log.warn("未识别的dbType[{}]，分页插件将回退到MYSQL方言", configuredDbType);
+                yield DbType.MYSQL;
+            }
+        };
     }
 
     /**

@@ -168,7 +168,7 @@ public abstract class GXCondition<T> implements Serializable {
      */
     public String whereString() {
         String opStr = getOp();
-        if (CharSequenceUtil.isEmpty(opStr) && CharSequenceUtil.equals(opStr, GXDataSourceConstant.IGNORE_DATA_FILTER_CONDITION_OP_VALUE)) {
+        if (CharSequenceUtil.isEmpty(opStr) || CharSequenceUtil.equals(opStr, GXDataSourceConstant.IGNORE_DATA_FILTER_CONDITION_OP_VALUE)) {
             return "";
         }
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
