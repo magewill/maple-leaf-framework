@@ -113,12 +113,16 @@ public interface GXBaseBuilder {
         String tableName = dbQueryParamInnerDto.getTableName();
         String tableNameAlias = Optional.ofNullable(dbQueryParamInnerDto.getTableNameAlias()).orElse(tableName);
         List<GXJoinDto> joins = dbQueryParamInnerDto.getJoins();
-        Set<String> columns = dbQueryParamInnerDto.getColumns();
+        Set<String> selectColumns = dbQueryParamInnerDto.getColumns();
         Set<String> groupByField = dbQueryParamInnerDto.getGroupByField();
         Map<String, String> orderByField = dbQueryParamInnerDto.getOrderByField();
         Set<String> having = dbQueryParamInnerDto.getHaving();
         List<GXCondition<?>> conditions = dbQueryParamInnerDto.getCondition();
         Set<String> allowedColumns = buildAllowedColumns(tableName, tableNameAlias, joins);
+        Set<String> columns = CollUtil.newHashSet();
+        if (CollUtil.isNotEmpty(selectColumns)) {
+            columns = selectColumns.stream().map(CharSequenceUtil::toUnderlineCase).collect(Collectors.toSet());
+        }
         String selectStr;
         if (CollUtil.isNotEmpty(columns)) {
             selectStr = columns.stream()
