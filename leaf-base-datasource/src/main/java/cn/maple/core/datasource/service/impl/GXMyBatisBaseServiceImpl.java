@@ -189,6 +189,9 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
         if (CollUtil.isEmpty(condition)) {
             throw new GXBusinessException("条件不能为空!");
         }
+        if (CollUtil.isEmpty(updateFields)) {
+            throw new GXBusinessException("updateFields cannot be empty");
+        }
         boolean b = checkRecordIsExists(tableName, condition);
         if (!b) {
             log.error("待更新的数据不存在!");
@@ -1527,6 +1530,12 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
      */
     @Override
     public <E> E findSingleFieldByCondition(GXBaseQueryParamInnerDto queryParamInnerDto, Class<E> targetClazz) {
+        if (Objects.isNull(queryParamInnerDto) || Objects.isNull(targetClazz)) {
+            throw new GXBusinessException("queryParamInnerDto and targetClazz cannot be null");
+        }
+        if (CollUtil.isEmpty(queryParamInnerDto.getColumns()) || queryParamInnerDto.getColumns().size() != 1) {
+            throw new GXBusinessException("columns size must be exactly 1");
+        }
         queryParamInnerDto.setLimit(1);
         String column = queryParamInnerDto.getColumns().toArray(new String[0])[0];
         String tableName = queryParamInnerDto.getTableName();
@@ -1538,7 +1547,7 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
         if (Objects.isNull(dict)) {
             return null;
         }
-        Object o = Optional.ofNullable(dict.get(column)).orElse(dict.get(CharSequenceUtil.toUnderlineCase(column)));
+        Object o = readColumnValue(dict, column);
         return Convert.convert(targetClazz, o);
     }
 
@@ -1570,7 +1579,10 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
      */
     @Override
     public <E> List<E> findSingleFieldLstByCondition(GXBaseQueryParamInnerDto queryParamInnerDto, Class<E> targetClazz) {
-        if (queryParamInnerDto.getColumns().size() != 1) {
+        if (Objects.isNull(queryParamInnerDto) || Objects.isNull(targetClazz)) {
+            throw new GXBusinessException("queryParamInnerDto and targetClazz cannot be null");
+        }
+        if (CollUtil.isEmpty(queryParamInnerDto.getColumns()) || queryParamInnerDto.getColumns().size() != 1) {
             throw new GXBusinessException("字段列长度只能为1!!!");
         }
         String column = queryParamInnerDto.getColumns().toArray(new String[0])[0];
@@ -1582,7 +1594,7 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
         List<Dict> dictList = repository.findByCondition(queryParamInnerDto);
         ArrayList<E> lst = new ArrayList<>();
         dictList.forEach(dict -> {
-            Object o = Optional.ofNullable(dict.get(column)).orElse(dict.get(CharSequenceUtil.toCamelCase(column)));
+            Object o = readColumnValue(dict, column);
             if (Objects.nonNull(o)) {
                 lst.add(Convert.convert(targetClazz, o));
             }
@@ -1730,7 +1742,11 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     @Override
     public Long countByCondition(GXBaseQueryParamInnerDto queryParamInnerDto) {
         if (CollUtil.isEmpty(queryParamInnerDto.getColumns())) {
-            HashSet<String> columns = CollUtil.newHashSet(CharSequenceUtil.format("count({}.id) as cnt", queryParamInnerDto.getTableNameAlias()));
+            String tableNameAlias = queryParamInnerDto.getTableNameAlias();
+            String countField = CharSequenceUtil.isBlank(tableNameAlias)
+                    ? "count(id) as cnt"
+                    : CharSequenceUtil.format("count({}.id) as cnt", tableNameAlias);
+            HashSet<String> columns = CollUtil.newHashSet(countField);
             queryParamInnerDto.setColumns(columns);
         }
         if (CharSequenceUtil.isBlank(queryParamInnerDto.getTableName())) {
@@ -1785,6 +1801,24 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
             validateExistsDto.setTableName(repository.getTableName());
         }
         return repository.validateExists(validateExistsDto, constraintValidatorContext);
+    }
+
+    /**
+     * Read value by column name with common naming conventions.
+     */
+    private Object readColumnValue(Dict dict, String column) {
+        if (Objects.isNull(dict) || CharSequenceUtil.isBlank(column)) {
+            return null;
+        }
+        Object value = dict.get(column);
+        if (Objects.nonNull(value)) {
+            return value;
+        }
+        value = dict.get(CharSequenceUtil.toUnderlineCase(column));
+        if (Objects.nonNull(value)) {
+            return value;
+        }
+        return dict.get(CharSequenceUtil.toCamelCase(column));
     }
 
     /**
