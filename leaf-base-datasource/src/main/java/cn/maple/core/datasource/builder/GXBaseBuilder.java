@@ -103,9 +103,15 @@ public interface GXBaseBuilder {
     }
 
     static String checkRecordIsExists(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
-        dbQueryParamInnerDto.setColumns(CollUtil.newHashSet("1"));
-        String innerSql = findByCondition(dbQueryParamInnerDto);
-        return CharSequenceUtil.format("SELECT CASE WHEN EXISTS ({}) THEN 1 ELSE 0 END", innerSql);
+        Set<String> originalColumns = dbQueryParamInnerDto.getColumns();
+        Set<String> columnsSnapshot = Objects.isNull(originalColumns) ? null : new LinkedHashSet<>(originalColumns);
+        try {
+            dbQueryParamInnerDto.setColumns(CollUtil.newLinkedHashSet("1"));
+            String innerSql = findByCondition(dbQueryParamInnerDto);
+            return CharSequenceUtil.format("SELECT CASE WHEN EXISTS ({}) THEN 1 ELSE 0 END", innerSql);
+        } finally {
+            dbQueryParamInnerDto.setColumns(columnsSnapshot);
+        }
     }
 
     static String findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
@@ -238,17 +244,21 @@ public interface GXBaseBuilder {
             String baseClause = CharSequenceUtil.isNotBlank(normalizedWhere)
                     ? CharSequenceUtil.format("{}{}{}", andClause, CharSequenceUtil.isNotBlank(andClause) ? GXBuilderConstant.AND_OP : "", normalizedWhere)
                     : andClause;
-            if (CharSequenceUtil.isBlank(baseClause)) {
-                baseClause = "1 = 1";
-            }
             if (join.isAutoFillIsDeleteCondition()) {
                 String joinLogicNotDeletedCondition = buildLogicNotDeletedCondition(tableName, Optional.ofNullable(tableAliasName).orElse(tableName), Collections.emptyList());
                 if (CharSequenceUtil.isNotBlank(joinLogicNotDeletedCondition)) {
-                    baseClause = CharSequenceUtil.format("({}) {} ({})", baseClause, GXBuilderConstant.AND_OP, joinLogicNotDeletedCondition);
+                    baseClause = CharSequenceUtil.isBlank(baseClause)
+                            ? joinLogicNotDeletedCondition
+                            : CharSequenceUtil.format("({}) {} ({})", baseClause, GXBuilderConstant.AND_OP, joinLogicNotDeletedCondition);
                 }
             }
+            if (CharSequenceUtil.isBlank(baseClause) && CharSequenceUtil.isBlank(orClause)) {
+                throw new GXDBConditionException(CharSequenceUtil.format("JOIN [{}] must include at least one ON condition", tableName));
+            }
             String onClause = CharSequenceUtil.isNotBlank(orClause)
+                    ? (CharSequenceUtil.isNotBlank(baseClause)
                     ? CharSequenceUtil.format("({}) {} ({})", baseClause, GXBuilderConstant.OR_OP, orClause)
+                    : orClause)
                     : baseClause;
             String assemblySql = CharSequenceUtil.format("{} ON ({})", joinTableWithAlias, onClause);
             if (CharSequenceUtil.equalsIgnoreCase(GXBuilderConstant.LEFT_JOIN_TYPE, joinType.getJoinType())) {
@@ -289,6 +299,7 @@ public interface GXBaseBuilder {
     }
 
     static <R> String paginate(IPage<R> page, GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
+        Objects.requireNonNull(page, "page must not be null");
         if (CharSequenceUtil.isNotBlank(dbQueryParamInnerDto.getRawSQL())) {
             return validateRawSqlStrict(dbQueryParamInnerDto.getRawSQL());
         }
@@ -296,7 +307,8 @@ public interface GXBaseBuilder {
     }
 
     static String findOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
-        return findByCondition(dbQueryParamInnerDto);
+        String sql = findByCondition(dbQueryParamInnerDto);
+        return applySingleRowLimit(sql);
     }
 
     static Map<String, Object> handleSQLCondition(SQL sql, List<GXCondition<?>> conditions) {
@@ -338,6 +350,7 @@ public interface GXBaseBuilder {
         if (CollUtil.isNotEmpty(updateFieldList)) {
             for (GXUpdateField<?> field : updateFieldList) {
                 sql.SET(field.updateString());
+                dbQueryParamInnerDto.getParamMap().putAll(field.getParamMap());
             }
         }
         if (CharSequenceUtil.isNotBlank(extraData.getStr("deletedBy")) && hasColumn(tableName, "deleted_by")) {
@@ -373,29 +386,47 @@ public interface GXBaseBuilder {
     static String unionFindByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
         List<String> unionSqlLst = new ArrayList<>();
         unionQueryParamInnerDtoLst.forEach(queryParamInnerDto -> {
-            String tableName = queryParamInnerDto.getTableName();
-            if (CharSequenceUtil.isEmpty(tableName)) {
-                queryParamInnerDto.setTableName(dbQueryParamInnerDto.getTableName());
+            String originalTableName = queryParamInnerDto.getTableName();
+            String originalTableAlias = queryParamInnerDto.getTableNameAlias();
+            try {
+                if (CharSequenceUtil.isEmpty(originalTableName)) {
+                    queryParamInnerDto.setTableName(dbQueryParamInnerDto.getTableName());
+                }
+                if (CharSequenceUtil.isEmpty(originalTableAlias)) {
+                    queryParamInnerDto.setTableNameAlias(queryParamInnerDto.getTableName());
+                }
+                String sql = findByCondition(queryParamInnerDto);
+                dbQueryParamInnerDto.getParamMap().putAll(queryParamInnerDto.getParamMap());
+                unionSqlLst.add("(" + sql + ")");
+            } finally {
+                queryParamInnerDto.setTableName(originalTableName);
+                queryParamInnerDto.setTableNameAlias(originalTableAlias);
             }
-            String tableNameAlias = queryParamInnerDto.getTableNameAlias();
-            if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-                queryParamInnerDto.setTableNameAlias(queryParamInnerDto.getTableName());
-            }
-            String sql = findByCondition(queryParamInnerDto);
-            dbQueryParamInnerDto.getParamMap().putAll(queryParamInnerDto.getParamMap());
-            unionSqlLst.add("(" + sql + ")");
         });
         String unionSql = String.join("\n " + unionTypeEnums.getUnionType() + " \n", unionSqlLst);
-        dbQueryParamInnerDto.setTableName("(" + unionSql + ")");
-        dbQueryParamInnerDto.setTableNameAlias("tmp");
-        if (CollUtil.isNotEmpty(dbQueryParamInnerDto.getCondition())) {
-            dbQueryParamInnerDto.getCondition().forEach(condition -> {
-                if (!"tmp".equalsIgnoreCase(Optional.ofNullable(condition.getTableNameAlias()).orElse(""))) {
-                    condition.setTableNameAlias("tmp");
-                }
-            });
+        String originalTableName = dbQueryParamInnerDto.getTableName();
+        String originalTableAlias = dbQueryParamInnerDto.getTableNameAlias();
+        List<GXCondition<?>> rootConditions = dbQueryParamInnerDto.getCondition();
+        Map<GXCondition<?>, String> originalAliases = new IdentityHashMap<>();
+        if (CollUtil.isNotEmpty(rootConditions)) {
+            rootConditions.forEach(condition -> originalAliases.put(condition, condition.getTableNameAlias()));
         }
-        return GXBaseBuilder.findByCondition(dbQueryParamInnerDto);
+        try {
+            dbQueryParamInnerDto.setTableName("(" + unionSql + ")");
+            dbQueryParamInnerDto.setTableNameAlias("tmp");
+            if (CollUtil.isNotEmpty(rootConditions)) {
+                rootConditions.forEach(condition -> {
+                    if (!"tmp".equalsIgnoreCase(Optional.ofNullable(condition.getTableNameAlias()).orElse(""))) {
+                        condition.setTableNameAlias("tmp");
+                    }
+                });
+            }
+            return GXBaseBuilder.findByCondition(dbQueryParamInnerDto);
+        } finally {
+            dbQueryParamInnerDto.setTableName(originalTableName);
+            dbQueryParamInnerDto.setTableNameAlias(originalTableAlias);
+            originalAliases.forEach(GXCondition::setTableNameAlias);
+        }
     }
 
     static String unionFindOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
@@ -409,10 +440,26 @@ public interface GXBaseBuilder {
     }
 
     static <R> String unionPaginate(IPage<R> page, GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
+        Objects.requireNonNull(page, "page must not be null");
         if (CharSequenceUtil.isNotBlank(dbQueryParamInnerDto.getRawSQL())) {
             return validateRawSqlStrict(dbQueryParamInnerDto.getRawSQL());
         }
         return unionFindByCondition(dbQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+    }
+
+    private static String applySingleRowLimit(String sql) {
+        String dbType = resolveDbTypeFromContext().toLowerCase(Locale.ROOT);
+        if (MYSQL_LIKE_DIALECTS.contains(dbType) || POSTGRES_DIALECTS.contains(dbType)) {
+            return CharSequenceUtil.format("SELECT * FROM ({}) gx_tmp_one LIMIT 1", sql);
+        }
+        if (SQLSERVER_DIALECTS.contains(dbType)) {
+            return CharSequenceUtil.format("SELECT TOP 1 * FROM ({}) gx_tmp_one", sql);
+        }
+        if (ORACLE_DIALECTS.contains(dbType)) {
+            return CharSequenceUtil.format("SELECT * FROM ({}) gx_tmp_one WHERE ROWNUM <= 1", sql);
+        }
+        LOGGER.warn("Unrecognized dbType [{}] for findOneByCondition, fallback to LIMIT 1 syntax.", dbType);
+        return CharSequenceUtil.format("SELECT * FROM ({}) gx_tmp_one LIMIT 1", sql);
     }
 
     private static String buildLogicNotDeletedCondition(String tableName, String tableAliasName, List<GXCondition<?>> conditions) {
