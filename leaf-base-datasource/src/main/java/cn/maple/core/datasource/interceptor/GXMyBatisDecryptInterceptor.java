@@ -1,8 +1,5 @@
 package cn.maple.core.datasource.interceptor;
 
-import cn.hutool.core.convert.Convert;
-import cn.hutool.core.lang.TypeReference;
-import cn.hutool.core.util.TypeUtil;
 import cn.maple.core.framework.annotation.GXSensitiveData;
 import cn.maple.core.framework.service.GXSensitiveDataDecryptService;
 import com.baomidou.mybatisplus.core.toolkit.CollectionUtils;
@@ -14,7 +11,6 @@ import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.stereotype.Component;
 
 import java.sql.Statement;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
@@ -63,45 +59,33 @@ public class GXMyBatisDecryptInterceptor implements Interceptor {
      */
     @Override
     public Object intercept(Invocation invocation) throws Throwable {
+        Object resultObject = invocation.proceed();
+        if (Objects.isNull(resultObject)) {
+            return null;
+        }
         try {
-            // 执行原方法，获取查询结果
-            Object resultObject = invocation.proceed();
-            if (Objects.isNull(resultObject)) {
-                return null;
-            }
-
-            // 处理List类型的查询结果（selectList方法的返回值）
-            if (ArrayList.class.getName().equalsIgnoreCase(TypeUtil.getClass(resultObject.getClass()).getName())) {
-                List<?> resultList = Convert.convert(new TypeReference<>() {
-                }, resultObject);
-
-                // 检查列表是否为空，以及第一个元素是否需要解密
-                if (!CollectionUtils.isEmpty(resultList) && Objects.nonNull(resultList.get(0))) {
-                    // 获取第一个元素的类型，检查是否需要解密
-                    Object firstItem = resultList.get(0);
+            if (resultObject instanceof List<?> resultList) {
+                if (!CollectionUtils.isEmpty(resultList) && Objects.nonNull(resultList.getFirst())) {
+                    Object firstItem = resultList.getFirst();
                     if (checkNeedToDecrypt(firstItem)) {
-                        log.debug("检测到敏感数据列表结果: {}, 执行批量解密处理", firstItem.getClass().getName());
-                        // 对列表中的每个元素进行解密
+                        log.debug("检测到敏感数据列表结果: {}, 执行批量解密处理",
+                                firstItem.getClass().getName());
                         for (Object result : resultList) {
                             sensitiveDataDecryptService.decrypt(result);
                         }
                     }
                 }
-            }
-            // 处理单个对象的查询结果（selectOne方法的返回值）
-            else {
+            } else {
                 if (checkNeedToDecrypt(resultObject)) {
-                    log.debug("检测到敏感数据单个结果: {}, 执行解密处理", resultObject.getClass().getName());
+                    log.debug("检测到敏感数据单个结果: {}, 执行解密处理",
+                            resultObject.getClass().getName());
                     sensitiveDataDecryptService.decrypt(resultObject);
                 }
             }
-
-            return resultObject;
         } catch (Exception e) {
-            // 记录异常但不中断流程，确保查询结果能够正常返回
             log.error("敏感数据解密过程发生异常: {}", e.getMessage(), e);
-            return invocation.proceed();
         }
+        return resultObject;
     }
 
     /**

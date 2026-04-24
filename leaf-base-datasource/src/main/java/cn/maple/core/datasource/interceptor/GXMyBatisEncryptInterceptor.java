@@ -12,8 +12,7 @@ import org.springframework.util.ReflectionUtils;
 
 import java.lang.reflect.Field;
 import java.sql.PreparedStatement;
-import java.util.Objects;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -63,52 +62,37 @@ public class GXMyBatisEncryptInterceptor implements Interceptor {
     @SuppressWarnings("all")
     public Object intercept(Invocation invocation) throws Throwable {
         try {
-            // 获取参数处理器
-            // @Signature 指定了 type=parameterHandler 后，这里的 invocation.getTarget() 便是parameterHandler
             ParameterHandler parameterHandler = (ParameterHandler) invocation.getTarget();
-
-            // 安全地获取参数对象字段
             Field parameterField = ReflectionUtils.findField(parameterHandler.getClass(), "parameterObject");
             if (parameterField == null) {
                 log.warn("无法找到parameterObject字段，跳过敏感数据加密处理");
                 return invocation.proceed();
             }
-
-            // 设置字段可访问
-            parameterField.setAccessible(true);
-
-            // 获取参数对象实例
+            ReflectionUtils.makeAccessible(parameterField);
             Object parameterObject = parameterField.get(parameterHandler);
             if (parameterObject == null) {
                 return invocation.proceed();
             }
-
-            // 获取参数对象类型
             Class<?> parameterObjectClass = parameterObject.getClass();
-
-            // 检查类是否需要进行敏感数据加密（使用缓存提高性能）
             Boolean hasAnnotation = annotationCache.get(parameterObjectClass);
             if (hasAnnotation == null) {
-                // 首次检查，查找注解并缓存结果
                 GXSensitiveData sensitiveData = AnnotationUtils.findAnnotation(parameterObjectClass, GXSensitiveData.class);
                 hasAnnotation = Objects.nonNull(sensitiveData);
                 annotationCache.put(parameterObjectClass, hasAnnotation);
             }
-
-            // 如果类标记了敏感数据注解，执行加密处理
             if (hasAnnotation) {
                 log.debug("检测到敏感数据类: {}, 执行加密处理", parameterObjectClass.getName());
-                // 获取类的所有字段
-                Field[] declaredFields = parameterObjectClass.getDeclaredFields();
-                // 调用加密服务进行加密
-                sensitiveDataEncryptService.encrypt(declaredFields, parameterObject);
+                List<Field> allFields = new ArrayList<>();
+                Class<?> currentClass = parameterObjectClass;
+                while (currentClass != null && currentClass != Object.class) {
+                    allFields.addAll(Arrays.asList(currentClass.getDeclaredFields()));
+                    currentClass = currentClass.getSuperclass();
+                }
+                sensitiveDataEncryptService.encrypt(allFields.toArray(new Field[0]), parameterObject);
             }
         } catch (Exception e) {
-            // 记录异常但不中断流程，确保SQL能够继续执行
             log.error("敏感数据加密过程发生异常: {}", e.getMessage(), e);
         }
-
-        // 继续执行原方法
         return invocation.proceed();
     }
 
