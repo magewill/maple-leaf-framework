@@ -38,6 +38,7 @@ public interface GXBaseBuilder {
     Logger LOGGER = LoggerFactory.getLogger(GXBaseBuilder.class);
     Pattern NUMERIC_PATTERN = Pattern.compile("^-?\\d+(\\.\\d+)?$");
     Pattern SAFE_IDENTIFIER_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_\\.]*$");
+    Pattern QUALIFIED_WILDCARD_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_]*\\.\\*$");
     Pattern HAVING_TOKEN_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_\\.]*");
     Pattern DANGEROUS_SQL_TOKEN_PATTERN = Pattern.compile("(?i)\\b(update|delete|insert|alter|drop|truncate|create|grant|revoke|call|exec|merge)\\b");
     Set<String> HAVING_KEYWORD_WHITELIST = Set.of(
@@ -53,6 +54,7 @@ public interface GXBaseBuilder {
     Set<String> SQLSERVER_DIALECTS = Set.of("sqlserver", "sql_server", "mssql", "sql-server");
     Set<String> ORACLE_DIALECTS = Set.of("oracle");
     Pattern SQL_FUNCTION_PATTERN = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*\\s*\\(.*\\)$", Pattern.DOTALL);
+    Pattern EXPRESSION_ALIAS_PATTERN = Pattern.compile("^(.*?)(?:(?i)\\s+as\\s+|\\s+)([A-Za-z_][A-Za-z0-9_]*)\\s*$", Pattern.DOTALL);
 
     Set<String> SQL_FUNCTION_KEYWORDS = Set.of(
             "ifnull", "isnull", "coalesce", "nullif",
@@ -118,13 +120,19 @@ public interface GXBaseBuilder {
         Set<String> allowedColumns = buildAllowedColumns(tableName, tableNameAlias, joins);
         Set<String> columns = CollUtil.newHashSet();
         if (CollUtil.isNotEmpty(selectColumns)) {
-            columns = selectColumns.stream().map(CharSequenceUtil::toUnderlineCase).collect(Collectors.toSet());
+            columns = selectColumns.stream()
+                    .map(GXBaseBuilder::normalizeRequestedSelectColumn)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
         }
         String selectStr;
         if (CollUtil.isNotEmpty(columns)) {
-            selectStr = columns.stream()
-                    .map(column -> sanitizeSelectColumn(column, allowedColumns))
-                    .collect(Collectors.joining(","));
+            List<String> sanitizedSelectColumns = new ArrayList<>();
+            for (String column : columns) {
+                String sanitizedColumn = sanitizeSelectColumn(column, allowedColumns);
+                sanitizedSelectColumns.add(CharSequenceUtil.toUnderlineCase(sanitizedColumn));
+                addExpressionAliasToWhitelist(sanitizedColumn, allowedColumns);
+            }
+            selectStr = String.join(",", sanitizedSelectColumns);
         } else {
             selectStr = CharSequenceUtil.format("{}.*", tableNameAlias);
         }
@@ -143,7 +151,11 @@ public interface GXBaseBuilder {
         dbQueryParamInnerDto.getParamMap().putAll(mergedParamMap);
         if (CollUtil.isNotEmpty(groupByField)) {
             String[] groupByColumns = groupByField.stream()
-                    .map(column -> sanitizeStructuralColumn(column, allowedColumns, "GROUP BY", true))
+                    .map(column -> {
+                        List<String> split = CharSequenceUtil.split(column, ".");
+                        registerAllowedColumn(allowedColumns, column, split.getFirst(), split.getFirst());
+                        return sanitizeStructuralColumn(column, allowedColumns, "GROUP BY", true);
+                    })
                     .toArray(String[]::new);
             sql.GROUP_BY(groupByColumns);
         }
@@ -155,7 +167,11 @@ public interface GXBaseBuilder {
         }
         if (CollUtil.isNotEmpty(orderByField)) {
             String[] orderColumns = orderByField.entrySet().stream()
-                    .map(entry -> sanitizeOrderBy(entry.getKey(), entry.getValue(), allowedColumns))
+                    .map(entry -> {
+                        List<String> split = CharSequenceUtil.split(entry.getKey(), ".");
+                        registerAllowedColumn(allowedColumns, entry.getKey(), split.getFirst(), split.getFirst());
+                        return sanitizeOrderBy(entry.getKey(), entry.getValue(), allowedColumns);
+                    })
                     .toArray(String[]::new);
             sql.ORDER_BY(orderColumns);
         }
@@ -651,16 +667,29 @@ public interface GXBaseBuilder {
         }
         String keyColumn = tableInfo.getKeyColumn();
         if (CharSequenceUtil.isNotBlank(keyColumn)) {
-            allowedColumns.add(keyColumn.toLowerCase(Locale.ROOT));
+            registerAllowedColumn(allowedColumns, keyColumn, tableName, tableAlias);
         }
         tableInfo.getFieldList().forEach(fieldInfo -> {
             String column = fieldInfo.getColumn();
             if (CharSequenceUtil.isNotBlank(column)) {
-                allowedColumns.add(column.toLowerCase(Locale.ROOT));
+                registerAllowedColumn(allowedColumns, column, tableName, tableAlias);
             }
         });
 
         return true;
+    }
+
+    private static void registerAllowedColumn(Set<String> allowedColumns, String column, String tableName, String tableAlias) {
+        String normalizedColumn = column.toLowerCase(Locale.ROOT);
+        allowedColumns.add(normalizedColumn);
+        if (CharSequenceUtil.isNotBlank(tableName)) {
+            allowedColumns.add(CharSequenceUtil.format("{}.{}", tableName.toLowerCase(Locale.ROOT), normalizedColumn));
+            allowedColumns.add(CharSequenceUtil.format("{}.*", tableName.toLowerCase(Locale.ROOT)));
+        }
+        if (CharSequenceUtil.isNotBlank(tableAlias)) {
+            allowedColumns.add(CharSequenceUtil.format("{}.{}", tableAlias.toLowerCase(Locale.ROOT), normalizedColumn));
+            allowedColumns.add(CharSequenceUtil.format("{}.*", tableAlias.toLowerCase(Locale.ROOT)));
+        }
     }
 
     private static String sanitizeSelectColumn(String column, Set<String> allowedColumns) {
@@ -671,11 +700,25 @@ public interface GXBaseBuilder {
         return sanitizeStructuralColumn(trimmed, allowedColumns, "SELECT", false);
     }
 
+    private static String normalizeRequestedSelectColumn(String column) {
+        String trimmed = CharSequenceUtil.trim(column);
+        if (CharSequenceUtil.isBlank(trimmed)) {
+            return trimmed;
+        }
+        String expressionPart = extractExpressionPart(trimmed);
+        if ("*".equals(expressionPart) || QUALIFIED_WILDCARD_PATTERN.matcher(expressionPart).matches() || isComplexExpression(trimmed)) {
+            return trimmed;
+        }
+        return CharSequenceUtil.toUnderlineCase(trimmed);
+    }
+
     /**
      * 判断是否为复合表达式：含括号（函数调用）或含 AS 别名
      */
     private static boolean isComplexExpression(String trimmed) {
-        return trimmed.contains("(") || CharSequenceUtil.containsIgnoreCase(trimmed, " as ");
+        return trimmed.contains("(")
+                || CharSequenceUtil.containsIgnoreCase(trimmed, " as ")
+                || hasTrailingAlias(trimmed);
     }
 
     /**
@@ -683,22 +726,19 @@ public interface GXBaseBuilder {
      * 跳过：SQL 函数/关键字、纯数值、AS 后的别名。
      */
     private static void validateColumnRefsInExpression(String expr, Set<String> allowedColumns, String clauseName) {
-        String exprWithoutAlias = expr.replaceAll("(?i)\\s+as\\s+[A-Za-z_][A-Za-z0-9_]*\\s*$", "").trim();
+        String exprWithoutAlias = extractExpressionPart(expr);
         Matcher matcher = IDENTIFIER_IN_EXPR_PATTERN.matcher(exprWithoutAlias);
         while (matcher.find()) {
             String token = matcher.group();
             String columnPart = token.toLowerCase(Locale.ROOT);
-            int dotIndex = columnPart.lastIndexOf('.');
-            if (dotIndex >= 0) {
-                columnPart = columnPart.substring(dotIndex + 1);
-            }
             if (SQL_FUNCTION_KEYWORDS.contains(columnPart)) {
                 continue;
             }
-            if (columnPart.matches("\\d+")) {
+            String bareColumn = extractBareColumnName(columnPart);
+            if (SQL_FUNCTION_KEYWORDS.contains(bareColumn) || bareColumn.matches("\\d+")) {
                 continue;
             }
-            if (!allowedColumns.contains(columnPart)) {
+            if (!allowedColumns.contains(columnPart) && !allowedColumns.contains(bareColumn)) {
                 throw new GXDBConditionException(
                         CharSequenceUtil.format("{} expression references column [{}] which is not in whitelist: {}",
                                 clauseName, token, expr));
@@ -708,12 +748,18 @@ public interface GXBaseBuilder {
 
     private static String sanitizeStructuralColumn(String column, Set<String> allowedColumns, String clauseName, boolean whitelistRequired) {
         String trimmed = CharSequenceUtil.trim(column);
-        if ("SELECT".equalsIgnoreCase(clauseName) && CharSequenceUtil.containsAny(trimmed, "*")) {
-            LOGGER.error("SELECT field '*' is allowed for compatibility, please prefer explicit columns when possible.");
-            return trimmed;
-        }
         if (CharSequenceUtil.isBlank(trimmed)) {
             throw new GXDBConditionException(CharSequenceUtil.format("{} field is blank", clauseName));
+        }
+        String expressionPart = extractExpressionPart(trimmed);
+        if ("*".equals(expressionPart) || QUALIFIED_WILDCARD_PATTERN.matcher(expressionPart).matches()) {
+            if (!"SELECT".equalsIgnoreCase(clauseName)) {
+                throw new GXDBConditionException(CharSequenceUtil.format("{} field does not support wildcard: {}", clauseName, column));
+            }
+            if ("*".equals(expressionPart)) {
+                LOGGER.error("SELECT field '*' is allowed for compatibility, please prefer explicit columns when possible.");
+            }
+            return trimmed;
         }
         if (isComplexExpression(trimmed)) {
             if (GXDBStringEscapeUtils.check(trimmed)) {
@@ -728,7 +774,7 @@ public interface GXBaseBuilder {
                 validateColumnRefsInExpression(trimmed, allowedColumns, clauseName);
             }
         } else {
-            if (!SAFE_IDENTIFIER_PATTERN.matcher(trimmed).matches()) {
+            if (!SAFE_IDENTIFIER_PATTERN.matcher(expressionPart).matches()) {
                 throw new GXDBConditionException(
                         CharSequenceUtil.format("{} field is invalid: {}", clauseName, column));
             }
@@ -740,12 +786,9 @@ public interface GXBaseBuilder {
                 throw new GXDBConditionException(
                         CharSequenceUtil.format("{} column whitelist is unavailable", clauseName));
             }
-            String columnToCheck = trimmed.toLowerCase(Locale.ROOT);
-            int dotIndex = columnToCheck.lastIndexOf('.');
-            if (dotIndex >= 0) {
-                columnToCheck = columnToCheck.substring(dotIndex + 1);
-            }
-            if (!allowedColumns.isEmpty() && !allowedColumns.contains(columnToCheck)) {
+            String normalizedColumn = expressionPart.toLowerCase(Locale.ROOT);
+            String bareColumn = extractBareColumnName(normalizedColumn);
+            if (!allowedColumns.isEmpty() && !allowedColumns.contains(normalizedColumn) && !allowedColumns.contains(bareColumn)) {
                 throw new GXDBConditionException(
                         CharSequenceUtil.format("{} field is not in whitelist: {}", clauseName, column));
             }
@@ -757,10 +800,6 @@ public interface GXBaseBuilder {
         if (CharSequenceUtil.isBlank(column)) {
             throw new GXDBConditionException("ORDER BY column must not be blank");
         }
-        if (!CollUtil.safeContains(allowedColumns, column)) {
-            LOGGER.error("排序字段不在被允许的字段中！！已经实时将排序字段加入到了允许字段中！！");
-        }
-        CollUtil.addIfAbsent(allowedColumns, column);
         String safeColumn = sanitizeStructuralColumn(column, allowedColumns, "ORDER BY", true);
         String safeDirection = Optional.ofNullable(direction).map(CharSequenceUtil::trim).orElse("").toUpperCase(Locale.ROOT);
         if (!"ASC".equals(safeDirection) && !"DESC".equals(safeDirection)) {
@@ -791,7 +830,8 @@ public interface GXBaseBuilder {
             if (HAVING_KEYWORD_WHITELIST.contains(upper)) {
                 continue;
             }
-            if (allowedColumns.contains(token.toLowerCase(Locale.ROOT))) {
+            String normalizedToken = token.toLowerCase(Locale.ROOT);
+            if (allowedColumns.contains(normalizedToken) || allowedColumns.contains(extractBareColumnName(normalizedToken))) {
                 continue;
             }
             if (isFunctionToken(trimmed, matcher.end(), token)) {
@@ -818,6 +858,51 @@ public interface GXBaseBuilder {
             return true;
         }
         return !DANGEROUS_SQL_TOKEN_PATTERN.matcher(token).find();
+    }
+
+    private static String extractExpressionPart(String expression) {
+        String trimmed = CharSequenceUtil.trim(expression);
+        Matcher matcher = EXPRESSION_ALIAS_PATTERN.matcher(trimmed);
+        if (!matcher.matches()) {
+            return trimmed;
+        }
+        String alias = matcher.group(2);
+        if (isReservedTrailingKeyword(alias)) {
+            return trimmed;
+        }
+        String baseExpression = CharSequenceUtil.trim(matcher.group(1));
+        return CharSequenceUtil.isBlank(baseExpression) ? trimmed : baseExpression;
+    }
+
+    private static boolean hasTrailingAlias(String expression) {
+        return !CharSequenceUtil.equals(extractExpressionPart(expression), CharSequenceUtil.trim(expression));
+    }
+
+    private static void addExpressionAliasToWhitelist(String expression, Set<String> allowedColumns) {
+        Matcher matcher = EXPRESSION_ALIAS_PATTERN.matcher(CharSequenceUtil.trim(expression));
+        if (!matcher.matches()) {
+            return;
+        }
+        String alias = matcher.group(2);
+        if (!isReservedTrailingKeyword(alias)) {
+            allowedColumns.add(alias.toLowerCase(Locale.ROOT));
+        }
+    }
+
+    private static boolean isReservedTrailingKeyword(String token) {
+        String normalized = token.toLowerCase(Locale.ROOT);
+        return SQL_FUNCTION_KEYWORDS.contains(normalized)
+                || HAVING_KEYWORD_WHITELIST.contains(token.toUpperCase(Locale.ROOT))
+                || "asc".equals(normalized)
+                || "desc".equals(normalized);
+    }
+
+    private static String extractBareColumnName(String identifier) {
+        int dotIndex = identifier.lastIndexOf('.');
+        if (dotIndex >= 0) {
+            return identifier.substring(dotIndex + 1);
+        }
+        return identifier;
     }
 
     private static String validateRawSqlStrict(String rawSQL) {
