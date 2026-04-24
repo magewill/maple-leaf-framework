@@ -11,7 +11,6 @@ import org.apache.ibatis.reflection.MetaObject;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
-import java.util.Optional;
 
 /**
  * MyBatis公共字段自动填充器
@@ -39,37 +38,15 @@ public class GXAutoFillMetaObjectHandler implements MetaObjectHandler {
     @Override
     public void insertFill(MetaObject metaObject) {
         try {
-            // 安全获取createdBy字段值，避免类型转换异常
-            String createdBy = (String) metaObject.getValue("createdBy");
+            GXMyBatisAutoFillMetaObjectService autoFillService = getAutoFillService();
+            String createdBy = asString(metaObject.getValue("createdBy"));
             if (CharSequenceUtil.isEmpty(createdBy)) {
-                createdBy = "unknown";
-                Object tenantId = null;
-                // 从Spring上下文中安全获取服务实例，用于获取当前操作用户
-                GXMyBatisAutoFillMetaObjectService myBatisAutoFillMetaObjectService = GXSpringContextUtils.getBean(GXMyBatisAutoFillMetaObjectService.class);
-                if (Objects.nonNull(myBatisAutoFillMetaObjectService)) {
-                    createdBy = myBatisAutoFillMetaObjectService.getCreatedBy();
-                    // 获取租户信息，确保不为null
-                    tenantId = myBatisAutoFillMetaObjectService.getTenantId();
-                }
-                // 处理创建者，使用防御性复制避免外部修改
-                this.setFieldValByName("createdBy", String.valueOf(createdBy), metaObject);
-
-                // 处理租户信息
-                Boolean enableTenant = GXCommonUtils.getEnvironmentValue("maple.framework.enable.tenant", Boolean.class, Boolean.FALSE);
-                if (Boolean.TRUE.equals(enableTenant) && Objects.nonNull(tenantId)) {
-                    // 安全地设置租户ID，确保类型兼容性
-                    this.setFieldValByName("tenantId", tenantId, metaObject);
-                    log.debug("自动填充租户ID: {}", tenantId);
-                }
+                String fillCreatedBy = Objects.nonNull(autoFillService) ? autoFillService.getCreatedBy() : null;
+                this.setFieldValByName("createdBy", defaultIfBlank(fillCreatedBy, "unknown"), metaObject);
             }
 
-            // 安全获取createdAt字段值，使用Optional避免空指针异常
-            Integer createdAt = (Integer) Optional.ofNullable(metaObject.getValue("createdAt")).orElse(0);
-            if (createdAt.equals(0)) {
-                // 使用Math.toIntExact安全地将long转为int，避免溢出风险
-                final Integer timestamp = Math.toIntExact(DateUtil.currentSeconds());
-                this.setFieldValByName("createdAt", timestamp, metaObject);
-            }
+            fillTenantId(metaObject, autoFillService);
+            fillTimestampIfAbsent(metaObject, "createdAt");
         } catch (Exception e) {
             // 捕获所有可能的异常，确保填充过程不会中断整个SQL执行
             log.error("自动填充字段时发生异常", e);
@@ -84,29 +61,66 @@ public class GXAutoFillMetaObjectHandler implements MetaObjectHandler {
     @Override
     public void updateFill(MetaObject metaObject) {
         try {
-            // 安全获取updatedBy字段值，避免类型转换异常
-            String updatedBy = (String) metaObject.getValue("updatedBy");
+            GXMyBatisAutoFillMetaObjectService autoFillService = getAutoFillService();
+            String updatedBy = asString(metaObject.getValue("updatedBy"));
             if (CharSequenceUtil.isEmpty(updatedBy)) {
-                updatedBy = "unknown";
-                // 从Spring上下文中安全获取服务实例，用于获取当前操作用户
-                GXMyBatisAutoFillMetaObjectService myBatisAutoFillMetaObjectService = GXSpringContextUtils.getBean(GXMyBatisAutoFillMetaObjectService.class);
-                if (Objects.nonNull(myBatisAutoFillMetaObjectService)) {
-                    updatedBy = myBatisAutoFillMetaObjectService.getUpdatedBy();
-                }
-                // 使用防御性复制避免外部修改
-                this.setFieldValByName("updatedBy", String.valueOf(updatedBy), metaObject);
+                String fillUpdatedBy = Objects.nonNull(autoFillService) ? autoFillService.getUpdatedBy() : null;
+                this.setFieldValByName("updatedBy", defaultIfBlank(fillUpdatedBy, "unknown"), metaObject);
             }
-
-            // 安全获取updatedAt字段值，使用Optional避免空指针异常
-            Integer updatedAt = (Integer) Optional.ofNullable(metaObject.getValue("updatedAt")).orElse(0);
-            if (updatedAt.equals(0)) {
-                // 使用Math.toIntExact安全地将long转为int，避免溢出风险
-                final Integer timestamp = Math.toIntExact(DateUtil.currentSeconds());
-                this.setFieldValByName("updatedAt", timestamp, metaObject);
-            }
+            fillTimestampIfAbsent(metaObject, "updatedAt");
         } catch (Exception e) {
             // 捕获所有可能的异常，确保填充过程不会中断整个SQL执行
             log.error("自动填充更新字段时发生异常", e);
         }
+    }
+
+    private GXMyBatisAutoFillMetaObjectService getAutoFillService() {
+        return GXSpringContextUtils.getBean(GXMyBatisAutoFillMetaObjectService.class);
+    }
+
+    private void fillTenantId(MetaObject metaObject, GXMyBatisAutoFillMetaObjectService autoFillService) {
+        Boolean enableTenant = GXCommonUtils.getEnvironmentValue("maple.framework.enable.tenant", Boolean.class, Boolean.FALSE);
+        if (!Boolean.TRUE.equals(enableTenant) || Objects.isNull(autoFillService)) {
+            return;
+        }
+
+        Object currentTenantId = metaObject.getValue("tenantId");
+        if (Objects.nonNull(currentTenantId)) {
+            return;
+        }
+
+        Object tenantId = autoFillService.getTenantId();
+        if (Objects.nonNull(tenantId)) {
+            this.setFieldValByName("tenantId", tenantId, metaObject);
+            log.debug("自动填充租户ID: {}", tenantId);
+        }
+    }
+
+    private void fillTimestampIfAbsent(MetaObject metaObject, String fieldName) {
+        Object fieldValue = metaObject.getValue(fieldName);
+        if (isNullOrZero(fieldValue)) {
+            this.setFieldValByName(fieldName, Math.toIntExact(DateUtil.currentSeconds()), metaObject);
+        }
+    }
+
+    private String asString(Object value) {
+        return Objects.isNull(value) ? null : String.valueOf(value);
+    }
+
+    private boolean isNullOrZero(Object value) {
+        if (Objects.isNull(value)) {
+            return true;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).longValue() == 0L;
+        }
+        if (value instanceof CharSequence) {
+            return CharSequenceUtil.isBlank((CharSequence) value) || "0".contentEquals((CharSequence) value);
+        }
+        return false;
+    }
+
+    private String defaultIfBlank(String value, String defaultValue) {
+        return CharSequenceUtil.isBlank(value) ? defaultValue : value;
     }
 }
