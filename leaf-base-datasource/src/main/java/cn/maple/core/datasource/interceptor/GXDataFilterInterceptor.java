@@ -72,13 +72,7 @@ public class GXDataFilterInterceptor implements InnerInterceptor {
      * @return 数据过滤条件对象，如果不存在则返回null
      */
     private GXDataFilterInnerDto getDataScope() {
-        // 从ThreadLocal中获取数据过滤条件
-        GXDataFilterInnerDto dataScope = GXDataFilterThreadLocalUtils.getDataFilterInnerDto();
-        if (Objects.nonNull(dataScope)) {
-            return dataScope;
-        }
-
-        return null;
+        return GXDataFilterThreadLocalUtils.getDataFilterInnerDto();
     }
 
     /**
@@ -131,8 +125,10 @@ public class GXDataFilterInterceptor implements InnerInterceptor {
             // 如果原SQL有WHERE条件，使用AND连接原条件和过滤条件
             else {
                 log.debug("原SQL已有WHERE条件，使用AND连接过滤条件");
-                AndExpression andExpression = new AndExpression(new ParenthesedExpressionList<>(expression), new ParenthesedExpressionList<>(filterExpression));
-                plainSelect.setWhere(andExpression);
+                // 通过AST组合并显式加括号，避免AND/OR优先级导致条件语义变化
+                plainSelect.setWhere(new AndExpression(
+                        new ParenthesedExpressionList<>(expression),
+                        new ParenthesedExpressionList<>(filterExpression)));
             }
 
             // 直接返回生成的SQL，无需进行容易出错的黑科技字符串替换

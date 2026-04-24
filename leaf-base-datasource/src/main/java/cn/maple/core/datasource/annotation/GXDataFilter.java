@@ -36,7 +36,7 @@ import java.lang.annotation.*;
  * @author 塵渊 britton@126.com
  * @deprecated 推荐使用MyBatis-Plus官方的DataPermissionInterceptor
  */
-@Target(ElementType.METHOD)
+@Target({ElementType.METHOD, ElementType.TYPE})
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
 public @interface GXDataFilter {

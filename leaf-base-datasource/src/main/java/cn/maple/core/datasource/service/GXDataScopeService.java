@@ -133,9 +133,8 @@ public interface GXDataScopeService {
     default String getDeptCondition(String tableAlias, String[] deptIdFieldNames) {
         Set<Number> deptIdLst = getDeptIdLst();
         if (CollUtil.isNotEmpty(deptIdLst)) {
-            //return new GXConditionIn(tableAlias, getDeptIdFieldName(deptIdFieldNames), deptIdLst);
             String inStr = CollUtil.join(deptIdLst, ",");
-            return CharSequenceUtil.format("{}.{} in ({})", tableAlias, getDeptIdFieldName(deptIdFieldNames), inStr);
+            return CharSequenceUtil.format("{} in ({})", qualifyField(tableAlias, getDeptIdFieldName(deptIdFieldNames)), inStr);
         }
         return null;
     }
@@ -165,9 +164,9 @@ public interface GXDataScopeService {
         if (ObjectUtil.isNull(dataScopeService)) {
             return null;
         }
-        Long userId = dataScopeService.getLoginUserId();
+        Long userId = getLoginUserId();
         //GXConditionEQ conditionEQ = new GXConditionEQ(tableAlias, getUserIdFieldName(userIdFieldNames), userId);
-        return CharSequenceUtil.format("{}.{} = {}", tableAlias, getUserIdFieldName(userIdFieldNames), userId);
+        return CharSequenceUtil.format("{} = {}", qualifyField(tableAlias, getUserIdFieldName(userIdFieldNames)), userId);
     }
 
     /**
@@ -240,11 +239,16 @@ public interface GXDataScopeService {
      * @return String SQL过滤语句，如果不需要过滤则返回空字符串
      */
     default String getSqlFilter(GXDataFilter dataFilter, JoinPoint point) {
+        if (isSuperAdmin()) {
+            return "";
+        }
+
         boolean hasIgnoreDataFilterCondition = checkIgnoreDataFilter(point);
         GXDataScopeService dataScopeService = GXSpringContextUtils.getBean(GXDataScopeService.class);
         if (hasIgnoreDataFilterCondition || ObjectUtil.isNull(dataScopeService)) {
             return "";
         }
+
         // 获取表的别名
         String tableAlias = dataFilter.tableAlias();
 
@@ -263,16 +267,15 @@ public interface GXDataScopeService {
         }
 
         // 部门ID列表
-        String deptCondition = dataScopeService.getDeptCondition(tableAlias, deptIdFieldNames);
+        String deptCondition = getDeptCondition(tableAlias, deptIdFieldNames);
         if (ObjectUtil.isNotNull(deptCondition)) {
-            // 添加或条件
-            //sqlFilter.append(" or ").append(deptCondition);
             whereLst.add(deptCondition);
         }
         if (CollUtil.isNotEmpty(whereLst)) {
             return CharSequenceUtil.format(" ({}) ", CollUtil.join(whereLst, " or "));
         }
-        return "";
+        // 默认拒绝策略：非超级管理员且未构建出任何权限条件时，返回恒 false 条件防止数据泄露
+        return " (1 = 0) ";
     }
 
     /**
@@ -283,8 +286,8 @@ public interface GXDataScopeService {
      * </p>
      * <p>
      * 该方法会检查以下情况：
-     * 1. 如果方法参数为空，则忽略数据过滤
-     * 2. 如果方法参数中没有GXBaseQueryParamInnerDto类型的参数，则忽略数据过滤
+     * 1. 如果方法参数为空，则不忽略数据过滤
+     * 2. 如果方法参数中没有GXBaseQueryParamInnerDto类型的参数，则不忽略数据过滤
      * 3. 如果GXBaseQueryParamInnerDto的ignoreDataFilter属性为true，则忽略数据过滤
      * 4. 如果GXBaseQueryParamInnerDto的条件列表中包含GXIgnoreDataFilterCondition类型的条件，则忽略数据过滤
      * </p>
@@ -360,6 +363,9 @@ public interface GXDataScopeService {
      * @return String 部门ID字段名
      */
     default String getDeptIdFieldName(String[] deptIdFieldNames) {
+        if (deptIdFieldNames == null || deptIdFieldNames.length == 0 || CharSequenceUtil.isBlank(deptIdFieldNames[0])) {
+            return "dept_id";
+        }
         return deptIdFieldNames[0];
     }
 
@@ -384,7 +390,17 @@ public interface GXDataScopeService {
      * @return String 用户ID字段名
      */
     default String getUserIdFieldName(String[] userIdFieldNames) {
+        if (userIdFieldNames == null || userIdFieldNames.length == 0 || CharSequenceUtil.isBlank(userIdFieldNames[0])) {
+            return "user_id";
+        }
         return userIdFieldNames[0];
+    }
+
+    private String qualifyField(String tableAlias, String fieldName) {
+        if (CharSequenceUtil.isBlank(tableAlias)) {
+            return fieldName;
+        }
+        return CharSequenceUtil.format("{}.{}", tableAlias, fieldName);
     }
 
     /**
