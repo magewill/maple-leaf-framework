@@ -33,7 +33,7 @@ public class GXConditionFuncConcat extends GXConditionFunc<String> {
     public String whereString() {
         this.paramMap.clear();
         getFieldValue();
-        return CharSequenceUtil.format("{}({}) LIKE #{{dbQueryParamInnerDto.paramMap.{}}}",
+        return CharSequenceUtil.format("{}({}) LIKE #{dbQueryParamInnerDto.paramMap.{}}",
                 getFunctionName(), getFieldExpression(), paramName);
     }
 

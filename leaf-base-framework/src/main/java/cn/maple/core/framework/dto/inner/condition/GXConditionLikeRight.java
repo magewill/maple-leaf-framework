@@ -51,8 +51,8 @@ public class GXConditionLikeRight extends GXCondition<String> {
             throw new GXSqlInjectionException("检测到SQL注入风险：右模糊匹配条件含可疑内容");
         }
         String sql = CharSequenceUtil.isEmpty(tableNameAlias)
-                ? CharSequenceUtil.format("{} {} #{{dbQueryParamInnerDto.paramMap.{}}}", getFieldExpression(), getOp(), paramName)
-                : CharSequenceUtil.format("{}.{} {} #{{dbQueryParamInnerDto.paramMap.{}}}", tableNameAlias, getFieldExpression(), getOp(), paramName);
+                ? CharSequenceUtil.format("{} {} #{dbQueryParamInnerDto.paramMap.{}}", getFieldExpression(), getOp(), paramName)
+                : CharSequenceUtil.format("{}.{} {} #{dbQueryParamInnerDto.paramMap.{}}", tableNameAlias, getFieldExpression(), getOp(), paramName);
         Map<String, Object> params = new HashMap<>();
         params.put(paramName, value + "%");
         return new GXConditionSegment(sql, params);

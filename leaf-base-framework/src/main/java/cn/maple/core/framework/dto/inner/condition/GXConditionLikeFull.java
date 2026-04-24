@@ -50,8 +50,8 @@ public class GXConditionLikeFull extends GXCondition<String> {
             throw new GXSqlInjectionException("SQL注入异常");
         }
         String sql = CharSequenceUtil.isEmpty(tableNameAlias)
-                ? CharSequenceUtil.format("{} {} #{{dbQueryParamInnerDto.paramMap.{}}}", getFieldExpression(), getOp(), paramName)
-                : CharSequenceUtil.format("{}.{} {} #{{dbQueryParamInnerDto.paramMap.{}}}", tableNameAlias, getFieldExpression(), getOp(), paramName);
+                ? CharSequenceUtil.format("{} {} #{dbQueryParamInnerDto.paramMap.{}}", getFieldExpression(), getOp(), paramName)
+                : CharSequenceUtil.format("{}.{} {} #{dbQueryParamInnerDto.paramMap.{}}", tableNameAlias, getFieldExpression(), getOp(), paramName);
         Map<String, Object> params = new HashMap<>();
         params.put(paramName, "%" + value + "%");
         return new GXConditionSegment(sql, params);
