@@ -37,12 +37,11 @@ public class GXDataFilterInnerDto {
 
     /**
      * 获取SQL过滤条件
-     * 返回的SQL过滤条件会被特殊标记$$''$$包围，用于在SQL解析时识别
      *
      * @return 带特殊标记的SQL过滤条件
      */
     public String getSqlFilter() {
-        return "$$'" + sqlFilter + "'$$";
+        return sqlFilter;
     }
 
     /**
