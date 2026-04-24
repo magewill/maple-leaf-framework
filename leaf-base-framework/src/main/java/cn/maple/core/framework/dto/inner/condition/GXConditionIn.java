@@ -8,10 +8,16 @@ import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class GXConditionIn extends GXCondition<String> {
+    private static final int DEFAULT_IN_LIMIT_COUNT = 100000;
+    private static final int DEV_LOCAL_IN_LIMIT_COUNT = 50;
     private final Set<Number> numbers;
 
     public GXConditionIn(String tableNameAlias, String fieldName, Set<Number> value) {
@@ -26,22 +32,8 @@ public class GXConditionIn extends GXCondition<String> {
 
     @Override
     public String whereString() {
-        String activeProfile = GXCommonUtils.getActiveProfile();
-        int limitCnt = 100000;
-        List<String> envLst = CollUtil.newArrayList(GXCommonConstant.RUN_ENV_DEV, GXCommonConstant.RUN_ENV_LOCAL);
-        if (CollUtil.contains(envLst, activeProfile)) {
-            limitCnt = GXCommonUtils.getEnvironmentValue("db.in.limit.cnt", Integer.class, 50);
-        }
-        if (CollUtil.size(numbers) > limitCnt) {
-            throw new GXBusinessException(CharSequenceUtil.format("IN查询条件不能超过{}条数据!", limitCnt));
-        }
-        List<String> paramPlaceholders = new ArrayList<>();
-        int index = 0;
-        for (Number ignored : numbers) {
-            String itemParamName = paramName + "_" + index++;
-            paramPlaceholders.add("#{dbQueryParamInnerDto.paramMap." + itemParamName + "}");
-        }
-        String inClause = String.join(",", paramPlaceholders);
+        validateSize();
+        String inClause = String.join(",", buildParamPlaceholders());
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
             return CharSequenceUtil.format("{} {} ({})", getFieldExpression(), getOp(), inClause);
         }
@@ -51,46 +43,71 @@ public class GXConditionIn extends GXCondition<String> {
     @Override
     public String getFieldValue() {
         this.paramMap.clear();
-        int index = 0;
-        for (Number num : numbers) {
-            String itemParamName = paramName + "_" + index++;
-            this.paramMap.put(itemParamName, num);
-        }
+        this.paramMap.putAll(buildValidatedParams());
         return "";
     }
 
     @Override
     public String getFieldOriginalValue() {
-        String activeProfile = GXCommonUtils.getActiveProfile();
-        int limitCnt = 100000;
-        List<String> envLst = CollUtil.newArrayList(GXCommonConstant.RUN_ENV_DEV, GXCommonConstant.RUN_ENV_LOCAL);
-        if (CollUtil.contains(envLst, activeProfile)) {
-            limitCnt = GXCommonUtils.getEnvironmentValue("db.in.limit.cnt", Integer.class, 50);
-        }
-        if (CollUtil.size(value) > limitCnt) {
-            throw new GXBusinessException(CharSequenceUtil.format("IN查询条件不能超过{}条数据!", limitCnt));
-        }
-        String str = ((Set<Number>) value).stream().map(v -> {
-            if (v == null) {
-                return "NULL";
-            }
-            String numStr = String.valueOf(v);
-            if (GXDBStringEscapeUtils.check(numStr)) {
-                throw new GXSqlInjectionException("IN条件中的数值存在SQL注入风险: " + numStr);
-            }
-            return numStr;
+        validateSize();
+        String serialized = numbers.stream().map(v -> {
+            validateNumberValue(v);
+            return String.valueOf(v);
         }).collect(Collectors.joining(","));
-        return CharSequenceUtil.format("({})", str);
+        return CharSequenceUtil.format("({})", serialized);
     }
 
     @Override
     public GXConditionSegment toSegment() {
-        String sql = whereString();
+        return new GXConditionSegment(whereString(), buildValidatedParams());
+    }
+
+    private void validateSize() {
+        if (CollUtil.isEmpty(numbers)) {
+            throw new GXBusinessException("IN condition values must not be empty");
+        }
+        int limitCnt = resolveLimitCount();
+        if (numbers.size() > limitCnt) {
+            throw new GXBusinessException(CharSequenceUtil.format("IN condition values exceed limit: {}", limitCnt));
+        }
+    }
+
+    private int resolveLimitCount() {
+        String activeProfile = GXCommonUtils.getActiveProfile();
+        List<String> envList = List.of(GXCommonConstant.RUN_ENV_DEV, GXCommonConstant.RUN_ENV_LOCAL);
+        if (CollUtil.contains(envList, activeProfile)) {
+            return GXCommonUtils.getEnvironmentValue("db.in.limit.cnt", Integer.class, DEV_LOCAL_IN_LIMIT_COUNT);
+        }
+        return DEFAULT_IN_LIMIT_COUNT;
+    }
+
+    private List<String> buildParamPlaceholders() {
+        List<String> placeholders = new ArrayList<>();
+        int index = 0;
+        for (Number ignored : numbers) {
+            placeholders.add("#{dbQueryParamInnerDto.paramMap." + paramName + "_" + index++ + "}");
+        }
+        return placeholders;
+    }
+
+    private Map<String, Object> buildValidatedParams() {
+        validateSize();
         Map<String, Object> params = new HashMap<>();
         int index = 0;
-        for (Number num : numbers) {
-            params.put(paramName + "_" + index++, num);
+        for (Number number : numbers) {
+            validateNumberValue(number);
+            params.put(paramName + "_" + index++, number);
         }
-        return new GXConditionSegment(sql, params);
+        return params;
+    }
+
+    private static void validateNumberValue(Number number) {
+        if (number == null) {
+            throw new GXBusinessException("IN condition value item must not be null");
+        }
+        String numStr = String.valueOf(number);
+        if (GXDBStringEscapeUtils.check(numStr)) {
+            throw new GXSqlInjectionException(CharSequenceUtil.format("SQL injection risk detected in IN condition numeric value: {}", numStr));
+        }
     }
 }

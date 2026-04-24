@@ -8,10 +8,16 @@ import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class GXConditionStrNotIn extends GXCondition<String> {
+    private static final int DEFAULT_NOT_IN_LIMIT_COUNT = 100000;
+    private static final int DEV_LOCAL_NOT_IN_LIMIT_COUNT = 50;
     private final Set<String> values;
 
     public GXConditionStrNotIn(String tableNameAlias, String fieldName, Set<String> value) {
@@ -26,24 +32,8 @@ public class GXConditionStrNotIn extends GXCondition<String> {
 
     @Override
     public String whereString() {
-        String activeProfile = GXCommonUtils.getActiveProfile();
-        int limitCnt = 100000;
-        List<String> envLst = List.of(GXCommonConstant.RUN_ENV_DEV, GXCommonConstant.RUN_ENV_LOCAL);
-        if (CollUtil.contains(envLst, activeProfile)) {
-            limitCnt = GXCommonUtils.getEnvironmentValue("db.in.limit.cnt", Integer.class, 50);
-        }
-        if (values.size() > limitCnt) {
-            throw new GXBusinessException(CharSequenceUtil.format("NOT IN查询条件不能超过{}条数据", limitCnt));
-        }
-
-        List<String> paramPlaceholders = new ArrayList<>();
-        int index = 0;
-        for (String ignored : values) {
-            String itemParamName = paramName + "_" + index++;
-            paramPlaceholders.add("#{dbQueryParamInnerDto.paramMap." + itemParamName + "}");
-        }
-
-        String inClause = String.join(",", paramPlaceholders);
+        validateSize();
+        String inClause = String.join(",", buildParamPlaceholders());
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
             return CharSequenceUtil.format("{} {} ({})", getFieldExpression(), getOp(), inClause);
         }
@@ -53,53 +43,70 @@ public class GXConditionStrNotIn extends GXCondition<String> {
     @Override
     public String getFieldValue() {
         this.paramMap.clear();
-        int index = 0;
-        for (String str : values) {
-            if (GXDBStringEscapeUtils.check(str)) {
-                throw new GXSqlInjectionException("检测到SQL注入风险：包含可疑字符或SQL关键字");
-            }
-            String itemParamName = paramName + "_" + index++;
-            this.paramMap.put(itemParamName, str);
-        }
+        this.paramMap.putAll(buildValidatedParams());
         return "";
     }
 
     @Override
     public String getFieldOriginalValue() {
-        String activeProfile = GXCommonUtils.getActiveProfile();
-        int limitCnt = 100000;
-        List<String> envLst = CollUtil.newArrayList(GXCommonConstant.RUN_ENV_DEV, GXCommonConstant.RUN_ENV_LOCAL);
-        if (CollUtil.contains(envLst, activeProfile)) {
-            limitCnt = GXCommonUtils.getEnvironmentValue("db.in.limit.cnt", Integer.class, 50);
-        }
-        if (CollUtil.size(value) > limitCnt) {
-            throw new GXBusinessException(CharSequenceUtil.format("NOT IN查询条件不能超过{}条数据", limitCnt));
-        }
-        String str = ((Set<String>) value).stream().map(v -> {
-            if (GXDBStringEscapeUtils.check(v)) {
-                throw new GXSqlInjectionException("SQL注入异常");
-            }
-            String val = GXDBStringEscapeUtils.escapeRawString(v);
-            String format = "'{}'";
-            if (CharSequenceUtil.contains(val, "\\'")) {
-                format = "\"{}\"";
-            }
-            return CharSequenceUtil.format(format, val);
+        validateSize();
+        String serialized = values.stream().map(v -> {
+            validateStringValue(v);
+            return CharSequenceUtil.format("'{}'", GXDBStringEscapeUtils.escapeSql(v));
         }).collect(Collectors.joining(","));
-        return CharSequenceUtil.format("({})", str);
+        return CharSequenceUtil.format("({})", serialized);
     }
 
     @Override
     public GXConditionSegment toSegment() {
-        String sql = whereString();
+        return new GXConditionSegment(whereString(), buildValidatedParams());
+    }
+
+    private void validateSize() {
+        if (CollUtil.isEmpty(values)) {
+            throw new GXBusinessException("NOT IN condition values must not be empty");
+        }
+        int limitCnt = resolveLimitCount();
+        if (values.size() > limitCnt) {
+            throw new GXBusinessException(CharSequenceUtil.format("NOT IN condition values exceed limit: {}", limitCnt));
+        }
+    }
+
+    private int resolveLimitCount() {
+        String activeProfile = GXCommonUtils.getActiveProfile();
+        List<String> envList = List.of(GXCommonConstant.RUN_ENV_DEV, GXCommonConstant.RUN_ENV_LOCAL);
+        if (CollUtil.contains(envList, activeProfile)) {
+            return GXCommonUtils.getEnvironmentValue("db.in.limit.cnt", Integer.class, DEV_LOCAL_NOT_IN_LIMIT_COUNT);
+        }
+        return DEFAULT_NOT_IN_LIMIT_COUNT;
+    }
+
+    private List<String> buildParamPlaceholders() {
+        List<String> placeholders = new ArrayList<>();
+        int index = 0;
+        for (String ignored : values) {
+            placeholders.add("#{dbQueryParamInnerDto.paramMap." + paramName + "_" + index++ + "}");
+        }
+        return placeholders;
+    }
+
+    private Map<String, Object> buildValidatedParams() {
+        validateSize();
         Map<String, Object> params = new HashMap<>();
         int index = 0;
         for (String str : values) {
-            if (GXDBStringEscapeUtils.check(str)) {
-                throw new GXSqlInjectionException("检测到SQL注入风险：包含可疑字符或SQL关键字");
-            }
+            validateStringValue(str);
             params.put(paramName + "_" + index++, str);
         }
-        return new GXConditionSegment(sql, params);
+        return params;
+    }
+
+    private static void validateStringValue(String value) {
+        if (value == null) {
+            throw new GXBusinessException("NOT IN condition value item must not be null");
+        }
+        if (GXDBStringEscapeUtils.check(value)) {
+            throw new GXSqlInjectionException("SQL injection risk detected in NOT IN condition value");
+        }
     }
 }

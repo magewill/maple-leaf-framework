@@ -17,19 +17,18 @@ public class GXConditionRaw extends GXCondition<String> {
 
     private static String normalizeAndValidateRawSql(String raw) {
         if (CharSequenceUtil.isBlank(raw)) {
-            throw new GXSqlInjectionException("原始SQL条件不能为空");
+            throw new GXSqlInjectionException("Raw SQL condition must not be blank");
         }
         String normalized = raw.trim();
         if (GXDBStringEscapeUtils.check(normalized)) {
-            throw new GXSqlInjectionException("原始条件中检测到SQL注入风险");
+            throw new GXSqlInjectionException("SQL injection risk detected in raw SQL condition");
         }
-
         String lower = normalized.toLowerCase(Locale.ROOT);
         if (lower.contains(";") || lower.contains("--") || lower.contains("/*") || lower.contains("*/")) {
-            throw new GXSqlInjectionException("原始条件包含非法SQL控制符");
+            throw new GXSqlInjectionException("Raw SQL condition contains illegal SQL control symbols");
         }
         if (DANGEROUS_PATTERN.matcher(normalized).find()) {
-            throw new GXSqlInjectionException("原始条件包含危险SQL关键字");
+            throw new GXSqlInjectionException("Raw SQL condition contains dangerous SQL keywords");
         }
         return normalized;
     }

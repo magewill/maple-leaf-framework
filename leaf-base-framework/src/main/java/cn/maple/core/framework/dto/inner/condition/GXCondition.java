@@ -44,6 +44,10 @@ public abstract class GXCondition<T> implements Serializable {
             simplifiedName = "func" + Math.abs(fieldExpression.hashCode());
         } else {
             simplifiedName = CharSequenceUtil.toUnderlineCase(fieldExpression);
+            simplifiedName = simplifiedName.replaceAll("[^a-zA-Z0-9_]", "_");
+            if (CharSequenceUtil.isBlank(simplifiedName)) {
+                simplifiedName = "field";
+            }
         }
         return "condition_" + simplifiedName + "_" + PARAM_COUNTER.incrementAndGet();
     }

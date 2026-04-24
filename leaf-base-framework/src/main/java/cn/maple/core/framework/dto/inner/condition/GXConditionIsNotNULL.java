@@ -1,5 +1,9 @@
 package cn.maple.core.framework.dto.inner.condition;
 
+import cn.hutool.core.text.CharSequenceUtil;
+
+import java.util.Collections;
+
 public class GXConditionIsNotNULL extends GXCondition<Object> {
     public GXConditionIsNotNULL(String tableNameAlias, String fieldName, Object value) {
         super(tableNameAlias, fieldName, value);
@@ -22,5 +26,18 @@ public class GXConditionIsNotNULL extends GXCondition<Object> {
     @Override
     public Object getFieldOriginalValue() {
         return null;
+    }
+
+    @Override
+    public String whereString() {
+        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
+            return CharSequenceUtil.format("{} IS NOT NULL", getFieldExpression());
+        }
+        return CharSequenceUtil.format("{}.{} IS NOT NULL", tableNameAlias, getFieldExpression());
+    }
+
+    @Override
+    public GXConditionSegment toSegment() {
+        return new GXConditionSegment(whereString(), Collections.emptyMap());
     }
 }
