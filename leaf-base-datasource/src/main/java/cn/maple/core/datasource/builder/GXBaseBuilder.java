@@ -28,7 +28,6 @@ import org.apache.ibatis.jdbc.SQL;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.lang.reflect.Method;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -326,7 +325,7 @@ public interface GXBaseBuilder {
             }
         }
         if (CharSequenceUtil.isNotBlank(extraData.getStr("deletedBy")) && hasColumn(tableName, "deleted_by")) {
-            String deletedByParamName = CharSequenceUtil.format("deleted_by_{}", UUID.randomUUID().toString().replace("-", ""));
+            String deletedByParamName = CharSequenceUtil.format("deleted_by_{}", UUID.randomUUID().toString().substring(0, 8));
             sql.SET(CharSequenceUtil.format("deleted_by = #{{dbQueryParamInnerDto.paramMap.{}}}", deletedByParamName));
             dbQueryParamInnerDto.getParamMap().put(deletedByParamName, extraData.getStr("deletedBy"));
         }
@@ -454,12 +453,19 @@ public interface GXBaseBuilder {
             }
             String keyColumn = tableInfo.getKeyColumn();
             if (CharSequenceUtil.isBlank(keyColumn)) {
-                LOGGER.warn("Table [{}] fallback logical-delete field [is_deleted] requires primary key column, but got null.",
-                        tableInfo.getTableName());
-                return null;
+                LOGGER.warn("Table [{}] fallback logical-delete field [is_deleted] requires primary key column, but got null.", tableInfo.getTableName());
+                logicColumn = "is_deleted";
+                logicDeletedValue = "1";
+            } else {
+                if (!GXBaseBuilder.SAFE_IDENTIFIER_PATTERN.matcher(keyColumn).matches()) {
+                    LOGGER.warn("Table [{}] primary key column [{}] is not a safe identifier, fallback to '1'.", tableInfo.getTableName(), keyColumn);
+                    logicColumn = "is_deleted";
+                    logicDeletedValue = "1";
+                } else {
+                    logicColumn = "is_deleted";
+                    logicDeletedValue = keyColumn;
+                }
             }
-            logicColumn = "is_deleted";
-            logicDeletedValue = keyColumn;
         }
         String deletedValueSql;
         deletedValueSql = logicDeletedValue;
@@ -477,15 +483,8 @@ public interface GXBaseBuilder {
         if (Objects.isNull(tableInfo)) {
             return Optional.empty();
         }
-        try {
-            Method method = tableInfo.getClass().getMethod("getLogicDeleteFieldInfo");
-            Object result = method.invoke(tableInfo);
-            if (result instanceof TableFieldInfo info) {
-                return Optional.of(info);
-            }
-        } catch (Exception ignored) {
-        }
-        return Optional.empty();
+        TableFieldInfo fieldInfo = tableInfo.getLogicDeleteFieldInfo();
+        return Optional.ofNullable(fieldInfo);
     }
 
     private static String getLogicDeleteValue(TableInfo tableInfo) {
@@ -755,6 +754,9 @@ public interface GXBaseBuilder {
     }
 
     private static String sanitizeOrderBy(String column, String direction, Set<String> allowedColumns) {
+        if (CharSequenceUtil.isBlank(column)) {
+            throw new GXDBConditionException("ORDER BY column must not be blank");
+        }
         if (!CollUtil.safeContains(allowedColumns, column)) {
             LOGGER.error("排序字段不在被允许的字段中！！已经实时将排序字段加入到了允许字段中！！");
         }
@@ -847,6 +849,7 @@ public interface GXBaseBuilder {
             }
         } catch (Exception ignored) {
         }
+        LOGGER.error("Unable to resolve database type, please configure 'dbType' in GXDataSourceProperties");
         return "mysql";
     }
 }
