@@ -55,7 +55,6 @@ public interface GXBaseBuilder {
     Set<String> ORACLE_DIALECTS = Set.of("oracle");
     Pattern SQL_FUNCTION_PATTERN = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*\\s*\\(.*\\)$", Pattern.DOTALL);
 
-    // 已知 SQL 函数名与关键字，白名单校验时跳过这些标识符
     Set<String> SQL_FUNCTION_KEYWORDS = Set.of(
             "ifnull", "isnull", "coalesce", "nullif",
             "sum", "count", "avg", "min", "max",
@@ -69,7 +68,6 @@ public interface GXBaseBuilder {
             "varchar", "nvarchar", "int", "bigint", "decimal", "char", "text"
     );
 
-    // 从复合表达式中提取所有标识符（含 alias.column 格式）
     Pattern IDENTIFIER_IN_EXPR_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?");
 
     static String updateFieldByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> fieldList) {
@@ -652,23 +650,17 @@ public interface GXBaseBuilder {
         if (Objects.isNull(tableInfo)) {
             return false;
         }
-        String alias = CharSequenceUtil.isBlank(tableAlias) ? tableName : tableAlias;
-        List<String> columns = new ArrayList<>();
-        if (CharSequenceUtil.isNotBlank(tableInfo.getKeyColumn())) {
-            columns.add(CharSequenceUtil.toUnderlineCase(tableInfo.getKeyColumn()));
+        String keyColumn = tableInfo.getKeyColumn();
+        if (CharSequenceUtil.isNotBlank(keyColumn)) {
+            allowedColumns.add(keyColumn.toLowerCase(Locale.ROOT));
         }
         tableInfo.getFieldList().forEach(fieldInfo -> {
-            if (CharSequenceUtil.isNotBlank(fieldInfo.getColumn())) {
-                columns.add(CharSequenceUtil.toUnderlineCase(fieldInfo.getColumn()));
-            }
-            if (CharSequenceUtil.isNotBlank(fieldInfo.getProperty())) {
-                columns.add(CharSequenceUtil.toUnderlineCase(fieldInfo.getProperty()));
+            String column = fieldInfo.getColumn();
+            if (CharSequenceUtil.isNotBlank(column)) {
+                allowedColumns.add(column.toLowerCase(Locale.ROOT));
             }
         });
-        for (String column : columns) {
-            allowedColumns.add(column.toLowerCase(Locale.ROOT));
-            allowedColumns.add(CharSequenceUtil.format("{}.{}", alias, column).toLowerCase(Locale.ROOT));
-        }
+
         return true;
     }
 
@@ -717,8 +709,8 @@ public interface GXBaseBuilder {
 
     private static String sanitizeStructuralColumn(String column, Set<String> allowedColumns, String clauseName, boolean whitelistRequired) {
         String trimmed = CharSequenceUtil.trim(column);
-        if ("SELECT".equalsIgnoreCase(clauseName) && "*".equals(trimmed)) {
-            LOGGER.warn("SELECT field '*' is allowed for compatibility, please prefer explicit columns when possible.");
+        if ("SELECT".equalsIgnoreCase(clauseName) && CharSequenceUtil.containsAny(trimmed, "*")) {
+            LOGGER.error("SELECT field '*' is allowed for compatibility, please prefer explicit columns when possible.");
             return trimmed;
         }
         if (CharSequenceUtil.isBlank(trimmed)) {
@@ -763,6 +755,10 @@ public interface GXBaseBuilder {
     }
 
     private static String sanitizeOrderBy(String column, String direction, Set<String> allowedColumns) {
+        if (!CollUtil.safeContains(allowedColumns, column)) {
+            LOGGER.error("排序字段不在被允许的字段中！！已经实时将排序字段加入到了允许字段中！！");
+        }
+        CollUtil.addIfAbsent(allowedColumns, column);
         String safeColumn = sanitizeStructuralColumn(column, allowedColumns, "ORDER BY", true);
         String safeDirection = Optional.ofNullable(direction).map(CharSequenceUtil::trim).orElse("").toUpperCase(Locale.ROOT);
         if (!"ASC".equals(safeDirection) && !"DESC".equals(safeDirection)) {
