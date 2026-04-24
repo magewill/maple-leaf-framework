@@ -3,7 +3,9 @@ package cn.maple.core.datasource.service;
 import cn.maple.core.framework.dto.inner.GXValidateExistsDto;
 import jakarta.validation.ConstraintValidatorContext;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -117,6 +119,9 @@ public interface GXValidateDBExistsService {
      * @return CompletableFuture<Boolean> 异步验证结果，存在返回true，不存在返回false
      */
     default CompletableFuture<Boolean> validateExistsAsync(GXValidateExistsDto validateExistsDto) {
+        if (validateExistsDto == null) {
+            return CompletableFuture.completedFuture(false);
+        }
         return CompletableFuture.supplyAsync(() -> validateExists(validateExistsDto, null));
     }
 
@@ -136,8 +141,11 @@ public interface GXValidateDBExistsService {
      * @return List<Boolean> 验证结果列表，与输入列表顺序一致
      */
     default List<Boolean> validateExistsBatch(List<GXValidateExistsDto> validateExistsDtoList, ConstraintValidatorContext context) {
+        if (validateExistsDtoList == null || validateExistsDtoList.isEmpty()) {
+            return Collections.emptyList();
+        }
         return validateExistsDtoList.stream()
-                .map(dto -> validateExists(dto, context))
+                .map(dto -> Objects.nonNull(dto) && validateExists(dto, context))
                 .toList();
     }
 
@@ -159,6 +167,9 @@ public interface GXValidateDBExistsService {
      * @return boolean 存在返回true，不存在返回false
      */
     default boolean quickValidateExists(String tableName, String fieldName, Object value, ConstraintValidatorContext context) {
+        if (tableName == null || tableName.isBlank() || fieldName == null || fieldName.isBlank()) {
+            return false;
+        }
         GXValidateExistsDto dto = GXValidateExistsDto.builder()
                 .tableName(tableName)
                 .fieldName(fieldName)

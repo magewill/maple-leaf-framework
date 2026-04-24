@@ -7,7 +7,6 @@ import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.datasource.annotation.GXValidateDBExists;
 import cn.maple.core.datasource.service.GXValidateDBExistsService;
 import cn.maple.core.framework.dto.inner.GXValidateExistsDto;
-import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
@@ -225,16 +224,16 @@ public class GXValidateDBExistsValidator implements ConstraintValidator<GXValida
      * @param o                          被验证的值，不能为null
      * @param constraintValidatorContext 验证上下文，包含验证过程中的环境信息
      * @return boolean 验证通过返回true，否则返回false
-     * @throws GXBusinessException 当被验证的值为null或服务未正确初始化时抛出
      */
     @Override
     public boolean isValid(Object o, ConstraintValidatorContext constraintValidatorContext) {
         if (Objects.isNull(o)) {
-            throw new GXBusinessException(CharSequenceUtil.format("验证出错 , <{}>字段的值为<{}>", fieldName, null));
+            return true;
         }
 
         if (null == service) {
-            throw new GXBusinessException(CharSequenceUtil.format("字段<{}>的值<{}>需要指定相应的Service进行验证...", fieldName, o));
+            log.error("validateExists service is null, fieldName: {}, value: {}", fieldName, o);
+            return false;
         }
 
         // 构建验证DTO
@@ -242,6 +241,7 @@ public class GXValidateDBExistsValidator implements ConstraintValidator<GXValida
 
         // 如果启用缓存，尝试从缓存获取结果
         if (enableCache) {
+            cleanExpiredCache();
             String cacheKey = generateCacheKey(validateExistsDto);
             CacheEntry cacheEntry = RESULT_CACHE.get(cacheKey);
 
@@ -274,17 +274,21 @@ public class GXValidateDBExistsValidator implements ConstraintValidator<GXValida
      */
     private GXValidateExistsDto buildValidateExistsDto(Object value) {
         Dict conditionData = GXCommonUtils.convertStrToTarget("{" + condition + "}", Dict.class);
-        assert conditionData != null;
+        if (conditionData == null) {
+            conditionData = Dict.create();
+        }
 
         if (Dict.class.isAssignableFrom(value.getClass())) {
             Dict data = Convert.convert(Dict.class, value);
             conditionData.putAll(data);
         }
 
-        for (String dependOnField : dependOnFields) {
-            Object fieldValue = GXCurrentRequestContextUtils.getHttpParam(dependOnField, Object.class);
-            if (ObjectUtil.isNotEmpty(fieldValue)) {
-                conditionData.put(dependOnField, fieldValue);
+        if (dependOnFields != null) {
+            for (String dependOnField : dependOnFields) {
+                Object fieldValue = GXCurrentRequestContextUtils.getHttpParam(dependOnField, Object.class);
+                if (ObjectUtil.isNotEmpty(fieldValue)) {
+                    conditionData.put(dependOnField, fieldValue);
+                }
             }
         }
 
@@ -316,7 +320,7 @@ public class GXValidateDBExistsValidator implements ConstraintValidator<GXValida
                 .append(":")
                 .append(dto.getValue())
                 .append(":")
-                .append(dto.getCondition().hashCode());
+                .append(Objects.hashCode(dto.getCondition()));
 
         if (CharSequenceUtil.isNotEmpty(dto.getSpEL())) {
             keyBuilder.append(":")
