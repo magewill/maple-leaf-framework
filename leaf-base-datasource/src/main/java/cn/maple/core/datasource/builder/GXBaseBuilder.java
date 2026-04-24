@@ -108,7 +108,7 @@ public interface GXBaseBuilder {
         try {
             dbQueryParamInnerDto.setColumns(CollUtil.newLinkedHashSet("1"));
             String innerSql = findByCondition(dbQueryParamInnerDto);
-            return CharSequenceUtil.format("SELECT CASE WHEN EXISTS ({}) THEN 1 ELSE 0 END", innerSql);
+            return CharSequenceUtil.format("SELECT EXISTS ({})", innerSql);
         } finally {
             dbQueryParamInnerDto.setColumns(columnsSnapshot);
         }

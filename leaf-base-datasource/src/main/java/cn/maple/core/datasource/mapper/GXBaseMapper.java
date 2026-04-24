@@ -9,7 +9,13 @@ import cn.maple.core.framework.model.GXBaseModel;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
-import org.apache.ibatis.annotations.*;
+import org.apache.ibatis.annotations.DeleteProvider;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Result;
+import org.apache.ibatis.annotations.Results;
+import org.apache.ibatis.annotations.SelectProvider;
+import org.apache.ibatis.annotations.UpdateProvider;
 
 import java.util.List;
 
@@ -56,7 +62,7 @@ public interface GXBaseMapper<T extends GXBaseModel> extends BaseMapper<T> {
      * @throws cn.maple.core.framework.exception.GXBusinessException 当条件为空时抛出
      */
     @UpdateProvider(type = GXBaseBuilder.class, method = "updateFieldByCondition")
-    Integer updateFieldByCondition(@Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> fieldList);
+    Integer updateFieldByCondition(@Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto, @Param("fieldList") List<GXUpdateField<?>> fieldList);
 
     /**
      * 检查指定条件的记录是否存在
@@ -74,7 +80,7 @@ public interface GXBaseMapper<T extends GXBaseModel> extends BaseMapper<T> {
      * @return 存在返回非null整数值，不存在返回null
      */
     @SelectProvider(type = GXBaseBuilder.class, method = "checkRecordIsExists")
-    Integer checkRecordIsExists(@Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto);
+    Boolean checkRecordIsExists(@Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto);
 
     /**
      * 根据条件查询单条记录
@@ -170,7 +176,7 @@ public interface GXBaseMapper<T extends GXBaseModel> extends BaseMapper<T> {
      * @throws cn.maple.core.framework.exception.GXBusinessException 当条件为空时抛出
      */
     @UpdateProvider(type = GXBaseBuilder.class, method = "deleteSoftCondition")
-    Integer deleteSoftCondition(@Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> updateFieldList);
+    Integer deleteSoftCondition(@Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto, @Param("updateFieldList") List<GXUpdateField<?>> updateFieldList);
 
     /**
      * 根据条件物理删除记录
@@ -218,7 +224,7 @@ public interface GXBaseMapper<T extends GXBaseModel> extends BaseMapper<T> {
      */
     @SelectProvider(type = GXBaseBuilder.class, method = "unionFindOneByCondition")
     @Results(@Result(property = "ext", column = "ext", typeHandler = JacksonTypeHandler.class))
-    Dict unionFindOneByCondition(@Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums);
+    Dict unionFindOneByCondition(@Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto, @Param("unionQueryParamInnerDtoLst") List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, @Param("unionTypeEnums") GXUnionTypeEnums unionTypeEnums);
 
     /**
      * 联合查询多条记录
@@ -244,7 +250,7 @@ public interface GXBaseMapper<T extends GXBaseModel> extends BaseMapper<T> {
      */
     @SelectProvider(type = GXBaseBuilder.class, method = "unionFindByCondition")
     @Results(@Result(property = "ext", column = "ext", typeHandler = JacksonTypeHandler.class))
-    List<Dict> unionFindByCondition(@Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums);
+    List<Dict> unionFindByCondition(@Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto, @Param("unionQueryParamInnerDtoLst") List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, @Param("unionTypeEnums") GXUnionTypeEnums unionTypeEnums);
 
     /**
      * 联合查询分页记录
@@ -271,5 +277,5 @@ public interface GXBaseMapper<T extends GXBaseModel> extends BaseMapper<T> {
      */
     @SelectProvider(type = GXBaseBuilder.class, method = "unionPaginate")
     @Results(@Result(property = "ext", column = "ext", typeHandler = JacksonTypeHandler.class))
-    List<Dict> unionPaginate(IPage<Dict> page, @Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums);
+    List<Dict> unionPaginate(IPage<Dict> page, @Param("dbQueryParamInnerDto") GXBaseQueryParamInnerDto dbQueryParamInnerDto, @Param("unionQueryParamInnerDtoLst") List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, @Param("unionTypeEnums") GXUnionTypeEnums unionTypeEnums);
 }
