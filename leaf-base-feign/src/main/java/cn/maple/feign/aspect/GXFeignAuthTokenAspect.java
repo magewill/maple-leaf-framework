@@ -13,6 +13,8 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Before;
 import org.aspectj.lang.annotation.Pointcut;
 import org.aspectj.lang.reflect.MethodSignature;
+import org.springframework.aop.support.AopUtils;
+import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -240,9 +242,10 @@ public class GXFeignAuthTokenAspect {
     @Before("feignAuthTokenPointCut()")
     public void before(JoinPoint point) {
         MethodSignature signature = (MethodSignature) point.getSignature();
-        Method method = signature.getMethod();
-        GXHttpInvokerAuthToken httpInvokerAuthToken = method.getAnnotation(GXHttpInvokerAuthToken.class);
-        assert httpInvokerAuthToken != null;
+        GXHttpInvokerAuthToken httpInvokerAuthToken = getAuthTokenAnnotation(point, signature);
+        if (Objects.isNull(httpInvokerAuthToken)) {
+            return;
+        }
         String value = httpInvokerAuthToken.value();
         if (!CharSequenceUtil.equalsIgnoreCase(value, GXHttpInvokerConstant.FEIGN_INVOKER)) {
             return;
@@ -291,6 +294,29 @@ public class GXFeignAuthTokenAspect {
      * @param point 连接点
      * @return 格式化的方法签名字符串，格式为：类全限定名.方法名
      */
+    /**
+     * Resolve method-level annotations first, then class-level annotations.
+     */
+    private GXHttpInvokerAuthToken getAuthTokenAnnotation(JoinPoint point, MethodSignature signature) {
+        Method method = signature.getMethod();
+        Class<?> targetClass = Objects.nonNull(point.getTarget())
+                ? AopUtils.getTargetClass(point.getTarget())
+                : signature.getDeclaringType();
+        Method specificMethod = AopUtils.getMostSpecificMethod(method, targetClass);
+
+        GXHttpInvokerAuthToken annotation = AnnotationUtils.findAnnotation(specificMethod, GXHttpInvokerAuthToken.class);
+        if (Objects.nonNull(annotation)) {
+            return annotation;
+        }
+
+        annotation = AnnotationUtils.findAnnotation(method, GXHttpInvokerAuthToken.class);
+        if (Objects.nonNull(annotation)) {
+            return annotation;
+        }
+
+        return AnnotationUtils.findAnnotation(targetClass, GXHttpInvokerAuthToken.class);
+    }
+
     private String getMethodSignature(JoinPoint point) {
         String signatureKey = point.getSignature().toString();
         return METHOD_SIGNATURE_CACHE.computeIfAbsent(signatureKey, key -> {
