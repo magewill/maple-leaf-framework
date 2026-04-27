@@ -10,6 +10,8 @@ import org.apache.dubbo.common.extension.Activate;
 import org.apache.dubbo.rpc.*;
 import org.springframework.core.Ordered;
 
+import java.util.Objects;
+
 /**
  * Dubbo服务提供方的TraceId过滤器，负责在RPC调用链路中传递和管理TraceId
  * <p>
@@ -58,20 +60,7 @@ public class GXDubboServerTraceIdFilter implements Filter {
     public Result invoke(Invoker<?> invoker, Invocation invocation) throws RpcException {
         try {
             // 1. 获取TraceId，优先级：当前线程 > 服务端上下文 > 客户端上下文 > 新生成
-            String traceId = GXTraceIdContextUtils.getTraceId();
-            if (CharSequenceUtil.isEmpty(traceId)) {
-                // 尝试从服务端上下文获取
-                traceId = RpcContext.getServerAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
-                if (CharSequenceUtil.isEmpty(traceId)) {
-                    // 尝试从客户端上下文获取
-                    traceId = RpcContext.getClientAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
-                    // 如果仍然为空，则生成新的TraceId
-                    if (CharSequenceUtil.isEmpty(traceId)) {
-                        traceId = GXTraceIdContextUtils.generateTraceId();
-                        log.debug("在Dubbo服务端生成新的TraceId: {}", traceId);
-                    }
-                }
-            }
+            String traceId = resolveTraceId(invocation);
             
             // 2. 记录应用名称和TraceId，便于日志追踪
             String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class);
@@ -94,5 +83,35 @@ public class GXDubboServerTraceIdFilter implements Filter {
             // 注意：这里只清理ThreadLocal中的TraceId，不影响RPC上下文中的TraceId传递
             GXTraceIdContextUtils.removeTraceId();
         }
+    }
+
+    private String resolveTraceId(Invocation invocation) {
+        String traceId = GXTraceIdContextUtils.getTraceId();
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = getInvocationAttachment(invocation);
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = RpcContext.getServerAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = RpcContext.getClientAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = GXTraceIdContextUtils.generateTraceId();
+        log.debug("在Dubbo服务端生成新的TraceId: {}", traceId);
+        return traceId;
+    }
+
+    private String getInvocationAttachment(Invocation invocation) {
+        Object traceId = invocation.getObjectAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        if (Objects.isNull(traceId)) {
+            traceId = invocation.getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        }
+        return Objects.toString(traceId, null);
     }
 }

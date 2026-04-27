@@ -2,6 +2,7 @@ package cn.maple.dubbo.nacos.filter;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Dict;
+import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.http.HttpStatus;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSentinelFlowException;
@@ -15,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
+import java.util.Objects;
 
 /**
  * Dubbo服务提供方的异常处理过滤器，负责处理和转换RPC调用过程中产生的异常
@@ -80,26 +82,30 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
             try {
                 Throwable exception = appResponse.getException();
 
-                // 1. 处理Checked异常（非RuntimeException的Exception）
+                if (Objects.isNull(exception)) {
+                    return;
+                }
+
+                // 1. 处理Sentinel限流异常
+                // BlockException是Checked异常，必须在通用Checked异常分支之前处理。
+                if (isSentinelFlowException(exception)) {
+                    Dict data = Dict.create().set("methodName", invocation.getMethodName())
+                            .set("arguments", CollUtil.toList(invocation.getArguments()))
+                            .set("interfaceName", invoker.getInterface());
+                    exception = new GXSentinelFlowException("服务繁忙,请稍后重试!!", HttpStatus.HTTP_NOT_ACCEPTABLE, data, exception);
+                    appResponse.setException(exception);
+                    return;
+                }
+
+                // 2. 处理Checked异常（非RuntimeException的Exception）
                 // 对于Checked异常，直接抛出，不做处理，因为这类异常通常是业务预期内的异常
                 if (!(exception instanceof RuntimeException) && (exception instanceof Exception)) {
                     return;
                 }
 
-                // 2. 处理MyBatisSystemException异常
+                // 3. 处理MyBatisSystemException异常
                 // 对于MyBatis框架抛出的系统异常，直接返回，保留原始异常信息，便于定位数据库相关问题
-                if (exception.getClass().getCanonicalName().equalsIgnoreCase("org.mybatis.spring.MyBatisSystemException")) {
-                    return;
-                }
-
-                // 3. 处理Sentinel限流异常
-                // 当触发了Sentinel的限流规则时，将原始异常转换为GXSentinelFlowException，提供友好的错误提示
-                if (exception.getMessage().equals("SentinelBlockException: FlowException")) {
-                    Dict data = Dict.create().set("methodName", invocation.getMethodName())
-                            .set("arguments", CollUtil.toList(invocation.getArguments()))
-                            .set("interfaceName", invocation.getInvoker().getInterface());
-                    exception = new GXSentinelFlowException("服务繁忙,请稍后重试!!", HttpStatus.HTTP_NOT_ACCEPTABLE, data);
-                    appResponse.setException(exception);
+                if (CharSequenceUtil.equalsIgnoreCase(exception.getClass().getCanonicalName(), "org.mybatis.spring.MyBatisSystemException")) {
                     return;
                 }
 
@@ -115,7 +121,7 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
                     Method method = invoker.getInterface().getMethod(invocation.getMethodName(), invocation.getParameterTypes());
                     Class<?>[] exceptionClasses = method.getExceptionTypes();
                     for (Class<?> exceptionClass : exceptionClasses) {
-                        if (exception.getClass().equals(exceptionClass)) {
+                        if (exceptionClass.isAssignableFrom(exception.getClass())) {
                             return;
                         }
                     }
@@ -150,12 +156,28 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
                 // 10. 处理其他RuntimeException
                 // 对于不属于以上类别的RuntimeException，包装为GXBusinessException，提供友好的错误提示，同时隐藏实现细节
                 if (exception instanceof RuntimeException) {
-                    exception = new GXBusinessException("服务方出现错误,请联系服务方!!");
+                    exception = new GXBusinessException("服务方出现错误,请联系服务方!!", exception);
                 }
                 appResponse.setException(exception);
             } catch (Throwable e) {
                 logger.warn("[Dubbo服务调用出错]Fail to ExceptionFilter when called by " + RpcContext.getServiceContext().getRemoteHost() + ". service: " + invoker.getInterface().getName() + ", method: " + invocation.getMethodName() + ", exception: " + e.getClass().getName() + ": " + e.getMessage(), e);
             }
         }
+    }
+
+    private boolean isSentinelFlowException(Throwable exception) {
+        Throwable current = exception;
+        while (Objects.nonNull(current)) {
+            String className = current.getClass().getName();
+            String message = current.getMessage();
+            if (CharSequenceUtil.equals(className, "com.alibaba.csp.sentinel.slots.block.flow.FlowException")
+                    || CharSequenceUtil.equals(className, "com.alibaba.csp.sentinel.slots.block.BlockException")
+                    || CharSequenceUtil.contains(message, "SentinelBlockException: FlowException")
+                    || CharSequenceUtil.contains(message, "FlowException")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }

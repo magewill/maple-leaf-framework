@@ -10,6 +10,8 @@ import org.apache.dubbo.common.extension.Activate;
 import org.apache.dubbo.rpc.*;
 import org.springframework.core.Ordered;
 
+import java.util.Objects;
+
 /**
  * Dubbo客户端TraceId过滤器，负责在RPC调用链路中传递TraceId
  * <p>
@@ -58,16 +60,7 @@ public class GXDubboClientTraceIdFilter implements Filter {
             // 通过GXPenetrateAttachmentSelector设置的值可以通过以下方式获取
             // RpcContext.getCurrentServiceContext().getObjectAttachment(GXTraceIdContextUtils.TRACE_ID_KEY)
             // 在GXBaseRequestLoggingFilter中会设置该值
-            String traceId = GXTraceIdContextUtils.getTraceId();
-            if (CharSequenceUtil.isEmpty(traceId)) {
-                // 当该服务既是服务方又是消费方时，会在GXDubboServerTraceIdFilter设置该值
-                traceId = RpcContext.getClientAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
-                if (CharSequenceUtil.isEmpty(traceId)) {
-                    traceId = RpcContext.getServerAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
-                }
-                // 注意：与GXDubboServerTraceIdFilter不同，客户端过滤器不负责生成新的TraceId
-                // 如果此时traceId仍为空，表示链路起点未设置TraceId，将传递空值
-            }
+            String traceId = resolveTraceId(invocation);
 
             // 2. 记录应用名称和TraceId，便于日志追踪
             String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "UnknownApp");
@@ -92,5 +85,33 @@ public class GXDubboClientTraceIdFilter implements Filter {
         // 注意：与GXDubboServerTraceIdFilter不同，客户端过滤器不清理ThreadLocal
         // 因为客户端过滤器在调用完成后，可能还需要处理响应，此时仍需要TraceId
         // ThreadLocal的清理应由请求入口处（如Web过滤器）负责
+    }
+
+    private String resolveTraceId(Invocation invocation) {
+        String traceId = GXTraceIdContextUtils.getTraceId();
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = getInvocationAttachment(invocation);
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = RpcContext.getClientAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = RpcContext.getServerAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        return GXTraceIdContextUtils.generateTraceId();
+    }
+
+    private String getInvocationAttachment(Invocation invocation) {
+        Object traceId = invocation.getObjectAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        if (Objects.isNull(traceId)) {
+            traceId = invocation.getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        }
+        return Objects.toString(traceId, null);
     }
 }

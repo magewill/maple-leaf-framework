@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Dubbo附件选择器，负责在RPC调用链中传递TraceId等关键信息
@@ -74,17 +75,7 @@ public class GXPenetrateAttachmentSelector implements PenetrateAttachmentSelecto
         String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "UnknownApp");
         LOG.info("【{} --->> Dubbo Client Selector】进入select方法", appName);
         
-        // 1. 获取TraceId，优先级：当前线程 > 服务端上下文 > 新生成
-        String traceId = GXTraceIdContextUtils.getTraceId();
-        if (CharSequenceUtil.isEmpty(traceId)) {
-            // 尝试从服务端上下文获取
-            traceId = RpcContext.getServerAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
-            if (CharSequenceUtil.isEmpty(traceId)) {
-                // 如果仍然为空，则生成新的TraceId
-                traceId = GXTraceIdContextUtils.generateTraceId();
-                LOG.debug("在Dubbo客户端选择器中生成新的TraceId: {}", traceId);
-            }
-        }
+        String traceId = resolveTraceId(invocation, clientAttachment, serverAttachment);
         
         LOG.info("【{} --->> Dubbo Client Selector】选择传递TraceId: {}", appName, traceId);
         return Dict.create()
@@ -125,17 +116,7 @@ public class GXPenetrateAttachmentSelector implements PenetrateAttachmentSelecto
         String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "UnknownApp");
         LOG.info("【{} --->> Dubbo Server Selector】进入selectReverse方法", appName);
         
-        // 1. 获取TraceId，优先级：当前线程 > 服务端上下文 > 新生成
-        String traceId = GXTraceIdContextUtils.getTraceId();
-        if (CharSequenceUtil.isEmpty(traceId)) {
-            // 尝试从服务端上下文获取
-            traceId = RpcContext.getServerAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
-            if (CharSequenceUtil.isEmpty(traceId)) {
-                // 如果仍然为空，则生成新的TraceId
-                traceId = GXTraceIdContextUtils.generateTraceId();
-                LOG.debug("在Dubbo服务端选择器中生成新的TraceId: {}", traceId);
-            }
-        }
+        String traceId = resolveTraceId(invocation, clientResponseContext, serverResponseContext);
         
         // 如果服务作为中间服务，确保将TraceId传递回上游服务
         LOG.info("【{} --->> Dubbo Server Selector】选择传递TraceId: {}", appName, traceId);
@@ -143,5 +124,46 @@ public class GXPenetrateAttachmentSelector implements PenetrateAttachmentSelecto
                 .set("author", "塵子曦")
                 .set("SPC", "服务端")
                 .set(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
+    }
+
+    private String resolveTraceId(Invocation invocation, RpcContextAttachment clientAttachment, RpcContextAttachment serverAttachment) {
+        String traceId = GXTraceIdContextUtils.getTraceId();
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = getInvocationAttachment(invocation);
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = getAttachment(serverAttachment);
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = getAttachment(clientAttachment);
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = GXTraceIdContextUtils.generateTraceId();
+        LOG.debug("在Dubbo附件选择器中生成新的TraceId: {}", traceId);
+        return traceId;
+    }
+
+    private String getAttachment(RpcContextAttachment attachment) {
+        if (attachment == null) {
+            return null;
+        }
+        Object traceId = attachment.getObjectAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        if (Objects.isNull(traceId)) {
+            traceId = attachment.getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        }
+        return Objects.toString(traceId, null);
+    }
+
+    private String getInvocationAttachment(Invocation invocation) {
+        Object traceId = invocation.getObjectAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        if (Objects.isNull(traceId)) {
+            traceId = invocation.getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        }
+        return Objects.toString(traceId, null);
     }
 }

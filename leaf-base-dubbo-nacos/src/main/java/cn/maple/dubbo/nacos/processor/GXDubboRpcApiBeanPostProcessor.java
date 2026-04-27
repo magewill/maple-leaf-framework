@@ -1,6 +1,5 @@
 package cn.maple.dubbo.nacos.processor;
 
-import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
@@ -90,21 +89,37 @@ public class GXDubboRpcApiBeanPostProcessor implements BeanPostProcessor {
     @Override
     public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
         // 1. 检查Bean是否为Dubbo的ServiceBean类型
-        String className = bean.getClass().getName();
-        if (CharSequenceUtil.equals(className, ServiceBean.class.getName())) {
+        if (bean instanceof ServiceBean<?> serviceBean) {
             // 2. 获取ServiceBean中的实际RPC API实现类
-            Object realRpcApiTarget = ((ServiceBean<?>) bean).getRef();
+            Object realRpcApiTarget = serviceBean.getRef();
+            if (ObjectUtil.isNull(realRpcApiTarget)) {
+                log.warn("DUBBO RPC API: ServiceBean [{}] ref为空,跳过服务绑定", beanName);
+                return bean;
+            }
             
             // 3. 通过泛型分析获取该API应该绑定的业务服务类
             // 约定：RPC API实现类的第一个泛型参数为需要绑定的业务服务类
-            Class<?> targetService = GXCommonUtils.getGenericClassType(realRpcApiTarget.getClass(), 0);
+            Class<?> targetService;
+            try {
+                targetService = GXCommonUtils.getGenericClassType(realRpcApiTarget.getClass(), 0);
+            } catch (IllegalArgumentException e) {
+                log.warn("DUBBO RPC API: [{}] 泛型服务类型解析失败,跳过服务绑定", realRpcApiTarget.getClass().getName(), e);
+                return bean;
+            }
             if (ObjectUtil.isNull(targetService)) {
                 // 如果无法获取泛型类型，直接返回原始Bean
+                log.warn("DUBBO RPC API: [{}] 未声明可绑定的泛型服务类型,跳过服务绑定", realRpcApiTarget.getClass().getName());
                 return bean;
             }
             
             // 4. 从Spring容器中获取业务服务类的实例
-            Object targetServiceObject = GXSpringContextUtils.getBean(targetService);
+            Object targetServiceObject;
+            try {
+                targetServiceObject = GXSpringContextUtils.getBean(targetService);
+            } catch (BeansException e) {
+                log.warn("DUBBO RPC API: 未找到 [{}] 对应的Spring Bean,跳过服务绑定", targetService.getName(), e);
+                return bean;
+            }
             if (ObjectUtil.isNotNull(targetServiceObject)) {
                 // 5. 通过反射调用API实现类的绑定方法，将业务服务类与API关联
                 // 约定：RPC API实现类必须有一个名为staticBindServeServiceClass的方法，用于接收业务服务类

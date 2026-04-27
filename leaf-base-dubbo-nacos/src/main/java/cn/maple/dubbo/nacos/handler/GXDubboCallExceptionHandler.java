@@ -1,6 +1,7 @@
 package cn.maple.dubbo.nacos.handler;
 
 import cn.hutool.core.lang.Dict;
+import cn.hutool.http.HttpStatus;
 import cn.maple.core.framework.handler.GXExceptionHandler;
 import cn.maple.core.framework.exception.GXSentinelFlowException;
 import cn.maple.core.framework.util.GXResultUtils;
@@ -15,7 +16,7 @@ public class GXDubboCallExceptionHandler extends GXExceptionHandler {
     @ExceptionHandler(RpcException.class)
     public GXResultUtils<Dict> handleRpcException(RpcException e) {
         log.error(e.getMessage(), e);
-        return GXResultUtils.ok("服务端没有运行不正常,请联系运维人员!");
+        return GXResultUtils.error(HttpStatus.HTTP_INTERNAL_ERROR, "服务端运行异常,请联系运维人员");
     }
 
     @ExceptionHandler(GXSentinelFlowException.class)
