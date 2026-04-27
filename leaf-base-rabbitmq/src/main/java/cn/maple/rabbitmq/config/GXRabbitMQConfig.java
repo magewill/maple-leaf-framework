@@ -5,16 +5,20 @@ import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.rabbitmq.callback.GXConfirmCallback;
 import cn.maple.rabbitmq.callback.GXRecoveryCallback;
 import cn.maple.rabbitmq.callback.GXReturnsCallback;
+import cn.maple.rabbitmq.properties.GXRabbitMQProperties;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.AsyncRabbitTemplate;
 import org.springframework.amqp.rabbit.annotation.EnableRabbit;
+import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitMessagingTemplate;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.DefaultClassMapper;
 import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
+import org.springframework.boot.amqp.autoconfigure.RabbitProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.system.JavaVersion;
 import org.springframework.context.annotation.Bean;
@@ -27,6 +31,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.datatype.jsr310.JavaTimeModule;
 
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
@@ -85,6 +90,9 @@ public class GXRabbitMQConfig {
     @Resource
     private ConnectionFactory connectionFactory;
 
+    @Resource
+    private GXRabbitMQProperties rabbitProperties;
+
     /**
      * 创建虚拟线程池任务调度器
      * <p>
@@ -119,6 +127,26 @@ public class GXRabbitMQConfig {
         return scheduler;
     }
 
+    @PostConstruct
+    public void applyConnectionFactoryProperties() {
+        if (!(connectionFactory instanceof CachingConnectionFactory cachingConnectionFactory) || rabbitProperties == null) {
+            return;
+        }
+
+        if (rabbitProperties.getCacheMode() != null) {
+            cachingConnectionFactory.setCacheMode(rabbitProperties.getCacheMode());
+        }
+        if (rabbitProperties.getChannelCacheSize() != null) {
+            cachingConnectionFactory.setChannelCacheSize(rabbitProperties.getChannelCacheSize());
+        }
+        if (rabbitProperties.getConnectionLimit() != null) {
+            cachingConnectionFactory.setConnectionLimit(rabbitProperties.getConnectionLimit());
+        }
+        if (rabbitProperties.getChannelCheckoutTimeout() != null) {
+            cachingConnectionFactory.setChannelCheckoutTimeout(rabbitProperties.getChannelCheckoutTimeout());
+        }
+    }
+
     /**
      * 创建RabbitTemplate实例
      * <p>
@@ -148,6 +176,7 @@ public class GXRabbitMQConfig {
     public RabbitTemplate rabbitTemplate() {
         final RabbitTemplate rabbitTemplate = new RabbitTemplate();
         rabbitTemplate.setConnectionFactory(connectionFactory);
+        applyTemplateProperties(rabbitTemplate);
 
         // 配置消息转换器，提高安全性和性能
         DefaultClassMapper defaultClassMapper = new DefaultClassMapper();
@@ -173,7 +202,7 @@ public class GXRabbitMQConfig {
                     log.warn("消息路由失败: exchange={}, routingKey={}, replyCode={}, replyText={}, message={}",
                             returned.getExchange(), returned.getRoutingKey(),
                             returned.getReplyCode(), returned.getReplyText(),
-                            new String(returned.getMessage().getBody()));
+                            new String(returned.getMessage().getBody(), StandardCharsets.UTF_8));
                 }
             } catch (Exception e) {
                 log.error("处理消息返回回调时发生异常", e);
@@ -232,6 +261,33 @@ public class GXRabbitMQConfig {
     @Bean
     public RabbitAdmin rabbitAdmin() {
         return new RabbitAdmin(connectionFactory);
+    }
+
+    private void applyTemplateProperties(RabbitTemplate rabbitTemplate) {
+        if (rabbitProperties == null || rabbitProperties.getTemplate() == null) {
+            return;
+        }
+
+        RabbitProperties.Template template = rabbitProperties.getTemplate();
+        if (template.getMandatory() != null) {
+            rabbitTemplate.setMandatory(template.getMandatory());
+        }
+        if (template.getReceiveTimeout() != null) {
+            rabbitTemplate.setReceiveTimeout(template.getReceiveTimeout().toMillis());
+        }
+        if (template.getReplyTimeout() != null) {
+            rabbitTemplate.setReplyTimeout(template.getReplyTimeout().toMillis());
+        }
+        if (template.getExchange() != null) {
+            rabbitTemplate.setExchange(template.getExchange());
+        }
+        if (template.getRoutingKey() != null) {
+            rabbitTemplate.setRoutingKey(template.getRoutingKey());
+        }
+        if (template.getDefaultReceiveQueue() != null) {
+            rabbitTemplate.setDefaultReceiveQueue(template.getDefaultReceiveQueue());
+        }
+        rabbitTemplate.setObservationEnabled(template.isObservationEnabled());
     }
 
     /**

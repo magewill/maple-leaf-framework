@@ -1,5 +1,7 @@
 package cn.maple.rabbitmq.callback;
 
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+
 /**
  * RabbitMQ消息重试恢复回调接口
  * <p>
@@ -19,7 +21,8 @@ package cn.maple.rabbitmq.callback;
  *
  * @author maple
  */
-public interface GXRecoveryCallback {
+@FunctionalInterface
+public interface GXRecoveryCallback extends RabbitTemplate.RecoveryCallback {
     /**
      * 消息重试恢复回调方法
      * <p>
@@ -34,7 +37,7 @@ public interface GXRecoveryCallback {
      *
      * @param throwable 异常信息
      * @return 恢复操作的结果，可以为null
-     * @throws Exception 如果恢复过程中发生异常，可以抛出异常
      */
-    Object recover(Throwable throwable) throws Exception;
+    @Override
+    Object recover(Throwable throwable);
 }

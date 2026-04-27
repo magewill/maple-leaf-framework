@@ -1,6 +1,7 @@
 package cn.maple.rabbitmq.callback;
 
 import org.springframework.amqp.core.ReturnedMessage;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 /**
  * RabbitMQ消息返回回调接口
@@ -14,7 +15,8 @@ import org.springframework.amqp.core.ReturnedMessage;
  * 
  * @author maple
  */
-public interface GXReturnsCallback {
+@FunctionalInterface
+public interface GXReturnsCallback extends RabbitTemplate.ReturnsCallback {
     /**
      * 消息返回回调方法
      * <p>
@@ -24,5 +26,6 @@ public interface GXReturnsCallback {
      *
      * @param returned 返回的消息对象，包含消息内容、交换机、路由键和返回原因等信息
      */
+    @Override
     void returnedMessage(ReturnedMessage returned);
 }

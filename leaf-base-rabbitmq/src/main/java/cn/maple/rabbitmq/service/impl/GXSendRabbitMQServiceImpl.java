@@ -214,7 +214,7 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
      * 使用自定义的线程工厂，便于问题排查
      * 懒加载初始化，确保配置属性已被注入
      */
-    private ExecutorService rabbitMqAsyncExecutor;
+    private volatile ExecutorService rabbitMqAsyncExecutor;
     /**
      * RabbitMQ模板组件，用于发送消息
      * 由Spring自动注入，线程安全
@@ -326,6 +326,7 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
         } catch (AmqpConnectException e) {
             // 连接异常，可能是暂时性网络问题
             log.error("RabbitMQ连接异常，将进行重试: {}", e.getMessage());
+            throw e;
         } catch (AmqpException e) {
             log.error("消息发送失败 - 原因: {}", e.getMessage(), e);
             // 重新抛出异常，让调用者决定如何处理
@@ -363,6 +364,7 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
      * @param arguments  队列的其他属性，如消息TTL、死信交换机等
      * @return 创建的队列对象，如果创建失败则返回null
      */
+    @Override
     public Queue createQueue(String queueName, boolean durable, boolean exclusive, boolean autoDelete, Map<String, Object> arguments) {
         // 先检查缓存中是否已存在该队列
         if (queueCache.containsKey(queueName)) {
@@ -404,6 +406,7 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
      * @param queueName 队列名称
      * @return 创建的队列对象，如果创建失败则返回null
      */
+    @Override
     public Queue createDurableQueue(String queueName) {
         return createQueue(queueName, true, false, false, null);
     }
@@ -418,6 +421,7 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
      * @param queueName 队列名称
      * @return 创建的队列对象，如果创建失败则返回null
      */
+    @Override
     public Queue createTemporaryQueue(String queueName) {
         return createQueue(queueName, false, true, true, null);
     }
@@ -435,6 +439,7 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
      * @param queueName 要删除的队列名称
      * @return 如果队列存在并被成功删除则返回true，否则返回false
      */
+    @Override
     public boolean deleteQueue(String queueName) {
         try {
             queueOperationLock.lock();
@@ -737,56 +742,34 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
             return false;
         }
         try {
-            // 首先检查本地缓存，避免不必要的锁竞争
-            Boolean exists = queueCache.get(queueName);
-            if (Boolean.TRUE.equals(exists)) {
-                log.debug("队列已存在(缓存): {}", queueName);
-                return true;
-            }
-
-            // 双重检查锁定模式，减少锁竞争
-            if (exists == null) {
-                // 获取锁，确保线程安全
-                queueOperationLock.lock();
-                try {
-                    // 再次检查缓存，避免在等待锁期间其他线程已创建队列
-                    exists = queueCache.get(queueName);
-                    if (Boolean.TRUE.equals(exists)) {
-                        log.debug("队列已存在(锁内缓存): {}", queueName);
-                        return true;
-                    }
-
-                    // 1. 创建交换机
-                    boolean exchangeCreated = createExchange(exchange);
-                    if (!exchangeCreated) {
-                        log.error("消息通道创建失败: 无法创建交换机 {}", exchange.getName());
-                        return false;
-                    }
-
-                    // 2. 创建队列
-                    Queue queue = createQueue(queueName, durable, exclusive, autoDelete, queueArgs);
-                    if (queue == null) {
-                        log.error("消息通道创建失败: 无法创建队列 {}", queueName);
-                        return false;
-                    }
-
-                    // 3. 建立绑定关系
-                    boolean bindingCreated = bindQueueToExchange(queueName, exchange.getName(), routingKey);
-                    if (!bindingCreated) {
-                        log.error("消息通道创建失败: 无法建立绑定关系 队列[{}] -> 交换机[{}], 路由键[{}]",
-                                queueName, exchange.getName(), routingKey);
-                        return false;
-                    }
-
-                    log.info("成功创建完整消息通道: 队列[{}] -> 交换机[{}](类型:{}), 路由键[{}]",
-                            queueName, exchange.getName(), exchange.getType(), routingKey);
-
-                    // 更新缓存
-                    queueCache.put(queueName, true);
-                } finally {
-                    // 释放锁
-                    queueOperationLock.unlock();
+            queueOperationLock.lock();
+            try {
+                // 1. 创建交换机
+                boolean exchangeCreated = createExchange(exchange);
+                if (!exchangeCreated) {
+                    log.error("消息通道创建失败: 无法创建交换机 {}", exchange.getName());
+                    return false;
                 }
+
+                // 2. 创建队列
+                Queue queue = createQueue(queueName, durable, exclusive, autoDelete, queueArgs);
+                if (queue == null) {
+                    log.error("消息通道创建失败: 无法创建队列 {}", queueName);
+                    return false;
+                }
+
+                // 3. 建立绑定关系
+                boolean bindingCreated = bindQueueToExchange(queueName, exchange.getName(), routingKey);
+                if (!bindingCreated) {
+                    log.error("消息通道创建失败: 无法建立绑定关系 队列[{}] -> 交换机[{}], 路由键[{}]",
+                            queueName, exchange.getName(), routingKey);
+                    return false;
+                }
+
+                log.info("成功创建完整消息通道: 队列[{}] -> 交换机[{}](类型:{}), 路由键[{}]",
+                        queueName, exchange.getName(), exchange.getType(), routingKey);
+            } finally {
+                queueOperationLock.unlock();
             }
             return true;
         } catch (Exception e) {

@@ -1,6 +1,7 @@
 package cn.maple.rabbitmq.callback;
 
 import org.springframework.amqp.rabbit.connection.CorrelationData;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 /**
  * RabbitMQ消息发送确认回调接口
@@ -14,7 +15,8 @@ import org.springframework.amqp.rabbit.connection.CorrelationData;
  * 
  * @author maple
  */
-public interface GXConfirmCallback {
+@FunctionalInterface
+public interface GXConfirmCallback extends RabbitTemplate.ConfirmCallback {
     /**
      * 消息发送确认回调方法
      * <p>
@@ -25,5 +27,6 @@ public interface GXConfirmCallback {
      * @param ack             是否成功发送到交换机，true表示成功，false表示失败
      * @param cause           失败原因，当ack为false时提供，表示消息发送失败的原因
      */
+    @Override
     void confirm(CorrelationData correlationData, boolean ack, String cause);
 }

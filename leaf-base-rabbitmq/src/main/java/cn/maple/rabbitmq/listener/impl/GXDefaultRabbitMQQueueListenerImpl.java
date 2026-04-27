@@ -78,7 +78,7 @@ public class GXDefaultRabbitMQQueueListenerImpl implements GXRabbitMQQueueListen
      */
     @Override
     @RabbitHandler
-    @RabbitListener(queues = "#{T(cn.maple.core.framework.util.GXSpELToolUtils).callBeanMethodSpELExpression(Class.forName('cn.maple.rabbitmq.properties.GXRabbitMQProperties'), 'getDefaultQueueName', Class.forName('java.lang.String'), new Class[0])}")
+    @RabbitListener(queues = "${maple.framework.mq.rabbitmq.default-queue-name:${spring.rabbitmq.default-queue-name:${spring.rabbitmq.defaultQueueName:maple.default.queue}}}")
     public void process(Message data) {
         try {
             // 将消息体转换为字符串
