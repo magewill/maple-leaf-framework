@@ -1,22 +1,22 @@
 package cn.maple.seata.properties;
 
 import cn.maple.core.framework.factory.GXYamlPropertySourceFactory;
-import lombok.Data;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.PropertySource;
-import org.springframework.stereotype.Component;
 
 /**
- * 每个应用自定义的环境配置文件
+ * Loads local Seata configuration from the active profile directory.
  */
-@Data
-@Slf4j
-@Component
-@SuppressWarnings("all")
-@ConditionalOnMissingClass({"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
-@PropertySource(value = {"classpath:/${spring.profiles.active}/seata.yml"}, factory = GXYamlPropertySourceFactory.class, ignoreResourceNotFound = false)
+@Configuration(proxyBeanMethods = false)
+@ConditionalOnMissingClass("com.alibaba.cloud.nacos.NacosConfigManager")
+@PropertySource(
+        value = "classpath:/${spring.profiles.active}/seata.yml",
+        factory = GXYamlPropertySourceFactory.class,
+        encoding = "utf-8",
+        ignoreResourceNotFound = false
+)
 @ConfigurationProperties(prefix = "")
 public class GXLocalSeataProperties {
 }
