@@ -18,7 +18,9 @@ import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.stereotype.Component;
+import org.springframework.util.AntPathMatcher;
 import org.springframework.web.method.HandlerMethod;
 
 import java.util.Objects;
@@ -87,6 +89,8 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
      * </p>
      */
     private final AtomicReference<GXSSOHandler> handlerRef = new AtomicReference<>();
+
+    private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
     /**
      * URL白名单配置属性
@@ -167,26 +171,41 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
 
         // 检查URL是否在白名单中
         String requestURI = request.getRequestURI();
-        if (CollUtil.contains(urlWhiteListsConfigProperties.getWhiteLists(), requestURI)) {
+        if (isWhiteListUrl(requestURI)) {
             log.debug("URL在白名单中，跳过登录验证: {}", requestURI);
             return true;
         }
 
         // 检查方法是否有@GXIgnoreLoginIntercept注解
-        GXIgnoreLoginIntercept ignoreLoginIntercept = handlerMethod.getMethodAnnotation(GXIgnoreLoginIntercept.class);
+        GXIgnoreLoginIntercept ignoreLoginIntercept = AnnotatedElementUtils.findMergedAnnotation(handlerMethod.getMethod(), GXIgnoreLoginIntercept.class);
+        if (Objects.isNull(ignoreLoginIntercept)) {
+            ignoreLoginIntercept = AnnotatedElementUtils.findMergedAnnotation(handlerMethod.getBeanType(), GXIgnoreLoginIntercept.class);
+        }
         if (Objects.nonNull(ignoreLoginIntercept)) {
             log.debug("方法有@GXIgnoreLoginIntercept注解，跳过登录验证: {}", handlerMethod.getMethod().getName());
             return true;
         }
 
         // 检查方法是否有@GXHttpInvokerAuthToken注解
-        GXHttpInvokerAuthToken webClientAuthToken = handlerMethod.getMethodAnnotation(GXHttpInvokerAuthToken.class);
+        GXHttpInvokerAuthToken webClientAuthToken = AnnotatedElementUtils.findMergedAnnotation(handlerMethod.getMethod(), GXHttpInvokerAuthToken.class);
+        if (Objects.isNull(webClientAuthToken)) {
+            webClientAuthToken = AnnotatedElementUtils.findMergedAnnotation(handlerMethod.getBeanType(), GXHttpInvokerAuthToken.class);
+        }
         if (Objects.nonNull(webClientAuthToken)) {
             log.debug("方法有@GXHttpInvokerAuthToken注解，跳过登录验证: {}", handlerMethod.getMethod().getName());
             return true;
         }
 
         return false;
+    }
+
+    private boolean isWhiteListUrl(String requestURI) {
+        if (urlWhiteListsConfigProperties == null || CollUtil.isEmpty(urlWhiteListsConfigProperties.getWhiteLists())) {
+            return false;
+        }
+        return urlWhiteListsConfigProperties.getWhiteLists().stream()
+                .filter(Objects::nonNull)
+                .anyMatch(pattern -> pathMatcher.match(pattern, requestURI));
     }
 
     /**

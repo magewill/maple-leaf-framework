@@ -1,6 +1,7 @@
 package cn.maple.sso.service;
 
 import cn.hutool.core.convert.Convert;
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
@@ -207,14 +208,14 @@ public abstract class GXSSOSupportService {
         // 如果缓存组件存在则使用缓存中存储的token
         if (cache != null) {
             Dict requestToken = getSSOTokenFromCookie(request);
-            if (requestToken == null) {
+            if (CollUtil.isEmpty(requestToken)) {
                 // 未登录
                 log.info("SSO 用户未登录....");
                 return Dict.create();
             }
 
             Dict cacheToken = cache.get(getConfig().getCacheExpires(), requestToken);
-            if (cacheToken.isEmpty()) {
+            if (CollUtil.isEmpty(cacheToken)) {
                 // 开启缓存且失效，清除 Cookie 退出 , 返回 null
                 log.info("cacheSSOToken GXSsoToken is null.");
                 return Dict.create();
@@ -420,7 +421,7 @@ public abstract class GXSSOSupportService {
      */
     protected Cookie generateCookie(HttpServletRequest request, Dict token) {
         try {
-            Cookie cookie = new Cookie(getConfig().getCookieName(), token.getStr("token"));
+            Cookie cookie = new Cookie(getConfig().getCookieName(), token.getStr(getConfig().getTokenName()));
             cookie.setPath(getConfig().getCookiePath());
             cookie.setSecure(getConfig().isCookieSecure());
             // domain 提示

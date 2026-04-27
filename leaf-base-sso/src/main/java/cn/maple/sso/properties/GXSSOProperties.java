@@ -9,8 +9,10 @@ import cn.maple.sso.plugins.GXSSOPlugin;
 import cn.maple.sso.utils.GXSSOHelperUtil;
 import lombok.Data;
 import lombok.experimental.Accessors;
+import cn.hutool.core.text.CharSequenceUtil;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * <p>
@@ -172,11 +174,12 @@ public class GXSSOProperties {
      * @return String
      */
     public static String toCacheKey(Object userId) {
+        Objects.requireNonNull(userId, "userId must not be null");
         return "ssoTokenKey_" + userId;
     }
 
     public String getRsaCertStore() {
-        if (null == rsaCertStore) {
+        if (CharSequenceUtil.isBlank(rsaCertStore)) {
             throw new GXBusinessException("public.cert not found");
         }
         return rsaCertStore;
@@ -186,14 +189,14 @@ public class GXSSOProperties {
      * 签名密钥
      */
     public String getSignKey() {
-        if (null == this.signKey) {
+        if (CharSequenceUtil.isBlank(this.signKey)) {
             return "Janfv5UgKhoDrH73EZT7m+81pgqLN3EjWKXZtqF9lQHH9WruxqX0+FkQys6XK0QXzSUckseOAZGeQyvfreA3tw==";
         }
         return this.signKey;
     }
 
     public String getRsaJksStore() {
-        if (null == rsaJksStore) {
+        if (CharSequenceUtil.isBlank(rsaJksStore)) {
             throw new GXBusinessException("jwt.jks not found");
         }
         return rsaJksStore;

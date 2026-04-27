@@ -1,11 +1,14 @@
 package cn.maple.sso.service;
 
 import cn.hutool.core.lang.Dict;
+import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.constant.GXTokenConstant;
+import cn.maple.core.framework.util.GXAuthCodeUtils;
+import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.hutool.http.HttpStatus;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCookieHelperUtil;
-import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.sso.cache.GXSSOCache;
 import cn.maple.sso.enums.GXTokenFlag;
 import cn.maple.sso.plugins.GXSSOPlugin;
@@ -213,7 +216,7 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
     public boolean kickLogin(Object userId) {
         GXSSOCache cache = getConfig().getCache();
         if (cache != null) {
-            Dict ssoToken = getSSOToken(GXCurrentRequestContextUtils.getHttpServletRequest());
+            Dict ssoToken = Dict.create().set(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, userId);
             return cache.delete(ssoToken);
         } else {
             log.debug(" kickLogin! please implements GXSsoCache class.");
@@ -285,25 +288,37 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
             // cache 缓存宕机，flag 设置为失效
             GXSSOCache cache = getConfig().getCache();
             if (cache != null) {
+                boolean tokenProvided = CharSequenceUtil.isNotBlank(ssoToken.getStr(getConfig().getTokenName()));
                 // 添加额外安全信息，绑定用户环境信息防止会话劫持
                 ssoToken.put("createTime", System.currentTimeMillis());
                 ssoToken.put("userAgent", request.getHeader("User-Agent"));
                 ssoToken.put("ip", GXIpHelperUtil.getIpAddr(request));
 
                 // 合并现有Token信息，保留有用的状态数据
-                Dict cookieSSOToken = getSSOTokenFromCookie(GXCurrentRequestContextUtils.getHttpServletRequest());
+                Dict cookieSSOToken = getSSOTokenFromCookie(request);
                 if (cookieSSOToken != null && !cookieSSOToken.isEmpty()) {
+                    cookieSSOToken.putAll(ssoToken);
+                    ssoToken.clear();
                     ssoToken.putAll(cookieSSOToken);
                 }
+                if (!tokenProvided) {
+                    ssoToken.remove(getConfig().getTokenName());
+                }
+
+                fillTokenValueIfNecessary(ssoToken);
 
                 // 将Token同步到缓存，支持分布式会话管理
                 boolean rlt = cache.set(ssoToken, getConfig().getCacheExpires());
                 if (!rlt) {
                     // 缓存服务不可用时的降级处理
                     ssoToken.put("flag", GXTokenFlag.CACHE_SHUT.value());
+                    ssoToken.remove(getConfig().getTokenName());
+                    fillTokenValueIfNecessary(ssoToken);
                     log.warn("缓存服务不可用，Token将使用本地模式，可能影响分布式会话同步");
                 }
             }
+
+            fillTokenValueIfNecessary(ssoToken);
 
             // 生成安全的加密Cookie
             Cookie ck = this.generateCookie(request, ssoToken);
@@ -376,6 +391,24 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
             log.error("设置SSO Cookie时发生错误: {}", e.getMessage(), e);
             throw new GXBusinessException("设置登录Cookie失败，请稍后重试");
         }
+    }
+
+    private void fillTokenValueIfNecessary(Dict ssoToken) {
+        if (CharSequenceUtil.isNotBlank(ssoToken.getStr(getConfig().getTokenName()))) {
+            return;
+        }
+
+        GXTokenConfigService tokenConfigService = GXSpringContextUtils.getBean(GXTokenConfigService.class);
+        if (tokenConfigService == null) {
+            throw new GXBusinessException("未找到GXTokenConfigService实现类");
+        }
+
+        ssoToken.putIfAbsent(GXTokenConstant.LOGIN_AT_FIELD_NAME, System.currentTimeMillis() / 1000);
+        Dict tokenData = new Dict(ssoToken);
+        tokenData.remove(getConfig().getTokenName());
+        int expires = Math.max(getConfig().getCacheExpires(), 0);
+        ssoToken.set(getConfig().getTokenName(),
+                GXAuthCodeUtils.authCodeEncode(JSONUtil.toJsonStr(tokenData), tokenConfigService.getTokenSecret(), expires));
     }
 
     /**

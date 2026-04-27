@@ -115,7 +115,9 @@ public interface GXSSOPlugin {
      * @param response HTTP响应对象，可用于设置响应头或写入响应内容
      * @return 验证结果，true表示验证通过，false表示验证失败
      */
-    boolean login(HttpServletRequest request, HttpServletResponse response);
+    default boolean login(HttpServletRequest request, HttpServletResponse response) {
+        return true;
+    }
 
     /**
      * 登录后获取Token时调用该方法
@@ -153,5 +155,7 @@ public interface GXSSOPlugin {
      * @param response HTTP响应对象，可用于设置响应头或写入响应内容
      * @return 处理结果，true表示处理成功，false表示处理失败
      */
-    boolean logout(HttpServletRequest request, HttpServletResponse response);
+    default boolean logout(HttpServletRequest request, HttpServletResponse response) {
+        return true;
+    }
 }

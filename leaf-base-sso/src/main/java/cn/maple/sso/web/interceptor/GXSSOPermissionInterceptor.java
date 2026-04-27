@@ -2,10 +2,12 @@ package cn.maple.sso.web.interceptor;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Dict;
+import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.core.framework.web.interceptor.GXBaseSSOPermissionInterceptor;
 import cn.maple.sso.annotation.GXPermissionAnnotation;
+import cn.maple.sso.constant.GXSSOConstant;
 import cn.maple.sso.enums.GXAction;
 import cn.maple.sso.oauth.GXSSOAuthorization;
 import cn.maple.sso.properties.GXSSOProperties;
@@ -14,6 +16,7 @@ import cn.maple.sso.utils.GXSSOHelperUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 
@@ -126,7 +129,11 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
             // 获取当前请求的Token
             Dict tokenDict = GXSSOHelperUtil.attrToken(request);
             if (CollUtil.isEmpty(tokenDict)) {
-                return true; // Token为空，已经过登录拦截器验证，此处放行
+                tokenDict = GXSSOHelperUtil.getSSOToken(request);
+                if (CollUtil.isEmpty(tokenDict)) {
+                    return unauthorizedAccess(request, response);
+                }
+                request.setAttribute(GXSSOConstant.SSO_TOKEN_ATTR, tokenDict);
             }
 
             // 权限验证
@@ -171,15 +178,13 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
         // URL 权限认证
         if (GXSSOProperties.getInstance().isPermissionUri()) {
             String uri = request.getRequestURI();
-            if (uri == null || this.getAuthorization().isPermitted(token, uri)) {
-                return true; // URL权限验证通过
-            }
+            return uri != null && this.getAuthorization().isPermitted(token, uri);
         }
 
         // 注解权限认证
         HandlerMethod handlerMethod = (HandlerMethod) handler;
         Method method = handlerMethod.getMethod();
-        GXPermissionAnnotation pm = method.getAnnotation(GXPermissionAnnotation.class);
+        GXPermissionAnnotation pm = AnnotatedElementUtils.findMergedAnnotation(method, GXPermissionAnnotation.class);
 
         if (pm != null) {
             // 有注解的情况
@@ -187,7 +192,7 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
                 return true; // 注解指定跳过权限验证
             } else {
                 // 验证具体权限值
-                return !"".equals(pm.value()) && this.getAuthorization().isPermitted(token, pm.value());
+                return CharSequenceUtil.isNotBlank(pm.value()) && this.getAuthorization().isPermitted(token, pm.value());
             }
         } else {
             // 无注解情况下的处理

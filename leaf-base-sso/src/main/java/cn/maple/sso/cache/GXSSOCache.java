@@ -2,16 +2,15 @@ package cn.maple.sso.cache;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Dict;
-import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.http.HttpStatus;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.constant.GXTokenConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXTokenInvalidException;
 import cn.maple.core.framework.service.GXBaseCacheService;
-import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
+import cn.maple.sso.properties.GXSSOProperties;
 import cn.maple.sso.service.GXTokenConfigService;
 
 import java.util.Objects;
@@ -91,6 +90,9 @@ public interface GXSSOCache {
         if (GXCurrentRequestContextUtils.isRPC()) {
             return Dict.create();
         }
+        if (CollUtil.isEmpty(requestToken)) {
+            return Dict.create();
+        }
         // 获取Token配置服务
         GXTokenConfigService tokenConfigService = GXSpringContextUtils.getBean(GXTokenConfigService.class);
         if (tokenConfigService == null) {
@@ -160,7 +162,11 @@ public interface GXSSOCache {
         String cacheBucketName = tokenConfigService.getCacheBucketName();
         
         try {
-            cacheService.setCache(cacheBucketName, tokenCacheKey, JSONUtil.toJsonStr(ssoToken), expires, TimeUnit.SECONDS);
+            if (expires > 0) {
+                cacheService.setCache(cacheBucketName, tokenCacheKey, JSONUtil.toJsonStr(ssoToken), expires, TimeUnit.SECONDS);
+            } else {
+                cacheService.setCache(cacheBucketName, tokenCacheKey, JSONUtil.toJsonStr(ssoToken));
+            }
             return true;
         } catch (Exception e) {
             //log.error("存储Token到缓存时发生错误", e);
@@ -216,7 +222,7 @@ public interface GXSSOCache {
             Dict tmpToken = ssoToken;
             if (CollUtil.isEmpty(tmpToken)) {
                 String tokenSecret = tokenConfigService.getTokenSecret();
-                tmpToken = GXCurrentRequestContextUtils.getLoginCredentials(GXTokenConstant.TOKEN_NAME, tokenSecret);
+                tmpToken = GXCurrentRequestContextUtils.getLoginCredentials(GXSSOProperties.getInstance().getTokenName(), tokenSecret);
                 if (CollUtil.isEmpty(tmpToken)) {
                     return false; // 无法获取有效的Token
                 }
@@ -276,14 +282,8 @@ public interface GXSSOCache {
         }
         
         // 获取登录时间戳
-        Long cookieLoginAt = Optional.ofNullable(cookieSSOToken.getLong("loginAt")).orElse(0L);
-        Long cacheLoginAt = Optional.ofNullable(cacheSSOToken.getLong("loginAt")).orElse(1L);
-        
-        // 本地开发环境特殊处理
-        String activeProfile = GXCommonUtils.getActiveProfile();
-        if (CharSequenceUtil.equalsIgnoreCase(activeProfile, "local")) {
-            return true;
-        }
+        Long cookieLoginAt = Optional.ofNullable(cookieSSOToken.getLong(GXTokenConstant.LOGIN_AT_FIELD_NAME)).orElse(0L);
+        Long cacheLoginAt = Optional.ofNullable(cacheSSOToken.getLong(GXTokenConstant.LOGIN_AT_FIELD_NAME)).orElse(1L);
         
         // 比较登录时间戳是否一致
         return cookieLoginAt.equals(cacheLoginAt);

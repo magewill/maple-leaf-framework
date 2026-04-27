@@ -8,11 +8,7 @@ import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.NestedConfigurationProperty;
 import org.springframework.stereotype.Component;
-
-import java.util.Collections;
-import java.util.List;
 
 @Data
 @Slf4j
@@ -29,14 +25,7 @@ import java.util.List;
                 password = "${spring.cloud.nacos.password:${nacos.config.password:}}"))
 @ConfigurationProperties(prefix = "url")
 public class GXNacosUrlWhiteListsConfigProperties extends GXUrlWhiteListsConfigProperties {
-    @NestedConfigurationProperty
-    protected List<String> whiteLists = Collections.emptyList();
-
     public GXNacosUrlWhiteListsConfigProperties() {
         log.info("Url白名单的配置使用的是NACOS配置");
-    }
-
-    public List<String> getWhiteLists() {
-        return whiteLists;
     }
 }

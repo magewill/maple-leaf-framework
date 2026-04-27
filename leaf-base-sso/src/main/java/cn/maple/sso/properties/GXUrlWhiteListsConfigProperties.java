@@ -9,4 +9,8 @@ public class GXUrlWhiteListsConfigProperties {
     public List<String> getWhiteLists() {
         return whiteLists;
     }
+
+    public void setWhiteLists(List<String> whiteLists) {
+        this.whiteLists = whiteLists == null ? Collections.emptyList() : whiteLists;
+    }
 }

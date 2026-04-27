@@ -9,6 +9,7 @@ import cn.maple.core.framework.util.GXAuthCodeUtils;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.sso.cache.GXSSOCache;
+import cn.maple.sso.constant.GXSSOConstant;
 import cn.maple.sso.plugins.GXSSOPlugin;
 import cn.maple.sso.properties.GXSSOConfigProperties;
 import cn.maple.sso.properties.GXSSOProperties;
@@ -86,12 +87,12 @@ public class GXSSOHelperUtil {
      * SSO配置对象
      * 存储SSO系统的全局配置信息，采用单例模式
      */
-    protected static GXSSOProperties ssoConfig;
+    protected static volatile GXSSOProperties ssoConfig;
     /**
      * SSO服务处理对象
      * 负责执行具体的SSO业务逻辑，采用单例模式
      */
-    protected static GXAbstractSSOService ssoService;
+    protected static volatile GXAbstractSSOService ssoService;
 
     /**
      * 私有构造函数
@@ -137,23 +138,24 @@ public class GXSSOHelperUtil {
                 if (Objects.isNull(ssoConfig)) {
                     try {
                         // 为每个应用设置自己的配置信息
-                        if (Objects.nonNull(GXSpringContextUtils.getBean(GXSSOConfigProperties.class))) {
-                            ssoConfig = Objects.requireNonNull(GXSpringContextUtils.getBean(GXSSOConfigProperties.class)).getConfig();
+                        GXSSOConfigProperties configProperties = GXSpringContextUtils.getBean(GXSSOConfigProperties.class);
+                        if (Objects.nonNull(configProperties) && Objects.nonNull(configProperties.getConfig())) {
+                            ssoConfig = configProperties.getConfig();
                         } else {
                             ssoConfig = new GXSSOProperties();
                         }
                         
                         // 为每个应用配置自己的插件
                         Map<String, GXSSOPlugin> ssoPluginMap = GXSpringContextUtils.getBeans(GXSSOPlugin.class);
-                        if (!ssoPluginMap.isEmpty()) {
-                            List<GXSSOPlugin> plugins = new ArrayList<>();
-                            ssoPluginMap.forEach((key, val) -> plugins.add(val));
+                        if (ssoPluginMap != null && !ssoPluginMap.isEmpty()) {
+                            List<GXSSOPlugin> plugins = new ArrayList<>(ssoPluginMap.values());
                             ssoConfig.setPluginList(plugins);
                         }
                         
                         // 为每个应用配置自己的SsoCache实例
-                        if (Objects.nonNull(GXSpringContextUtils.getBean(GXSSOCache.class))) {
-                            ssoConfig.setCache(GXSpringContextUtils.getBean(GXSSOCache.class));
+                        GXSSOCache ssoCache = GXSpringContextUtils.getBean(GXSSOCache.class);
+                        if (Objects.nonNull(ssoCache)) {
+                            ssoConfig.setCache(ssoCache);
                         }
                     } catch (Exception e) {
                         LOGGER.error("初始化SSO配置时发生错误", e);
@@ -181,6 +183,7 @@ public class GXSSOHelperUtil {
      * @since 2021-09-17
      */
     public static GXSSOProperties setSsoConfig(GXSSOProperties ssoConfig) {
+        Objects.requireNonNull(ssoConfig, "ssoConfig must not be null");
         GXSSOHelperUtil.ssoConfig = ssoConfig;
         return GXSSOHelperUtil.ssoConfig;
     }
@@ -197,10 +200,11 @@ public class GXSSOHelperUtil {
      */
     public static GXAbstractSSOService getSSOService() {
         if (Objects.isNull(ssoService)) {
-            if (Objects.nonNull(GXSpringContextUtils.getBean(GXAbstractSSOService.class))) {
-                ssoService = GXSpringContextUtils.getBean(GXAbstractSSOService.class);
-            } else {
-                ssoService = new GXConfigurableAbstractSSOServiceImpl();
+            synchronized (GXSSOHelperUtil.class) {
+                if (Objects.isNull(ssoService)) {
+                    GXAbstractSSOService service = GXSpringContextUtils.getBean(GXAbstractSSOService.class);
+                    ssoService = Objects.nonNull(service) ? service : new GXConfigurableAbstractSSOServiceImpl();
+                }
             }
         }
         return ssoService;
@@ -374,10 +378,12 @@ public class GXSSOHelperUtil {
      */
     public static String getTokenCacheKey(HttpServletRequest request) {
         GXTokenConfigService tokenConfigService = GXSpringContextUtils.getBean(GXTokenConfigService.class);
-        assert tokenConfigService != null;
+        if (tokenConfigService == null) {
+            throw new GXBusinessException("未找到GXTokenConfigService实现类");
+        }
         String platform = Optional.ofNullable(request.getHeader(GXTokenConstant.PLATFORM)).orElse("");
         Dict data = Dict.create().set(GXTokenConstant.PLATFORM, platform);
-        Dict loginCredentials = GXCurrentRequestContextUtils.getLoginCredentials(GXTokenConstant.TOKEN_NAME, tokenConfigService.getTokenSecret());
+        Dict loginCredentials = GXCurrentRequestContextUtils.getLoginCredentials(getSSOConfig().getTokenName(), tokenConfigService.getTokenSecret());
         Long userId = Optional.ofNullable(loginCredentials.getLong(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME)).orElse(0L);
         return tokenConfigService.getTokenCacheKey(userId, data);
     }
@@ -516,7 +522,7 @@ public class GXSSOHelperUtil {
             
             // 添加IP信息用于安全验证
             String clientIP = GXCurrentRequestContextUtils.getClientIP();
-            requestToken.put("ip", clientIP);
+            requestToken.putIfAbsent(GXSSOConstant.TOKEN_USER_IP, clientIP);
             
             // 记录脱敏后的Token信息
             Dict logToken = new Dict(requestToken);

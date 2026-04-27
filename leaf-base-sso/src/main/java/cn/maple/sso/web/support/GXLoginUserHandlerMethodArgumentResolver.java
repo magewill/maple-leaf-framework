@@ -8,6 +8,7 @@ import cn.maple.core.framework.util.GXAuthCodeUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.core.framework.web.support.GXCustomerHandlerMethodArgumentResolver;
 import cn.maple.sso.annotation.GXLoginUserAnnotation;
+import cn.maple.sso.constant.GXSSOConstant;
 import cn.maple.sso.dto.GXUserInfoDto;
 import cn.maple.sso.service.GXUUserService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -53,7 +54,7 @@ public class GXLoginUserHandlerMethodArgumentResolver implements GXCustomerHandl
         /*return parameter.getParameterType().getSuperclass().isAssignableFrom(GXUUserEntity.class)
                 && parameter.hasParameterAnnotation(GXLoginUserAnnotation.class);*/
         return parameter.hasParameterAnnotation(GXLoginUserAnnotation.class) &&
-                parameter.getParameterType().getSuperclass().isAssignableFrom(GXUserInfoDto.class);
+                GXUserInfoDto.class.isAssignableFrom(parameter.getParameterType());
     }
 
     /**
@@ -84,6 +85,13 @@ public class GXLoginUserHandlerMethodArgumentResolver implements GXCustomerHandl
         // 首先尝试从请求属性中获取用户ID
         Object object = request.getAttribute(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, RequestAttributes.SCOPE_REQUEST);
 
+        if (object == null) {
+            Object ssoToken = request.getAttribute(GXSSOConstant.SSO_TOKEN_ATTR, RequestAttributes.SCOPE_REQUEST);
+            if (ssoToken instanceof Dict tokenData) {
+                object = tokenData.getObj(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME);
+            }
+        }
+
         // 如果请求属性中没有用户ID，则尝试从请求头中获取
         if (object == null) {
             final String header = request.getHeader(GXTokenConstant.USER_TOKEN_NAME);
@@ -106,6 +114,9 @@ public class GXLoginUserHandlerMethodArgumentResolver implements GXCustomerHandl
 
         // 转换用户ID为Long类型
         Long userId = Convert.toLong(object);
+        if (userId == null) {
+            return null;
+        }
 
         // 通过用户服务获取完整的用户信息
         GXUUserService userService = GXSpringContextUtils.getBean(GXUUserService.class);

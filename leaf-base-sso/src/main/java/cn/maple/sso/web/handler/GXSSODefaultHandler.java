@@ -189,6 +189,8 @@ public class GXSSODefaultHandler implements GXSSOHandler, Serializable {
                     .set("data", null);
 
             // 设置响应内容类型并写入响应
+            response.setStatus(HttpStatus.HTTP_UNAUTHORIZED);
+            response.setCharacterEncoding(StandardCharsets.UTF_8.name());
             response.setContentType(JSON_CONTENT_TYPE);
             response.getWriter().write(JSONUtil.toJsonStr(data, getJsonConfig()));
         } catch (IOException e) {
