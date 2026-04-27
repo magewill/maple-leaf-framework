@@ -1,6 +1,7 @@
 redisson:
-  config:
-    singleServerConfig:
-      address: "redis://192.168.56.101:6379"
-      password: britton
-      database: 10
+  mq:
+    config:
+      singleServerConfig:
+        address: "redis://192.168.56.101:6379"
+        password: britton
+        database: 10

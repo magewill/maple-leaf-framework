@@ -2,19 +2,21 @@ package cn.maple.redisson.listener;
 
 import org.springframework.beans.factory.DisposableBean;
 
+/**
+ * Contract for beans that register Redisson reliable-topic listeners.
+ */
 public interface GXRedissonMQListener extends DisposableBean {
     /**
-     * 在这个方法这中添加监听redis发布的主题
-     * 进行自己的业务逻辑处理
-     * {@code
-     * RReliableTopic reliableTopic = redissonClient.getReliableTopic("topic");
-     * reliableTopic.addListener(Object.class, new MessageListener<Object>() {
-     *
-     * @Override public void onMessage(CharSequence channel, Object msg) {
-     * System.out.println("topic msg" + JSONUtil.toJsonStr(msg));
-     * }
-     * });
-     * }
+     * Register Redisson listeners for this bean.
      */
     void registerRedissonListener();
+
+    /**
+     * Business listeners rarely need their own destroy hook. The post processor
+     * unregisters subscriptions recorded through GXRedissonMQUtils.
+     */
+    @Override
+    default void destroy() {
+        // no-op
+    }
 }

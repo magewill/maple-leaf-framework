@@ -1,29 +1,30 @@
 package cn.maple.redisson.annotation;
 
-import java.lang.annotation.*;
+import java.lang.annotation.Documented;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 
 /**
- * 转换Redisson的延迟队列数据到Redisson的ReliableTopic
- * Redisson的ReliableTopic是基于redis的Stream数据结构实现的
+ * Forwards expired Redisson delayed-queue messages to a Redisson reliable topic.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
 public @interface GXRedissonDelayMQToTopic {
     /**
-     * 延迟队列的名字
-     * 该队列只是使用来存储延迟的数据
+     * Name of the blocking queue that receives expired delayed messages.
      */
     String delayQueueName();
 
     /**
-     * 投递消息的topic
-     * 防止业务逻辑出错导致消息丢失
+     * Target reliable topic name.
      */
     String topicName();
 
     /**
-     * 从消息队列中取消息等待的超时时间
+     * Poll timeout in seconds when waiting for expired messages.
      */
     int timeout() default 1800;
 }
