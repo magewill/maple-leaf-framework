@@ -9,6 +9,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.log4j.Log4j2;
 import org.apache.rocketmq.client.producer.SendCallback;
 import org.apache.rocketmq.client.producer.SendResult;
+import org.apache.rocketmq.client.producer.SendStatus;
 import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.apache.rocketmq.spring.support.RocketMQHeaders;
 import org.springframework.messaging.Message;
@@ -126,25 +127,18 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
      */
     @Override
     public void sendNormalMessage(GXRocketMQMessageReqDto messageReqDto) {
-        // 参数校验，防止空指针异常
-        Objects.requireNonNull(messageReqDto, "消息对象不能为空");
-        Objects.requireNonNull(messageReqDto.getBody(), "消息内容不能为空");
-
-        log.info("发送普通消息开始，主题: {}, 标签: {}", messageReqDto.getTopic(), messageReqDto.getTag());
         try {
-            // 获取消息唯一标识Key
-            String messageKey = messageReqDto.getMessageKey();
-            // 使用Builder模式构建消息，更安全且易于扩展
-            MessageBuilder<String> messageBuilder = MessageBuilder.withPayload(messageReqDto.getBody());
-            // 设置消息Key，便于消息追踪
-            if (CharSequenceUtil.isNotEmpty(messageKey)) {
-                messageBuilder.setHeader(RocketMQHeaders.KEYS, messageKey);
-            }
-            Message<String> message = messageBuilder.build();
+            Message<String> message = buildMessage(messageReqDto);
+            String destination = getDestination(messageReqDto);
+
+            log.info("发送普通消息开始，主题: {}, 标签: {}", messageReqDto.getTopic(), messageReqDto.getTag());
             // 发送消息到指定目标
-            rocketMQTemplate.send(getDestination(messageReqDto), message);
+            SendResult sendResult = rocketMQTemplate.syncSend(destination, message);
+            checkSendResult("普通消息", sendResult);
             // 避免在日志中记录完整消息内容，可能包含敏感信息
-            log.info("普通消息发送成功，消息ID: {}", messageKey);
+            log.info("普通消息发送成功，消息ID: {}", sendResult.getMsgId());
+        } catch (GXBusinessException e) {
+            throw e;
         } catch (Exception e) {
             // 捕获并记录所有可能的异常
             log.error("普通消息发送失败: {}", e.getMessage(), e);
@@ -183,39 +177,30 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
      */
     @Override
     public String sendDelayMessage(GXRocketMQMessageReqDto messageReqDto) {
-        // 参数校验，防止空指针异常
-        Objects.requireNonNull(messageReqDto, "消息对象不能为空");
-        Objects.requireNonNull(messageReqDto.getBody(), "消息内容不能为空");
-
-        // 验证延迟时间的有效性
-        if (messageReqDto.getDeliverTime() <= 0) {
-            throw new GXBusinessException("延迟时间必须大于0秒");
-        }
-
-        log.info("发送延时消息开始，主题: {}, 标签: {}, 延迟: {}秒",
-                messageReqDto.getTopic(), messageReqDto.getTag(), messageReqDto.getDeliverTime());
         try {
+            Message<String> message = buildMessage(messageReqDto);
+            // 验证延迟时间的有效性
+            if (messageReqDto.getDeliverTime() <= 0) {
+                throw new GXBusinessException("延迟时间必须大于0秒");
+            }
+            String destination = getDestination(messageReqDto);
+
+            log.info("发送延时消息开始，主题: {}, 标签: {}, 延迟: {}秒",
+                    messageReqDto.getTopic(), messageReqDto.getTag(), messageReqDto.getDeliverTime());
             // 处理消息到时的绝对时间（毫秒），使用long避免整数溢出
             long deliveryTimeMills = System.currentTimeMillis() + messageReqDto.getDeliverTime() * 1000L;
 
-            // 获取消息唯一标识Key
-            String messageKey = messageReqDto.getMessageKey();
-            // 使用Builder模式构建消息，更安全且易于扩展
-            MessageBuilder<String> messageBuilder = MessageBuilder.withPayload(messageReqDto.getBody());
-            // 设置消息Key，便于消息追踪
-            if (CharSequenceUtil.isNotEmpty(messageKey)) {
-                messageBuilder.setHeader(RocketMQHeaders.KEYS, messageKey);
-            }
-            Message<String> message = messageBuilder.build();
-
             // 发送延迟消息，指定投递时间
             SendResult sendResult = rocketMQTemplate.syncSendDeliverTimeMills(
-                    getDestination(messageReqDto), message, deliveryTimeMills);
+                    destination, message, deliveryTimeMills);
+            checkSendResult("延迟消息", sendResult);
 
             // 记录成功信息，但不记录完整消息内容
             log.info("延迟消息发送完毕，消息ID: {}, 投递时间: {}", sendResult.getMsgId(),
                     deliveryTimeMills);
             return sendResult.getMsgId();
+        } catch (GXBusinessException e) {
+            throw e;
         } catch (Exception e) {
             // 捕获并记录所有可能的异常
             log.error("延迟消息发送失败: {}", e.getMessage(), e);
@@ -258,28 +243,21 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
      */
     @Override
     public boolean syncSend(GXRocketMQMessageReqDto messageReqDto) {
-        // 参数校验，防止空指针异常
-        Objects.requireNonNull(messageReqDto, "消息对象不能为空");
-        Objects.requireNonNull(messageReqDto.getBody(), "消息内容不能为空");
-
-        log.info("同步发送消息开始，主题: {}, 标签: {}", messageReqDto.getTopic(), messageReqDto.getTag());
         try {
+            Message<String> message = buildMessage(messageReqDto);
             // 获取目标地址
             String destination = getDestination(messageReqDto);
 
-            // 构建消息
-            String messageKey = messageReqDto.getMessageKey();
-            MessageBuilder<String> messageBuilder = MessageBuilder.withPayload(messageReqDto.getBody());
-            if (CharSequenceUtil.isNotEmpty(messageKey)) {
-                messageBuilder.setHeader(RocketMQHeaders.KEYS, messageKey);
-            }
-            Message<String> message = messageBuilder.build();
+            log.info("同步发送消息开始，主题: {}, 标签: {}", messageReqDto.getTopic(), messageReqDto.getTag());
 
             // 同步发送消息，会阻塞等待服务器响应
             SendResult sendResult = rocketMQTemplate.syncSend(destination, message);
+            checkSendResult("同步消息", sendResult);
             // 记录成功信息，但不记录完整消息内容
             log.info("同步发送消息成功，消息ID: {}", sendResult.getMsgId());
             return true;
+        } catch (GXBusinessException e) {
+            throw e;
         } catch (Exception e) {
             // 捕获并记录所有可能的异常
             log.error("同步发送消息失败: {}", e.getMessage(), e);
@@ -324,26 +302,23 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
      */
     @Override
     public boolean sendAsync(GXRocketMQMessageReqDto messageReqDto) {
-        // 参数校验，防止空指针异常
-        Objects.requireNonNull(messageReqDto, "消息对象不能为空");
-        Objects.requireNonNull(messageReqDto.getBody(), "消息内容不能为空");
-
-        log.info("异步发送消息开始，主题: {}, 标签: {}", messageReqDto.getTopic(), messageReqDto.getTag());
         try {
-            // 构建消息
-            String messageKey = messageReqDto.getMessageKey();
-            MessageBuilder<String> messageBuilder = MessageBuilder.withPayload(messageReqDto.getBody());
-            if (CharSequenceUtil.isNotEmpty(messageKey)) {
-                messageBuilder.setHeader(RocketMQHeaders.KEYS, messageKey);
-            }
-            Message<String> message = messageBuilder.build();
+            Message<String> message = buildMessage(messageReqDto);
+            String destination = getDestination(messageReqDto);
+
+            log.info("异步发送消息开始，主题: {}, 标签: {}", messageReqDto.getTopic(), messageReqDto.getTag());
 
             // 异步发送消息，通过回调函数处理发送结果
             final String topic = messageReqDto.getTopic(); // 捕获外部变量，避免在回调中直接引用messageReqDto
             final String tag = messageReqDto.getTag();
-            rocketMQTemplate.asyncSend(getDestination(messageReqDto), message, new SendCallback() {
+            rocketMQTemplate.asyncSend(destination, message, new SendCallback() {
                 @Override
                 public void onSuccess(SendResult sendResult) {
+                    if (!isSendOk(sendResult)) {
+                        log.error("异步消息发送状态异常，主题: {}, 标签: {}, 状态: {}, 消息ID: {}",
+                                topic, tag, getSendStatus(sendResult), sendResult == null ? null : sendResult.getMsgId());
+                        return;
+                    }
                     // 记录成功信息，但不记录完整消息内容
                     log.info("异步消息发送成功，主题: {}, 标签: {}, 消息ID: {}",
                             topic, tag, sendResult.getMsgId());
@@ -359,6 +334,8 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
 
             log.info("异步消息发送请求已提交");
             return true;
+        } catch (GXBusinessException e) {
+            throw e;
         } catch (Exception e) {
             // 捕获并记录所有可能的异常
             log.error("异步消息发送请求提交失败: {}", e.getMessage(), e);
@@ -403,27 +380,21 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
      */
     @Override
     public boolean sendOneway(GXRocketMQMessageReqDto messageReqDto) {
-        // 参数校验，防止空指针异常
-        Objects.requireNonNull(messageReqDto, "消息对象不能为空");
-        Objects.requireNonNull(messageReqDto.getBody(), "消息内容不能为空");
-
-        log.info("发送单向消息开始，主题: {}, 标签: {}", messageReqDto.getTopic(), messageReqDto.getTag());
         try {
-            // 构建消息
-            String messageKey = messageReqDto.getMessageKey();
-            MessageBuilder<String> messageBuilder = MessageBuilder.withPayload(messageReqDto.getBody());
-            if (CharSequenceUtil.isNotEmpty(messageKey)) {
-                messageBuilder.setHeader(RocketMQHeaders.KEYS, messageKey);
-            }
-            Message<String> message = messageBuilder.build();
+            Message<String> message = buildMessage(messageReqDto);
+            String destination = getDestination(messageReqDto);
+
+            log.info("发送单向消息开始，主题: {}, 标签: {}", messageReqDto.getTopic(), messageReqDto.getTag());
 
             // 发送单向消息，不关心发送结果
-            rocketMQTemplate.sendOneWay(getDestination(messageReqDto), message);
+            rocketMQTemplate.sendOneWay(destination, message);
 
             // 记录发送操作，但不能确认是否真正发送成功
             log.info("单向消息发送操作完成，主题: {}, 标签: {}",
                     messageReqDto.getTopic(), messageReqDto.getTag());
             return true;
+        } catch (GXBusinessException e) {
+            throw e;
         } catch (Exception e) {
             // 捕获并记录所有可能的异常
             log.error("单向消息发送失败: {}", e.getMessage(), e);
@@ -455,16 +426,46 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
         Objects.requireNonNull(messageReqDto, "消息对象不能为空");
 
         // Topic是必须的，没有Topic无法正确路由消息
-        if (CharSequenceUtil.isEmpty(messageReqDto.getTopic())) {
+        if (CharSequenceUtil.isBlank(messageReqDto.getTopic())) {
             throw new GXBusinessException("消息主题(Topic)不能为空");
         }
+        String topic = messageReqDto.getTopic().trim();
 
         // Tag是可选的，如果没有Tag则直接返回Topic
-        if (CharSequenceUtil.isEmpty(messageReqDto.getTag())) {
-            return messageReqDto.getTopic();
+        if (CharSequenceUtil.isBlank(messageReqDto.getTag())) {
+            return topic;
         }
 
         // 组装完整的目标地址：topic:tag
-        return CharSequenceUtil.format("{}:{}", messageReqDto.getTopic(), messageReqDto.getTag());
+        return CharSequenceUtil.format("{}:{}", topic, messageReqDto.getTag().trim());
+    }
+
+    private Message<String> buildMessage(GXRocketMQMessageReqDto messageReqDto) {
+        Objects.requireNonNull(messageReqDto, "消息对象不能为空");
+        if (CharSequenceUtil.isBlank(messageReqDto.getBody())) {
+            throw new GXBusinessException("消息内容不能为空");
+        }
+
+        MessageBuilder<String> messageBuilder = MessageBuilder.withPayload(messageReqDto.getBody());
+        String messageKey = messageReqDto.getMessageKey();
+        if (CharSequenceUtil.isNotBlank(messageKey)) {
+            messageBuilder.setHeader(RocketMQHeaders.KEYS, messageKey.trim());
+        }
+        return messageBuilder.build();
+    }
+
+    private void checkSendResult(String messageType, SendResult sendResult) {
+        if (!isSendOk(sendResult)) {
+            throw new GXBusinessException(CharSequenceUtil.format("{}发送失败, 状态: {}, 消息ID: {}",
+                    messageType, getSendStatus(sendResult), sendResult == null ? null : sendResult.getMsgId()));
+        }
+    }
+
+    private boolean isSendOk(SendResult sendResult) {
+        return sendResult != null && SendStatus.SEND_OK == sendResult.getSendStatus();
+    }
+
+    private SendStatus getSendStatus(SendResult sendResult) {
+        return sendResult == null ? null : sendResult.getSendStatus();
     }
 }
