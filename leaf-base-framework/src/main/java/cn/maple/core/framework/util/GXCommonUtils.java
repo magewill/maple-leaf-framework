@@ -7,7 +7,6 @@ import cn.hutool.core.codec.Base64Encoder;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.convert.ConvertException;
-import cn.hutool.core.exceptions.InvocationTargetRuntimeException;
 import cn.hutool.core.exceptions.UtilException;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.Validator;
@@ -271,6 +270,12 @@ public class GXCommonUtils {
     @Getter
     private static final Map<GXMethodCacheKeyUtils.MethodCacheKey, Method> METHOD_CACHE = new ConcurrentHashMap<>(64);
 
+    private static final Class<?>[] EMPTY_PARAM_TYPES = new Class<?>[0];
+
+    private static final Class<?> NULL_PARAM_TYPE = NullParam.class;
+
+    private static final Method METHOD_NOT_FOUND = initMethodNotFound();
+
     /**
      * 私有构造函数，防止实例化
      * <p>
@@ -280,6 +285,18 @@ public class GXCommonUtils {
     private GXCommonUtils() {
         // 防止通过反射实例化
         throw new AssertionError("不能实例化 GXCommonUtils 工具类");
+    }
+
+    private static Method initMethodNotFound() {
+        try {
+            return GXCommonUtils.class.getDeclaredMethod("__methodNotFound");
+        } catch (NoSuchMethodException e) {
+            throw new ExceptionInInitializerError(e);
+        }
+    }
+
+    @SuppressWarnings("unused")
+    private static void __methodNotFound() {
     }
 
     /**
@@ -1115,21 +1132,13 @@ public class GXCommonUtils {
 
         try {
             // 构建参数类型数组
-            Class<?>[] paramTypes = new Class<?>[params.length];
-            for (int i = 0; i < params.length; i++) {
-                if (Objects.nonNull(params[i])) {
-                    paramTypes[i] = params[i].getClass();
-                } else {
-                    // 对于null参数，使用Object.class作为类型占位符
-                    paramTypes[i] = Object.class;
-                }
-            }
+            Class<?>[] paramTypes = resolveParamTypes(params);
 
             // 查找匹配的方法（使用同步块保护方法查找过程，避免并发问题）
             Method method = findMethod(object.getClass(), methodName, paramTypes);
 
             // 检查方法是否存在
-            if (Objects.isNull(method)) {
+            if (method == METHOD_NOT_FOUND) {
                 LOG.warn("方法{}.{}({})不存在,反射调用失败!", object.getClass().getSimpleName(), methodName, Arrays.toString(params));
                 return null;
             }
@@ -1140,7 +1149,7 @@ public class GXCommonUtils {
             }
 
             // 调用方法
-            return ReflectUtil.invoke(object, method, params);
+            return method.invoke(object, params);
         } catch (Exception ex) {
             return handleReflectionException(ex, object, methodName, params);
         }
@@ -1189,18 +1198,145 @@ public class GXCommonUtils {
         final GXMethodCacheKeyUtils.MethodCacheKey methodCacheKey =
                 GXMethodCacheKeyUtils.getMethodCacheKey(clazz, methodName, paramTypes);
 
-        // 从缓存中获取或计算方法对象
         return METHOD_CACHE.computeIfAbsent(methodCacheKey, key -> {
-            // 首先尝试使用精确的参数类型匹配
-            Method method = ReflectUtil.getMethod(clazz, methodName, paramTypes);
-
-            // 如果找不到且参数为空，尝试查找无参方法
-            if (Objects.isNull(method) && paramTypes.length == 0) {
-                method = ReflectUtil.getMethodByName(clazz, methodName);
-            }
-
-            return method;
+            Method method = lookupMethod(clazz, methodName, paramTypes);
+            return method == null ? METHOD_NOT_FOUND : method;
         });
+    }
+
+    /**
+     * 解析方法参数
+     *
+     * @param params 方法参数
+     * @return 方法参数类型列表
+     */
+    private static Class<?>[] resolveParamTypes(Object[] params) {
+        if (params.length == 0) {
+            return EMPTY_PARAM_TYPES;
+        }
+        Class<?>[] paramTypes = new Class<?>[params.length];
+        for (int i = 0; i < params.length; i++) {
+            paramTypes[i] = params[i] == null ? NULL_PARAM_TYPE : params[i].getClass();
+        }
+        return paramTypes;
+    }
+
+    /**
+     * 查找类型的的方法
+     *
+     * @param clazz      类名
+     * @param methodName 方法名字
+     * @param paramTypes 参数类型
+     * @return 方法对象
+     */
+    private static Method lookupMethod(Class<?> clazz, String methodName, Class<?>[] paramTypes) {
+        Method method = ReflectUtil.getMethod(clazz, methodName, paramTypes);
+        if (method != null) {
+            return method;
+        }
+
+        Method bestMatch = null;
+        int bestScore = Integer.MAX_VALUE;
+        for (Method candidate : clazz.getMethods()) {
+            int score = getMethodMatchScore(candidate, methodName, paramTypes);
+            if (score < bestScore) {
+                bestMatch = candidate;
+                bestScore = score;
+            }
+        }
+        for (Class<?> current = clazz; current != null; current = current.getSuperclass()) {
+            for (Method candidate : current.getDeclaredMethods()) {
+                int score = getMethodMatchScore(candidate, methodName, paramTypes);
+                if (score < bestScore) {
+                    bestMatch = candidate;
+                    bestScore = score;
+                }
+            }
+        }
+        return bestMatch;
+    }
+
+    /**
+     * 获取最匹配的方法的分数
+     *
+     * @param method     方法对象
+     * @param methodName 方法名字
+     * @param paramTypes 方法参数
+     * @return 方法获取到的分数
+     */
+    private static int getMethodMatchScore(Method method, String methodName, Class<?>[] paramTypes) {
+        if (!method.getName().equals(methodName) || method.getParameterCount() != paramTypes.length) {
+            return Integer.MAX_VALUE;
+        }
+        int score = 0;
+        Class<?>[] methodParamTypes = method.getParameterTypes();
+        for (int i = 0; i < methodParamTypes.length; i++) {
+            int paramScore = getParamMatchScore(methodParamTypes[i], paramTypes[i]);
+            if (paramScore == Integer.MAX_VALUE) {
+                return Integer.MAX_VALUE;
+            }
+            score += paramScore;
+        }
+        return score;
+    }
+
+    /**
+     * 获取方法参数的分数
+     *
+     * @param declaredType 方法声明的参数类型
+     * @param actualType   方法实际的参数类型
+     * @return 参数获取到的分数
+     */
+    private static int getParamMatchScore(Class<?> declaredType, Class<?> actualType) {
+        if (actualType == NULL_PARAM_TYPE) {
+            return declaredType.isPrimitive() ? Integer.MAX_VALUE : 16;
+        }
+        Class<?> wrappedDeclaredType = wrapPrimitiveType(declaredType);
+        Class<?> wrappedActualType = wrapPrimitiveType(actualType);
+        if (wrappedDeclaredType.equals(wrappedActualType)) {
+            return 0;
+        }
+        return wrappedDeclaredType.isAssignableFrom(wrappedActualType) ? 8 : Integer.MAX_VALUE;
+    }
+
+    /**
+     * 获取包装类型的类型
+     *
+     * @param type 基本类型
+     * @return 基本类型的包装类型
+     */
+    private static Class<?> wrapPrimitiveType(Class<?> type) {
+        if (!type.isPrimitive()) {
+            return type;
+        }
+        if (type == int.class) {
+            return Integer.class;
+        }
+        if (type == long.class) {
+            return Long.class;
+        }
+        if (type == boolean.class) {
+            return Boolean.class;
+        }
+        if (type == byte.class) {
+            return Byte.class;
+        }
+        if (type == short.class) {
+            return Short.class;
+        }
+        if (type == float.class) {
+            return Float.class;
+        }
+        if (type == double.class) {
+            return Double.class;
+        }
+        if (type == char.class) {
+            return Character.class;
+        }
+        if (type == void.class) {
+            return Void.class;
+        }
+        return type;
     }
 
     /**
@@ -1221,27 +1357,14 @@ public class GXCommonUtils {
     private static Object handleReflectionException(Exception e, Object object, String methodName, Object[] params) {
         // 处理UtilException，通常包含InvocationTargetException
         switch (e) {
+            case InvocationTargetException ite -> {
+                throw unwrapInvocationTargetException(ite, object, methodName, params);
+            }
             case UtilException utilException -> {
                 Throwable cause = utilException.getCause();
                 // 处理调用目标方法时的异常
                 if (cause instanceof InvocationTargetException ite) {
-                    Throwable targetException = ite.getTargetException();
-                    // 处理Bean验证异常
-                    if (targetException instanceof GXBeanValidateException) {
-                        throw (GXBeanValidateException) targetException;
-                    }
-                    // 处理调用目标运行时异常
-                    if (utilException instanceof InvocationTargetRuntimeException) {
-                        throw new GXBusinessException(targetException.getMessage(),
-                                Optional.ofNullable(targetException.getCause()).orElse(targetException));
-                    }
-                    // 处理其他异常
-                    String exceptionMessage = CharSequenceUtil.isEmpty(targetException.getMessage())
-                            ? "系统反射调用失败" : targetException.getMessage();
-                    LOG.error("系统反射调用{}.{}({})失败 , [错误消息 : {}] [错误原因 : {}]",
-                            object.getClass().getSimpleName(), methodName, Arrays.toString(params),
-                            utilException.getMessage(), cause);
-                    throw new GXBusinessException(exceptionMessage, targetException);
+                    throw unwrapInvocationTargetException(ite, object, methodName, params);
                 }
                 // 重新抛出原始异常
                 LOG.error("反射调用过程中发生未知异常: {}", utilException.getMessage());
@@ -1263,6 +1386,19 @@ public class GXCommonUtils {
                 throw new GXBusinessException("反射调用失败: " + e.getMessage(), e);
             }
         }
+    }
+
+    private static RuntimeException unwrapInvocationTargetException(InvocationTargetException exception, Object object, String methodName, Object[] params) {
+        Throwable targetException = exception.getTargetException();
+        if (targetException instanceof GXBeanValidateException beanValidateException) {
+            return beanValidateException;
+        }
+        String exceptionMessage = CharSequenceUtil.isEmpty(targetException.getMessage())
+                ? "系统反射调用失败" : targetException.getMessage();
+        LOG.error("系统反射调用{}.{}({})失败 , [错误消息 : {}] [错误原因 : {}]",
+                object.getClass().getSimpleName(), methodName, Arrays.toString(params),
+                exceptionMessage, targetException);
+        return new GXBusinessException(exceptionMessage, Optional.ofNullable(targetException.getCause()).orElse(targetException));
     }
 
     /**
@@ -2278,6 +2414,11 @@ public class GXCommonUtils {
         } catch (Exception e) {
             LOG.error("获取系统负载失败: {}", e.getMessage());
             return -1;
+        }
+    }
+
+    private static final class NullParam {
+        private NullParam() {
         }
     }
 }

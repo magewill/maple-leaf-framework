@@ -6,13 +6,15 @@ import org.springframework.cglib.beans.BeanCopier;
 import org.springframework.cglib.beans.BeanMap;
 import org.springframework.cglib.core.Converter;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 /**
  * Cglib工具类
@@ -68,6 +70,9 @@ public class GXCglibUtils {
      * 私有构造方法，防止实例化
      */
     private GXCglibUtils() {
+    }
+
+    private record CopierCacheKey(Class<?> sourceClass, Class<?> targetClass) {
     }
 
     /**
@@ -239,20 +244,48 @@ public class GXCglibUtils {
         Assert.notNull(source, "源集合不能为null");
         Assert.notNull(target, "目标对象供应商不能为null");
         
-        return source.stream()
-                .filter(Objects::nonNull)
-                .map(s -> {
-                    final T t = target.get();
-                    if (t != null) {
-                        copy(s, t, converter);
-                        if (callback != null) {
-                            callback.accept(s, t);
-                        }
-                    }
-                    return t;
-                })
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+        if (source.isEmpty()) {
+            return Collections.emptyList();
+        }
+        final List<T> result = new ArrayList<>(source.size());
+        Map<CopierCacheKey, BeanCopier> localBeanCopierCache = null;
+        Class<?> lastSourceClass = null;
+        Class<?> lastTargetClass = null;
+        BeanCopier lastBeanCopier = null;
+
+        for (S s : source) {
+            if (Objects.isNull(s)) {
+                continue;
+            }
+            final T t = target.get();
+            if (Objects.isNull(t)) {
+                continue;
+            }
+
+            final Class<?> currentSourceClass = s.getClass();
+            final Class<?> currentTargetClass = t.getClass();
+            if (lastBeanCopier == null) {
+                lastBeanCopier = GXBeanCopierCache.INSTANCE.get(currentSourceClass, currentTargetClass, converter);
+                lastSourceClass = currentSourceClass;
+                lastTargetClass = currentTargetClass;
+            } else if (currentSourceClass != lastSourceClass || currentTargetClass != lastTargetClass) {
+                final CopierCacheKey cacheKey = new CopierCacheKey(currentSourceClass, currentTargetClass);
+                if (localBeanCopierCache == null) {
+                    localBeanCopierCache = new HashMap<>(4);
+                    localBeanCopierCache.put(new CopierCacheKey(lastSourceClass, lastTargetClass), lastBeanCopier);
+                }
+                lastBeanCopier = localBeanCopierCache.computeIfAbsent(cacheKey,
+                        key -> GXBeanCopierCache.INSTANCE.get(key.sourceClass(), key.targetClass(), converter));
+                lastSourceClass = currentSourceClass;
+                lastTargetClass = currentTargetClass;
+            }
+            lastBeanCopier.copy(s, t, converter);
+            if (callback != null) {
+                callback.accept(s, t);
+            }
+            result.add(t);
+        }
+        return result;
     }
 
     /**
