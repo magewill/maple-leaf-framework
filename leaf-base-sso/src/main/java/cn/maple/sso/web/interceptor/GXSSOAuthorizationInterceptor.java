@@ -18,7 +18,6 @@ import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.method.HandlerMethod;
@@ -177,21 +176,13 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
         }
 
         // 检查方法是否有@GXIgnoreLoginIntercept注解
-        GXIgnoreLoginIntercept ignoreLoginIntercept = AnnotatedElementUtils.findMergedAnnotation(handlerMethod.getMethod(), GXIgnoreLoginIntercept.class);
-        if (Objects.isNull(ignoreLoginIntercept)) {
-            ignoreLoginIntercept = AnnotatedElementUtils.findMergedAnnotation(handlerMethod.getBeanType(), GXIgnoreLoginIntercept.class);
-        }
-        if (Objects.nonNull(ignoreLoginIntercept)) {
+        if (GXHandlerMethodAnnotationUtils.hasMergedAnnotation(handlerMethod, GXIgnoreLoginIntercept.class)) {
             log.debug("方法有@GXIgnoreLoginIntercept注解，跳过登录验证: {}", handlerMethod.getMethod().getName());
             return true;
         }
 
         // 检查方法是否有@GXHttpInvokerAuthToken注解
-        GXHttpInvokerAuthToken webClientAuthToken = AnnotatedElementUtils.findMergedAnnotation(handlerMethod.getMethod(), GXHttpInvokerAuthToken.class);
-        if (Objects.isNull(webClientAuthToken)) {
-            webClientAuthToken = AnnotatedElementUtils.findMergedAnnotation(handlerMethod.getBeanType(), GXHttpInvokerAuthToken.class);
-        }
-        if (Objects.nonNull(webClientAuthToken)) {
+        if (GXHandlerMethodAnnotationUtils.hasMergedAnnotation(handlerMethod, GXHttpInvokerAuthToken.class)) {
             log.debug("方法有@GXHttpInvokerAuthToken注解，跳过登录验证: {}", handlerMethod.getMethod().getName());
             return true;
         }

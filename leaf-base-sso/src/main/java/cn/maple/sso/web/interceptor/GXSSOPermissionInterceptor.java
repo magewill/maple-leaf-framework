@@ -3,6 +3,7 @@ package cn.maple.sso.web.interceptor;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.annotation.GXIgnoreLoginIntercept;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.core.framework.web.interceptor.GXBaseSSOPermissionInterceptor;
@@ -16,11 +17,8 @@ import cn.maple.sso.utils.GXSSOHelperUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
-
-import java.lang.reflect.Method;
 
 /**
  * <p>
@@ -125,7 +123,11 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
      */
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        if (handler instanceof HandlerMethod) {
+        if (handler instanceof HandlerMethod handlerMethod) {
+            if (GXHandlerMethodAnnotationUtils.hasMergedAnnotation(handlerMethod, GXIgnoreLoginIntercept.class)) {
+                return true;
+            }
+
             // 获取当前请求的Token
             Dict tokenDict = GXSSOHelperUtil.attrToken(request);
             if (CollUtil.isEmpty(tokenDict)) {
@@ -183,8 +185,7 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
 
         // 注解权限认证
         HandlerMethod handlerMethod = (HandlerMethod) handler;
-        Method method = handlerMethod.getMethod();
-        GXPermissionAnnotation pm = AnnotatedElementUtils.findMergedAnnotation(method, GXPermissionAnnotation.class);
+        GXPermissionAnnotation pm = GXHandlerMethodAnnotationUtils.findMergedAnnotation(handlerMethod, GXPermissionAnnotation.class);
 
         if (pm != null) {
             // 有注解的情况
