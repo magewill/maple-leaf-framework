@@ -10,6 +10,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -36,6 +37,6 @@ public class GXNacosDebeziumProperties extends GXDebeziumProperties {
 
     @Override
     public Map<String, String> getConfig() {
-        return config;
+        return config == null ? Collections.emptyMap() : config;
     }
 }

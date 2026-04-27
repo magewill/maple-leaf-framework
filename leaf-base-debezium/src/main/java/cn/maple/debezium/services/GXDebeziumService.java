@@ -3,6 +3,7 @@ package cn.maple.debezium.services;
 import cn.hutool.core.lang.Dict;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.redisson.services.GXRedissonCacheService;
+import org.redisson.api.RMapCache;
 
 /**
  * Debezium服务接口
@@ -92,10 +93,15 @@ public interface GXDebeziumService {
      *
      * @param lockKey 锁的键名
      */
-    default void initialEngineLock(String lockKey) {
+    default boolean tryInitialEngineLock(String lockKey) {
         GXRedissonCacheService redissonCacheService = GXSpringContextUtils.getBean(GXRedissonCacheService.class);
         assert redissonCacheService != null;
-        redissonCacheService.setCache(BUCKET_NAME, lockKey, "locked");
+        RMapCache<Object, Object> mapCache = redissonCacheService.getRedissonClient().getMapCache(BUCKET_NAME);
+        return mapCache.fastPutIfAbsent(lockKey, "locked");
+    }
+
+    default void initialEngineLock(String lockKey) {
+        tryInitialEngineLock(lockKey);
     }
 
     /**

@@ -10,6 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.stereotype.Component;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -30,6 +31,6 @@ public class GXLocalDebeziumProperties extends GXDebeziumProperties {
 
     @Override
     public Map<String, String> getConfig() {
-        return config;
+        return config == null ? Collections.emptyMap() : config;
     }
 }

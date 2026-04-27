@@ -185,6 +185,11 @@ public class GXDebeziumEngineConfig implements DisposableBean {
     private final AtomicBoolean engineShutdown = new AtomicBoolean(false);
 
     /**
+     * 当前实例是否持有Debezium初始化占位。
+     */
+    private final AtomicBoolean engineLockAcquired = new AtomicBoolean(false);
+
+    /**
      * Debezium配置属性
      * <p>
      * 包含连接数据库的配置信息以及Debezium的相关配置
@@ -256,16 +261,15 @@ public class GXDebeziumEngineConfig implements DisposableBean {
 
         String lockKey = getLockKey();
 
-        // 检查是否已有其他实例初始化了引擎
-        if (debeziumService.isEngineInitialized(lockKey)) {
+        // 原子占位，避免多个实例同时通过 exists 检查后重复启动引擎
+        if (!debeziumService.tryInitialEngineLock(lockKey)) {
             log.info("其他服务实例已初始化Debezium引擎，当前服务实例不执行初始化操作");
             return;
         }
+        engineLockAcquired.set(true);
 
         log.info("开始初始化应用[{}]的Debezium引擎", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
 
-        // 确保只有一个服务实例初始化引擎
-        debeziumService.initialEngineLock(lockKey);
         try {
             // 加载Debezium配置
             Map<String, String> config = debeziumProperties.getConfig();
@@ -301,6 +305,10 @@ public class GXDebeziumEngineConfig implements DisposableBean {
                                 String value = record.value();
                                 Dict dbChangeData = JSONUtil.toBean(value, Dict.class);
                                 Dict payload = Convert.convert(Dict.class, dbChangeData.getObj("payload"));
+                                if (payload == null) {
+                                    log.warn("接收到空的Debezium payload，忽略该记录: {}", record.key());
+                                    return;
+                                }
 
                                 // 调用自定义处理逻辑（异步处理，避免阻塞Debezium引擎）
                                 getExecutorService().submit(() -> {
@@ -323,11 +331,11 @@ public class GXDebeziumEngineConfig implements DisposableBean {
 
                 // 启动引擎
                 try {
-                    getExecutorService().execute(engine);
-                    engineInitialized.set(true);
-                    log.info("应用[{}]的Debezium引擎启动成功", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
+                    getExecutorService().execute(() -> runDebeziumEngine(engine, debeziumService, lockKey));
+                    log.info("应用[{}]的Debezium引擎启动任务已提交", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
                 } catch (RejectedExecutionException e) {
                     log.error("Debezium引擎启动失败，线程池已关闭或已满: {}", e.getMessage(), e);
+                    debeziumEngineRef.compareAndSet(engine, null);
                 }
             } catch (Exception e) {
                 log.error("创建Debezium引擎时发生异常: {}", e.getMessage(), e);
@@ -336,14 +344,38 @@ public class GXDebeziumEngineConfig implements DisposableBean {
             log.error("初始化Debezium引擎时发生异常: {}", e.getMessage(), e);
         } finally {
             // 如果引擎初始化失败，释放锁
-            if (!engineInitialized.get()) {
-                try {
-                    debeziumService.initialEngineUnLock(lockKey);
-                    log.info("Debezium引擎初始化失败，已释放分布式锁");
-                } catch (Exception e) {
-                    log.error("释放Debezium初始化锁时发生异常: {}", e.getMessage(), e);
-                }
+            if (!engineInitialized.get() && debeziumEngineRef.get() == null) {
+                releaseEngineLock(debeziumService, lockKey);
             }
+        }
+    }
+
+    private void runDebeziumEngine(DebeziumEngine<ChangeEvent<String, String>> engine, GXDebeziumService debeziumService, String lockKey) {
+        engineInitialized.set(true);
+        log.info("应用[{}]的Debezium引擎启动成功", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
+        try {
+            engine.run();
+        } catch (Exception e) {
+            log.error("Debezium引擎运行时发生异常: {}", e.getMessage(), e);
+        } finally {
+            engineInitialized.set(false);
+            debeziumEngineRef.compareAndSet(engine, null);
+            releaseEngineLock(debeziumService, lockKey);
+            log.info("应用[{}]的Debezium引擎运行任务已退出", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
+        }
+    }
+
+    private void releaseEngineLock(GXDebeziumService debeziumService, String lockKey) {
+        if (!engineLockAcquired.compareAndSet(true, false)) {
+            return;
+        }
+
+        try {
+            debeziumService.initialEngineUnLock(lockKey);
+            log.info("已释放Debezium引擎初始化锁");
+        } catch (Exception e) {
+            log.error("释放Debezium初始化锁时发生异常: {}", e.getMessage(), e);
+            engineLockAcquired.set(true);
         }
     }
 
@@ -448,9 +480,8 @@ public class GXDebeziumEngineConfig implements DisposableBean {
         // 释放分布式锁
         try {
             GXDebeziumService debeziumService = GXSpringContextUtils.getBean(GXDebeziumService.class);
-            if (debeziumService != null && engineInitialized.get()) {
-                debeziumService.initialEngineUnLock(lockKey);
-                log.info("已释放Debezium引擎初始化锁");
+            if (debeziumService != null) {
+                releaseEngineLock(debeziumService, lockKey);
             }
         } catch (Exception e) {
             log.error("释放Debezium初始化锁时发生异常: {}", e.getMessage(), e);
