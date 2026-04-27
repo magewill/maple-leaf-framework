@@ -46,11 +46,11 @@ import java.lang.annotation.*;
  * @see GXBizScenario 业务场景
  */
 @Inherited
+@Documented
 @Retention(RetentionPolicy.RUNTIME)
 @Target({ElementType.TYPE})
 @Component
 public @interface GXExtensions {
-
     /**
      * 业务ID数组，用于标识业务领域
      * <p>

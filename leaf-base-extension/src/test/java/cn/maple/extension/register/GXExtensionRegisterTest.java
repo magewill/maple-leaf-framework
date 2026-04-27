@@ -1,0 +1,74 @@
+package cn.maple.extension.register;
+
+import cn.maple.extension.GXBizScenario;
+import cn.maple.extension.GXExtension;
+import cn.maple.extension.GXExtensionCoordinate;
+import cn.maple.extension.GXExtensionPoint;
+import cn.maple.extension.GXExtensionRepository;
+import cn.maple.extension.GXExtensions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
+
+class GXExtensionRegisterTest {
+    private GXExtensionRepository extensionRepository;
+    private GXExtensionRegister extensionRegister;
+
+    @BeforeEach
+    void setUp() {
+        extensionRepository = new GXExtensionRepository();
+        extensionRegister = new GXExtensionRegister();
+        ReflectionTestUtils.setField(extensionRegister, "extensionRepository", extensionRepository);
+    }
+
+    @Test
+    void registrationExtensionsWithValueDoesNotRegisterDefaultCartesianCoordinate() {
+        extensionRegister.doRegistrationExtensions(new MultiValueExtension());
+
+        assertEquals(2, extensionRepository.getExtensionRepo().size());
+        assertRegistered(GXBizScenario.valueOf("bizA", "useCaseA", "scenarioA"));
+        assertRegistered(GXBizScenario.valueOf("bizB", "useCaseB", "scenarioB"));
+        assertFalse(extensionRepository.findExtension(coordinate(GXBizScenario.newDefault())).isPresent());
+    }
+
+    @Test
+    void duplicateRegistrationKeepsFirstExtension() {
+        FirstDuplicateExtension first = new FirstDuplicateExtension();
+
+        extensionRegister.doRegistration(first);
+        extensionRegister.doRegistration(new SecondDuplicateExtension());
+
+        assertSame(first, extensionRepository.findExtension(coordinate(GXBizScenario.valueOf("dup"))).orElseThrow());
+    }
+
+    private void assertRegistered(GXBizScenario bizScenario) {
+        assertEquals(MultiValueExtension.class,
+                extensionRepository.findExtension(coordinate(bizScenario)).orElseThrow().getClass());
+    }
+
+    private GXExtensionCoordinate coordinate(GXBizScenario bizScenario) {
+        return new GXExtensionCoordinate(RegisterTestExtPoint.class, bizScenario);
+    }
+
+    private interface RegisterTestExtPoint extends GXExtensionPoint {
+    }
+
+    @GXExtensions(value = {
+            @GXExtension(bizId = "bizA", useCase = "useCaseA", scenario = "scenarioA"),
+            @GXExtension(bizId = "bizB", useCase = "useCaseB", scenario = "scenarioB")
+    })
+    private static class MultiValueExtension implements RegisterTestExtPoint {
+    }
+
+    @GXExtension(bizId = "dup")
+    private static class FirstDuplicateExtension implements RegisterTestExtPoint {
+    }
+
+    @GXExtension(bizId = "dup")
+    private static class SecondDuplicateExtension implements RegisterTestExtPoint {
+    }
+}

@@ -93,6 +93,9 @@ public abstract class GXAbstractComponentExecutor {
         if (extensionCoordinate == null || exeFunction == null) {
             throw new NullPointerException("extensionCoordinate and exeFunction cannot be null");
         }
+        if (extensionCoordinate.getExtensionPointClass() == null || extensionCoordinate.getBizScenario() == null) {
+            throw new IllegalArgumentException("extensionCoordinate must contain extensionPointClass and bizScenario");
+        }
         return execute(extensionCoordinate.getExtensionPointClass(), extensionCoordinate.getBizScenario(), exeFunction);
     }
 
@@ -132,6 +135,9 @@ public abstract class GXAbstractComponentExecutor {
     public <T> void executeVoid(GXExtensionCoordinate extensionCoordinate, Consumer<T> exeFunction) {
         if (extensionCoordinate == null || exeFunction == null) {
             throw new NullPointerException("extensionCoordinate and exeFunction cannot be null");
+        }
+        if (extensionCoordinate.getExtensionPointClass() == null || extensionCoordinate.getBizScenario() == null) {
+            throw new IllegalArgumentException("extensionCoordinate must contain extensionPointClass and bizScenario");
         }
         executeVoid(extensionCoordinate.getExtensionPointClass(), extensionCoordinate.getBizScenario(), exeFunction);
     }

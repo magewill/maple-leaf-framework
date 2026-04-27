@@ -1,5 +1,7 @@
 package cn.maple.extension;
 
+import org.springframework.stereotype.Component;
+
 import java.lang.annotation.*;
 
 /**
@@ -46,9 +48,11 @@ import java.lang.annotation.*;
  * @see GXBizScenario 业务场景
  */
 @Inherited
+@Documented
 @Retention(RetentionPolicy.RUNTIME)
 @Target({ElementType.TYPE})
 @Repeatable(GXExtensions.class)
+@Component
 public @interface GXExtension {
     /**
      * 业务ID，用于标识业务领域

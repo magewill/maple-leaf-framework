@@ -122,6 +122,12 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
             return extension;
         }
 
+        // 4. fourth try with default biz id + default use case + default scenario
+        extension = defaultBizIdTry(targetClz);
+        if (extension != null) {
+            return extension;
+        }
+
         String errMessage = "Can not find extension with ExtensionPoint: " + targetClz + " BizScenario:" + bizScenario.getUniqueIdentity();
         throw new GXExtensionException(errMessage, HttpStatus.HTTP_NOT_FOUND);
     }
@@ -178,6 +184,19 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
     }
 
     /**
+     * Fourth try with default biz id + default use case + default scenario.
+     *
+     * @param targetClz extension point interface type
+     * @param <E>       extension point interface type
+     * @return extension implementation, or null when absent
+     */
+    private <E> E defaultBizIdTry(Class<E> targetClz) {
+        String defaultIdentity = GXBizScenario.newDefault().getUniqueIdentity();
+        log.debug("Fourth trying with {}", defaultIdentity);
+        return locate(targetClz.getName(), defaultIdentity);
+    }
+
+    /**
      * 从扩展仓库中查找扩展点实现
      * <p>
      * 该方法根据扩展点接口名称和业务场景唯一标识，从扩展仓库中查找对应的扩展点实现。
@@ -191,8 +210,7 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
      */
     @SuppressWarnings("all")
     private <E> E locate(String name, String uniqueIdentity) {
-        GXExtensionCoordinate coordinate = new GXExtensionCoordinate(name, uniqueIdentity);
-        return (E) extensionRepository.getExtensionRepo().get(coordinate);
+        return (E) extensionRepository.findExtension(name, uniqueIdentity).orElse(null);
     }
 
     /**

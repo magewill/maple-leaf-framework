@@ -1,11 +1,11 @@
 package cn.maple.extension.register;
 
-import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.extension.GXExtension;
 import cn.maple.extension.GXExtensionPoint;
 import cn.maple.extension.GXExtensions;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
+import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -44,6 +44,9 @@ public class GXExtensionBootstrap {
     @Resource
     private GXExtensionRegister extensionRegister;
 
+    @Resource
+    private ApplicationContext applicationContext;
+
     /**
      * 应用启动时自动注册所有扩展点对象
      * <p>
@@ -57,12 +60,12 @@ public class GXExtensionBootstrap {
     @PostConstruct
     public void init() {
         // 获取Spring容器
-        if (GXSpringContextUtils.getApplicationContext() == null) {
+        if (applicationContext == null) {
             throw new IllegalStateException("Spring application context is not initialized yet");
         }
         
         // 注册所有标记了GXExtension注解的Bean
-        Map<String, Object> extensionBeans = GXSpringContextUtils.getApplicationContext().getBeansWithAnnotation(GXExtension.class);
+        Map<String, Object> extensionBeans = applicationContext.getBeansWithAnnotation(GXExtension.class);
         extensionBeans.values().forEach(extension -> {
             if (extension instanceof GXExtensionPoint) {
                 extensionRegister.doRegistration((GXExtensionPoint) extension);
@@ -72,7 +75,7 @@ public class GXExtensionBootstrap {
         });
 
         // 注册所有标记了GXExtensions注解的Bean
-        Map<String, Object> extensionsBeans = GXSpringContextUtils.getApplicationContext().getBeansWithAnnotation(GXExtensions.class);
+        Map<String, Object> extensionsBeans = applicationContext.getBeansWithAnnotation(GXExtensions.class);
         extensionsBeans.values().forEach(extension -> {
             if (extension instanceof GXExtensionPoint) {
                 extensionRegister.doRegistrationExtensions((GXExtensionPoint) extension);

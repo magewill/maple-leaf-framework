@@ -9,3 +9,4 @@ config/application-local.yml
 spy.log
 .fastRequest
 .flattened-pom.xml
+.m2-local

@@ -4,9 +4,9 @@ import cn.maple.extension.GXExtensionExecutor;
 import cn.maple.extension.GXExtensionRepository;
 import cn.maple.extension.register.GXExtensionBootstrap;
 import cn.maple.extension.register.GXExtensionRegister;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 
 /**
  * 扩展点框架自动配置类
@@ -49,7 +49,7 @@ import org.springframework.context.annotation.Configuration;
  * @see GXExtensionExecutor 扩展点执行器
  * @see GXExtensionRegister 扩展点注册器
  */
-@Configuration
+@AutoConfiguration
 public class ExtensionAutoConfiguration {
     /**
      * 创建扩展点启动引导类Bean
@@ -62,7 +62,7 @@ public class ExtensionAutoConfiguration {
      *
      * @return GXExtensionBootstrap实例
      */
-    @Bean(value = "extensionBootstrap", initMethod = "init")
+    @Bean(value = "extensionBootstrap")
     @ConditionalOnMissingBean(GXExtensionBootstrap.class)
     public GXExtensionBootstrap extPointBootstrap() {
         return new GXExtensionBootstrap();
