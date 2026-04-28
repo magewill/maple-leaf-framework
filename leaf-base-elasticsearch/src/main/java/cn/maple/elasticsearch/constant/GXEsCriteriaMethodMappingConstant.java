@@ -1,25 +1,29 @@
 package cn.maple.elasticsearch.constant;
 
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class GXEsCriteriaMethodMappingConstant {
-    public static final Map<String, String> METHOD_MAPPING = new HashMap<>();
-
-    static {
-        METHOD_MAPPING.put("=", "is");
-        METHOD_MAPPING.put("in", "in");
-        METHOD_MAPPING.put(">", "greaterThan");
-        METHOD_MAPPING.put("<", "lessThan");
-        METHOD_MAPPING.put(">=", "greaterThanEqual");
-        METHOD_MAPPING.put("<=", "lessThanEqual");
-        METHOD_MAPPING.put("!=", "");
-        METHOD_MAPPING.put("not in", "notIn");
-        METHOD_MAPPING.put("like", "fuzzy");
-        METHOD_MAPPING.put("between", "between");
-    }
+    public static final Map<String, String> METHOD_MAPPING = createMethodMapping();
 
     private GXEsCriteriaMethodMappingConstant() {
 
+    }
+
+    private static Map<String, String> createMethodMapping() {
+        Map<String, String> methodMapping = new LinkedHashMap<>();
+        methodMapping.put("=", "is");
+        methodMapping.put("!=", "not().is");
+        methodMapping.put("in", "in");
+        methodMapping.put("not in", "notIn");
+        methodMapping.put(">", "greaterThan");
+        methodMapping.put("<", "lessThan");
+        methodMapping.put(">=", "greaterThanEqual");
+        methodMapping.put("<=", "lessThanEqual");
+        methodMapping.put("like", "fuzzy");
+        methodMapping.put("between", "between");
+        methodMapping.put("is", "not().exists");
+        methodMapping.put("is not", "exists");
+        return Map.copyOf(methodMapping);
     }
 }

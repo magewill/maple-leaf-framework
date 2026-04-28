@@ -3,23 +3,33 @@ package cn.maple.elasticsearch.repository;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
+import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.framework.ddd.repository.GXBaseRepository;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.GXValidateExistsDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
+import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
+import cn.maple.core.framework.dto.inner.condition.GXConditionStrEQ;
 import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.dto.res.GXPaginationResDto;
+import cn.maple.core.framework.exception.GXBusinessException;
+import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.elasticsearch.dao.GXElasticsearchDao;
 import cn.maple.elasticsearch.model.GXElasticsearchModel;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.elasticsearch.annotations.Document;
+import org.springframework.data.elasticsearch.client.elc.ElasticsearchTemplate;
+import org.springframework.data.elasticsearch.core.mapping.IndexCoordinates;
 import org.springframework.data.elasticsearch.core.query.BaseQuery;
 import org.springframework.data.elasticsearch.core.query.BaseQueryBuilder;
 
 import jakarta.validation.ConstraintValidatorContext;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -174,8 +184,13 @@ public class GXElasticsearchRepository<T extends GXElasticsearchModel, D extends
      */
     @Override
     public Dict findOneById(String tableName, ID id, Set<String> columns) {
-        Optional<T> data = baseDao.findById(id);
-        return data.map(t -> Convert.convert(Dict.class, t)).orElse(null);
+        if (CharSequenceUtil.isBlank(tableName)) {
+            Optional<T> data = baseDao.findById(id);
+            return data.map(t -> Convert.convert(Dict.class, t)).orElse(null);
+        }
+        ElasticsearchTemplate elasticsearchTemplate = baseDao.getElasticsearchTemplate();
+        Object data = elasticsearchTemplate.get(Convert.toStr(id), baseDao.getGenericClassType(), IndexCoordinates.of(tableName));
+        return data == null ? null : Convert.convert(Dict.class, data);
     }
 
     /**
@@ -246,7 +261,10 @@ public class GXElasticsearchRepository<T extends GXElasticsearchModel, D extends
      */
     @Override
     public Integer deleteSoftCondition(String tableName, List<GXUpdateField<?>> updateFieldList, List<GXCondition<?>> condition, Dict extraData) {
-        return null;
+        if (CollUtil.isEmpty(updateFieldList)) {
+            return 0;
+        }
+        return updateFieldByCondition(tableName, updateFieldList, condition);
     }
 
     /**
@@ -307,7 +325,34 @@ public class GXElasticsearchRepository<T extends GXElasticsearchModel, D extends
      */
     @Override
     public boolean validateExists(GXValidateExistsDto validateExistsDto, ConstraintValidatorContext constraintValidatorContext) {
-        return false;
+        String tableName = CharSequenceUtil.isNotEmpty(validateExistsDto.getTableName()) ? validateExistsDto.getTableName() : getTableName();
+        String fieldName = validateExistsDto.getFieldName();
+        Object value = validateExistsDto.getValue();
+
+        if (CharSequenceUtil.isBlank(tableName)) {
+            throw new GXBusinessException(CharSequenceUtil.format("请指定Elasticsearch索引名称, 验证字段: {}, 验证值: {}", fieldName, value));
+        }
+
+        GXCondition<?> condition;
+        if (value instanceof Number number) {
+            condition = new GXConditionEQ(tableName, fieldName, number);
+        } else {
+            condition = new GXConditionStrEQ(tableName, fieldName, Convert.toStr(value));
+        }
+        List<GXCondition<?>> conditions = new ArrayList<>();
+        conditions.add(condition);
+        Dict originCondition = validateExistsDto.getCondition();
+        if (originCondition != null && !originCondition.isEmpty()) {
+            for (Map.Entry<String, Object> entry : originCondition.entrySet()) {
+                Object conditionValue = entry.getValue();
+                if (conditionValue instanceof Number number) {
+                    conditions.add(new GXConditionEQ(tableName, entry.getKey(), number));
+                } else {
+                    conditions.add(new GXConditionStrEQ(tableName, entry.getKey(), Convert.toStr(conditionValue)));
+                }
+            }
+        }
+        return checkRecordIsExists(tableName, conditions);
     }
 
     /**
@@ -324,7 +369,7 @@ public class GXElasticsearchRepository<T extends GXElasticsearchModel, D extends
      */
     @Override
     public Integer updateFieldByCondition(String tableName, List<GXUpdateField<?>> updateFields, List<GXCondition<?>> condition) {
-        return null;
+        return baseDao.updateFieldByCondition(tableName, updateFields, condition);
     }
 
     /**
@@ -352,7 +397,7 @@ public class GXElasticsearchRepository<T extends GXElasticsearchModel, D extends
      */
     @Override
     public String getPrimaryKeyName() {
-        return null;
+        return "id";
     }
 
     /**
@@ -367,7 +412,10 @@ public class GXElasticsearchRepository<T extends GXElasticsearchModel, D extends
      */
     @Override
     public String getTableName(T entity) {
-        return null;
+        if (entity == null) {
+            return getTableName();
+        }
+        return getIndexName(entity.getClass());
     }
 
     /**
@@ -381,6 +429,20 @@ public class GXElasticsearchRepository<T extends GXElasticsearchModel, D extends
      */
     @Override
     public String getTableName() {
-        return null;
+        return getIndexName(GXCommonUtils.getGenericClassType(getClass(), 0));
+    }
+
+    /**
+     * 获取实体类上@Document声明的索引名。
+     *
+     * @param entityClass 实体类型
+     * @return 索引名
+     */
+    protected String getIndexName(Class<?> entityClass) {
+        Document document = entityClass.getAnnotation(Document.class);
+        if (document == null || CharSequenceUtil.isBlank(document.indexName())) {
+            throw new GXBusinessException(CharSequenceUtil.format("{}未配置@Document(indexName)", entityClass.getName()));
+        }
+        return document.indexName();
     }
 }

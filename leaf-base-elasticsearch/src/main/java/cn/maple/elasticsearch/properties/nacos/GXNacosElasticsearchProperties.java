@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
@@ -25,6 +26,7 @@ import java.util.Map;
 @SuppressWarnings("all")
 @EqualsAndHashCode(callSuper = true)
 @ConditionalOnClass(name = {"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
+@ConditionalOnExpression("!'${spring.cloud.nacos.config.server-addr:${nacos.config.server-addr:}}'.isBlank()")
 @NacosConfigurationProperties(dataId = "elasticsearch.yml",
         groupId = "${spring.cloud.nacos.config.group:${nacos.config.group:}}",
         properties = @NacosProperties(

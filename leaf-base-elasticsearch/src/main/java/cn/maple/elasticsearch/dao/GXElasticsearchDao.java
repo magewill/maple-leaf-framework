@@ -12,7 +12,9 @@ import cn.hutool.core.util.ReflectUtil;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
+import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.dto.res.GXPaginationResDto;
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.elasticsearch.constant.GXEsCriteriaMethodMappingConstant;
@@ -28,6 +30,10 @@ import org.springframework.data.elasticsearch.repository.ElasticsearchRepository
 import org.springframework.util.Assert;
 
 import java.io.Serializable;
+import java.lang.reflect.Array;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -119,9 +125,9 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
             return content;
         }).collect(Collectors.toList());
         long totalCount = queryData.getInt("totalHits");
-        long currentPage = queryParamInnerDto.getPage();
-        long pageSize = queryParamInnerDto.getPageSize();
-        long pages = totalCount / pageSize;
+        long currentPage = Optional.ofNullable(queryParamInnerDto.getPage()).orElse(1);
+        long pageSize = NumberUtil.max(Optional.ofNullable(queryParamInnerDto.getPageSize()).orElse(GXCommonConstant.DEFAULT_MAX_PAGE_SIZE), 1);
+        long pages = (long) Math.ceil((double) totalCount / pageSize);
         return new GXPaginationResDto<>(records, totalCount, pages, pageSize, currentPage);
     }
 
@@ -137,6 +143,9 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
      */
     default <ID extends Serializable> ID updateOrCreate(T entity, List<GXCondition<?>> condition) {
         Assert.notNull(entity, "Entity must not be null");
+        if (CollUtil.isNotEmpty(condition)) {
+            deleteCondition(null, condition);
+        }
         T save = save(entity);
         Class<ID> retIDClazz = GXCommonUtils.getGenericClassType((Class<?>) getClass().getGenericInterfaces()[0], 3);
         String methodName = CharSequenceUtil.format("get{}", CharSequenceUtil.upperFirst("id"));
@@ -161,8 +170,118 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
         Query query = buildQuery(queryParamInnerDto);
         DeleteQuery deleteQuery = DeleteQuery.builder(query).build();
         ElasticsearchTemplate elasticsearchTemplate = getElasticsearchTemplate();
-        ByQueryResponse deleteResponse = elasticsearchTemplate.delete(deleteQuery, getGenericClassType());
+        ByQueryResponse deleteResponse = CharSequenceUtil.isEmpty(tableName)
+                ? elasticsearchTemplate.delete(deleteQuery, getGenericClassType())
+                : elasticsearchTemplate.delete(deleteQuery, getGenericClassType(), IndexCoordinates.of(tableName));
         return Math.toIntExact(deleteResponse.getDeleted());
+    }
+
+    /**
+     * Build one Elasticsearch criteria from a framework condition.
+     */
+    private Criteria buildConditionCriteria(String fieldName, String op, Object value) {
+        Criteria criteria = new Criteria(fieldName);
+        return switch (op) {
+            case "=" -> criteria.is(value);
+            case "!=" -> criteria.not().is(value);
+            case "in" -> criteria.in(toIterableValue(value, op));
+            case "not in" -> criteria.notIn(toIterableValue(value, op));
+            case ">" -> criteria.greaterThan(value);
+            case "<" -> criteria.lessThan(value);
+            case ">=" -> criteria.greaterThanEqual(value);
+            case "<=" -> criteria.lessThanEqual(value);
+            case "like" -> criteria.fuzzy(Convert.toStr(value));
+            case "between" -> {
+                List<Object> rangeValues = toRangeValues(value);
+                yield criteria.between(rangeValues.get(0), rangeValues.get(1));
+            }
+            case "is" -> value == null ? criteria.not().exists() : criteria.is(value);
+            case "is not" -> value == null ? criteria.exists() : criteria.not().is(value);
+            default -> throw new GXBusinessException(CharSequenceUtil.format("Elasticsearch unsupported condition operator: {}", op));
+        };
+    }
+
+    private Iterable<?> toIterableValue(Object value, String op) {
+        if (value instanceof Iterable<?> iterable) {
+            return iterable;
+        }
+        if (value != null && value.getClass().isArray()) {
+            List<Object> values = new ArrayList<>();
+            int length = Array.getLength(value);
+            for (int i = 0; i < length; i++) {
+                values.add(Array.get(value, i));
+            }
+            return values;
+        }
+        throw new GXBusinessException(CharSequenceUtil.format("Elasticsearch {} condition value must be Iterable or array", op));
+    }
+
+    private List<Object> toRangeValues(Object value) {
+        List<Object> values = new ArrayList<>();
+        if (value instanceof Collection<?> collection) {
+            values.addAll(collection);
+        } else if (value != null && value.getClass().isArray()) {
+            int length = Array.getLength(value);
+            for (int i = 0; i < length; i++) {
+                values.add(Array.get(value, i));
+            }
+        }
+        if (values.size() != 2) {
+            throw new GXBusinessException("Elasticsearch between condition requires exactly two values");
+        }
+        return values;
+    }
+
+    /**
+     * 根据条件更新字段。
+     *
+     * @param tableName    索引名称，为空时使用实体默认索引
+     * @param updateFields 需要更新的字段
+     * @param condition    更新条件
+     * @return 更新文档数量
+     */
+    default Integer updateFieldByCondition(String tableName, List<GXUpdateField<?>> updateFields, List<GXCondition<?>> condition) {
+        Assert.notNull(updateFields, "Update fields must not be null");
+        Assert.notNull(condition, "Condition must not be null");
+        if (CollUtil.isEmpty(updateFields) || CollUtil.isEmpty(condition)) {
+            return 0;
+        }
+
+        GXBaseQueryParamInnerDto queryParamInnerDto = GXBaseQueryParamInnerDto.builder()
+                .tableName(tableName)
+                .condition(condition)
+                .build();
+        Query query = buildQuery(queryParamInnerDto);
+        Map<String, Object> params = new HashMap<>(updateFields.size());
+        StringBuilder script = new StringBuilder();
+        updateFields.forEach(updateField -> {
+            if (updateField == null || CharSequenceUtil.isBlank(updateField.getFieldName())) {
+                return;
+            }
+            String paramName = updateField.getParamName();
+            Object paramValue = updateField.getParamMap().get(paramName);
+            params.put(paramName, paramValue);
+            script.append("ctx._source['")
+                    .append(updateField.getFieldName())
+                    .append("'] = params['")
+                    .append(paramName)
+                    .append("'];");
+        });
+        if (params.isEmpty()) {
+            return 0;
+        }
+
+        UpdateQuery updateQuery = UpdateQuery.builder(query)
+                .withScript(script.toString())
+                .withParams(params)
+                .withLang("painless")
+                .build();
+        ElasticsearchTemplate elasticsearchTemplate = getElasticsearchTemplate();
+        IndexCoordinates indexCoordinates = CharSequenceUtil.isEmpty(tableName)
+                ? elasticsearchTemplate.getIndexCoordinatesFor(getGenericClassType())
+                : IndexCoordinates.of(tableName);
+        ByQueryResponse updateResponse = elasticsearchTemplate.updateByQuery(updateQuery, indexCoordinates);
+        return Math.toIntExact(updateResponse.getUpdated());
     }
 
     /**
@@ -261,7 +380,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
     default B buildQueryBuilder(GXBaseQueryParamInnerDto queryParamInnerDto) {
         Class<BaseQueryBuilder<Q, B>> queryBuilderClazz = GXCommonUtils.getGenericClassType((Class<?>) getClass().getGenericInterfaces()[0], 2);
 
-        if (queryBuilderClazz.isAssignableFrom(CriteriaQueryBuilder.class)) {
+        if (CriteriaQueryBuilder.class.isAssignableFrom(queryBuilderClazz)) {
             Criteria criteria = conditions2Criteria(queryParamInnerDto);
             BaseQueryBuilder<Q, B> queryBuilder = ReflectUtil.newInstance(queryBuilderClazz, criteria);
             return (B) queryBuilder;
@@ -284,6 +403,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
         // 处理分页
         int page = NumberUtil.max(Optional.ofNullable(queryParamInnerDto.getPage()).orElse(0) - 1, 0);
         int pageSize = Optional.ofNullable(queryParamInnerDto.getPageSize()).orElse(GXCommonConstant.DEFAULT_MAX_PAGE_SIZE);
+        pageSize = NumberUtil.max(pageSize, 1);
         query.setPageable(PageRequest.of(page, pageSize));
         return query;
     }
@@ -305,14 +425,21 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
             List<Sort.Order> orders = CollUtil.newArrayList();
             orderByField.keySet().forEach(column -> {
                 String value = orderByField.get(column);
-                if (Sort.Direction.DESC.equals(Sort.Direction.fromString(value))) {
-                    orders.add(Sort.Order.desc(column));
-                } else if (Sort.Direction.ASC.equals(Sort.Direction.fromString(value))) {
-                    orders.add(Sort.Order.asc(column));
+                try {
+                    Sort.Direction direction = Sort.Direction.fromString(value);
+                    if (Sort.Direction.DESC.equals(direction)) {
+                        orders.add(Sort.Order.desc(column));
+                    } else if (Sort.Direction.ASC.equals(direction)) {
+                        orders.add(Sort.Order.asc(column));
+                    }
+                } catch (IllegalArgumentException ignored) {
+                    // 忽略非法排序方向，避免单个无效字段影响整个查询。
                 }
             });
-            Sort sort = Sort.by(orders);
-            query.addSort(sort);
+            if (CollUtil.isNotEmpty(orders)) {
+                Sort sort = Sort.by(orders);
+                query.addSort(sort);
+            }
         }
         return query;
     }
@@ -348,22 +475,20 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
         if (CollUtil.isNotEmpty(conditions)) {
             conditions.forEach(condition -> {
                 // 安全检查：确保条件对象的关键属性不为空
-                if (condition == null || CharSequenceUtil.isEmpty(condition.getFieldExpression()) || condition.getValue() == null) {
+                if (condition == null || CharSequenceUtil.isEmpty(condition.getFieldExpression())) {
                     return; // 跳过无效条件
                 }
 
                 String fieldName = condition.getFieldExpression();
-                String value = ObjectUtil.toString(condition.getValue());
-                String op = condition.getOp();
+                Object value = condition.getValue();
+                String op = CharSequenceUtil.trim(condition.getOp());
 
                 // 获取操作符对应的方法名
                 String methodName = methodMapping.get(op);
 
                 // 只有当方法名存在且Criteria类中有对应方法时才执行
-                if (CharSequenceUtil.isNotEmpty(methodName) && GXCommonUtils.checkMethodExists(Criteria.class, methodName, value)) {
-                    Criteria tmpCriteria = new Criteria(fieldName);
-                    GXCommonUtils.reflectCallObjectMethod(tmpCriteria, methodName, value);
-                    criteria.and(tmpCriteria);
+                if (CharSequenceUtil.isNotEmpty(methodName)) {
+                    criteria.and(buildConditionCriteria(fieldName, op, value));
                 }
             });
         }

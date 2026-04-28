@@ -101,12 +101,14 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
                     // 动态注册 ElasticsearchClient Bean
                     String clientBeanName = key + "ElasticsearchClient";
                     BeanDefinitionBuilder clientBeanDefinitionBuilder = BeanDefinitionBuilder.genericBeanDefinition(ElasticsearchClient.class, () -> buildElasticsearchClient(dataSourceProperties));
+                    clientBeanDefinitionBuilder.setPrimary(dataSourceProperties.isPrimary());
                     beanDefinitionRegistry.registerBeanDefinition(clientBeanName, clientBeanDefinitionBuilder.getBeanDefinition());
 
                     // 动态注册 SimpleElasticsearchMappingContext
                     String mappingContextBeanName = key + "ElasticsearchMappingContext";
                     BeanDefinitionBuilder mappingContextBuilder = BeanDefinitionBuilder.genericBeanDefinition(SimpleElasticsearchMappingContext.class);
                     mappingContextBuilder.setInitMethodName("initialize");
+                    mappingContextBuilder.setPrimary(dataSourceProperties.isPrimary());
                     beanDefinitionRegistry.registerBeanDefinition(mappingContextBeanName, mappingContextBuilder.getBeanDefinition());
 
                     // 动态注册 MappingElasticsearchConverter
@@ -114,6 +116,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
                     BeanDefinitionBuilder converterBuilder = BeanDefinitionBuilder.genericBeanDefinition(MappingElasticsearchConverter.class);
                     converterBuilder.addConstructorArgReference(mappingContextBeanName);
                     converterBuilder.setInitMethodName("afterPropertiesSet");
+                    converterBuilder.setPrimary(dataSourceProperties.isPrimary());
                     beanDefinitionRegistry.registerBeanDefinition(converterBeanName, converterBuilder.getBeanDefinition());
 
                     // 创建ElasticsearchTemplate的BeanDefinition构建对象
@@ -136,6 +139,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
                         elasticsearchTemplateBeanDefinitionBuilder.setPrimary(true);
                         // 为主数据源注册别名，方便其他组件引用
                         beanDefinitionRegistry.registerAlias(beanName, "elasticsearchTemplate");
+                        beanDefinitionRegistry.registerAlias(beanName, "primaryElasticsearchTemplate");
                         log.info("主Elasticsearch数据源[{}]已设置为primary", key);
                     }
 
@@ -254,6 +258,9 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             try {
                 // 判断是否导入了nacos，如果导入了则使用nacos的配置
                 Class.forName("com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties");
+                if (!isNacosConfigEnabled()) {
+                    throw new ClassNotFoundException("Nacos config is not enabled");
+                }
                 log.info("检测到Nacos配置中心，使用Nacos的Elasticsearch配置");
                 GXNacosElasticsearchProperties elasticsearchSourceProperties = new GXNacosElasticsearchProperties();
                 elasticsearchSourceProperties.setDatasource(datasource);
@@ -289,12 +296,20 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
      * @throws IllegalArgumentException 如果配置信息为null
      * @throws IllegalStateException    如果客户端创建失败
      */
+    private boolean isNacosConfigEnabled() {
+        String serverAddr = environment.getProperty("spring.cloud.nacos.config.server-addr");
+        if (CharSequenceUtil.isBlank(serverAddr)) {
+            serverAddr = environment.getProperty("nacos.config.server-addr");
+        }
+        return CharSequenceUtil.isNotBlank(serverAddr);
+    }
+
     private ElasticsearchClient buildElasticsearchClient(GXElasticsearchProperties elasticsearchSourceProperties) {
         Assert.notNull(elasticsearchSourceProperties, "Elasticsearch数据源配置不能为null");
 
         try {
             // 构建客户端配置
-            ClientConfiguration.MaybeSecureClientConfigurationBuilder configurationBuilder =
+            ClientConfiguration.TerminalClientConfigurationBuilder configurationBuilder =
                     buildElasticsearchConfigurationBuilder(elasticsearchSourceProperties);
 
             // 创建并返回客户端实例
@@ -327,7 +342,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
      * @throws IllegalArgumentException 如果配置信息为null或必要参数缺失
      * @throws IllegalStateException    如果构建过程中发生错误
      */
-    private ClientConfiguration.MaybeSecureClientConfigurationBuilder buildElasticsearchConfigurationBuilder(GXElasticsearchProperties elasticsearchSourceProperties) {
+    private ClientConfiguration.TerminalClientConfigurationBuilder buildElasticsearchConfigurationBuilder(GXElasticsearchProperties elasticsearchSourceProperties) {
         Assert.notNull(elasticsearchSourceProperties, "Elasticsearch数据源配置不能为null");
 
         try {
@@ -340,11 +355,21 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             if (uris == null || uris.isEmpty()) {
                 throw new IllegalArgumentException("Elasticsearch URI列表不能为空");
             }
-            String[] uriArray = uris.toArray(new String[0]);
+            boolean useSsl = uris.stream().anyMatch(uri -> CharSequenceUtil.startWithIgnoreCase(uri, "https://"));
+            String[] uriArray = uris.stream()
+                    .filter(CharSequenceUtil::isNotBlank)
+                    .map(uri -> CharSequenceUtil.removePrefixIgnoreCase(uri, "http://"))
+                    .map(uri -> CharSequenceUtil.removePrefixIgnoreCase(uri, "https://"))
+                    .map(uri -> CharSequenceUtil.subBefore(uri, "/", false))
+                    .toArray(String[]::new);
+            if (uriArray.length == 0) {
+                throw new IllegalArgumentException("Elasticsearch URI列表不能为空");
+            }
 
             // 创建基础配置构建器并设置连接地址
-            ClientConfiguration.MaybeSecureClientConfigurationBuilder configurationBuilder =
+            ClientConfiguration.MaybeSecureClientConfigurationBuilder connectedBuilder =
                     ClientConfiguration.builder().connectedTo(uriArray);
+            ClientConfiguration.TerminalClientConfigurationBuilder configurationBuilder = useSsl ? connectedBuilder.usingSsl() : connectedBuilder;
 
             // 设置认证信息（如果提供）
             if (CharSequenceUtil.isAllNotEmpty(username, password)) {

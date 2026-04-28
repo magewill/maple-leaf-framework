@@ -6,7 +6,7 @@ import cn.maple.elasticsearch.properties.GXElasticsearchSourceProperties;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.PropertySource;
@@ -24,7 +24,7 @@ import java.util.Map;
 @Component
 @SuppressWarnings("all")
 @EqualsAndHashCode(callSuper = true)
-@ConditionalOnMissingClass({"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
+@ConditionalOnExpression("'${spring.cloud.nacos.config.server-addr:${nacos.config.server-addr:}}'.isBlank()")
 @PropertySource(value = {"classpath:/${spring.profiles.active}/elasticsearch.yml"}, factory = GXYamlPropertySourceFactory.class, ignoreResourceNotFound = false)
 @ConfigurationProperties(prefix = "elasticsearch")
 public class GXLocalElasticsearchProperties extends GXElasticsearchSourceProperties {

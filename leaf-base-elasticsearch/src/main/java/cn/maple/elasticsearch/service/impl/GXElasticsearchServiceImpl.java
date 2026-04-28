@@ -2,6 +2,7 @@ package cn.maple.elasticsearch.service.impl;
 
 import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.constant.GXCommonConstant;
@@ -106,7 +107,11 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public boolean checkRecordIsExists(String tableName, List<GXCondition<?>> condition) {
-        return false;
+        if (CollUtil.isEmpty(condition)) {
+            throw new GXBusinessException("条件不能为空!");
+        }
+        String indexName = CharSequenceUtil.isBlank(tableName) ? repository.getTableName() : tableName;
+        return repository.checkRecordIsExists(indexName, condition);
     }
 
     /**
@@ -117,7 +122,7 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public boolean checkRecordIsExists(List<GXCondition<?>> condition) {
-        return checkRecordIsExists("", condition);
+        return checkRecordIsExists(repository.getTableName(), condition);
     }
 
     /**
@@ -147,7 +152,18 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public Integer updateFieldByCondition(String tableName, List<GXUpdateField<?>> updateFields, List<GXCondition<?>> condition) {
-        return null;
+        if (CollUtil.isEmpty(condition)) {
+            throw new GXBusinessException("条件不能为空!");
+        }
+        if (CollUtil.isEmpty(updateFields)) {
+            throw new GXBusinessException("updateFields cannot be empty");
+        }
+        String indexName = CharSequenceUtil.isBlank(tableName) ? repository.getTableName() : tableName;
+        if (!checkRecordIsExists(indexName, condition)) {
+            log.error("待更新的数据不存在!");
+            return GXCommonConstant.DB_RECORD_NOT_FOUND;
+        }
+        return repository.updateFieldByCondition(indexName, updateFields, condition);
     }
 
     /**
@@ -591,7 +607,22 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public ID copyOneData(List<GXCondition<?>> copyCondition, Dict replaceData, Dict extraData) {
-        return null;
+        if (CollUtil.isEmpty(copyCondition)) {
+            throw new GXBusinessException("条件不能为空!");
+        }
+        R oneData = findOneByCondition(repository.getTableName(), copyCondition);
+        if (Objects.isNull(oneData)) {
+            throw new GXBusinessException("待拷贝的数据不存在!!");
+        }
+        T entity = GXCommonUtils.convertSourceToTarget(oneData, GXCommonUtils.getGenericClassType(getClass(), 1), null, null, Optional.ofNullable(extraData).orElseGet(Dict::create));
+        if (Objects.isNull(entity)) {
+            throw new GXBusinessException("数据转换失败!");
+        }
+        String primaryKeyName = getPrimaryKeyName(entity);
+        GXCommonUtils.reflectCallObjectMethod(entity, CharSequenceUtil.format("set{}", CharSequenceUtil.upperFirst(CharSequenceUtil.toCamelCase(primaryKeyName))), (Object) null);
+        Optional.ofNullable(replaceData).orElseGet(Dict::create)
+                .forEach((key, value) -> GXCommonUtils.reflectCallObjectMethod(entity, CharSequenceUtil.format("set{}", CharSequenceUtil.upperFirst(CharSequenceUtil.toCamelCase(key))), value));
+        return updateOrCreate(entity);
     }
 
     /**
@@ -611,7 +642,7 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public ID copyOneData(List<GXCondition<?>> copyCondition, Dict replaceData) {
-        return null;
+        return copyOneData(copyCondition, replaceData, Dict.create());
     }
 
     /**
@@ -640,7 +671,11 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public Integer deleteSoftCondition(String tableName, List<GXCondition<?>> condition, Dict extraData) {
-        return null;
+        if (CollUtil.isEmpty(condition)) {
+            throw new GXBusinessException("条件不能为空!");
+        }
+        String indexName = CharSequenceUtil.isBlank(tableName) ? repository.getTableName() : tableName;
+        return repository.deleteSoftCondition(indexName, condition, Optional.ofNullable(extraData).orElseGet(Dict::create));
     }
 
     /**
@@ -661,7 +696,7 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public Integer deleteSoftCondition(String tableName, List<GXCondition<?>> condition) {
-        return null;
+        return deleteSoftCondition(tableName, condition, Dict.create());
     }
 
     /**
@@ -681,7 +716,7 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public Integer deleteSoftCondition(List<GXCondition<?>> condition) {
-        return null;
+        return deleteSoftCondition(repository.getTableName(), condition);
     }
 
     /**
@@ -749,7 +784,12 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public <E> List<E> findMultiFieldByCondition(String tableName, List<GXCondition<?>> condition, Set<String> columns, Class<E> targetClazz) {
-        return null;
+        GXBaseQueryParamInnerDto queryParamInnerDto = GXBaseQueryParamInnerDto.builder()
+                .tableName(CharSequenceUtil.isBlank(tableName) ? getTableName() : tableName)
+                .condition(condition)
+                .columns(columns)
+                .build();
+        return findMultiFieldByCondition(queryParamInnerDto, targetClazz);
     }
 
     /**
@@ -774,7 +814,7 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public <E> List<E> findMultiFieldByCondition(List<GXCondition<?>> condition, Set<String> columns, Class<E> targetClazz) {
-        return null;
+        return findMultiFieldByCondition(getTableName(), condition, columns, targetClazz);
     }
 
     /**
@@ -803,7 +843,20 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public <E> List<E> findMultiFieldByCondition(GXBaseQueryParamInnerDto queryParamInnerDto, Class<E> targetClazz) {
-        return null;
+        if (Objects.isNull(queryParamInnerDto) || Objects.isNull(targetClazz)) {
+            throw new GXBusinessException("queryParamInnerDto and targetClazz cannot be null");
+        }
+        if (CharSequenceUtil.isBlank(queryParamInnerDto.getTableName())) {
+            queryParamInnerDto.setTableName(getTableName());
+        }
+        CopyOptions copyOptions = getCopyOptions(queryParamInnerDto);
+        String[] methodName = new String[]{queryParamInnerDto.getMethodName()};
+        if (CharSequenceUtil.isEmpty(methodName[0])) {
+            methodName[0] = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
+        }
+        return repository.findByCondition(queryParamInnerDto).stream()
+                .map(dict -> GXCommonUtils.convertSourceToTarget(dict, targetClazz, methodName[0], copyOptions))
+                .collect(Collectors.toList());
     }
 
     /**
@@ -833,7 +886,22 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public <E> E findSingleFieldByCondition(GXBaseQueryParamInnerDto queryParamInnerDto, Class<E> targetClazz) {
-        return null;
+        if (Objects.isNull(queryParamInnerDto) || Objects.isNull(targetClazz)) {
+            throw new GXBusinessException("queryParamInnerDto and targetClazz cannot be null");
+        }
+        if (CollUtil.isEmpty(queryParamInnerDto.getColumns()) || queryParamInnerDto.getColumns().size() != 1) {
+            throw new GXBusinessException("columns size must be exactly 1");
+        }
+        queryParamInnerDto.setLimit(1);
+        String column = queryParamInnerDto.getColumns().toArray(new String[0])[0];
+        if (CharSequenceUtil.isBlank(queryParamInnerDto.getTableName())) {
+            queryParamInnerDto.setTableName(getTableName());
+        }
+        Dict dict = repository.findOneByCondition(queryParamInnerDto);
+        if (Objects.isNull(dict)) {
+            return null;
+        }
+        return Convert.convert(targetClazz, readColumnValue(dict, column));
     }
 
     /**
@@ -863,7 +931,25 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public <E> List<E> findSingleFieldLstByCondition(GXBaseQueryParamInnerDto queryParamInnerDto, Class<E> targetClazz) {
-        return null;
+        if (Objects.isNull(queryParamInnerDto) || Objects.isNull(targetClazz)) {
+            throw new GXBusinessException("queryParamInnerDto and targetClazz cannot be null");
+        }
+        if (CollUtil.isEmpty(queryParamInnerDto.getColumns()) || queryParamInnerDto.getColumns().size() != 1) {
+            throw new GXBusinessException("columns size must be exactly 1");
+        }
+        String column = queryParamInnerDto.getColumns().toArray(new String[0])[0];
+        if (CharSequenceUtil.isBlank(queryParamInnerDto.getTableName())) {
+            queryParamInnerDto.setTableName(getTableName());
+        }
+        List<Dict> dictList = repository.findByCondition(queryParamInnerDto);
+        List<E> result = new ArrayList<>();
+        dictList.forEach(dict -> {
+            Object value = readColumnValue(dict, column);
+            if (Objects.nonNull(value)) {
+                result.add(Convert.convert(targetClazz, value));
+            }
+        });
+        return result;
     }
 
     /**
@@ -944,7 +1030,13 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public Long countByCondition(List<GXCondition<?>> conditions) {
-        return null;
+        GXBaseQueryParamInnerDto queryParamInnerDto = GXBaseQueryParamInnerDto.builder()
+                .tableName(getTableName())
+                .condition(Optional.ofNullable(conditions).orElseGet(ArrayList::new))
+                .page(1)
+                .pageSize(1)
+                .build();
+        return countByCondition(queryParamInnerDto);
     }
 
     /**
@@ -964,7 +1056,15 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public Long countByCondition(GXBaseQueryParamInnerDto queryParamInnerDto) {
-        return null;
+        if (Objects.isNull(queryParamInnerDto)) {
+            throw new GXBusinessException("queryParamInnerDto cannot be null");
+        }
+        if (CharSequenceUtil.isBlank(queryParamInnerDto.getTableName())) {
+            queryParamInnerDto.setTableName(getTableName());
+        }
+        queryParamInnerDto.setPage(1);
+        queryParamInnerDto.setPageSize(1);
+        return repository.paginate(queryParamInnerDto).getTotal();
     }
 
     /**
@@ -984,7 +1084,7 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public String getPrimaryKeyName(T entity) {
-        return null;
+        return repository.getPrimaryKeyName(entity);
     }
 
     /**
@@ -1002,6 +1102,24 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
      */
     @Override
     public String getTableName() {
-        return null;
+        return repository.getTableName();
+    }
+
+    /**
+     * Read value by column name with common naming conventions.
+     */
+    private Object readColumnValue(Dict dict, String column) {
+        if (Objects.isNull(dict) || CharSequenceUtil.isBlank(column)) {
+            return null;
+        }
+        Object value = dict.get(column);
+        if (Objects.nonNull(value)) {
+            return value;
+        }
+        value = dict.get(CharSequenceUtil.toUnderlineCase(column));
+        if (Objects.nonNull(value)) {
+            return value;
+        }
+        return dict.get(CharSequenceUtil.toCamelCase(column));
     }
 }
