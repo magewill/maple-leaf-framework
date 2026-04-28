@@ -46,6 +46,10 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
 
     private static final String MONGO_OPERATIONS_BEAN_NAME = "mongoOperations";
 
+    private static final String DYNAMIC_MONGO_DATABASE_FACTORY_BEAN_NAME = "gxDynamicMongoDatabaseFactory";
+
+    private static final String DYNAMIC_MONGO_TEMPLATE_BEAN_NAME = "gxDynamicMongoTemplate";
+
     private Environment environment;
 
     private GXMongoDynamicDataSourceProperties cachedProperties;
@@ -55,6 +59,7 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
         GXMongoDynamicDataSourceProperties properties = getMongoDynamicDataSourceProperties();
         checkMongoDynamicDataSourceProperties(properties);
         PrimaryMongoBeanNames primaryMongoBeanNames = new PrimaryMongoBeanNames();
+        Map<String, String> templateFactoryBeanNames = new LinkedHashMap<>();
 
         properties.getDatasource().forEach((key, dataSourceProperties) -> {
             try {
@@ -76,7 +81,6 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
                         BeanDefinitionBuilder.rootBeanDefinition(SimpleMongoClientDatabaseFactory.class);
                 mongoDatabaseFactoryBeanDefinitionBuilder.addConstructorArgValue(new RuntimeBeanReference(clientBeanName));
                 mongoDatabaseFactoryBeanDefinitionBuilder.addConstructorArgValue(database);
-                mongoDatabaseFactoryBeanDefinitionBuilder.setPrimary(Boolean.TRUE.equals(primary));
                 registerBeanDefinition(beanDefinitionRegistry, factoryBeanName, mongoDatabaseFactoryBeanDefinitionBuilder);
 
                 String templateBeanName = CharSequenceUtil.isBlank(dataSourceProperties.getBeanName())
@@ -84,8 +88,8 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
                         : dataSourceProperties.getBeanName();
                 BeanDefinitionBuilder mongoTemplateBeanDefinitionBuilder = BeanDefinitionBuilder.rootBeanDefinition(MongoTemplate.class);
                 mongoTemplateBeanDefinitionBuilder.addConstructorArgValue(new RuntimeBeanReference(factoryBeanName));
-                mongoTemplateBeanDefinitionBuilder.setPrimary(Boolean.TRUE.equals(primary));
                 registerBeanDefinition(beanDefinitionRegistry, templateBeanName, mongoTemplateBeanDefinitionBuilder);
+                templateFactoryBeanNames.put(templateBeanName, factoryBeanName);
 
                 if (Boolean.TRUE.equals(primary)) {
                     primaryMongoBeanNames.set(clientBeanName, factoryBeanName, templateBeanName);
@@ -98,12 +102,8 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
             }
         });
 
-        registerPrimaryMongoAliases(
-                beanDefinitionRegistry,
-                primaryMongoBeanNames.clientBeanName,
-                primaryMongoBeanNames.factoryBeanName,
-                primaryMongoBeanNames.templateBeanName
-        );
+        registerDynamicPrimaryMongoBeans(beanDefinitionRegistry, primaryMongoBeanNames.factoryBeanName, templateFactoryBeanNames);
+        registerPrimaryMongoAliases(beanDefinitionRegistry, primaryMongoBeanNames.clientBeanName);
     }
 
     @Override
@@ -198,6 +198,7 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
         if (dataSourceProperties == null) {
             throw new GXBusinessException("MongoDB datasource [" + key + "] configuration must not be null");
         }
+        validateTemplateBeanName(key, dataSourceProperties);
         if (CharSequenceUtil.isBlank(dataSourceProperties.getUri())) {
             throw new GXBusinessException("MongoDB datasource [" + key + "] uri must not be blank");
         }
@@ -243,14 +244,31 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
         registry.registerBeanDefinition(beanName, builder.getBeanDefinition());
     }
 
-    private void registerPrimaryMongoAliases(BeanDefinitionRegistry registry,
-                                             String clientBeanName,
-                                             String factoryBeanName,
-                                             String templateBeanName) {
+    private void registerDynamicPrimaryMongoBeans(BeanDefinitionRegistry registry,
+                                                  String defaultFactoryBeanName,
+                                                  Map<String, String> templateFactoryBeanNames) {
+        templateFactoryBeanNames.put(MONGO_TEMPLATE_BEAN_NAME, defaultFactoryBeanName);
+        templateFactoryBeanNames.put(MONGO_OPERATIONS_BEAN_NAME, defaultFactoryBeanName);
+        templateFactoryBeanNames.put(DYNAMIC_MONGO_TEMPLATE_BEAN_NAME, defaultFactoryBeanName);
+
+        BeanDefinitionBuilder dynamicMongoDatabaseFactoryBeanDefinitionBuilder =
+                BeanDefinitionBuilder.rootBeanDefinition(GXDynamicMongoDatabaseFactory.class);
+        dynamicMongoDatabaseFactoryBeanDefinitionBuilder.addConstructorArgValue(defaultFactoryBeanName);
+        dynamicMongoDatabaseFactoryBeanDefinitionBuilder.addConstructorArgValue(templateFactoryBeanNames);
+        dynamicMongoDatabaseFactoryBeanDefinitionBuilder.setPrimary(true);
+        registerBeanDefinition(registry, DYNAMIC_MONGO_DATABASE_FACTORY_BEAN_NAME, dynamicMongoDatabaseFactoryBeanDefinitionBuilder);
+
+        BeanDefinitionBuilder dynamicMongoTemplateBeanDefinitionBuilder = BeanDefinitionBuilder.rootBeanDefinition(MongoTemplate.class);
+        dynamicMongoTemplateBeanDefinitionBuilder.addConstructorArgValue(new RuntimeBeanReference(DYNAMIC_MONGO_DATABASE_FACTORY_BEAN_NAME));
+        dynamicMongoTemplateBeanDefinitionBuilder.setPrimary(true);
+        registerBeanDefinition(registry, DYNAMIC_MONGO_TEMPLATE_BEAN_NAME, dynamicMongoTemplateBeanDefinitionBuilder);
+    }
+
+    private void registerPrimaryMongoAliases(BeanDefinitionRegistry registry, String clientBeanName) {
         registerAliasReplacingExistingBeanDefinition(registry, clientBeanName, MONGO_CLIENT_BEAN_NAME);
-        registerAliasReplacingExistingBeanDefinition(registry, factoryBeanName, MONGO_DATABASE_FACTORY_BEAN_NAME);
-        registerAliasReplacingExistingBeanDefinition(registry, templateBeanName, MONGO_TEMPLATE_BEAN_NAME);
-        registerAliasReplacingExistingBeanDefinition(registry, templateBeanName, MONGO_OPERATIONS_BEAN_NAME);
+        registerAliasReplacingExistingBeanDefinition(registry, DYNAMIC_MONGO_DATABASE_FACTORY_BEAN_NAME, MONGO_DATABASE_FACTORY_BEAN_NAME);
+        registerAliasReplacingExistingBeanDefinition(registry, DYNAMIC_MONGO_TEMPLATE_BEAN_NAME, MONGO_TEMPLATE_BEAN_NAME);
+        registerAliasReplacingExistingBeanDefinition(registry, DYNAMIC_MONGO_TEMPLATE_BEAN_NAME, MONGO_OPERATIONS_BEAN_NAME);
     }
 
     private void registerAliasReplacingExistingBeanDefinition(BeanDefinitionRegistry registry, String beanName, String alias) {
@@ -268,6 +286,16 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
         }
         if (registry.isAlias(beanName)) {
             registry.removeAlias(beanName);
+        }
+    }
+
+    private void validateTemplateBeanName(String key, GXMongoDataSourceProperties dataSourceProperties) {
+        String beanName = dataSourceProperties.getBeanName();
+        if (CharSequenceUtil.equals(beanName, MONGO_TEMPLATE_BEAN_NAME)
+                || CharSequenceUtil.equals(beanName, MONGO_OPERATIONS_BEAN_NAME)
+                || CharSequenceUtil.equals(beanName, DYNAMIC_MONGO_TEMPLATE_BEAN_NAME)
+                || CharSequenceUtil.equals(beanName, DYNAMIC_MONGO_DATABASE_FACTORY_BEAN_NAME)) {
+            throw new GXBusinessException("MongoDB datasource [" + key + "] beanName [" + beanName + "] is reserved");
         }
     }
 

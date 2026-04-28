@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -29,6 +30,12 @@ public interface GXMongoService<P extends GXMongoRepository<T, D, ID>, T extends
     <E> E useMongoTemplate(String mongoTemplateName, Supplier<E> supplier);
 
     void useMongoTemplate(String mongoTemplateName, Runnable runnable);
+
+    Runnable wrapMongoTemplateContext(Runnable runnable);
+
+    <E> Supplier<E> wrapMongoTemplateContext(Supplier<E> supplier);
+
+    <E> Callable<E> wrapMongoTemplateContext(Callable<E> callable);
 
     boolean checkRecordIsExists(String tableName, List<GXCondition<?>> condition);
 

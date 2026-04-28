@@ -14,6 +14,7 @@ import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.dto.res.GXPaginationResDto;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
+import cn.maple.mongodb.datasource.context.GXMongoTemplateContext;
 import cn.maple.mongodb.datasource.dao.GXMongoDao;
 import cn.maple.mongodb.datasource.model.GXMongoModel;
 import com.mongodb.client.result.DeleteResult;
@@ -29,40 +30,29 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 
 import java.io.Serializable;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Deque;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
+import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, ID>, ID extends Serializable> implements GXBaseRepository<T, ID> {
     private static final Set<String> ALL_COLUMNS = CollUtil.newHashSet("*");
 
-    public interface MongoTemplateScope extends AutoCloseable {
-        @Override
-        void close();
-    }
-
     @SuppressWarnings("all")
     @Autowired
     protected D baseDao;
 
+    @SuppressWarnings("all")
     @Autowired
     protected MongoTemplate mongoTemplate;
 
+    @SuppressWarnings("all")
     @Autowired(required = false)
     protected Map<String, MongoTemplate> mongoTemplateMap = Collections.emptyMap();
 
+    @SuppressWarnings("all")
     @Autowired
     protected BeanFactory beanFactory;
-
-    private final ThreadLocal<Deque<String>> mongoTemplateBeanNames = new ThreadLocal<>();
 
     @Override
     public ID updateOrCreate(T entity, List<GXCondition<?>> condition) {
@@ -254,18 +244,12 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
         return Math.toIntExact(result.getModifiedCount());
     }
 
-    public void useMongoTemplate(String beanName) {
-        if (CharSequenceUtil.isBlank(beanName)) {
-            clearMongoTemplate();
-            return;
-        }
-        validateMongoTemplateBeanName(beanName);
-        clearMongoTemplate();
-        pushMongoTemplateBeanName(beanName);
+    public MongoTemplateScope useMongoTemplateScope(String beanName) {
+        return switchMongoTemplate(beanName);
     }
 
     public void clearMongoTemplate() {
-        mongoTemplateBeanNames.remove();
+        GXMongoTemplateContext.clear();
     }
 
     public <R> R executeWithMongoTemplate(String beanName, Supplier<R> supplier) {
@@ -281,8 +265,53 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
         if (CharSequenceUtil.isNotBlank(beanName)) {
             validateMongoTemplateBeanName(beanName);
         }
-        pushMongoTemplateBeanName(CharSequenceUtil.nullToEmpty(beanName));
-        return this::popMongoTemplateBeanName;
+        GXMongoTemplateContext.push(beanName);
+        return GXMongoTemplateContext::pop;
+    }
+
+    public Runnable wrapMongoTemplateContext(Runnable runnable) {
+        if (runnable == null) {
+            throw new IllegalArgumentException("runnable must not be null");
+        }
+        GXMongoTemplateContext.Snapshot snapshot = GXMongoTemplateContext.capture();
+        return () -> {
+            GXMongoTemplateContext.Snapshot previous = GXMongoTemplateContext.replaceWith(snapshot);
+            try {
+                runnable.run();
+            } finally {
+                GXMongoTemplateContext.replaceWith(previous);
+            }
+        };
+    }
+
+    public <R> Supplier<R> wrapMongoTemplateContext(Supplier<R> supplier) {
+        if (supplier == null) {
+            throw new IllegalArgumentException("supplier must not be null");
+        }
+        GXMongoTemplateContext.Snapshot snapshot = GXMongoTemplateContext.capture();
+        return () -> {
+            GXMongoTemplateContext.Snapshot previous = GXMongoTemplateContext.replaceWith(snapshot);
+            try {
+                return supplier.get();
+            } finally {
+                GXMongoTemplateContext.replaceWith(previous);
+            }
+        };
+    }
+
+    public <R> Callable<R> wrapMongoTemplateContext(Callable<R> callable) {
+        if (callable == null) {
+            throw new IllegalArgumentException("callable must not be null");
+        }
+        GXMongoTemplateContext.Snapshot snapshot = GXMongoTemplateContext.capture();
+        return () -> {
+            GXMongoTemplateContext.Snapshot previous = GXMongoTemplateContext.replaceWith(snapshot);
+            try {
+                return callable.call();
+            } finally {
+                GXMongoTemplateContext.replaceWith(previous);
+            }
+        };
     }
 
     public MongoTemplate getMongoTemplate(String beanName) {
@@ -301,34 +330,12 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
     }
 
     protected MongoTemplate getMongoTemplate() {
-        Deque<String> beanNames = mongoTemplateBeanNames.get();
-        String beanName = beanNames == null || beanNames.isEmpty() ? null : beanNames.peek();
+        String beanName = GXMongoTemplateContext.peek();
         return CharSequenceUtil.isBlank(beanName) ? mongoTemplate : getMongoTemplate(beanName);
     }
 
     private void validateMongoTemplateBeanName(String beanName) {
         getMongoTemplate(beanName);
-    }
-
-    private void pushMongoTemplateBeanName(String beanName) {
-        Deque<String> beanNames = mongoTemplateBeanNames.get();
-        if (beanNames == null) {
-            beanNames = new ArrayDeque<>();
-            mongoTemplateBeanNames.set(beanNames);
-        }
-        beanNames.push(beanName);
-    }
-
-    private void popMongoTemplateBeanName() {
-        Deque<String> beanNames = mongoTemplateBeanNames.get();
-        if (beanNames == null || beanNames.isEmpty()) {
-            mongoTemplateBeanNames.remove();
-            return;
-        }
-        beanNames.pop();
-        if (beanNames.isEmpty()) {
-            mongoTemplateBeanNames.remove();
-        }
     }
 
     @Override
@@ -556,5 +563,10 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
         Dict dict = Dict.create();
         document.forEach((key, value) -> dict.set("_id".equals(key) ? "id" : key, value));
         return dict;
+    }
+
+    public interface MongoTemplateScope extends AutoCloseable {
+        @Override
+        void close();
     }
 }
