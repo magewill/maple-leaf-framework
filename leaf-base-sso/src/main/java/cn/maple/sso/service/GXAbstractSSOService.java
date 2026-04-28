@@ -19,6 +19,7 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.util.List;
@@ -640,7 +641,10 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
             response.setStatus(HttpStatus.HTTP_UNAUTHORIZED);
             response.setCharacterEncoding(getConfig().getEncoding());
             response.setContentType("application/json;charset=" + getConfig().getEncoding());
-            response.getWriter().write(JSONUtil.toJsonStr(data));
+            JsonMapper jsonMapper = GXSpringContextUtils.getBean(JsonMapper.class);
+            assert jsonMapper != null;
+            jsonMapper.writeValue(response.getWriter(), data);
+            //response.getWriter().write(JSONUtil.toJsonStr(data, JSONConfig.create().setIgnoreNullValue(false)));
         } else {
             String retUrl = GXHttpUtil.getRequestUrl(request);
             log.debug("loginAgain redirect pageUrl.." + retUrl);
