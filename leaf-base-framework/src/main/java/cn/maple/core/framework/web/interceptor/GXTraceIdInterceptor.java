@@ -62,6 +62,6 @@ public class GXTraceIdInterceptor extends GXAuthorizationInterceptor {
      */
     @Override
     public void afterCompletion(@NotNull HttpServletRequest request, @NotNull HttpServletResponse response, @NotNull Object handler, Exception ex) throws Exception {
-        GXTraceIdContextUtils.removeTraceId();
+        // TraceId lifecycle is handled by GXBaseRequestLoggingFilter.
     }
 }

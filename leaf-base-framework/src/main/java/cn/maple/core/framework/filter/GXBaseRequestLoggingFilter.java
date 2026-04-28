@@ -83,19 +83,7 @@ public class GXBaseRequestLoggingFilter extends AbstractRequestLoggingFilter {
      */
     @Override
     protected void beforeRequest(HttpServletRequest request, @NotNull String message) {
-        // 优先从请求头获取TraceId，支持分布式追踪
-        String requestId = Optional.ofNullable(request.getHeader(GXTraceIdContextUtils.TRACE_ID_KEY))
-                .orElse(GXTraceIdContextUtils.getTraceId());
-
-        // 如果没有获取到有效的TraceId，则生成新的
-        if (CharSequenceUtil.isEmpty(requestId)) {
-            requestId = GXTraceIdContextUtils.generateTraceId();
-        }
-
-        // 设置TraceId到MDC，用于日志输出
-        GXTraceIdContextUtils.setTraceId(requestId);
-        // 设置TraceId到请求属性，方便在请求处理过程中获取
-        request.setAttribute(GXTraceIdContextUtils.TRACE_ID_KEY, requestId);
+        // TraceId lifecycle is handled in doFilterInternal so it always runs.
     }
 
     /**
@@ -116,8 +104,7 @@ public class GXBaseRequestLoggingFilter extends AbstractRequestLoggingFilter {
      */
     @Override
     protected void afterRequest(@NotNull HttpServletRequest request, @NotNull String message) {
-        // 清理当前线程的TraceId，防止内存泄漏
-        GXTraceIdContextUtils.removeTraceId();
+        // TraceId lifecycle is handled in doFilterInternal so it always runs.
     }
 
     /**
@@ -148,6 +135,12 @@ public class GXBaseRequestLoggingFilter extends AbstractRequestLoggingFilter {
      */
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+        String originalTraceId = GXTraceIdContextUtils.getNullableTraceId();
+        String traceId = resolveTraceId(request, originalTraceId);
+        GXTraceIdContextUtils.putTraceId(traceId);
+        request.setAttribute(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
+        response.setHeader(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
+
         String headerName = "X-Request-Start-Time";
         // 获取请求开始时间，优先从请求头获取，支持分布式系统中的请求追踪
         String requestStartTimeHeader = request.getHeader(headerName);
@@ -157,7 +150,20 @@ public class GXBaseRequestLoggingFilter extends AbstractRequestLoggingFilter {
             response.setHeader(headerName, requestStartTimeHeader);
         }
 
-        // 继续执行过滤器链中的下一个过滤器或最终的处理器（Controller）
-        super.doFilterInternal(request, response, filterChain);
+        try {
+            super.doFilterInternal(request, response, filterChain);
+        } finally {
+            GXTraceIdContextUtils.restoreTraceId(originalTraceId);
+        }
+    }
+
+    private String resolveTraceId(HttpServletRequest request, String originalTraceId) {
+        String traceId = Optional.ofNullable(request.getHeader(GXTraceIdContextUtils.TRACE_ID_KEY))
+                .filter(CharSequenceUtil::isNotBlank)
+                .orElse(originalTraceId);
+        if (CharSequenceUtil.isBlank(traceId)) {
+            return GXTraceIdContextUtils.generateTraceId();
+        }
+        return traceId;
     }
 }

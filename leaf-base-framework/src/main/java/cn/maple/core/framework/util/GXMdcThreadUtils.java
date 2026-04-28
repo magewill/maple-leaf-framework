@@ -8,6 +8,9 @@ import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -492,6 +495,11 @@ public class GXMdcThreadUtils {
     public static <T, R> Function<T, R> contextWrapper(Function<T, R> function) {
         Objects.requireNonNull(function, "Function cannot be null");
         Map<String, String> context = getMdcContext();
+        return contextWrapper(function, context);
+    }
+
+    public static <T, R> Function<T, R> contextWrapper(Function<T, R> function, Map<String, String> context) {
+        Objects.requireNonNull(function, "Function cannot be null");
         return input -> {
             // 保存当前线程的原始 MDC 上下文
             Map<String, String> originalContext = MDC.getCopyOfContextMap();
@@ -516,4 +524,32 @@ public class GXMdcThreadUtils {
             }
         };
     }
+
+    public static <T> Consumer<T> consumerWrapper(Consumer<T> consumer) {
+        Objects.requireNonNull(consumer, "Consumer cannot be null");
+        Map<String, String> context = getMdcContext();
+        return consumerWrapper(consumer, context);
+    }
+
+    public static <T> Consumer<T> consumerWrapper(Consumer<T> consumer, Map<String, String> context) {
+        Objects.requireNonNull(consumer, "Consumer cannot be null");
+        return input -> contextWrapper((T value) -> {
+            consumer.accept(value);
+            return null;
+        }, context).apply(input);
+    }
+
+    public static <T, U, R> BiFunction<T, U, R> biFunctionWrapper(BiFunction<T, U, R> function, Map<String, String> context) {
+        Objects.requireNonNull(function, "BiFunction cannot be null");
+        return (left, right) -> contextWrapper((T value) -> function.apply(value, right), context).apply(left);
+    }
+
+    public static <T, U> BiConsumer<T, U> biConsumerWrapper(BiConsumer<T, U> consumer, Map<String, String> context) {
+        Objects.requireNonNull(consumer, "BiConsumer cannot be null");
+        return (left, right) -> biFunctionWrapper((T value, U throwable) -> {
+            consumer.accept(value, throwable);
+            return null;
+        }, context).apply(left, right);
+    }
+
 }

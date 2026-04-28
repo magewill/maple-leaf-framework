@@ -111,6 +111,10 @@ public class GXTraceIdContextUtils {
         return Objects.isNull(traceId) ? "" : traceId;
     }
 
+    public static String getNullableTraceId() {
+        return MDC.get(TRACE_ID_KEY);
+    }
+
     /**
      * 设置 TraceId 到当前线程的 MDC 中。
      * <p>
@@ -131,6 +135,23 @@ public class GXTraceIdContextUtils {
             LOG.debug("线程 {} 设置的 TraceId: {}", Thread.currentThread().getName(), traceId);
         } else {
             LOG.debug("线程 {} 未设置 TraceId: 当前已存在 TraceId 或传入的 TraceId 为空", Thread.currentThread().getName());
+        }
+    }
+
+    public static void putTraceId(String traceId) {
+        if (CharSequenceUtil.isBlank(traceId)) {
+            removeTraceId();
+            return;
+        }
+        MDC.put(TRACE_ID_KEY, traceId);
+        LOG.debug("线程 {} 写入 TraceId: {}", Thread.currentThread().getName(), traceId);
+    }
+
+    public static void restoreTraceId(String traceId) {
+        if (CharSequenceUtil.isBlank(traceId)) {
+            removeTraceId();
+        } else {
+            putTraceId(traceId);
         }
     }
 

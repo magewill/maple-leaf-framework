@@ -407,7 +407,12 @@ public class GXMdcWrapperForkJoinPool extends ForkJoinPool {
      */
     @Override
     public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> tasks) {
-        return super.invokeAll(tasks);
+        final var context = MDC.getCopyOfContextMap();
+        final var wrappedTasks = tasks.stream()
+                .map(task -> GXMdcThreadUtils.wrap(task, context))
+                .toList();
+
+        return super.invokeAll(wrappedTasks);
     }
 
     /**
@@ -497,4 +502,5 @@ public class GXMdcWrapperForkJoinPool extends ForkJoinPool {
     public List<Runnable> shutdownNow() {
         return super.shutdownNow();
     }
+
 }
