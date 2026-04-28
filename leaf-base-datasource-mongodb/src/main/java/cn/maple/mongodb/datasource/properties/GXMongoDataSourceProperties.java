@@ -1,12 +1,14 @@
 package cn.maple.mongodb.datasource.properties;
 
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import org.springframework.boot.mongodb.autoconfigure.MongoProperties;
 
 /**
  * 多数据源属性
  */
 @Data
+@EqualsAndHashCode(callSuper = true)
 @SuppressWarnings("all")
 public class GXMongoDataSourceProperties extends MongoProperties {
     /**

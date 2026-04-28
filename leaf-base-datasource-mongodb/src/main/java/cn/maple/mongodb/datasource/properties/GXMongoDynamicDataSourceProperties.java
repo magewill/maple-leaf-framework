@@ -8,4 +8,6 @@ public abstract class GXMongoDynamicDataSourceProperties {
     public Map<String, GXMongoDataSourceProperties> getDatasource() {
         return new HashMap<>();
     }
+
+    public abstract void setDatasource(Map<String, GXMongoDataSourceProperties> datasource);
 }
