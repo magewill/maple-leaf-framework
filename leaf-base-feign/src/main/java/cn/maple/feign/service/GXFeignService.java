@@ -250,12 +250,20 @@ public interface GXFeignService {
      */
     default String getTraceId() {
         HttpServletRequest httpServletRequest = GXCurrentRequestContextUtils.getHttpServletRequest();
-        Object traceId = httpServletRequest != null
+        Object traceIdAttribute = httpServletRequest != null
                 ? httpServletRequest.getAttribute(GXTraceIdContextUtils.TRACE_ID_KEY)
                 : null;
 
-        return Optional.ofNullable(traceId)
+        String currentTraceId = Optional.ofNullable(traceIdAttribute)
                 .map(Object::toString)
-                .orElse(GXTraceIdContextUtils.getTraceId());
+                .filter(CharSequenceUtil::isNotBlank)
+                .orElseGet(() -> httpServletRequest == null ? null : httpServletRequest.getHeader(GXTraceIdContextUtils.TRACE_ID_KEY));
+        if (CharSequenceUtil.isBlank(currentTraceId)) {
+            currentTraceId = GXTraceIdContextUtils.getTraceId();
+        }
+        if (CharSequenceUtil.isBlank(currentTraceId)) {
+            return GXTraceIdContextUtils.generateTraceId();
+        }
+        return currentTraceId;
     }
 }

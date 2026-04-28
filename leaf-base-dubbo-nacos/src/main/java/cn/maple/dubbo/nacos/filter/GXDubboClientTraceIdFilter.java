@@ -92,19 +92,19 @@ public class GXDubboClientTraceIdFilter implements Filter {
 
     private String resolveTraceId(Invocation invocation) {
         String traceId = getInvocationAttachment(invocation);
-        if (CharSequenceUtil.isNotEmpty(traceId)) {
+        if (CharSequenceUtil.isNotBlank(traceId)) {
             return traceId;
         }
         traceId = RpcContext.getClientAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
-        if (CharSequenceUtil.isNotEmpty(traceId)) {
+        if (CharSequenceUtil.isNotBlank(traceId)) {
             return traceId;
         }
         traceId = RpcContext.getServerAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
-        if (CharSequenceUtil.isNotEmpty(traceId)) {
+        if (CharSequenceUtil.isNotBlank(traceId)) {
             return traceId;
         }
         traceId = GXTraceIdContextUtils.getTraceId();
-        if (CharSequenceUtil.isNotEmpty(traceId)) {
+        if (CharSequenceUtil.isNotBlank(traceId)) {
             return traceId;
         }
         return GXTraceIdContextUtils.generateTraceId();

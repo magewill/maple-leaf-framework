@@ -27,13 +27,14 @@ import java.util.List;
 public class GXFeignRequestInterceptor implements RequestInterceptor {
     @Override
     public void apply(RequestTemplate requestTemplate) {
+        GXFeignService feignService = GXSpringContextUtils.getBean(GXFeignService.class);
         propagateAnnotatedHeaders(requestTemplate);
-        propagateServiceHeaders(requestTemplate);
+        propagateServiceHeaders(requestTemplate, feignService);
+        propagateTraceId(requestTemplate, feignService);
         appendCommonHeaders(requestTemplate);
     }
 
-    private void propagateServiceHeaders(RequestTemplate requestTemplate) {
-        GXFeignService feignService = GXSpringContextUtils.getBean(GXFeignService.class);
+    private void propagateServiceHeaders(RequestTemplate requestTemplate, GXFeignService feignService) {
         if (feignService == null) {
             log.warn("Failed to get FeignService instance, skipping authentication header propagation");
             return;
@@ -41,18 +42,29 @@ public class GXFeignRequestInterceptor implements RequestInterceptor {
 
         String token = feignService.generateHttpAuthToken();
         if (StrUtil.isNotBlank(token)) {
+            requestTemplate.removeHeader(GXCommonConstant.X_AUTH_TOKEN);
             requestTemplate.header(GXCommonConstant.X_AUTH_TOKEN, token);
             log.debug("Propagated authentication token to Feign request");
         }
 
         String platform = feignService.getPlatform();
         if (StrUtil.isNotBlank(platform)) {
+            requestTemplate.removeHeader(GXTokenConstant.PLATFORM);
             requestTemplate.header(GXTokenConstant.PLATFORM, platform);
             log.debug("Propagated platform identifier [{}] to Feign request", platform);
         }
+    }
 
-        String traceId = feignService.getTraceId();
+    private void propagateTraceId(RequestTemplate requestTemplate, GXFeignService feignService) {
+        String traceId = feignService == null ? null : feignService.getTraceId();
+        if (StrUtil.isBlank(traceId)) {
+            traceId = GXTraceIdContextUtils.getTraceId();
+        }
+        if (StrUtil.isBlank(traceId)) {
+            traceId = GXTraceIdContextUtils.generateTraceId();
+        }
         if (StrUtil.isNotBlank(traceId)) {
+            requestTemplate.removeHeader(GXTraceIdContextUtils.TRACE_ID_KEY);
             requestTemplate.header(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
             log.debug("Propagated trace ID [{}] to Feign request", traceId);
         }

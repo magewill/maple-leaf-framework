@@ -272,29 +272,6 @@ public class GXFeignAuthTokenAspect {
     }
 
     /**
-     * 获取方法签名信息
-     * <p>
-     * 该方法从连接点获取方法签名信息，并使用缓存减少重复构建的开销。
-     * 方法签名格式为：类全限定名.方法名
-     * </p>
-     * <p>
-     * 缓存策略：
-     * - 使用ConcurrentHashMap存储已解析的方法签名
-     * - 使用computeIfAbsent方法确保线程安全的懒加载
-     * - 缓存键为JoinPoint.getSignature().toString()的结果
-     * - 缓存值为格式化后的方法名称（类名.方法名）
-     * </p>
-     * <p>
-     * 性能说明：
-     * - 首次调用某方法时会解析签名并存入缓存
-     * - 后续调用相同方法时直接从缓存获取，避免重复解析
-     * - ConcurrentHashMap的get操作非常高效，几乎不影响性能
-     * </p>
-     *
-     * @param point 连接点
-     * @return 格式化的方法签名字符串，格式为：类全限定名.方法名
-     */
-    /**
      * Resolve method-level annotations first, then class-level annotations.
      */
     private GXHttpInvokerAuthToken getAuthTokenAnnotation(JoinPoint point, MethodSignature signature) {
@@ -317,6 +294,29 @@ public class GXFeignAuthTokenAspect {
         return AnnotationUtils.findAnnotation(targetClass, GXHttpInvokerAuthToken.class);
     }
 
+    /**
+     * 获取方法签名信息
+     * <p>
+     * 该方法从连接点获取方法签名信息，并使用缓存减少重复构建的开销。
+     * 方法签名格式为：类全限定名.方法名
+     * </p>
+     * <p>
+     * 缓存策略：
+     * - 使用ConcurrentHashMap存储已解析的方法签名
+     * - 使用computeIfAbsent方法确保线程安全的懒加载
+     * - 缓存键为JoinPoint.getSignature().toString()的结果
+     * - 缓存值为格式化后的方法名称（类名.方法名）
+     * </p>
+     * <p>
+     * 性能说明：
+     * - 首次调用某方法时会解析签名并存入缓存
+     * - 后续调用相同方法时直接从缓存获取，避免重复解析
+     * - ConcurrentHashMap的get操作非常高效，几乎不影响性能
+     * </p>
+     *
+     * @param point 连接点
+     * @return 格式化的方法签名字符串，格式为：类全限定名.方法名
+     */
     private String getMethodSignature(JoinPoint point) {
         String signatureKey = point.getSignature().toString();
         return METHOD_SIGNATURE_CACHE.computeIfAbsent(signatureKey, key -> {

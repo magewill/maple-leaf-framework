@@ -130,7 +130,7 @@ public class GXTraceIdContextUtils {
      * @param traceId 需要设置的 TraceId，不能为空
      */
     public static void setTraceId(String traceId) {
-        if (CharSequenceUtil.isNotEmpty(traceId) && CharSequenceUtil.isEmpty(MDC.get(TRACE_ID_KEY))) {
+        if (CharSequenceUtil.isNotBlank(traceId) && CharSequenceUtil.isBlank(MDC.get(TRACE_ID_KEY))) {
             MDC.put(TRACE_ID_KEY, traceId);
             LOG.debug("线程 {} 设置的 TraceId: {}", Thread.currentThread().getName(), traceId);
         } else {
@@ -213,7 +213,9 @@ public class GXTraceIdContextUtils {
         String threadName = Thread.currentThread().getName();
         String traceId = GXTraceIdGenerator.generateTraceId();
         String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class);
-        traceId = CharSequenceUtil.format("{}:{}", appName, traceId);
+        if (CharSequenceUtil.isNotBlank(appName)) {
+            traceId = CharSequenceUtil.format("{}:{}", appName, traceId);
+        }
         LOG.debug("线程 {} 生成的 TraceId: {}", threadName, traceId);
         return traceId;
     }
@@ -245,7 +247,7 @@ public class GXTraceIdContextUtils {
      */
     public static void setTraceIdIfAbsent() {
         String currentTraceId = getTraceId();
-        if (CharSequenceUtil.isEmpty(currentTraceId)) {
+        if (CharSequenceUtil.isBlank(currentTraceId)) {
             String newTraceId = generateTraceId();
             setTraceId(newTraceId);
             LOG.debug("线程 {} 自动设置了新的 TraceId: {}", Thread.currentThread().getName(), newTraceId);
