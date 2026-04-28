@@ -241,6 +241,12 @@ public interface GXWebClientService {
      * @throws GXBusinessException 当Token生成失败时抛出
      */
     default String generateHttpAuthToken(String source, int expiry) {
+        if (CharSequenceUtil.isBlank(source)) {
+            throw new GXBusinessException("Please configure maple.framework.web.client.token");
+        }
+        if (expiry <= 0) {
+            throw new GXBusinessException("WebClient Token expiry must be greater than 0");
+        }
         String authTokenSecret = getAuthTokenSecret();
         return GXAuthCodeUtils.authCodeEncode(source, authTokenSecret, expiry);
     }
@@ -270,7 +276,8 @@ public interface GXWebClientService {
         try {
             String authTokenSecret = getAuthTokenSecret();
             String decodedToken = GXAuthCodeUtils.authCodeDecode(webClientToken, authTokenSecret);
-            return !CharSequenceUtil.equalsIgnoreCase(decodedToken, "{}");
+            return CharSequenceUtil.isNotBlank(decodedToken)
+                    && !CharSequenceUtil.equalsIgnoreCase(decodedToken, "{}");
         } catch (Exception e) {
             // Token解码过程中发生异常，视为无效
             return false;

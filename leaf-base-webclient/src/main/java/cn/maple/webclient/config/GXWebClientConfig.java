@@ -277,6 +277,7 @@ public class GXWebClientConfig {
      * 该方法保留用于向后兼容，将在未来版本中移除
      */
     @Bean
+    @Deprecated(since = "4.3.0", forRemoval = false)
     public WebClient.Builder webClientBuilder() {
         // 配置内存限制，避免大响应导致内存溢出
         ExchangeStrategies strategies = ExchangeStrategies.builder()
@@ -345,9 +346,13 @@ public class GXWebClientConfig {
                 }
 
                 // 添加认证Token
-                String token = webClientService.generateHttpAuthToken();
-                if (CharSequenceUtil.isNotBlank(token)) {
-                    requestBuilder.header(GXCommonConstant.X_AUTH_TOKEN, token);
+                try {
+                    String token = webClientService.generateHttpAuthToken();
+                    if (CharSequenceUtil.isNotBlank(token)) {
+                        requestBuilder.header(GXCommonConstant.X_AUTH_TOKEN, token);
+                    }
+                } catch (Exception e) {
+                    LOGGER.warn("Generate WebClient auth token failed: {}", e.getMessage());
                 }
 
                 // 添加平台信息
@@ -468,7 +473,6 @@ public class GXWebClientConfig {
         });
 
         JsonMapper jsonMapper = GXSpringContextUtils.getBean(JsonMapper.class);
-        assert jsonMapper != null;
         // 构建WebClient，配置默认请求头、超时设置等
         return WebClient.builder()
                 .exchangeStrategies(strategies)
@@ -480,7 +484,6 @@ public class GXWebClientConfig {
                 .clientConnector(new ReactorClientHttpConnector(HttpClient.create(connectionProvider)
                         .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, DEFAULT_TIMEOUT_SECONDS * 1000)
                         .compress(true)
-                        .secure() // 启用SSL/TLS安全连接
                         .doOnConnected(conn -> conn
                                 // 读超时：在指定时间内没有收到任何数据
                                 .addHandlerLast(new ReadTimeoutHandler(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS))
@@ -489,12 +492,14 @@ public class GXWebClientConfig {
                         .responseTimeout(Duration.ofSeconds(DEFAULT_TIMEOUT_SECONDS))))
                 // 设置编解码器
                 .codecs(configurer -> {
-                    configurer.defaultCodecs().jacksonJsonEncoder(
-                            new JacksonJsonEncoder(jsonMapper)
-                    );
-                    configurer.defaultCodecs().jacksonJsonDecoder(
-                            new JacksonJsonDecoder(jsonMapper)
-                    );
+                    if (ObjectUtil.isNotNull(jsonMapper)) {
+                        configurer.defaultCodecs().jacksonJsonEncoder(
+                                new JacksonJsonEncoder(jsonMapper)
+                        );
+                        configurer.defaultCodecs().jacksonJsonDecoder(
+                                new JacksonJsonDecoder(jsonMapper)
+                        );
+                    }
                 });
     }
 
@@ -543,6 +548,7 @@ public class GXWebClientConfig {
         errorApiResDto.setMessage(getHttpStatusDescription(httpStatusCode));
         errorApiResDto.setCode(httpStatusCode.value());
         return clientResponse.bodyToMono(GXHttpInvokerApiErrorResDto.class)
+                .onErrorReturn(errorApiResDto)
                 .defaultIfEmpty(errorApiResDto)
                 .flatMap(errorBody -> {
                     String errorMessage = String.format("客户端请求错误(4xx): %s",
@@ -566,6 +572,7 @@ public class GXWebClientConfig {
         errorApiResDto.setMessage(getHttpStatusDescription(httpStatusCode));
         errorApiResDto.setCode(httpStatusCode.value());
         return clientResponse.bodyToMono(GXHttpInvokerApiErrorResDto.class)
+                .onErrorReturn(errorApiResDto)
                 .defaultIfEmpty(errorApiResDto)
                 .flatMap(errorBody -> {
                     String errorMessage = String.format("服务器处理错误(5xx): %s",

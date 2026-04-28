@@ -13,6 +13,8 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Before;
 import org.aspectj.lang.annotation.Pointcut;
 import org.aspectj.lang.reflect.MethodSignature;
+import org.springframework.aop.support.AopUtils;
+import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -241,8 +243,10 @@ public class GXWebClientAuthTokenAspect {
     public void before(JoinPoint point) {
         MethodSignature signature = (MethodSignature) point.getSignature();
         Method method = signature.getMethod();
-        GXHttpInvokerAuthToken httpInvokerAuthToken = method.getAnnotation(GXHttpInvokerAuthToken.class);
-        assert httpInvokerAuthToken != null;
+        GXHttpInvokerAuthToken httpInvokerAuthToken = findAuthTokenAnnotation(point, method);
+        if (Objects.isNull(httpInvokerAuthToken)) {
+            return;
+        }
         String value = httpInvokerAuthToken.value();
         if (!CharSequenceUtil.equalsIgnoreCase(value, GXHttpInvokerConstant.WEB_CLIENT_INVOKER)) {
             return;
@@ -291,6 +295,23 @@ public class GXWebClientAuthTokenAspect {
      * @param point 连接点
      * @return 格式化的方法签名字符串，格式为：类全限定名.方法名
      */
+    private GXHttpInvokerAuthToken findAuthTokenAnnotation(JoinPoint point, Method method) {
+        GXHttpInvokerAuthToken annotation = AnnotationUtils.findAnnotation(method, GXHttpInvokerAuthToken.class);
+        if (Objects.nonNull(annotation)) {
+            return annotation;
+        }
+
+        Class<?> targetClass = Objects.nonNull(point.getTarget())
+                ? AopUtils.getTargetClass(point.getTarget())
+                : method.getDeclaringClass();
+        annotation = AnnotationUtils.findAnnotation(targetClass, GXHttpInvokerAuthToken.class);
+        if (Objects.nonNull(annotation)) {
+            return annotation;
+        }
+
+        return AnnotationUtils.findAnnotation(method.getDeclaringClass(), GXHttpInvokerAuthToken.class);
+    }
+
     private String getMethodSignature(JoinPoint point) {
         String signatureKey = point.getSignature().toString();
         return METHOD_SIGNATURE_CACHE.computeIfAbsent(signatureKey, key -> {
