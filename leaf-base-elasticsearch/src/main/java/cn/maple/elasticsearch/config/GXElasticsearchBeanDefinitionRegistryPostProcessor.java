@@ -20,8 +20,8 @@ import org.springframework.beans.factory.support.BeanDefinitionBuilder;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
 import org.springframework.boot.context.properties.bind.BindResult;
-import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.*;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
@@ -80,8 +80,6 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
     private static final String PRIMARY_ELASTICSEARCH_TEMPLATE_BEAN_NAME = "primaryElasticsearchTemplate";
 
     private Environment environment;
-
-    private ApplicationContext applicationContext;
 
     /**
      * 修改应用上下文的内部Bean定义注册表
@@ -258,7 +256,6 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
         if (Objects.isNull(GXApplicationContextSingleton.INSTANCE.getApplicationContext())) {
             GXApplicationContextSingleton.INSTANCE.setApplicationContext(applicationContext);
         }
-        this.applicationContext = GXApplicationContextSingleton.INSTANCE.getApplicationContext();
     }
 
     /**
