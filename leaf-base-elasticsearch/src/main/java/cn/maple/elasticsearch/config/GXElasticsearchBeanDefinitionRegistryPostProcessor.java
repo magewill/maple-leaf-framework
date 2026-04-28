@@ -21,6 +21,7 @@ import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
 import org.springframework.boot.context.properties.bind.BindResult;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.context.*;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
@@ -33,7 +34,6 @@ import org.springframework.data.elasticsearch.core.convert.MappingElasticsearchC
 import org.springframework.data.elasticsearch.core.mapping.SimpleElasticsearchMappingContext;
 import org.springframework.data.elasticsearch.support.HttpHeaders;
 import org.springframework.util.Assert;
-import org.springframework.boot.context.properties.bind.Bindable;
 
 import java.time.Duration;
 import java.util.List;
@@ -67,6 +67,18 @@ import java.util.Objects;
 @Configuration
 @Log4j2
 public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanDefinitionRegistryPostProcessor, EnvironmentAware, ApplicationContextAware, Ordered {
+    private static final String ELASTICSEARCH_CLIENT_BEAN_NAME = "elasticsearchClient";
+
+    private static final String ELASTICSEARCH_MAPPING_CONTEXT_BEAN_NAME = "elasticsearchMappingContext";
+
+    private static final String ELASTICSEARCH_ENTITY_MAPPER_BEAN_NAME = "elasticsearchEntityMapper";
+
+    private static final String ELASTICSEARCH_TEMPLATE_BEAN_NAME = "elasticsearchTemplate";
+
+    private static final String ELASTICSEARCH_OPERATIONS_BEAN_NAME = "elasticsearchOperations";
+
+    private static final String PRIMARY_ELASTICSEARCH_TEMPLATE_BEAN_NAME = "primaryElasticsearchTemplate";
+
     private Environment environment;
 
     private ApplicationContext applicationContext;
@@ -91,7 +103,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
         try {
             // 获取所有数据源配置
             Map<String, GXElasticsearchProperties> datasourceMap = getSourceElasticsearchProperties().getDatasource();
-            
+
             // 检查配置中是否只有一个主数据源
             checkElasticsearchDataSourceProperties(datasourceMap);
 
@@ -137,14 +149,15 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
                         // 如果需要设置主数据源属性，需要使用自定义的方式处理
                         // settingElasticsearchPropertiesBeanProperties(dataSourceProperties);
                         elasticsearchTemplateBeanDefinitionBuilder.setPrimary(true);
-                        // 为主数据源注册别名，方便其他组件引用
-                        beanDefinitionRegistry.registerAlias(beanName, "elasticsearchTemplate");
-                        beanDefinitionRegistry.registerAlias(beanName, "primaryElasticsearchTemplate");
                         log.info("主Elasticsearch数据源[{}]已设置为primary", key);
                     }
 
                     // 注册ElasticsearchTemplate Bean
                     beanDefinitionRegistry.registerBeanDefinition(beanName, elasticsearchTemplateBeanDefinitionBuilder.getBeanDefinition());
+
+                    if (primary) {
+                        registerPrimaryElasticsearchAliases(beanDefinitionRegistry, clientBeanName, mappingContextBeanName, converterBeanName, beanName);
+                    }
 
                     // 记录数据源注册成功的日志
                     log.info("Elasticsearch数据源[{}]注册成功", key);
@@ -158,6 +171,46 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
         } catch (Exception e) {
             log.error("Elasticsearch多数据源配置处理失败: {}", e.getMessage());
             throw new GXBusinessException("Elasticsearch多数据源配置处理失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 将Spring Boot默认的Elasticsearch Bean入口切换到框架自定义主数据源。
+     */
+    private void registerPrimaryElasticsearchAliases(BeanDefinitionRegistry beanDefinitionRegistry,
+                                                     String clientBeanName,
+                                                     String mappingContextBeanName,
+                                                     String converterBeanName,
+                                                     String templateBeanName) {
+        registerAliasReplacingExistingBeanDefinition(beanDefinitionRegistry, clientBeanName, ELASTICSEARCH_CLIENT_BEAN_NAME);
+        registerAliasReplacingExistingBeanDefinition(beanDefinitionRegistry, mappingContextBeanName, ELASTICSEARCH_MAPPING_CONTEXT_BEAN_NAME);
+        registerAliasReplacingExistingBeanDefinition(beanDefinitionRegistry, converterBeanName, ELASTICSEARCH_ENTITY_MAPPER_BEAN_NAME);
+        registerAliasReplacingExistingBeanDefinition(beanDefinitionRegistry, templateBeanName, ELASTICSEARCH_TEMPLATE_BEAN_NAME);
+        registerAliasReplacingExistingBeanDefinition(beanDefinitionRegistry, templateBeanName, ELASTICSEARCH_OPERATIONS_BEAN_NAME);
+        registerAliasReplacingExistingBeanDefinition(beanDefinitionRegistry, templateBeanName, PRIMARY_ELASTICSEARCH_TEMPLATE_BEAN_NAME);
+    }
+
+    /**
+     * Spring Boot的自动配置会注册默认名称的Bean。这里删除已有同名定义后注册别名，
+     * 确保按默认名称查找时也返回当前框架配置的主数据源。
+     */
+    private void registerAliasReplacingExistingBeanDefinition(BeanDefinitionRegistry beanDefinitionRegistry,
+                                                              String beanName,
+                                                              String alias) {
+        if (CharSequenceUtil.equals(beanName, alias)) {
+            return;
+        }
+        removeBeanNameIfPresent(beanDefinitionRegistry, alias);
+        beanDefinitionRegistry.registerAlias(beanName, alias);
+    }
+
+    private void removeBeanNameIfPresent(BeanDefinitionRegistry beanDefinitionRegistry, String beanName) {
+        if (beanDefinitionRegistry.containsBeanDefinition(beanName)) {
+            beanDefinitionRegistry.removeBeanDefinition(beanName);
+            log.info("已移除Spring Boot自动装配的Elasticsearch Bean定义[{}]，使用框架自定义主数据源", beanName);
+        }
+        if (beanDefinitionRegistry.isAlias(beanName)) {
+            beanDefinitionRegistry.removeAlias(beanName);
         }
     }
 
@@ -291,7 +344,6 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
      * - 安全处理客户端配置，避免连接泄漏
      * </p>
      *
-     * @param elasticsearchSourceProperties 数据源配置信息，不能为null
      * @return 构建好的ElasticsearchClient实例
      * @throws IllegalArgumentException 如果配置信息为null
      * @throws IllegalStateException    如果客户端创建失败

@@ -25,8 +25,63 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 public interface GXElasticsearchService<P extends GXElasticsearchRepository<T, D, Q, B, ID>, T extends GXElasticsearchModel, D extends GXElasticsearchDao<T, Q, B, ID>, Q extends BaseQuery, B extends BaseQueryBuilder<Q, B>, R extends GXBaseDBResDto, ID extends Serializable> extends GXBusinessService {
+    /**
+     * 使用指定ElasticsearchTemplate执行一次服务调用，调用结束后恢复原上下文。
+     *
+     * @param elasticsearchTemplateName Spring容器中的ElasticsearchTemplate Bean名称
+     * @param supplier                  需要执行的逻辑
+     * @param <E>                       返回值类型
+     * @return supplier的执行结果
+     */
+    <E> E useElasticsearchTemplate(String elasticsearchTemplateName, Supplier<E> supplier);
+
+    /**
+     * 使用指定ElasticsearchTemplate执行一次无返回值服务调用，调用结束后恢复原上下文。
+     *
+     * @param elasticsearchTemplateName Spring容器中的ElasticsearchTemplate Bean名称
+     * @param runnable                  需要执行的逻辑
+     */
+    void useElasticsearchTemplate(String elasticsearchTemplateName, Runnable runnable);
+
+    /**
+     * 捕获当前数据源上下文并包装Supplier，适用于虚拟线程、线程池和CompletableFuture等跨线程执行场景。
+     *
+     * @param supplier 需要包装的逻辑
+     * @param <E>      返回值类型
+     * @return 带当前ElasticsearchTemplate上下文的Supplier
+     */
+    <E> Supplier<E> wrapElasticsearchTemplate(Supplier<E> supplier);
+
+    /**
+     * 捕获当前数据源上下文并包装Runnable，适用于虚拟线程、线程池和CompletableFuture等跨线程执行场景。
+     *
+     * @param runnable 需要包装的逻辑
+     * @return 带当前ElasticsearchTemplate上下文的Runnable
+     */
+    Runnable wrapElasticsearchTemplate(Runnable runnable);
+
+    /**
+     * 使用指定ElasticsearchTemplate包装Supplier，适用于延迟提交到其他线程执行的任务。
+     *
+     * @param elasticsearchTemplateName Spring容器中的ElasticsearchTemplate Bean名称
+     * @param supplier                  需要包装的逻辑
+     * @param <E>                       返回值类型
+     * @return 带指定ElasticsearchTemplate上下文的Supplier
+     */
+    <E> Supplier<E> wrapElasticsearchTemplate(String elasticsearchTemplateName, Supplier<E> supplier);
+
+    /**
+     * 使用指定ElasticsearchTemplate包装Runnable，适用于延迟提交到其他线程执行的任务。
+     *
+     * @param elasticsearchTemplateName Spring容器中的ElasticsearchTemplate Bean名称
+     * @param runnable                  需要包装的逻辑
+     * @return 带指定ElasticsearchTemplate上下文的Runnable
+     */
+    Runnable wrapElasticsearchTemplate(String elasticsearchTemplateName, Runnable runnable);
+
     /**
      * 检测给定条件的记录是否存在
      *

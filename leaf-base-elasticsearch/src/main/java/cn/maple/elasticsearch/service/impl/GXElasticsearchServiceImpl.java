@@ -30,6 +30,7 @@ import org.springframework.data.elasticsearch.core.query.BaseQueryBuilder;
 import java.io.Serializable;
 import java.util.*;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -87,6 +88,36 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
     @Autowired
     @SuppressWarnings("all")
     protected P repository;
+
+    @Override
+    public <E> E useElasticsearchTemplate(String elasticsearchTemplateName, Supplier<E> supplier) {
+        return repository.useElasticsearchTemplate(elasticsearchTemplateName, supplier);
+    }
+
+    @Override
+    public void useElasticsearchTemplate(String elasticsearchTemplateName, Runnable runnable) {
+        repository.useElasticsearchTemplate(elasticsearchTemplateName, runnable);
+    }
+
+    @Override
+    public <E> Supplier<E> wrapElasticsearchTemplate(Supplier<E> supplier) {
+        return repository.wrapElasticsearchTemplate(supplier);
+    }
+
+    @Override
+    public Runnable wrapElasticsearchTemplate(Runnable runnable) {
+        return repository.wrapElasticsearchTemplate(runnable);
+    }
+
+    @Override
+    public <E> Supplier<E> wrapElasticsearchTemplate(String elasticsearchTemplateName, Supplier<E> supplier) {
+        return repository.wrapElasticsearchTemplate(elasticsearchTemplateName, supplier);
+    }
+
+    @Override
+    public Runnable wrapElasticsearchTemplate(String elasticsearchTemplateName, Runnable runnable) {
+        return repository.wrapElasticsearchTemplate(elasticsearchTemplateName, runnable);
+    }
 
     /**
      * 检测给定条件的记录是否存在

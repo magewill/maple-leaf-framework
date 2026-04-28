@@ -19,9 +19,15 @@ import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.elasticsearch.constant.GXEsCriteriaMethodMappingConstant;
 import cn.maple.elasticsearch.model.GXElasticsearchModel;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.elasticsearch.core.MultiGetItem;
+import org.springframework.data.elasticsearch.core.RefreshPolicy;
 import org.springframework.data.elasticsearch.client.elc.ElasticsearchTemplate;
+import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.data.elasticsearch.core.SearchHit;
 import org.springframework.data.elasticsearch.core.SearchHits;
 import org.springframework.data.elasticsearch.core.mapping.IndexCoordinates;
@@ -38,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -74,6 +81,259 @@ import java.util.stream.Collectors;
  * @since 1.0.0
  */
 public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends BaseQuery, B extends BaseQueryBuilder<Q, B>, ID extends Serializable> extends ElasticsearchRepository<T, ID> {
+    ThreadLocal<String> ELASTICSEARCH_TEMPLATE_NAME_CONTEXT = new ThreadLocal<>();
+
+    /**
+     * 使用指定ElasticsearchTemplate执行一次调用，调用结束后恢复原上下文。
+     *
+     * @param elasticsearchTemplateName Spring容器中的ElasticsearchTemplate Bean名称
+     * @param supplier                  需要执行的逻辑
+     * @param <R>                       返回值类型
+     * @return supplier的执行结果
+     */
+    default <R> R useElasticsearchTemplate(String elasticsearchTemplateName, Supplier<R> supplier) {
+        Assert.hasText(elasticsearchTemplateName, "ElasticsearchTemplate bean name must not be blank");
+        Assert.notNull(supplier, "Supplier must not be null");
+        return withElasticsearchTemplateContext(elasticsearchTemplateName, supplier);
+    }
+
+    /**
+     * 使用指定ElasticsearchTemplate执行一次无返回值调用，调用结束后恢复原上下文。
+     *
+     * @param elasticsearchTemplateName Spring容器中的ElasticsearchTemplate Bean名称
+     * @param runnable                  需要执行的逻辑
+     */
+    default void useElasticsearchTemplate(String elasticsearchTemplateName, Runnable runnable) {
+        Assert.notNull(runnable, "Runnable must not be null");
+        useElasticsearchTemplate(elasticsearchTemplateName, () -> {
+            runnable.run();
+            return null;
+        });
+    }
+
+    /**
+     * 捕获当前数据源上下文并包装Supplier，适用于虚拟线程、线程池和CompletableFuture等跨线程执行场景。
+     *
+     * @param supplier 需要包装的逻辑
+     * @param <R>      返回值类型
+     * @return 带当前ElasticsearchTemplate上下文的Supplier
+     */
+    default <R> Supplier<R> wrapElasticsearchTemplate(Supplier<R> supplier) {
+        Assert.notNull(supplier, "Supplier must not be null");
+        String capturedTemplateName = ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.get();
+        return () -> withElasticsearchTemplateContext(capturedTemplateName, supplier);
+    }
+
+    /**
+     * 捕获当前数据源上下文并包装Runnable，适用于虚拟线程、线程池和CompletableFuture等跨线程执行场景。
+     *
+     * @param runnable 需要包装的逻辑
+     * @return 带当前ElasticsearchTemplate上下文的Runnable
+     */
+    default Runnable wrapElasticsearchTemplate(Runnable runnable) {
+        Assert.notNull(runnable, "Runnable must not be null");
+        String capturedTemplateName = ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.get();
+        return () -> withElasticsearchTemplateContext(capturedTemplateName, () -> {
+            runnable.run();
+            return null;
+        });
+    }
+
+    /**
+     * 使用指定ElasticsearchTemplate包装Supplier，适用于延迟提交到其他线程执行的任务。
+     *
+     * @param elasticsearchTemplateName Spring容器中的ElasticsearchTemplate Bean名称
+     * @param supplier                  需要包装的逻辑
+     * @param <R>                       返回值类型
+     * @return 带指定ElasticsearchTemplate上下文的Supplier
+     */
+    default <R> Supplier<R> wrapElasticsearchTemplate(String elasticsearchTemplateName, Supplier<R> supplier) {
+        Assert.hasText(elasticsearchTemplateName, "ElasticsearchTemplate bean name must not be blank");
+        Assert.notNull(supplier, "Supplier must not be null");
+        return () -> withElasticsearchTemplateContext(elasticsearchTemplateName, supplier);
+    }
+
+    /**
+     * 使用指定ElasticsearchTemplate包装Runnable，适用于延迟提交到其他线程执行的任务。
+     *
+     * @param elasticsearchTemplateName Spring容器中的ElasticsearchTemplate Bean名称
+     * @param runnable                  需要包装的逻辑
+     * @return 带指定ElasticsearchTemplate上下文的Runnable
+     */
+    default Runnable wrapElasticsearchTemplate(String elasticsearchTemplateName, Runnable runnable) {
+        Assert.hasText(elasticsearchTemplateName, "ElasticsearchTemplate bean name must not be blank");
+        Assert.notNull(runnable, "Runnable must not be null");
+        return () -> withElasticsearchTemplateContext(elasticsearchTemplateName, () -> {
+            runnable.run();
+            return null;
+        });
+    }
+
+    @Override
+    default <S extends T> S save(S entity) {
+        Assert.notNull(entity, "Entity must not be null");
+        return getElasticsearchTemplate().save(entity);
+    }
+
+    @Override
+    default <S extends T> S save(S entity, RefreshPolicy refreshPolicy) {
+        Assert.notNull(entity, "Entity must not be null");
+        return getElasticsearchOperations(refreshPolicy).save(entity);
+    }
+
+    @Override
+    default <S extends T> Iterable<S> saveAll(Iterable<S> entities) {
+        Assert.notNull(entities, "Entities must not be null");
+        return getElasticsearchTemplate().save(entities);
+    }
+
+    @Override
+    default <S extends T> Iterable<S> saveAll(Iterable<S> entities, RefreshPolicy refreshPolicy) {
+        Assert.notNull(entities, "Entities must not be null");
+        return getElasticsearchOperations(refreshPolicy).save(entities);
+    }
+
+    @Override
+    default Optional<T> findById(ID id) {
+        Assert.notNull(id, "Id must not be null");
+        T entity = getElasticsearchTemplate().get(Convert.toStr(id), getGenericEntityClassType());
+        return Optional.ofNullable(entity);
+    }
+
+    @Override
+    default boolean existsById(ID id) {
+        Assert.notNull(id, "Id must not be null");
+        return getElasticsearchTemplate().exists(Convert.toStr(id), getGenericClassType());
+    }
+
+    @Override
+    default Iterable<T> findAll() {
+        Query query = Query.findAll();
+        query.setPageable(Pageable.unpaged());
+        return searchContents(query);
+    }
+
+    @Override
+    default Iterable<T> findAllById(Iterable<ID> ids) {
+        Assert.notNull(ids, "Ids must not be null");
+        List<String> idList = new ArrayList<>();
+        ids.forEach(id -> idList.add(Convert.toStr(id)));
+        if (idList.isEmpty()) {
+            return List.of();
+        }
+        return getElasticsearchTemplate().multiGet(Query.multiGetQuery(idList), getGenericEntityClassType()).stream()
+                .filter(MultiGetItem::hasItem)
+                .map(MultiGetItem::getItem)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    default long count() {
+        return getElasticsearchTemplate().count(Query.findAll(), getGenericClassType());
+    }
+
+    @Override
+    default void deleteById(ID id) {
+        Assert.notNull(id, "Id must not be null");
+        getElasticsearchTemplate().delete(Convert.toStr(id), getGenericClassType());
+    }
+
+    @Override
+    default void deleteById(ID id, RefreshPolicy refreshPolicy) {
+        Assert.notNull(id, "Id must not be null");
+        getElasticsearchOperations(refreshPolicy).delete(Convert.toStr(id), getGenericClassType());
+    }
+
+    @Override
+    default void delete(T entity) {
+        Assert.notNull(entity, "Entity must not be null");
+        getElasticsearchTemplate().delete(entity);
+    }
+
+    @Override
+    default void delete(T entity, RefreshPolicy refreshPolicy) {
+        Assert.notNull(entity, "Entity must not be null");
+        getElasticsearchOperations(refreshPolicy).delete(entity);
+    }
+
+    @Override
+    default void deleteAllById(Iterable<? extends ID> ids) {
+        Assert.notNull(ids, "Ids must not be null");
+        ids.forEach(this::deleteById);
+    }
+
+    @Override
+    default void deleteAllById(Iterable<? extends ID> ids, RefreshPolicy refreshPolicy) {
+        Assert.notNull(ids, "Ids must not be null");
+        ElasticsearchOperations elasticsearchOperations = getElasticsearchOperations(refreshPolicy);
+        ids.forEach(id -> elasticsearchOperations.delete(Convert.toStr(id), getGenericClassType()));
+    }
+
+    @Override
+    default void deleteAll(Iterable<? extends T> entities) {
+        Assert.notNull(entities, "Entities must not be null");
+        entities.forEach(this::delete);
+    }
+
+    @Override
+    default void deleteAll(Iterable<? extends T> entities, RefreshPolicy refreshPolicy) {
+        Assert.notNull(entities, "Entities must not be null");
+        ElasticsearchOperations elasticsearchOperations = getElasticsearchOperations(refreshPolicy);
+        entities.forEach(elasticsearchOperations::delete);
+    }
+
+    @Override
+    default void deleteAll() {
+        DeleteQuery deleteQuery = DeleteQuery.builder(Query.findAll()).build();
+        getElasticsearchTemplate().delete(deleteQuery, getGenericClassType());
+    }
+
+    @Override
+    default void deleteAll(RefreshPolicy refreshPolicy) {
+        DeleteQuery deleteQuery = DeleteQuery.builder(Query.findAll()).build();
+        getElasticsearchOperations(refreshPolicy).delete(deleteQuery, getGenericClassType());
+    }
+
+    @Override
+    default Iterable<T> findAll(Sort sort) {
+        Assert.notNull(sort, "Sort must not be null");
+        Query query = Query.findAll();
+        query.setPageable(Pageable.unpaged());
+        query.addSort(sort);
+        return searchContents(query);
+    }
+
+    @Override
+    default Page<T> findAll(Pageable pageable) {
+        Assert.notNull(pageable, "Pageable must not be null");
+        Query query = Query.findAll();
+        query.setPageable(pageable);
+        SearchHits<T> searchHits = getElasticsearchTemplate().search(query, getGenericEntityClassType());
+        List<T> content = searchHits.getSearchHits().stream()
+                .map(SearchHit::getContent)
+                .collect(Collectors.toList());
+        return new PageImpl<>(content, pageable, searchHits.getTotalHits());
+    }
+
+    @Override
+    default Page<T> searchSimilar(T entity, String[] fields, Pageable pageable) {
+        Assert.notNull(entity, "Entity must not be null");
+        Assert.notNull(fields, "Fields must not be null");
+        Assert.notNull(pageable, "Pageable must not be null");
+        Object id = getEntityId(entity);
+        Assert.notNull(id, "Entity id must not be null");
+        MoreLikeThisQuery moreLikeThisQuery = new MoreLikeThisQuery();
+        moreLikeThisQuery.setId(Convert.toStr(id));
+        moreLikeThisQuery.addFields(fields);
+        moreLikeThisQuery.setPageable(pageable);
+        SearchHits<T> searchHits = getElasticsearchTemplate().search(moreLikeThisQuery, getGenericEntityClassType());
+        List<T> content = searchHits.getSearchHits().stream()
+                .map(SearchHit::getContent)
+                .collect(Collectors.toList());
+        return new PageImpl<>(content, pageable, searchHits.getTotalHits());
+    }
+
+
     /**
      * 根据条件查询所有满足条件的数据
      * 该方法是线程安全的，可以在多线程环境下调用
@@ -146,10 +406,9 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
         if (CollUtil.isNotEmpty(condition)) {
             deleteCondition(null, condition);
         }
-        T save = save(entity);
+        T save = getElasticsearchTemplate().save(entity);
         Class<ID> retIDClazz = GXCommonUtils.getGenericClassType((Class<?>) getClass().getGenericInterfaces()[0], 3);
-        String methodName = CharSequenceUtil.format("get{}", CharSequenceUtil.upperFirst("id"));
-        return Convert.convert(retIDClazz, GXCommonUtils.reflectCallObjectMethod(save, methodName));
+        return Convert.convert(retIDClazz, getEntityId(save));
     }
 
     /**
@@ -505,7 +764,8 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
      * @throws IllegalStateException 如果无法获取ElasticsearchTemplate实例
      */
     default ElasticsearchTemplate getElasticsearchTemplate() {
-        return getElasticsearchTemplate(getElasticsearchTemplateName());
+        String contextTemplateName = ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.get();
+        return getElasticsearchTemplate(CharSequenceUtil.isBlank(contextTemplateName) ? getElasticsearchTemplateName() : contextTemplateName);
     }
 
     /**
@@ -542,7 +802,8 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
     default ElasticsearchTemplate getElasticsearchTemplate(String beanName) {
         // 如果beanName为空，使用默认名称
         if (CharSequenceUtil.isEmpty(beanName)) {
-            beanName = getElasticsearchTemplateName();
+            String contextTemplateName = ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.get();
+            beanName = CharSequenceUtil.isBlank(contextTemplateName) ? getElasticsearchTemplateName() : contextTemplateName;
         }
 
         // 从Spring容器中获取ElasticsearchTemplate实例
@@ -556,5 +817,45 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
                 "]");
 
         return elasticsearchTemplate;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Class<T> getGenericEntityClassType() {
+        return (Class<T>) getGenericClassType();
+    }
+
+    private List<T> searchContents(Query query) {
+        SearchHits<T> searchHits = getElasticsearchTemplate().search(query, getGenericEntityClassType());
+        return searchHits.getSearchHits().stream()
+                .map(SearchHit::getContent)
+                .collect(Collectors.toList());
+    }
+
+    private Object getEntityId(T entity) {
+        String methodName = CharSequenceUtil.format("get{}", CharSequenceUtil.upperFirst("id"));
+        return GXCommonUtils.reflectCallObjectMethod(entity, methodName);
+    }
+
+    private ElasticsearchOperations getElasticsearchOperations(RefreshPolicy refreshPolicy) {
+        ElasticsearchTemplate elasticsearchTemplate = getElasticsearchTemplate();
+        return refreshPolicy == null ? elasticsearchTemplate : elasticsearchTemplate.withRefreshPolicy(refreshPolicy);
+    }
+
+    private <R> R withElasticsearchTemplateContext(String elasticsearchTemplateName, Supplier<R> supplier) {
+        String previousTemplateName = ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.get();
+        if (CharSequenceUtil.isBlank(elasticsearchTemplateName)) {
+            ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.remove();
+        } else {
+            ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.set(elasticsearchTemplateName);
+        }
+        try {
+            return supplier.get();
+        } finally {
+            if (CharSequenceUtil.isBlank(previousTemplateName)) {
+                ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.remove();
+            } else {
+                ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.set(previousTemplateName);
+            }
+        }
     }
 }

@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Elasticsearch仓库实现类，提供对Elasticsearch数据的统一访问接口
@@ -77,6 +78,72 @@ public class GXElasticsearchRepository<T extends GXElasticsearchModel, D extends
     @SuppressWarnings("all")
     @Autowired
     protected D baseDao;
+
+    /**
+     * 使用指定ElasticsearchTemplate执行一次仓储调用，调用结束后恢复原上下文。
+     *
+     * @param elasticsearchTemplateName Spring容器中的ElasticsearchTemplate Bean名称
+     * @param supplier                  需要执行的逻辑
+     * @param <R>                       返回值类型
+     * @return supplier的执行结果
+     */
+    public <R> R useElasticsearchTemplate(String elasticsearchTemplateName, Supplier<R> supplier) {
+        return baseDao.useElasticsearchTemplate(elasticsearchTemplateName, supplier);
+    }
+
+    /**
+     * 使用指定ElasticsearchTemplate执行一次无返回值仓储调用，调用结束后恢复原上下文。
+     *
+     * @param elasticsearchTemplateName Spring容器中的ElasticsearchTemplate Bean名称
+     * @param runnable                  需要执行的逻辑
+     */
+    public void useElasticsearchTemplate(String elasticsearchTemplateName, Runnable runnable) {
+        baseDao.useElasticsearchTemplate(elasticsearchTemplateName, runnable);
+    }
+
+    /**
+     * 捕获当前数据源上下文并包装Supplier，适用于虚拟线程、线程池和CompletableFuture等跨线程执行场景。
+     *
+     * @param supplier 需要包装的逻辑
+     * @param <R>      返回值类型
+     * @return 带当前ElasticsearchTemplate上下文的Supplier
+     */
+    public <R> Supplier<R> wrapElasticsearchTemplate(Supplier<R> supplier) {
+        return baseDao.wrapElasticsearchTemplate(supplier);
+    }
+
+    /**
+     * 捕获当前数据源上下文并包装Runnable，适用于虚拟线程、线程池和CompletableFuture等跨线程执行场景。
+     *
+     * @param runnable 需要包装的逻辑
+     * @return 带当前ElasticsearchTemplate上下文的Runnable
+     */
+    public Runnable wrapElasticsearchTemplate(Runnable runnable) {
+        return baseDao.wrapElasticsearchTemplate(runnable);
+    }
+
+    /**
+     * 使用指定ElasticsearchTemplate包装Supplier，适用于延迟提交到其他线程执行的任务。
+     *
+     * @param elasticsearchTemplateName Spring容器中的ElasticsearchTemplate Bean名称
+     * @param supplier                  需要包装的逻辑
+     * @param <R>                       返回值类型
+     * @return 带指定ElasticsearchTemplate上下文的Supplier
+     */
+    public <R> Supplier<R> wrapElasticsearchTemplate(String elasticsearchTemplateName, Supplier<R> supplier) {
+        return baseDao.wrapElasticsearchTemplate(elasticsearchTemplateName, supplier);
+    }
+
+    /**
+     * 使用指定ElasticsearchTemplate包装Runnable，适用于延迟提交到其他线程执行的任务。
+     *
+     * @param elasticsearchTemplateName Spring容器中的ElasticsearchTemplate Bean名称
+     * @param runnable                  需要包装的逻辑
+     * @return 带指定ElasticsearchTemplate上下文的Runnable
+     */
+    public Runnable wrapElasticsearchTemplate(String elasticsearchTemplateName, Runnable runnable) {
+        return baseDao.wrapElasticsearchTemplate(elasticsearchTemplateName, runnable);
+    }
 
     /**
      * 保存数据
