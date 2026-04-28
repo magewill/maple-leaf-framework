@@ -32,6 +32,8 @@ import org.springframework.data.mongodb.core.query.Update;
 import java.io.Serializable;
 import java.util.*;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadFactory;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -312,6 +314,20 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
                 GXMongoTemplateContext.replaceWith(previous);
             }
         };
+    }
+
+    public Executor wrapMongoTemplateContext(Executor executor) {
+        if (executor == null) {
+            throw new IllegalArgumentException("executor must not be null");
+        }
+        return command -> executor.execute(wrapMongoTemplateContext(command));
+    }
+
+    public ThreadFactory wrapMongoTemplateContext(ThreadFactory threadFactory) {
+        if (threadFactory == null) {
+            throw new IllegalArgumentException("threadFactory must not be null");
+        }
+        return runnable -> threadFactory.newThread(wrapMongoTemplateContext(runnable));
     }
 
     public MongoTemplate getMongoTemplate(String beanName) {

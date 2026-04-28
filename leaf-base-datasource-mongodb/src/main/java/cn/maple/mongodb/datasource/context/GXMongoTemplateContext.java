@@ -6,12 +6,8 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 
 public final class GXMongoTemplateContext {
-    private static final ThreadLocal<Deque<String>> MONGO_TEMPLATE_BEAN_NAMES = new InheritableThreadLocal<>() {
-        @Override
-        protected Deque<String> childValue(Deque<String> parentValue) {
-            return parentValue == null ? null : new ArrayDeque<>(parentValue);
-        }
-    };
+    // Do not use InheritableThreadLocal here: executor threads can inherit stale datasource names when they are lazily created.
+    private static final ThreadLocal<Deque<String>> MONGO_TEMPLATE_BEAN_NAMES = new ThreadLocal<>();
 
     private GXMongoTemplateContext() {
     }

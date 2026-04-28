@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadFactory;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -36,6 +38,10 @@ public interface GXMongoService<P extends GXMongoRepository<T, D, ID>, T extends
     <E> Supplier<E> wrapMongoTemplateContext(Supplier<E> supplier);
 
     <E> Callable<E> wrapMongoTemplateContext(Callable<E> callable);
+
+    Executor wrapMongoTemplateContext(Executor executor);
+
+    ThreadFactory wrapMongoTemplateContext(ThreadFactory threadFactory);
 
     boolean checkRecordIsExists(String tableName, List<GXCondition<?>> condition);
 

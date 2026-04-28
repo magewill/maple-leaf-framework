@@ -35,6 +35,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadFactory;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -71,6 +73,16 @@ public class GXMongoServiceImpl<P extends GXMongoRepository<T, D, ID>, T extends
     @Override
     public <E> Callable<E> wrapMongoTemplateContext(Callable<E> callable) {
         return repository.wrapMongoTemplateContext(callable);
+    }
+
+    @Override
+    public Executor wrapMongoTemplateContext(Executor executor) {
+        return repository.wrapMongoTemplateContext(executor);
+    }
+
+    @Override
+    public ThreadFactory wrapMongoTemplateContext(ThreadFactory threadFactory) {
+        return repository.wrapMongoTemplateContext(threadFactory);
     }
 
     @Override
