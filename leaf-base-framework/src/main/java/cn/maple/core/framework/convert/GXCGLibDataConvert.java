@@ -1218,7 +1218,7 @@ public class GXCGLibDataConvert implements Converter {
                 }
             }
         }
-        LOG.warn("无法解析目标类型{}上属性'{}'在索引{}处的泛型类型参数。返回null。", targetType.getName(), propertyName, index);
+        LOG.debug("无法解析目标类型{}上属性'{}'在索引{}处的泛型类型参数。返回null。", targetType.getName(), propertyName, index);
         // 表示解析失败
         return null;
     }

@@ -177,7 +177,7 @@ public class GXSpringContextUtils {
         try {
             return applicationContext.getBean(clazz);
         } catch (Exception e) {
-            LOG.warn("获取Bean失败: 类型={}, 错误={}", clazz.getSimpleName(), e.getMessage());
+            LOG.debug("获取Bean失败: 类型={}, 错误={}", clazz.getSimpleName(), e.getMessage());
         }
         return null;
     }
@@ -213,7 +213,7 @@ public class GXSpringContextUtils {
         try {
             return applicationContext.getBean(name, requiredType);
         } catch (Exception e) {
-            LOG.warn("获取Bean失败: 名称={}, 类型={}, 错误={}", name, requiredType.getSimpleName(), e.getMessage());
+            LOG.debug("获取Bean失败: 名称={}, 类型={}, 错误={}", name, requiredType.getSimpleName(), e.getMessage());
         }
         return null;
     }
@@ -248,7 +248,7 @@ public class GXSpringContextUtils {
         try {
             return applicationContext.containsBean(name);
         } catch (Exception e) {
-            LOG.warn("检查Bean是否存在时发生错误: 名称={}, 错误={}", name, e.getMessage());
+            LOG.debug("检查Bean是否存在时发生错误: 名称={}, 错误={}", name, e.getMessage());
             return false;
         }
     }
@@ -281,7 +281,7 @@ public class GXSpringContextUtils {
         try {
             return applicationContext.isSingleton(name);
         } catch (Exception e) {
-            LOG.warn("检查Bean是否为单例时发生错误: 名称={}, 错误={}", name, e.getMessage());
+            LOG.debug("检查Bean是否为单例时发生错误: 名称={}, 错误={}", name, e.getMessage());
             return false;
         }
     }
@@ -317,7 +317,7 @@ public class GXSpringContextUtils {
         try {
             return applicationContext.getType(name);
         } catch (Exception e) {
-            LOG.warn("获取Bean类型失败: 名称={}, 错误={}", name, e.getMessage());
+            LOG.debug("获取Bean类型失败: 名称={}, 错误={}", name, e.getMessage());
             return null;
         }
     }
@@ -354,7 +354,7 @@ public class GXSpringContextUtils {
         try {
             return applicationContext.getBeansOfType(clazz);
         } catch (Exception e) {
-            LOG.warn("获取所有Bean失败: 类型={}, 错误={}", clazz.getSimpleName(), e.getMessage());
+            LOG.debug("获取所有Bean失败: 类型={}, 错误={}", clazz.getSimpleName(), e.getMessage());
             return Map.of();
         }
     }
@@ -393,7 +393,7 @@ public class GXSpringContextUtils {
         try {
             return applicationContext.getEnvironment();
         } catch (Exception e) {
-            LOG.warn("获取Environment失败: 错误={}", e.getMessage());
+            LOG.debug("获取Environment失败: 错误={}", e.getMessage());
             return null;
         }
     }
@@ -450,12 +450,12 @@ public class GXSpringContextUtils {
                 // 确保ApplicationContext是AbstractApplicationContext类型
                 if (applicationContext instanceof AbstractApplicationContext) {
                     ((AbstractApplicationContext) applicationContext).getBeanFactory().registerSingleton(beanName, singletonObject);
-                    LOG.info("成功注册单例Bean: 名称={}, 类型={}", beanName, singletonObject.getClass().getName());
+                    LOG.debug("成功注册单例Bean: 名称={}, 类型={}", beanName, singletonObject.getClass().getName());
                 } else {
-                    LOG.warn("无法注册Bean: ApplicationContext不是AbstractApplicationContext类型");
+                    LOG.debug("无法注册Bean: ApplicationContext不是AbstractApplicationContext类型");
                 }
             } else {
-                LOG.info("已存在类型为{}的Bean，跳过注册", singletonObject.getClass().getName());
+                LOG.debug("已存在类型为{}的Bean，跳过注册", singletonObject.getClass().getName());
             }
         } catch (Exception e) {
             LOG.error("注册单例Bean失败: 名称={}, 类型={}, 错误={}", beanName, singletonObject.getClass().getName(), e.getMessage(), e);

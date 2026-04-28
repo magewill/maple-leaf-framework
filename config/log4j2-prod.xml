@@ -2,8 +2,7 @@
 <Configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                xmlns="https://logging.apache.org/xml/ns"
                xsi:schemaLocation="https://logging.apache.org/xml/ns https://logging.apache.org/xml/ns/log4j-config-2.xsd"
-               name="maple" status="TRACE" monitorInterval="30">
-    <!--<Configuration status="WARN" monitorInterval="30">-->
+               name="maple" status="WARN" monitorInterval="30">
     <properties>
         <property name="LOG_HOME" value="${LOG_PATH:-./logs/}"/>
         <Property name="LOG_PATTERN"
@@ -11,118 +10,36 @@
         <Property name="LOG_PATTERN_WITHOUT_TRACE_ID"
                   value="[%style{%d{ISO8601}}{bright,green}] [%t] %style{%p}{bright,green} %style{%C{}.%M}{bright,yellow}:%L - %msg%n%style{%xEx}{bright,red}"/>
     </properties>
+
     <Appenders>
         <!--*********************控制台日志***********************-->
+        <!--生产环境：控制台只输出 WARN 及以上，减少无效 IO-->
         <Console name="consoleAppender" target="SYSTEM_OUT">
             <Filters>
-                <ThresholdFilter level="DEBUG" onMatch="ACCEPT" onMismatch="DENY"/>
+                <ThresholdFilter level="WARN" onMatch="ACCEPT" onMismatch="DENY"/>
             </Filters>
-            <!--设置日志格式及颜色-->
-            <PatternLayout
-                    pattern="${LOG_PATTERN}" disableAnsi="false" noConsoleNoAnsi="false"/>
+            <PatternLayout pattern="${LOG_PATTERN}" disableAnsi="false" noConsoleNoAnsi="false"/>
         </Console>
 
         <!--*********************文件日志***********************-->
-        <!--all级别日志-->
-        <RollingFile name="allFileAppender"
-                     fileName="${LOG_HOME}/all.log"
-                     filePattern="${LOG_HOME}/$${date:yyyy-MM}/all-%d{yyyy-MM-dd}-%i.log.gz">
-            <Filters>
-                <ThresholdFilter level="ALL" onMatch="ACCEPT" onMismatch="DENY"/>
-            </Filters>
-            <!--设置日志格式-->
-            <PatternLayout pattern="${LOG_PATTERN}"/>
-            <Policies>
-                <!-- 设置日志文件切分参数 -->
-                <!--<OnStartupTriggeringPolicy/>-->
-                <!--设置日志基础文件大小，超过该大小就触发日志文件滚动更新-->
-                <SizeBasedTriggeringPolicy size="100 MB"/>
-                <!--设置日志文件滚动更新的时间，依赖于文件命名filePattern的设置-->
-                <TimeBasedTriggeringPolicy/>
-            </Policies>
-            <!--设置日志的文件个数上限，不设置默认为7个，超过大小后会被覆盖；依赖于filePattern中的%i-->
-            <DefaultRolloverStrategy max="20">
-                <Delete basePath="${LOG_HOME}" maxDepth="2">
-                    <IfFileName glob="**/*.log*"/>
-                    <IfLastModified age="90d"/>
-                </Delete>
-                <!--<Delete basePath="${LOG_HOME}" maxDepth="1">
-                    <IfFileName glob="*/*.log*"/>
-                    <IfLastModified age="7d"/>
-                </Delete>-->
-                <!--<Delete basePath="logs/app/history" maxDepth="1">
-                    <IfFileName glob="*.vsdx"/>
-                </Delete>-->
-            </DefaultRolloverStrategy>
-        </RollingFile>
-
-        <!--debug级别日志-->
-        <RollingFile name="debugFileAppender"
-                     fileName="${LOG_HOME}/debug.log"
-                     filePattern="${LOG_HOME}/$${date:yyyy-MM}/debug-%d{yyyy-MM-dd}-%i.log.gz">
-            <!--只接受DEBUG级别的日志，其余的全部拒绝处理-->
-            <Filters>
-                <ThresholdFilter level="DEBUG"/>
-                <ThresholdFilter level="INFO" onMatch="DENY" onMismatch="NEUTRAL"/> <!--拒绝的日志级别及该日志级别之上的-->
-            </Filters>
-            <!--设置日志格式-->
-            <PatternLayout pattern="${LOG_PATTERN}"/>
-            <Policies>
-                <!-- 设置日志文件切分参数 -->
-                <!--<OnStartupTriggeringPolicy/>-->
-                <!--设置日志基础文件大小，超过该大小就触发日志文件滚动更新-->
-                <SizeBasedTriggeringPolicy size="100 MB"/>
-                <!--设置日志文件滚动更新的时间，依赖于文件命名filePattern的设置-->
-                <TimeBasedTriggeringPolicy/>
-            </Policies>
-            <!--设置日志的文件个数上限，不设置默认为7个，超过大小后会被覆盖；依赖于filePattern中的%i-->
-            <DefaultRolloverStrategy max="20">
-                <Delete basePath="${LOG_HOME}" maxDepth="2">
-                    <IfFileName glob="**/*.log*"/>
-                    <IfLastModified age="90d"/>
-                </Delete>
-                <!--<Delete basePath="${LOG_HOME}" maxDepth="1">
-                    <IfFileName glob="*/*.log*"/>
-                    <IfLastModified age="7d"/>
-                </Delete>-->
-                <!--<Delete basePath="logs/app/history" maxDepth="1">
-                    <IfFileName glob="*.vsdx"/>
-                </Delete>-->
-            </DefaultRolloverStrategy>
-        </RollingFile>
-
         <!--info级别日志-->
         <RollingFile name="infoFileAppender"
                      fileName="${LOG_HOME}/info.log"
                      filePattern="${LOG_HOME}/$${date:yyyy-MM}/info-%d{yyyy-MM-dd}-%i.log.gz">
-            <!--只接受INFO级别的日志，其余的全部拒绝处理-->
             <Filters>
                 <ThresholdFilter level="INFO"/>
-                <ThresholdFilter level="WARN" onMatch="DENY" onMismatch="NEUTRAL"/> <!--拒绝的日志级别及该日志级别之上的-->
+                <ThresholdFilter level="WARN" onMatch="DENY" onMismatch="NEUTRAL"/>
             </Filters>
-            <!--设置日志格式-->
             <PatternLayout pattern="${LOG_PATTERN}"/>
             <Policies>
-                <!-- 设置日志文件切分参数 -->
-                <!--<OnStartupTriggeringPolicy/>-->
-                <!--设置日志基础文件大小，超过该大小就触发日志文件滚动更新-->
                 <SizeBasedTriggeringPolicy size="100 MB"/>
-                <!--设置日志文件滚动更新的时间，依赖于文件命名filePattern的设置-->
                 <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
             </Policies>
-            <!--设置日志的文件个数上限，不设置默认为7个，超过大小后会被覆盖；依赖于filePattern中的%i-->
             <DefaultRolloverStrategy max="20">
                 <Delete basePath="${LOG_HOME}" maxDepth="2">
                     <IfFileName glob="**/*.log*"/>
                     <IfLastModified age="90d"/>
                 </Delete>
-                <!--<Delete basePath="${LOG_HOME}" maxDepth="1">
-                    <IfFileName glob="*/*.log*"/>
-                    <IfLastModified age="7d"/>
-                </Delete>-->
-                <!--<Delete basePath="logs/app/history" maxDepth="1">
-                    <IfFileName glob="*.vsdx"/>
-                </Delete>-->
             </DefaultRolloverStrategy>
         </RollingFile>
 
@@ -130,34 +47,20 @@
         <RollingFile name="warnFileAppender"
                      fileName="${LOG_HOME}/warn.log"
                      filePattern="${LOG_HOME}/$${date:yyyy-MM}/warn-%d{yyyy-MM-dd}-%i.log.gz">
-            <!--只接受WARN级别的日志，其余的全部拒绝处理-->
             <Filters>
                 <ThresholdFilter level="WARN"/>
-                <ThresholdFilter level="ERROR" onMatch="DENY" onMismatch="NEUTRAL"/> <!--拒绝的日志级别及该日志级别之上的-->
+                <ThresholdFilter level="ERROR" onMatch="DENY" onMismatch="NEUTRAL"/>
             </Filters>
-            <!--设置日志格式-->
             <PatternLayout pattern="${LOG_PATTERN}"/>
             <Policies>
-                <!-- 设置日志文件切分参数 -->
-                <!--<OnStartupTriggeringPolicy/>-->
-                <!--设置日志基础文件大小，超过该大小就触发日志文件滚动更新-->
                 <SizeBasedTriggeringPolicy size="100 MB"/>
-                <!--设置日志文件滚动更新的时间，依赖于文件命名filePattern的设置-->
                 <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
             </Policies>
-            <!--设置日志的文件个数上限，不设置默认为7个，超过大小后会被覆盖；依赖于filePattern中的%i-->
             <DefaultRolloverStrategy max="20">
                 <Delete basePath="${LOG_HOME}" maxDepth="2">
                     <IfFileName glob="**/*.log*"/>
                     <IfLastModified age="90d"/>
                 </Delete>
-                <!--<Delete basePath="${LOG_HOME}" maxDepth="1">
-                    <IfFileName glob="*/*.log*"/>
-                    <IfLastModified age="7d"/>
-                </Delete>-->
-                <!--<Delete basePath="logs/app/history" maxDepth="1">
-                    <IfFileName glob="*.vsdx"/>
-                </Delete>-->
             </DefaultRolloverStrategy>
         </RollingFile>
 
@@ -165,47 +68,29 @@
         <RollingFile name="errorFileAppender"
                      fileName="${LOG_HOME}/error.log"
                      filePattern="${LOG_HOME}/$${date:yyyy-MM}/error-%d{yyyy-MM-dd}-%i.log.gz">
-            <!--只接受ERROR级别的日志，其余的全部拒绝处理-->
             <Filters>
                 <ThresholdFilter level="ERROR"/>
-                <!--<ThresholdFilter level="ERROR" onMatch="DENY" onMismatch="NEUTRAL"/>--> <!--拒绝的日志级别及该日志级别之上的-->
             </Filters>
-            <!--设置日志格式-->
             <PatternLayout pattern="${LOG_PATTERN}"/>
             <Policies>
-                <!-- 设置日志文件切分参数 -->
-                <!--<OnStartupTriggeringPolicy/>-->
-                <!--设置日志基础文件大小，超过该大小就触发日志文件滚动更新-->
                 <SizeBasedTriggeringPolicy size="100 MB"/>
-                <!--设置日志文件滚动更新的时间，依赖于文件命名filePattern的设置-->
                 <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
             </Policies>
-            <!--设置日志的文件个数上限，不设置默认为7个，超过大小后会被覆盖；依赖于filePattern中的%i-->
             <DefaultRolloverStrategy max="20">
                 <Delete basePath="${LOG_HOME}" maxDepth="2">
                     <IfFileName glob="**/*.log*"/>
                     <IfLastModified age="90d"/>
                 </Delete>
-                <!--<Delete basePath="${LOG_HOME}" maxDepth="1">
-                    <IfFileName glob="*/*.log*"/>
-                    <IfLastModified age="7d"/>
-                </Delete>-->
-                <!--<Delete basePath="logs/app/history" maxDepth="1">
-                    <IfFileName glob="*.vsdx"/>
-                </Delete>-->
             </DefaultRolloverStrategy>
         </RollingFile>
 
-        <!--json格式error级别日志-->
+        <!--json格式error级别日志（便于日志平台采集）-->
         <RollingFile name="errorJsonAppender"
                      fileName="${LOG_HOME}/error-json.log"
                      filePattern="${LOG_HOME}/$${date:yyyy-MM}/error-json-%d{yyyy-MM-dd}-%i.log.gz">
-            <!--只接受WARN级别的日志，其余的全部拒绝处理-->
             <Filters>
                 <ThresholdFilter level="ERROR"/>
-                <!--<ThresholdFilter level="ERROR" onMatch="DENY" onMismatch="NEUTRAL"/>--> <!--拒绝的日志级别及该日志级别之上的-->
             </Filters>
-            <!--设置日志格式-->
             <JsonLayout compact="true" eventEol="true" locationInfo="true"/>
             <Policies>
                 <SizeBasedTriggeringPolicy size="100 MB"/>
@@ -216,36 +101,27 @@
                     <IfFileName glob="**/*.log*"/>
                     <IfLastModified age="90d"/>
                 </Delete>
-                <!--<Delete basePath="${LOG_HOME}" maxDepth="1">
-                    <IfFileName glob="*/*.log*"/>
-                    <IfLastModified age="7d"/>
-                </Delete>-->
-                <!--<Delete basePath="logs/app/history" maxDepth="1">
-                    <IfFileName glob="*.vsdx"/>
-                </Delete>-->
             </DefaultRolloverStrategy>
         </RollingFile>
 
-        <!--druid的日志记录追加器-->
-        <RollingFile name="druidSqlRollingFile" fileName="${LOG_HOME}/druid-sql.log"
+        <!--
+            Druid SQL 专用追加器
+            注意：仅接受 DEBUG 级别，用于隔离存储 druid 打印的 SQL 语句。
+            此 Appender 只应被 druid.sql.* 的 Logger 引用，
+            不要挂载到 Root Logger，否则会导致所有 DEBUG 日志污染此文件。
+        -->
+        <RollingFile name="druidSqlRollingFile"
+                     fileName="${LOG_HOME}/druid-sql.log"
                      filePattern="${LOG_HOME}/$${date:yyyy-MM}/druid-sql-%d{yyyy-MM-dd}-%i.log.gz">
-            <!--<PatternLayout  pattern="${LOG_PATTERN}"/>-->
-            <!--只接受WARN级别的日志，其余的全部拒绝处理-->
             <Filters>
                 <ThresholdFilter level="DEBUG"/>
-                <ThresholdFilter level="INFO" onMatch="DENY" onMismatch="NEUTRAL"/> <!--拒绝的日志级别及该日志级别之上的-->
+                <ThresholdFilter level="INFO" onMatch="DENY" onMismatch="NEUTRAL"/>
             </Filters>
-            <!--设置日志格式-->
             <PatternLayout pattern="${LOG_PATTERN_WITHOUT_TRACE_ID}"/>
             <Policies>
-                <!-- 设置日志文件切分参数 -->
-                <!--<OnStartupTriggeringPolicy/>-->
-                <!--设置日志基础文件大小，超过该大小就触发日志文件滚动更新-->
                 <SizeBasedTriggeringPolicy size="500 MB"/>
-                <!--设置日志文件滚动更新的时间，依赖于文件命名filePattern的设置-->
                 <TimeBasedTriggeringPolicy interval="2" modulate="true"/>
             </Policies>
-            <!--设置日志的文件个数上限，不设置默认为7个，超过大小后会被覆盖；依赖于filePattern中的%i-->
             <DefaultRolloverStrategy max="20">
                 <Delete basePath="${LOG_HOME}" maxDepth="2">
                     <IfFileName glob="**/*.log*"/>
@@ -256,68 +132,109 @@
     </Appenders>
 
     <Loggers>
-        <!-- 根日志设置 -->
-        <Root level="TRACE" additivity="true"> <!-- 必须设置为比 Logger中配置的级别低 -->
-            <AppenderRef ref="consoleAppender" level="TRACE"/>
-            <AppenderRef ref="infoFileAppender" level="INFO"/>
-            <AppenderRef ref="druidSqlRollingFile" level="DEBUG"/>
-            <!--AppenderRef ref="allFileAppender" level="info"/-->
-            <!--AppenderRef ref="debugFileAppender" level="debug"/-->
-            <!--AppenderRef ref="warnFileAppender" level="warn"/-->
-            <!--AppenderRef ref="errorFileAppender" level="error"/-->
-            <!--AppenderRef ref="errorJsonAppender" level="error"/-->
+        <!--
+            根日志设置（生产环境）
+            Root level 从 TRACE 改为 INFO，生产环境不需要 TRACE/DEBUG 级别的全量输出。
+            移除了对 druidSqlRollingFile 的引用，druid SQL 由专用 Logger 处理。
+            启用了 warnFileAppender 和 errorFileAppender，生产环境必须记录 WARN/ERROR。
+        -->
+        <Root level="INFO">
+            <AppenderRef ref="consoleAppender"/>
+            <AppenderRef ref="infoFileAppender"/>
+            <AppenderRef ref="warnFileAppender"/>
+            <AppenderRef ref="errorFileAppender"/>
+            <AppenderRef ref="errorJsonAppender"/>
         </Root>
 
-        <!--ES 日志信息-->
-        <Logger name="org.elasticsearch.client.RequestLogger" level="INFO">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-        <Logger name="org.elasticsearch" level="INFO">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-        <!--spring日志-->
-        <Logger name="org.springframework" level="ERROR">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-        <!--记录druid-sql的记录-->
-        <logger name="druid.sql.Statement" level="debug" additivity="false">
+        <!--
+            Druid SQL 日志（核心配置）
+            druid 打印 SQL 必须是 DEBUG 级别，且 level 必须与 Appender 过滤器匹配。
+            additivity="false"：SQL 日志只写入 druidSqlRollingFile，不再向上传播到 Root，
+            避免 SQL 日志重复出现在控制台和其他文件中，也避免触发 Root 的 INFO 过滤被丢弃。
+        -->
+        <Logger name="druid.sql.Statement" level="DEBUG" additivity="false">
             <AppenderRef ref="druidSqlRollingFile"/>
-        </logger>
-        <!--alibaba日志-->
-        <Logger name="com.alibaba" level="WARN">
+        </Logger>
+        <!--druid 结果集参数打印（可选，按需开启；开启后可看到绑定参数值）-->
+        <!--<Logger name="druid.sql.ResultSet" level="DEBUG" additivity="false">-->
+        <!--    <AppenderRef ref="druidSqlRollingFile"/>-->
+        <!--</Logger>-->
+
+        <!--ES 日志-->
+        <Logger name="org.elasticsearch.client.RequestLogger" level="WARN" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
-        <!--apache日志-->
-        <Logger name="org.apache" level="WARN">
+        <Logger name="org.elasticsearch" level="WARN" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
-        <!--redisson日志-->
-        <Logger name="org.redisson" level="WARN">
+
+        <!--Spring 日志-->
+        <Logger name="org.springframework" level="ERROR" additivity="false">
+            <AppenderRef ref="consoleAppender"/>
+            <AppenderRef ref="errorFileAppender"/>
+        </Logger>
+
+        <!--
+            com.alibaba 日志设置为 WARN。
+            注意：druid 的 SQL logger 名为 druid.sql.*（非 com.alibaba.druid.*），
+            因此此处的 WARN 限制不影响上方 druid.sql.Statement 的 DEBUG 日志输出。
+        -->
+        <Logger name="com.alibaba" level="WARN" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
-        <!--netty-->
-        <Logger name="io.netty" level="WARN">
+
+        <!--Apache 日志-->
+        <Logger name="org.apache" level="WARN" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
+
+        <!--Redisson 日志-->
+        <Logger name="org.redisson" level="WARN" additivity="false">
+            <AppenderRef ref="consoleAppender"/>
+        </Logger>
+
+        <!--Netty 日志-->
+        <Logger name="io.netty" level="WARN" additivity="false">
+            <AppenderRef ref="consoleAppender"/>
+        </Logger>
+
         <!--net.sf-->
-        <Logger name="net.sf" level="fatal"/>
-        <!-- mybatis日志 -->
-        <Logger name="com.p6spy" level="WARN">
+        <Logger name="net.sf" level="FATAL" additivity="false"/>
+
+        <Logger name="java.util.logging" level="WARN" additivity="false"/>
+        <Logger name="javax.management" level="WARN" additivity="false"/>
+        <Logger name="sun.util" level="WARN" additivity="false"/>
+        <Logger name="sun.rmi" level="WARN" additivity="false"/>
+        <Logger name="org.jboss.logging" level="WARN" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
-        <Logger name="com.baomidou" level="WARN">
+        <Logger name="org.mybatis" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
-        <Logger name="org.hibernate" level="WARN">
+
+        <!--Mybatis / p6spy-->
+        <Logger name="com.p6spy" level="WARN" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
-        <!-- maple框架 -->
-        <Logger name="cn.maple" level="INFO">
+        <Logger name="com.baomidou" level="WARN" additivity="false">
+            <AppenderRef ref="consoleAppender"/>
+        </Logger>
+        <Logger name="org.hibernate" level="WARN" additivity="false">
+            <AppenderRef ref="consoleAppender"/>
+        </Logger>
+
+        <!--maple 框架-->
+        <Logger name="cn.maple" level="INFO" additivity="false">
             <AppenderRef ref="infoFileAppender"/>
+            <AppenderRef ref="warnFileAppender"/>
+            <AppenderRef ref="errorFileAppender"/>
         </Logger>
-        <!-- 业务项目 -->
-        <Logger name="cn.gaple" level="INFO">
+
+        <!--业务项目-->
+        <Logger name="cn.gaple" level="INFO" additivity="false">
             <AppenderRef ref="infoFileAppender"/>
+            <AppenderRef ref="warnFileAppender"/>
+            <AppenderRef ref="errorFileAppender"/>
         </Logger>
     </Loggers>
 </Configuration>
