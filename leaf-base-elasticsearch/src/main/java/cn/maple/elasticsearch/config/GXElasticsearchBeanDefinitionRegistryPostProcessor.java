@@ -8,6 +8,8 @@ import cn.maple.elasticsearch.properties.GXElasticsearchProperties;
 import cn.maple.elasticsearch.properties.GXElasticsearchSourceProperties;
 import cn.maple.elasticsearch.properties.local.GXLocalElasticsearchProperties;
 import cn.maple.elasticsearch.properties.nacos.GXNacosElasticsearchProperties;
+import cn.maple.elasticsearch.support.GXDynamicElasticsearchOperations;
+import cn.maple.elasticsearch.support.GXElasticsearchRepositoryFactoryBeanPostProcessor;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import lombok.extern.log4j.Log4j2;
 import org.apache.hc.core5.util.TimeValue;
@@ -29,6 +31,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.data.elasticsearch.client.ClientConfiguration;
 import org.springframework.data.elasticsearch.client.elc.ElasticsearchClients;
 import org.springframework.data.elasticsearch.client.elc.ElasticsearchTemplate;
+import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.data.elasticsearch.client.elc.rest5_client.Rest5Clients;
 import org.springframework.data.elasticsearch.core.convert.MappingElasticsearchConverter;
 import org.springframework.data.elasticsearch.core.mapping.SimpleElasticsearchMappingContext;
@@ -78,6 +81,8 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
     private static final String ELASTICSEARCH_OPERATIONS_BEAN_NAME = "elasticsearchOperations";
 
     private static final String PRIMARY_ELASTICSEARCH_TEMPLATE_BEAN_NAME = "primaryElasticsearchTemplate";
+
+    private static final String ELASTICSEARCH_REPOSITORY_FACTORY_BEAN_POST_PROCESSOR_BEAN_NAME = "gxElasticsearchRepositoryFactoryBeanPostProcessor";
 
     private Environment environment;
 
@@ -184,8 +189,25 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
         registerAliasReplacingExistingBeanDefinition(beanDefinitionRegistry, mappingContextBeanName, ELASTICSEARCH_MAPPING_CONTEXT_BEAN_NAME);
         registerAliasReplacingExistingBeanDefinition(beanDefinitionRegistry, converterBeanName, ELASTICSEARCH_ENTITY_MAPPER_BEAN_NAME);
         registerAliasReplacingExistingBeanDefinition(beanDefinitionRegistry, templateBeanName, ELASTICSEARCH_TEMPLATE_BEAN_NAME);
-        registerAliasReplacingExistingBeanDefinition(beanDefinitionRegistry, templateBeanName, ELASTICSEARCH_OPERATIONS_BEAN_NAME);
         registerAliasReplacingExistingBeanDefinition(beanDefinitionRegistry, templateBeanName, PRIMARY_ELASTICSEARCH_TEMPLATE_BEAN_NAME);
+        registerDynamicElasticsearchOperations(beanDefinitionRegistry, templateBeanName);
+        registerRepositoryFactoryBeanPostProcessor(beanDefinitionRegistry, templateBeanName);
+    }
+
+    private void registerDynamicElasticsearchOperations(BeanDefinitionRegistry beanDefinitionRegistry, String defaultTemplateBeanName) {
+        removeBeanNameIfPresent(beanDefinitionRegistry, ELASTICSEARCH_OPERATIONS_BEAN_NAME);
+        BeanDefinitionBuilder operationsBuilder = BeanDefinitionBuilder.genericBeanDefinition(
+                ElasticsearchOperations.class,
+                () -> GXDynamicElasticsearchOperations.create(defaultTemplateBeanName)
+        );
+        beanDefinitionRegistry.registerBeanDefinition(ELASTICSEARCH_OPERATIONS_BEAN_NAME, operationsBuilder.getBeanDefinition());
+    }
+
+    private void registerRepositoryFactoryBeanPostProcessor(BeanDefinitionRegistry beanDefinitionRegistry, String defaultTemplateBeanName) {
+        removeBeanNameIfPresent(beanDefinitionRegistry, ELASTICSEARCH_REPOSITORY_FACTORY_BEAN_POST_PROCESSOR_BEAN_NAME);
+        BeanDefinitionBuilder builder = BeanDefinitionBuilder.genericBeanDefinition(GXElasticsearchRepositoryFactoryBeanPostProcessor.class);
+        builder.addConstructorArgValue(defaultTemplateBeanName);
+        beanDefinitionRegistry.registerBeanDefinition(ELASTICSEARCH_REPOSITORY_FACTORY_BEAN_POST_PROCESSOR_BEAN_NAME, builder.getBeanDefinition());
     }
 
     /**

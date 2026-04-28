@@ -19,6 +19,7 @@ import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.elasticsearch.constant.GXEsCriteriaMethodMappingConstant;
 import cn.maple.elasticsearch.model.GXElasticsearchModel;
+import cn.maple.elasticsearch.support.GXElasticsearchTemplateContext;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
@@ -81,7 +82,6 @@ import java.util.stream.Collectors;
  * @since 1.0.0
  */
 public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends BaseQuery, B extends BaseQueryBuilder<Q, B>, ID extends Serializable> extends ElasticsearchRepository<T, ID> {
-    ThreadLocal<String> ELASTICSEARCH_TEMPLATE_NAME_CONTEXT = new ThreadLocal<>();
 
     /**
      * 使用指定ElasticsearchTemplate执行一次调用，调用结束后恢复原上下文。
@@ -120,8 +120,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
      */
     default <R> Supplier<R> wrapElasticsearchTemplate(Supplier<R> supplier) {
         Assert.notNull(supplier, "Supplier must not be null");
-        String capturedTemplateName = ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.get();
-        return () -> withElasticsearchTemplateContext(capturedTemplateName, supplier);
+        return GXElasticsearchTemplateContext.wrap(supplier);
     }
 
     /**
@@ -132,11 +131,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
      */
     default Runnable wrapElasticsearchTemplate(Runnable runnable) {
         Assert.notNull(runnable, "Runnable must not be null");
-        String capturedTemplateName = ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.get();
-        return () -> withElasticsearchTemplateContext(capturedTemplateName, () -> {
-            runnable.run();
-            return null;
-        });
+        return GXElasticsearchTemplateContext.wrap(runnable);
     }
 
     /**
@@ -764,7 +759,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
      * @throws IllegalStateException 如果无法获取ElasticsearchTemplate实例
      */
     default ElasticsearchTemplate getElasticsearchTemplate() {
-        String contextTemplateName = ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.get();
+        String contextTemplateName = GXElasticsearchTemplateContext.getTemplateName();
         return getElasticsearchTemplate(CharSequenceUtil.isBlank(contextTemplateName) ? getElasticsearchTemplateName() : contextTemplateName);
     }
 
@@ -802,7 +797,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
     default ElasticsearchTemplate getElasticsearchTemplate(String beanName) {
         // 如果beanName为空，使用默认名称
         if (CharSequenceUtil.isEmpty(beanName)) {
-            String contextTemplateName = ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.get();
+            String contextTemplateName = GXElasticsearchTemplateContext.getTemplateName();
             beanName = CharSequenceUtil.isBlank(contextTemplateName) ? getElasticsearchTemplateName() : contextTemplateName;
         }
 
@@ -842,20 +837,6 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
     }
 
     private <R> R withElasticsearchTemplateContext(String elasticsearchTemplateName, Supplier<R> supplier) {
-        String previousTemplateName = ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.get();
-        if (CharSequenceUtil.isBlank(elasticsearchTemplateName)) {
-            ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.remove();
-        } else {
-            ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.set(elasticsearchTemplateName);
-        }
-        try {
-            return supplier.get();
-        } finally {
-            if (CharSequenceUtil.isBlank(previousTemplateName)) {
-                ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.remove();
-            } else {
-                ELASTICSEARCH_TEMPLATE_NAME_CONTEXT.set(previousTemplateName);
-            }
-        }
+        return GXElasticsearchTemplateContext.withTemplateName(elasticsearchTemplateName, supplier);
     }
 }
