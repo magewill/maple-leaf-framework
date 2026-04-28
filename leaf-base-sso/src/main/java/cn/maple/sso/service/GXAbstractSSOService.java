@@ -628,14 +628,21 @@ public abstract class GXAbstractSSOService extends GXSSOSupportService implement
     public void clearRedirectLogin(HttpServletRequest request, HttpServletResponse response) throws IOException {
         // 清理当前登录状态
         clearLogin(request, response);
+        if (response.isCommitted()) {
+            log.debug("响应已提交，跳过重新登录响应处理: {}", request.getRequestURI());
+            return;
+        }
 
         // redirect login page
         String loginUrl = getConfig().getLoginUrl();
-        if ("".equals(loginUrl)) {
-            Dict data = Dict.create().set("code", HttpStatus.HTTP_NOT_AUTHORITATIVE).set("msg", "Please login").set("data", null);
+        if ("api".equalsIgnoreCase(request.getHeader("X-RESPONSE-TYPE")) || CharSequenceUtil.isBlank(loginUrl)) {
+            Dict data = Dict.create().set("code", HttpStatus.HTTP_UNAUTHORIZED).set("msg", "Please login").set("data", null);
+            response.setStatus(HttpStatus.HTTP_UNAUTHORIZED);
+            response.setCharacterEncoding(getConfig().getEncoding());
+            response.setContentType("application/json;charset=" + getConfig().getEncoding());
             response.getWriter().write(JSONUtil.toJsonStr(data));
         } else {
-            String retUrl = GXHttpUtil.getQueryString(request, getConfig().getEncoding());
+            String retUrl = GXHttpUtil.getRequestUrl(request);
             log.debug("loginAgain redirect pageUrl.." + retUrl);
             response.sendRedirect(GXHttpUtil.encodeRetURL(loginUrl, getConfig().getParamReturnUrl(), retUrl));
         }
