@@ -55,6 +55,7 @@ public class GXDubboClientTraceIdFilter implements Filter {
      */
     @Override
     public Result invoke(Invoker<?> invoker, Invocation invocation) throws RpcException {
+        String originalTraceId = GXTraceIdContextUtils.getNullableTraceId();
         try {
             // 1. 获取TraceId，优先级：当前线程 > 客户端上下文 > 服务端上下文
             // 通过GXPenetrateAttachmentSelector设置的值可以通过以下方式获取
@@ -68,7 +69,7 @@ public class GXDubboClientTraceIdFilter implements Filter {
 
             // 3. 设置TraceId到各个上下文中，确保在整个调用链路中传递
             // a) 设置回当前线程上下文
-            GXTraceIdContextUtils.setTraceId(traceId);
+            GXTraceIdContextUtils.putTraceId(traceId);
             // b) 设置到Invocation的Attachment，这是Dubbo跨进程传递信息的标准方式
             invocation.setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
             // c) 设置到RpcContext的Server和Client Attachment
@@ -81,18 +82,16 @@ public class GXDubboClientTraceIdFilter implements Filter {
             // 记录异常信息，但仍然抛出，由Dubbo框架处理
             log.error("Dubbo客户端处理请求时发生异常", e);
             throw e;
+        } finally {
+            // 注意：与GXDubboServerTraceIdFilter不同，客户端过滤器不清理ThreadLocal
+            // 因为客户端过滤器在调用完成后，可能还需要处理响应，此时仍需要TraceId
+            // ThreadLocal的清理应由请求入口处（如Web过滤器）负责
+            GXTraceIdContextUtils.restoreTraceId(originalTraceId);
         }
-        // 注意：与GXDubboServerTraceIdFilter不同，客户端过滤器不清理ThreadLocal
-        // 因为客户端过滤器在调用完成后，可能还需要处理响应，此时仍需要TraceId
-        // ThreadLocal的清理应由请求入口处（如Web过滤器）负责
     }
 
     private String resolveTraceId(Invocation invocation) {
-        String traceId = GXTraceIdContextUtils.getTraceId();
-        if (CharSequenceUtil.isNotEmpty(traceId)) {
-            return traceId;
-        }
-        traceId = getInvocationAttachment(invocation);
+        String traceId = getInvocationAttachment(invocation);
         if (CharSequenceUtil.isNotEmpty(traceId)) {
             return traceId;
         }
@@ -101,6 +100,10 @@ public class GXDubboClientTraceIdFilter implements Filter {
             return traceId;
         }
         traceId = RpcContext.getServerAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = GXTraceIdContextUtils.getTraceId();
         if (CharSequenceUtil.isNotEmpty(traceId)) {
             return traceId;
         }

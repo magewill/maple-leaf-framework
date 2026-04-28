@@ -127,11 +127,7 @@ public class GXPenetrateAttachmentSelector implements PenetrateAttachmentSelecto
     }
 
     private String resolveTraceId(Invocation invocation, RpcContextAttachment clientAttachment, RpcContextAttachment serverAttachment) {
-        String traceId = GXTraceIdContextUtils.getTraceId();
-        if (CharSequenceUtil.isNotEmpty(traceId)) {
-            return traceId;
-        }
-        traceId = getInvocationAttachment(invocation);
+        String traceId = getInvocationAttachment(invocation);
         if (CharSequenceUtil.isNotEmpty(traceId)) {
             return traceId;
         }
@@ -140,6 +136,10 @@ public class GXPenetrateAttachmentSelector implements PenetrateAttachmentSelecto
             return traceId;
         }
         traceId = getAttachment(clientAttachment);
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = GXTraceIdContextUtils.getTraceId();
         if (CharSequenceUtil.isNotEmpty(traceId)) {
             return traceId;
         }

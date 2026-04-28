@@ -58,6 +58,7 @@ public class GXDubboServerTraceIdFilter implements Filter {
      */
     @Override
     public Result invoke(Invoker<?> invoker, Invocation invocation) throws RpcException {
+        String originalTraceId = GXTraceIdContextUtils.getNullableTraceId();
         try {
             // 1. 获取TraceId，优先级：当前线程 > 服务端上下文 > 客户端上下文 > 新生成
             String traceId = resolveTraceId(invocation);
@@ -67,7 +68,7 @@ public class GXDubboServerTraceIdFilter implements Filter {
             log.info("【{} --->> Dubbo Service】获取TraceId : {}", appName, traceId);
             
             // 3. 设置TraceId到各个上下文中，确保在整个调用链路中传递
-            GXTraceIdContextUtils.setTraceId(traceId);
+            GXTraceIdContextUtils.putTraceId(traceId);
             invocation.setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
             RpcContext.getClientAttachment().setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
             RpcContext.getServerAttachment().setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
@@ -81,16 +82,12 @@ public class GXDubboServerTraceIdFilter implements Filter {
         } finally {
             // 5. 清理当前线程的TraceId，防止内存泄漏
             // 注意：这里只清理ThreadLocal中的TraceId，不影响RPC上下文中的TraceId传递
-            GXTraceIdContextUtils.removeTraceId();
+            GXTraceIdContextUtils.restoreTraceId(originalTraceId);
         }
     }
 
     private String resolveTraceId(Invocation invocation) {
-        String traceId = GXTraceIdContextUtils.getTraceId();
-        if (CharSequenceUtil.isNotEmpty(traceId)) {
-            return traceId;
-        }
-        traceId = getInvocationAttachment(invocation);
+        String traceId = getInvocationAttachment(invocation);
         if (CharSequenceUtil.isNotEmpty(traceId)) {
             return traceId;
         }
@@ -99,6 +96,10 @@ public class GXDubboServerTraceIdFilter implements Filter {
             return traceId;
         }
         traceId = RpcContext.getClientAttachment().getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
+        if (CharSequenceUtil.isNotEmpty(traceId)) {
+            return traceId;
+        }
+        traceId = GXTraceIdContextUtils.getTraceId();
         if (CharSequenceUtil.isNotEmpty(traceId)) {
             return traceId;
         }
