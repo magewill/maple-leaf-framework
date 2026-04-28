@@ -38,6 +38,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Component
 @Log4j2
 public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitionRegistryPostProcessor, EnvironmentAware, ApplicationContextAware {
+    private static final String MONGO_CLIENT_BEAN_NAME = "mongoClient";
+
+    private static final String MONGO_DATABASE_FACTORY_BEAN_NAME = "mongoDatabaseFactory";
+
+    private static final String MONGO_TEMPLATE_BEAN_NAME = "mongoTemplate";
+
+    private static final String MONGO_OPERATIONS_BEAN_NAME = "mongoOperations";
+
     private Environment environment;
 
     private GXMongoDynamicDataSourceProperties cachedProperties;
@@ -46,6 +54,7 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
     public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry beanDefinitionRegistry) throws BeansException {
         GXMongoDynamicDataSourceProperties properties = getMongoDynamicDataSourceProperties();
         checkMongoDynamicDataSourceProperties(properties);
+        PrimaryMongoBeanNames primaryMongoBeanNames = new PrimaryMongoBeanNames();
 
         properties.getDatasource().forEach((key, dataSourceProperties) -> {
             try {
@@ -78,8 +87,8 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
                 mongoTemplateBeanDefinitionBuilder.setPrimary(Boolean.TRUE.equals(primary));
                 registerBeanDefinition(beanDefinitionRegistry, templateBeanName, mongoTemplateBeanDefinitionBuilder);
 
-                if (Boolean.TRUE.equals(primary) && !Objects.equals(templateBeanName, "mongoTemplate")) {
-                    registerAlias(beanDefinitionRegistry, templateBeanName, "mongoTemplate");
+                if (Boolean.TRUE.equals(primary)) {
+                    primaryMongoBeanNames.set(clientBeanName, factoryBeanName, templateBeanName);
                 }
 
                 log.info("MongoDB datasource [{}] registered, database: {}", key, database);
@@ -88,6 +97,13 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
                 throw new GXBusinessException("MongoDB datasource registration failed: " + key + ", " + e.getMessage());
             }
         });
+
+        registerPrimaryMongoAliases(
+                beanDefinitionRegistry,
+                primaryMongoBeanNames.clientBeanName,
+                primaryMongoBeanNames.factoryBeanName,
+                primaryMongoBeanNames.templateBeanName
+        );
     }
 
     @Override
@@ -218,18 +234,54 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
 
     private void registerBeanDefinition(BeanDefinitionRegistry registry, String beanName, BeanDefinitionBuilder builder) {
         if (registry.containsBeanDefinition(beanName)) {
-            log.warn("MongoDB bean [{}] already exists, skip registration", beanName);
-            return;
+            registry.removeBeanDefinition(beanName);
+            log.info("MongoDB bean [{}] already exists, remove it and use GX definition", beanName);
+        }
+        if (registry.isAlias(beanName)) {
+            registry.removeAlias(beanName);
         }
         registry.registerBeanDefinition(beanName, builder.getBeanDefinition());
     }
 
-    private void registerAlias(BeanDefinitionRegistry registry, String beanName, String alias) {
-        if (registry.isAlias(alias)) {
-            registry.removeAlias(alias);
+    private void registerPrimaryMongoAliases(BeanDefinitionRegistry registry,
+                                             String clientBeanName,
+                                             String factoryBeanName,
+                                             String templateBeanName) {
+        registerAliasReplacingExistingBeanDefinition(registry, clientBeanName, MONGO_CLIENT_BEAN_NAME);
+        registerAliasReplacingExistingBeanDefinition(registry, factoryBeanName, MONGO_DATABASE_FACTORY_BEAN_NAME);
+        registerAliasReplacingExistingBeanDefinition(registry, templateBeanName, MONGO_TEMPLATE_BEAN_NAME);
+        registerAliasReplacingExistingBeanDefinition(registry, templateBeanName, MONGO_OPERATIONS_BEAN_NAME);
+    }
+
+    private void registerAliasReplacingExistingBeanDefinition(BeanDefinitionRegistry registry, String beanName, String alias) {
+        if (Objects.equals(beanName, alias)) {
+            return;
         }
-        if (!registry.containsBeanDefinition(alias)) {
-            registry.registerAlias(beanName, alias);
+        removeBeanNameIfPresent(registry, alias);
+        registry.registerAlias(beanName, alias);
+    }
+
+    private void removeBeanNameIfPresent(BeanDefinitionRegistry registry, String beanName) {
+        if (registry.containsBeanDefinition(beanName)) {
+            registry.removeBeanDefinition(beanName);
+            log.info("Removed Spring Boot MongoDB bean definition [{}], using GX primary datasource", beanName);
+        }
+        if (registry.isAlias(beanName)) {
+            registry.removeAlias(beanName);
+        }
+    }
+
+    private static class PrimaryMongoBeanNames {
+        private String clientBeanName;
+
+        private String factoryBeanName;
+
+        private String templateBeanName;
+
+        private void set(String clientBeanName, String factoryBeanName, String templateBeanName) {
+            this.clientBeanName = clientBeanName;
+            this.factoryBeanName = factoryBeanName;
+            this.templateBeanName = templateBeanName;
         }
     }
 }

@@ -20,6 +20,7 @@ import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import jakarta.validation.ConstraintValidatorContext;
 import org.bson.Document;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -28,17 +29,25 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 
 import java.io.Serializable;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, ID>, ID extends Serializable> implements GXBaseRepository<T, ID> {
     private static final Set<String> ALL_COLUMNS = CollUtil.newHashSet("*");
+
+    public interface MongoTemplateScope extends AutoCloseable {
+        @Override
+        void close();
+    }
 
     @SuppressWarnings("all")
     @Autowired
@@ -47,13 +56,21 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
     @Autowired
     protected MongoTemplate mongoTemplate;
 
+    @Autowired(required = false)
+    protected Map<String, MongoTemplate> mongoTemplateMap = Collections.emptyMap();
+
+    @Autowired
+    protected BeanFactory beanFactory;
+
+    private final ThreadLocal<Deque<String>> mongoTemplateBeanNames = new ThreadLocal<>();
+
     @Override
     public ID updateOrCreate(T entity, List<GXCondition<?>> condition) {
         if (entity == null) {
             throw new IllegalArgumentException("entity must not be null");
         }
         try {
-            T savedEntity = baseDao.save(entity);
+            T savedEntity = getMongoTemplate().save(entity);
             Object id = GXCommonUtils.reflectCallObjectMethod(savedEntity, "getId");
             return (ID) id;
         } catch (Exception e) {
@@ -70,7 +87,7 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
     public List<Dict> findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         Query query = buildQuery(dbQueryParamInnerDto);
         applyPage(query, dbQueryParamInnerDto);
-        return mongoTemplate.find(query, Document.class, resolveCollectionName(dbQueryParamInnerDto))
+        return getMongoTemplate().find(query, Document.class, resolveCollectionName(dbQueryParamInnerDto))
                 .stream()
                 .map(this::toDict)
                 .toList();
@@ -95,7 +112,7 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
     @Override
     public Dict findOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         Query query = buildQuery(dbQueryParamInnerDto).limit(1);
-        Document document = mongoTemplate.findOne(query, Document.class, resolveCollectionName(dbQueryParamInnerDto));
+        Document document = getMongoTemplate().findOne(query, Document.class, resolveCollectionName(dbQueryParamInnerDto));
         return document == null ? Dict.create() : toDict(document);
     }
 
@@ -122,7 +139,8 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
             return Dict.create();
         }
         if (CharSequenceUtil.isBlank(tableName)) {
-            return baseDao.findById(id).map(entity -> Convert.convert(Dict.class, entity)).orElse(Dict.create());
+            T entity = getMongoTemplate().findById(id, GXCommonUtils.getGenericClassType(getClass(), 0));
+            return entity == null ? Dict.create() : Convert.convert(Dict.class, entity);
         }
         GXBaseQueryParamInnerDto queryParamInnerDto = GXBaseQueryParamInnerDto.builder()
                 .tableName(tableName)
@@ -141,14 +159,14 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
     public GXPaginationResDto<Dict> paginate(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         Query countQuery = buildQuery(dbQueryParamInnerDto);
         String collectionName = resolveCollectionName(dbQueryParamInnerDto);
-        long total = mongoTemplate.count(countQuery, collectionName);
+        long total = getMongoTemplate().count(countQuery, collectionName);
 
         Query pageQuery = buildQuery(dbQueryParamInnerDto);
         int page = normalizePage(dbQueryParamInnerDto == null ? null : dbQueryParamInnerDto.getPage());
         int pageSize = normalizePageSize(dbQueryParamInnerDto == null ? null : dbQueryParamInnerDto.getPageSize());
         pageQuery.skip((long) (page - 1) * pageSize).limit(pageSize);
 
-        List<Dict> records = mongoTemplate.find(pageQuery, Document.class, collectionName)
+        List<Dict> records = getMongoTemplate().find(pageQuery, Document.class, collectionName)
                 .stream()
                 .map(this::toDict)
                 .toList();
@@ -185,7 +203,7 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
         if (extraData != null) {
             extraData.forEach((key, value) -> update.set(normalizeFieldName(Convert.toStr(key)), value));
         }
-        UpdateResult result = mongoTemplate.updateMulti(buildQuery(tableName, condition), update, requireCollectionName(tableName));
+        UpdateResult result = getMongoTemplate().updateMulti(buildQuery(tableName, condition), update, requireCollectionName(tableName));
         return Math.toIntExact(result.getModifiedCount());
     }
 
@@ -194,7 +212,7 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
         if (CollUtil.isEmpty(condition)) {
             return 0;
         }
-        DeleteResult result = mongoTemplate.remove(buildQuery(tableName, condition), requireCollectionName(tableName));
+        DeleteResult result = getMongoTemplate().remove(buildQuery(tableName, condition), requireCollectionName(tableName));
         return Math.toIntExact(result.getDeletedCount());
     }
 
@@ -203,7 +221,7 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
         if (CollUtil.isEmpty(condition)) {
             return false;
         }
-        return mongoTemplate.exists(buildQuery(tableName, condition).limit(1), requireCollectionName(tableName));
+        return getMongoTemplate().exists(buildQuery(tableName, condition).limit(1), requireCollectionName(tableName));
     }
 
     @Override
@@ -232,8 +250,85 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
         if (CollUtil.isEmpty(updateFields) || CollUtil.isEmpty(condition)) {
             return 0;
         }
-        UpdateResult result = mongoTemplate.updateMulti(buildQuery(tableName, condition), buildUpdate(updateFields), requireCollectionName(tableName));
+        UpdateResult result = getMongoTemplate().updateMulti(buildQuery(tableName, condition), buildUpdate(updateFields), requireCollectionName(tableName));
         return Math.toIntExact(result.getModifiedCount());
+    }
+
+    public void useMongoTemplate(String beanName) {
+        if (CharSequenceUtil.isBlank(beanName)) {
+            clearMongoTemplate();
+            return;
+        }
+        validateMongoTemplateBeanName(beanName);
+        clearMongoTemplate();
+        pushMongoTemplateBeanName(beanName);
+    }
+
+    public void clearMongoTemplate() {
+        mongoTemplateBeanNames.remove();
+    }
+
+    public <R> R executeWithMongoTemplate(String beanName, Supplier<R> supplier) {
+        if (supplier == null) {
+            throw new IllegalArgumentException("supplier must not be null");
+        }
+        try (MongoTemplateScope ignored = switchMongoTemplate(beanName)) {
+            return supplier.get();
+        }
+    }
+
+    public MongoTemplateScope switchMongoTemplate(String beanName) {
+        if (CharSequenceUtil.isNotBlank(beanName)) {
+            validateMongoTemplateBeanName(beanName);
+        }
+        pushMongoTemplateBeanName(CharSequenceUtil.nullToEmpty(beanName));
+        return this::popMongoTemplateBeanName;
+    }
+
+    public MongoTemplate getMongoTemplate(String beanName) {
+        if (CharSequenceUtil.isBlank(beanName)) {
+            return mongoTemplate;
+        }
+        MongoTemplate targetMongoTemplate = mongoTemplateMap.get(beanName);
+        if (targetMongoTemplate != null) {
+            return targetMongoTemplate;
+        }
+        try {
+            return beanFactory.getBean(beanName, MongoTemplate.class);
+        } catch (Exception e) {
+            throw new GXBusinessException("MongoTemplate bean [" + beanName + "] does not exist");
+        }
+    }
+
+    protected MongoTemplate getMongoTemplate() {
+        Deque<String> beanNames = mongoTemplateBeanNames.get();
+        String beanName = beanNames == null || beanNames.isEmpty() ? null : beanNames.peek();
+        return CharSequenceUtil.isBlank(beanName) ? mongoTemplate : getMongoTemplate(beanName);
+    }
+
+    private void validateMongoTemplateBeanName(String beanName) {
+        getMongoTemplate(beanName);
+    }
+
+    private void pushMongoTemplateBeanName(String beanName) {
+        Deque<String> beanNames = mongoTemplateBeanNames.get();
+        if (beanNames == null) {
+            beanNames = new ArrayDeque<>();
+            mongoTemplateBeanNames.set(beanNames);
+        }
+        beanNames.push(beanName);
+    }
+
+    private void popMongoTemplateBeanName() {
+        Deque<String> beanNames = mongoTemplateBeanNames.get();
+        if (beanNames == null || beanNames.isEmpty()) {
+            mongoTemplateBeanNames.remove();
+            return;
+        }
+        beanNames.pop();
+        if (beanNames.isEmpty()) {
+            mongoTemplateBeanNames.remove();
+        }
     }
 
     @Override
