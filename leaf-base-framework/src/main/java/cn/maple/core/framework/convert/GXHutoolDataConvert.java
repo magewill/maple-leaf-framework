@@ -3,18 +3,15 @@ package cn.maple.core.framework.convert;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.bean.copier.IJSONTypeConverter;
-import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.core.util.ClassUtil;
-import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.TypeUtil;
 import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSON;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.dto.GXBaseData;
-import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import com.google.common.reflect.TypeToken;
 import org.slf4j.Logger;
@@ -23,634 +20,513 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.lang.reflect.Array;
 import java.lang.reflect.Type;
-import java.util.*;
+import java.time.temporal.Temporal;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Collection;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Hashtable;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class GXHutoolDataConvert {
-    private static volatile GXHutoolDataConvert INSTANCE;
-
-    private final Logger LOG = LoggerFactory.getLogger(GXHutoolDataConvert.class);
-
+    private static final Logger LOG = LoggerFactory.getLogger(GXHutoolDataConvert.class);
+    private static final GXHutoolDataConvert INSTANCE = new GXHutoolDataConvert();
 
     private GXHutoolDataConvert() {
-        if (INSTANCE != null) {
-            throw new IllegalStateException("已经存在GXHutoolDataConvert实例，请使用getInstance()方法获取");
-        }
     }
-
 
     public static GXHutoolDataConvert getInstance() {
-        if (INSTANCE == null) {
-            synchronized (GXHutoolDataConvert.class) {
-                if (INSTANCE == null) {
-                    INSTANCE = new GXHutoolDataConvert();
-                }
-            }
-        }
         return INSTANCE;
     }
-
 
     public static Object staticConvert(Type type, Object value) {
         return getInstance().convert(type, value);
     }
 
-
     public Object convert(Type type, Object value) {
+        Class<?> targetClass = resolveClass(type);
         if (value == null) {
-            return null;
+            if (targetClass == Optional.class) {
+                return Optional.empty();
+            }
+            return targetClass != null && targetClass.isPrimitive() ? primitiveDefaultValue(targetClass) : null;
+        }
+
+        if (targetClass == null) {
+            return normalizeJsonValue(value);
+        }
+        if (targetClass == Object.class) {
+            return value;
+        }
+        if (isAssignableValue(targetClass, value) && !(value instanceof Collection<?>) && !(value instanceof Map<?, ?>) && !value.getClass().isArray()) {
+            return value;
         }
 
         try {
-            Class<?> targetClazz = TypeUtil.getClass(type);
-            if (targetClazz == null) {
-                LOG.debug("无法确定目标类型，返回原始值");
-                return value;
+            if (targetClass.isEnum()) {
+                return handleEnumConversion(targetClass, value);
             }
-            if (ClassUtil.isBasicType(targetClazz) && targetClazz.isInstance(value)) {
-                LOG.debug("基本类型的包装类型转换: {} -> {}", value.getClass().getName(), targetClazz.getName());
-                return value;
+            if (isDateTimeType(targetClass)) {
+                return handleDateTimeConversion(targetClass, value);
             }
-            return convertBySpecializedPath(type, targetClazz, value);
+            if (targetClass == Optional.class) {
+                return handleOptionalConversion(type, value);
+            }
+            if (value instanceof CharSequence charSequence) {
+                return handleStringConversion(type, targetClass, charSequence.toString());
+            }
+            if (value instanceof IJSONTypeConverter jsonTypeConverter) {
+                return jsonTypeConverter.toBean(Objects.requireNonNullElse(type, Object.class));
+            }
+            if (value instanceof Collection<?> collection) {
+                return handleCollectionConversion(type, targetClass, collection);
+            }
+            if (value.getClass().isArray()) {
+                return handleArrayConversion(type, targetClass, value);
+            }
+            if (value instanceof Map<?, ?> map) {
+                return handleMapConversion(type, targetClass, map);
+            }
+            if (value instanceof JSON json) {
+                return json.toBean(type);
+            }
+
+            Object convertedValue = Convert.convertWithCheck(type, value, null, false);
+            return convertedValue != null ? convertedValue : value;
         } catch (Exception e) {
-            LOG.warn("类型转换异常: {} -> {}, 异常信息: {}",
+            LOG.warn("Type convert failed: {} -> {}, {}",
                     value.getClass().getName(),
                     type != null ? type.getTypeName() : "null",
                     e.getMessage());
             if (LOG.isDebugEnabled()) {
-                LOG.debug("类型转换异常详细信息", e);
+                LOG.debug("Type convert failed", e);
             }
             return value;
         }
     }
 
+    private Object handleOptionalConversion(Type type, Object value) {
+        if (value instanceof Optional<?> optional) {
+            return optional.map(item -> convertOptionalValue(type, item));
+        }
+        return Optional.ofNullable(convertOptionalValue(type, value));
+    }
 
-    private Object convertBySpecializedPath(Type type, Class<?> targetClazz, Object value) {
-        if (targetClazz == Object.class) {
+    private Object convertOptionalValue(Type optionalType, Object value) {
+        Type valueType = TypeUtil.getTypeArgument(optionalType, 0);
+        if (valueType == null || valueType == Object.class) {
             return value;
         }
-
-        if (targetClazz.isEnum()) {
-            LOG.debug("检测到枚举类型转换需求: {} -> {}", value.getClass().getName(), targetClazz.getName());
-            return handleEnumConversion(targetClazz, value);
-        }
-        if (Date.class.isAssignableFrom(targetClazz) || Calendar.class.isAssignableFrom(targetClazz)) {
-            LOG.debug("检测到日期/时间类型转换需求: {} -> {}", value.getClass().getName(), targetClazz.getName());
-            return handleDateTimeConversion(targetClazz, value);
-        }
-        if (value instanceof CharSequence) {
-            LOG.debug("检测到字符串类型转换需求: {} -> {}", value.getClass().getName(), targetClazz.getName());
-            return handleStringConversion(type, targetClazz, value.toString());
-        }
-        if (value instanceof IJSONTypeConverter) {
-            LOG.debug("检测到JSON类型转换器: {}", value.getClass().getName());
-            return ((IJSONTypeConverter) value).toBean(ObjectUtil.defaultIfNull(type, Object.class));
-        }
-        if (value instanceof Collection<?>) {
-            LOG.debug("检测到集合类型转换需求: {} -> {}", value.getClass().getName(), targetClazz.getName());
-            return handleCollectionConversion(type, targetClazz, (Collection<?>) value);
-        }
-        if (value instanceof Object[]) {
-            LOG.debug("检测到数组类型转换需求: {} -> {}", value.getClass().getName(), targetClazz.getName());
-            return handleArrayConversion(type, targetClazz, (Object[]) value);
-        }
-        if (value instanceof Map<?, ?>) {
-            LOG.debug("检测到Map类型转换需求: {} -> {}", value.getClass().getName(), targetClazz.getName());
-            return handleMapConversion(type, targetClazz, (Map<?, ?>) value);
-        }
-
-        LOG.debug("尝试使用通用转换工具: {} -> {}", value.getClass().getName(), targetClazz.getName());
-        Object convertedValue = Convert.convertWithCheck(type, value, null, true);
-        if (convertedValue != null) {
-            return convertedValue;
-        }
-
-        LOG.debug("无法将类型 [{}] 转换为 [{}]，返回原始值", value.getClass().getName(), targetClazz.getName());
-        return value;
+        return convert(valueType, value);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private Object handleEnumConversion(Class<?> targetClazz, Object value) {
-        if (value == null) {
+    private Object handleEnumConversion(Class<?> targetClass, Object value) {
+        if (targetClass.isInstance(value)) {
+            return value;
+        }
+        Object[] enumConstants = targetClass.getEnumConstants();
+        if (enumConstants == null || enumConstants.length == 0) {
             return null;
         }
-        if (value instanceof String strValue) {
+        if (value instanceof CharSequence charSequence) {
+            String enumName = charSequence.toString().trim();
+            if (enumName.isEmpty()) {
+                return null;
+            }
             try {
-                return Enum.valueOf((Class<Enum>) targetClazz, strValue);
-            } catch (IllegalArgumentException e) {
-                try {
-                    for (Object enumConstant : targetClazz.getEnumConstants()) {
-                        if (((Enum<?>) enumConstant).name().equalsIgnoreCase(strValue)) {
-                            LOG.debug("通过忽略大小写匹配枚举值: {} -> {}", strValue, enumConstant);
-                            return enumConstant;
-                        }
+                return Enum.valueOf((Class<Enum>) targetClass, enumName);
+            } catch (IllegalArgumentException ignored) {
+                for (Object enumConstant : enumConstants) {
+                    if (((Enum<?>) enumConstant).name().equalsIgnoreCase(enumName) || enumConstant.toString().equals(enumName)) {
+                        return enumConstant;
                     }
-                } catch (Exception ex) {
-                    LOG.warn("忽略大小写匹配枚举值失败: {}", ex.getMessage());
                 }
-                try {
-                    for (Object enumConstant : targetClazz.getEnumConstants()) {
-                        if (enumConstant.toString().equals(strValue)) {
-                            LOG.debug("通过toString()匹配枚举值: {} -> {}", strValue, enumConstant);
-                            return enumConstant;
-                        }
-                    }
-                } catch (Exception ex) {
-                    LOG.warn("通过toString()匹配枚举值失败: {}", ex.getMessage());
-                }
-
-                LOG.warn("枚举转换失败: {} 不是 {} 的有效枚举值", value, targetClazz.getName());
+                return null;
             }
-        } else if (value instanceof Number) {
+        }
+        if (value instanceof Number number) {
+            int index = number.intValue();
+            return index >= 0 && index < enumConstants.length ? enumConstants[index] : null;
+        }
+        if (value.getClass().isEnum()) {
             try {
-                Object[] enumConstants = targetClazz.getEnumConstants();
-                int index = ((Number) value).intValue();
-                if (index >= 0 && index < enumConstants.length) {
-                    return enumConstants[index];
-                } else {
-                    LOG.warn("枚举序号越界: 索引 {} 超出 {} 的有效范围 [0, {}]",
-                            index, targetClazz.getName(), enumConstants.length - 1);
-                }
-            } catch (Exception e) {
-                LOG.warn("通过序号转换枚举失败: {}", e.getMessage());
+                return Enum.valueOf((Class<Enum>) targetClass, ((Enum<?>) value).name());
+            } catch (IllegalArgumentException ignored) {
+                return null;
             }
-        } else if (value.getClass().isEnum()) {
-            try {
-                String enumName = ((Enum<?>) value).name();
-                return Enum.valueOf((Class<Enum>) targetClazz, enumName);
-            } catch (Exception e) {
-                LOG.warn("枚举类型间转换失败: {} -> {}", value.getClass().getName(), targetClazz.getName());
-            }
-        } else {
-            LOG.debug("不支持将类型 [{}] 转换为枚举类型 [{}]",
-                    value.getClass().getName(), targetClazz.getName());
         }
         return null;
     }
 
-    private Object handleDateTimeConversion(Class<?> targetClazz, Object value) {
-        if (value == null) {
-            return null;
-        }
+    private Object handleDateTimeConversion(Class<?> targetClass, Object value) {
         try {
-            switch (value) {
-                case Date dateValue -> {
-                    if (targetClazz == Date.class) {
-                        return dateValue;
-                    } else if (targetClazz == Calendar.class) {
-                        Calendar calendar = Calendar.getInstance();
-                        calendar.setTime(dateValue);
-                        return calendar;
-                    }
+            if (value instanceof Date dateValue) {
+                if (targetClass == Date.class) {
+                    return dateValue;
                 }
-                case Calendar calValue -> {
-                    if (targetClazz == Calendar.class) {
-                        return calValue;
-                    } else if (targetClazz == Date.class) {
-                        return calValue.getTime();
-                    }
-                }
-                case String strValue -> {
-                    if (strValue.isEmpty()) {
-                        LOG.debug("日期字符串为空，返回null");
-                        return null;
-                    }
-
-                    Date date = DateUtil.parse(strValue);
-                    if (date != null) {
-                        if (targetClazz == Date.class) {
-                            return date;
-                        } else if (targetClazz == Calendar.class) {
-                            Calendar calendar = Calendar.getInstance();
-                            calendar.setTime(date);
-                            return calendar;
-                        }
-                    } else {
-                        LOG.debug("无法解析日期字符串: {}", strValue);
-                    }
-                }
-                case Number number -> {
-                    long timestamp = number.longValue();
-                    if (timestamp < 100000000000L) {
-                        timestamp *= 1000;
-                        LOG.debug("将秒级时间戳转换为毫秒级: {}", timestamp);
-                    }
-                    Date date = new Date(timestamp);
-                    if (targetClazz == Date.class) {
-                        return date;
-                    } else if (targetClazz == Calendar.class) {
-                        Calendar calendar = Calendar.getInstance();
-                        calendar.setTime(date);
-                        return calendar;
-                    }
-                }
-                default -> {
+                if (targetClass == Calendar.class) {
+                    Calendar calendar = Calendar.getInstance();
+                    calendar.setTime(dateValue);
+                    return calendar;
                 }
             }
-
-            LOG.debug("尝试使用通用转换工具转换日期/时间类型");
-            return Convert.convert(targetClazz, value);
+            if (value instanceof Calendar calendarValue) {
+                if (targetClass == Calendar.class) {
+                    return calendarValue;
+                }
+                if (targetClass == Date.class) {
+                    return calendarValue.getTime();
+                }
+            }
+            if (value instanceof CharSequence charSequence) {
+                String text = charSequence.toString().trim();
+                if (text.isEmpty()) {
+                    return null;
+                }
+                Date date = DateUtil.parse(text);
+                if (targetClass == Date.class) {
+                    return date;
+                }
+                if (targetClass == Calendar.class) {
+                    Calendar calendar = Calendar.getInstance();
+                    calendar.setTime(date);
+                    return calendar;
+                }
+            }
+            if (value instanceof Number number) {
+                long timestamp = number.longValue();
+                if (timestamp < 100000000000L) {
+                    timestamp *= 1000;
+                }
+                Date date = new Date(timestamp);
+                if (targetClass == Date.class) {
+                    return date;
+                }
+                if (targetClass == Calendar.class) {
+                    Calendar calendar = Calendar.getInstance();
+                    calendar.setTime(date);
+                    return calendar;
+                }
+            }
+            return Convert.convertWithCheck(targetClass, value, null, false);
         } catch (Exception e) {
-            LOG.warn("日期时间转换异常: {} -> {}", e.getClass().getName(), e.getMessage());
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("日期时间转换异常详细信息", e);
-            }
+            LOG.warn("Date/time convert failed: {} -> {}, {}", value.getClass().getName(), targetClass.getName(), e.getMessage());
             return null;
         }
     }
 
+    private Object handleStringConversion(Type type, Class<?> targetClass, String value) {
+        if (CharSequenceUtil.isBlank(value)) {
+            return targetClass.isPrimitive() ? primitiveDefaultValue(targetClass) : null;
+        }
+        if (targetClass == String.class) {
+            return value;
+        }
+        if (JSONUtil.isTypeJSONObject(value)) {
+            return handleJsonObjectConversion(type, targetClass, value);
+        }
+        if (JSONUtil.isTypeJSONArray(value)) {
+            return handleJsonArrayConversion(type, targetClass, value);
+        }
 
-    private Object handleStringConversion(Type type, Class<?> targetClazz, String valueStr) {
-        if (valueStr == null) {
-            return null;
-        }
-        if (CharSequenceUtil.isBlank(valueStr)) {
-            LOG.debug("检测到空字符串，根据目标类型返回默认值");
-            if (ClassUtil.isBasicType(targetClazz)) {
-                return GXCommonUtils.getClassDefaultValue(targetClazz);
-            }
-            return null;
-        }
-        if (targetClazz == String.class) {
-            LOG.debug("目标类型是String，直接返回字符串");
-            return valueStr;
-        }
-        if (JSONUtil.isTypeJSONObject(valueStr)) {
-            LOG.debug("检测到JSON对象字符串，进行JSON对象转换");
-            return handleJsonObjectConversion(targetClazz, valueStr);
-        }
-        if (JSONUtil.isTypeJSONArray(valueStr)) {
-            LOG.debug("检测到JSON数组字符串，进行JSON数组转换");
-            return handleJsonArrayConversion(type, targetClazz, valueStr);
-        }
-        LOG.debug("尝试使用通用工具转换字符串: {}", valueStr);
-        Object convertedObj = GXCommonUtils.convertStrToTarget(valueStr, targetClazz);
-        return convertedObj != null ? convertedObj : valueStr;
+        Object convertedValue = Convert.convertWithCheck(type, value, null, false);
+        return convertedValue != null ? convertedValue : value;
     }
 
-
-    private Object handleJsonObjectConversion(Class<?> targetClazz, String valueStr) {
+    private Object handleJsonObjectConversion(Type type, Class<?> targetClass, String value) {
         try {
-            if (isGXBaseDataType(targetClazz)) {
-                return convertToGXBaseData(targetClazz, valueStr);
-            } else if (isDictType(targetClazz)) {
-                return convertToDict(valueStr);
-            } else if (isJSONObjectType(targetClazz)) {
-                return convertToJSONObject(valueStr);
-            } else if (isMapType(targetClazz)) {
-                return convertToMap(valueStr);
-            } else {
-                return convertToJavaBean(targetClazz, valueStr);
+            if (isGXBaseDataType(targetClass)) {
+                return JSONUtil.toBean(value, targetClass);
             }
+            if (Dict.class.isAssignableFrom(targetClass)) {
+                return JSONUtil.toBean(value, Dict.class);
+            }
+            if (JSONObject.class.isAssignableFrom(targetClass)) {
+                return JSONUtil.parseObj(value);
+            }
+            if (Map.class.isAssignableFrom(targetClass)) {
+                return handleMapConversion(type, targetClass, JSONUtil.toBean(value, Map.class));
+            }
+            return convertToJavaBean(targetClass, value);
         } catch (Exception e) {
-            LOG.warn("JSON对象转换异常: {} -> {}, 值: {}", e.getClass().getName(), e.getMessage(), valueStr);
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("JSON对象转换异常详细信息", e);
-            }
+            LOG.warn("JSON object convert failed: {} -> {}, {}", value, targetClass.getName(), e.getMessage());
             return null;
         }
     }
 
-
-    private boolean isGXBaseDataType(Class<?> targetClazz) {
-        return TypeToken.of(targetClazz).isSubtypeOf(GXBaseData.class);
-    }
-
-
-    private Object convertToGXBaseData(Class<?> targetClazz, String valueStr) {
-        LOG.debug("将JSON转换为GXBaseData子类: {}", targetClazz.getName());
-        return JSONUtil.toBean(valueStr, targetClazz);
-    }
-
-
-    private boolean isDictType(Class<?> targetClazz) {
-        return targetClazz.isAssignableFrom(Dict.class);
-    }
-
-
-    private Object convertToDict(String valueStr) {
-        LOG.debug("将JSON转换为Dict类型");
-        return JSONUtil.toBean(valueStr, Dict.class);
-    }
-
-
-    private boolean isJSONObjectType(Class<?> targetClazz) {
-        return targetClazz.isAssignableFrom(JSONObject.class);
-    }
-
-
-    private Object convertToJSONObject(String valueStr) {
-        LOG.debug("将JSON转换为JSONObject类型");
-        return JSONUtil.parseObj(valueStr);
-    }
-
-
-    private boolean isMapType(Class<?> targetClazz) {
-        return targetClazz.isAssignableFrom(Map.class);
-    }
-
-
-    private Object convertToMap(String valueStr) {
-        LOG.debug("将JSON转换为Map类型");
-        return JSONUtil.toBean(valueStr, Map.class);
-    }
-
-
-    private Object convertToJavaBean(Class<?> targetClazz, String valueStr) {
-        LOG.debug("将JSON转换为JavaBean类型: {}", targetClazz.getName());
+    private Object convertToJavaBean(Class<?> targetClass, String value) {
         try {
-            return JSONUtil.toBean(valueStr, targetClazz);
+            return JSONUtil.toBean(value, targetClass);
         } catch (Exception e) {
-            LOG.warn("JSON转JavaBean异常: {} -> {}", targetClazz.getName(), e.getMessage());
+            ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
+            if (objectMapper == null) {
+                throw e;
+            }
             try {
-                ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
-                if (objectMapper != null) {
-                    return objectMapper.readValue(valueStr, targetClazz);
-                }
-            } catch (Exception ex) {
-                LOG.debug("Jackson转换也失败: {}", ex.getMessage());
+                return objectMapper.readValue(value, targetClass);
+            } catch (Exception jacksonException) {
+                throw e;
             }
-            throw e;
         }
     }
 
-
-    private Object handleJsonArrayConversion(Type type, Class<?> targetClazz, String valueStr) {
-        try {
-            if (isListType(targetClazz)) {
-                return convertJsonArrayToList(type, valueStr);
-            } else if (isSetType(targetClazz)) {
-                return convertJsonArrayToSet(type, valueStr);
-            } else if (isArrayType(targetClazz)) {
-                return convertJsonArrayToArray(targetClazz, valueStr);
-            } else if (Collection.class.isAssignableFrom(targetClazz) && !targetClazz.isInterface()) {
-                try {
-                    @SuppressWarnings("unchecked")
-                    Collection<Object> targetCollection = (Collection<Object>) targetClazz.getDeclaredConstructor().newInstance();
-                    List<?> jsonArray = JSONUtil.parseArray(valueStr);
-                    Class<?> componentType = getComponentType(type, 0);
-                    if (componentType != null) {
-                        LOG.debug("将JSON数组转换为{}类型，元素类型为{}", targetClazz.getSimpleName(), componentType.getSimpleName());
-                        for (Object item : jsonArray) {
-                            Object convertedItem = convert(componentType, item);
-                            targetCollection.add(convertedItem != null ? convertedItem : item);
-                        }
-                    } else {
-                        LOG.debug("将JSON数组直接转换为{}类型（不转换元素类型）", targetClazz.getSimpleName());
-                        targetCollection.addAll(jsonArray);
-                    }
-                    return targetCollection;
-                } catch (Exception e) {
-                    LOG.warn("handleJsonArrayConversion方法创建集合实例失败: {} -> {}", targetClazz.getName(), e.getMessage());
-                }
-            }
-
-            LOG.debug("不支持将JSON数组转换为类型: {}", targetClazz.getName());
-            return null;
-        } catch (Exception e) {
-            LOG.warn("JSON数组转换异常: {} -> {}, 值: {}", e.getClass().getName(), e.getMessage(), valueStr);
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("JSON数组转换异常详细信息", e);
-            }
+    private Object handleJsonArrayConversion(Type type, Class<?> targetClass, String value) {
+        if (!Collection.class.isAssignableFrom(targetClass) && !targetClass.isArray()) {
             return null;
         }
+        List<?> parsedList = JSONUtil.parseArray(value);
+        Type componentType = targetClass.isArray() ? targetClass.getComponentType() : getTypeArgument(type, 0);
+        if (componentType == null) {
+            componentType = Dict.class;
+        }
+        return convertCollectionToTarget(targetClass, parsedList, componentType);
     }
 
-
-    private boolean isListType(Class<?> targetClazz) {
-        return targetClazz.isAssignableFrom(List.class);
-    }
-
-
-    private Object convertJsonArrayToList(Type type, String valueStr) {
-        Class<?> componentType = getComponentType(type, 0);
-        LOG.debug("将JSON数组转换为List<{}>类型", componentType != null ? componentType.getSimpleName() : "Dict");
-        return componentType != null ?
-                JSONUtil.toList(valueStr, componentType) :
-                JSONUtil.toList(valueStr, Dict.class);
-    }
-
-
-    private boolean isSetType(Class<?> targetClazz) {
-        return targetClazz.isAssignableFrom(Set.class);
-    }
-
-
-    private Object convertJsonArrayToSet(Type type, String valueStr) {
-        Class<?> componentType = getComponentType(type, 0);
-        LOG.debug("将JSON数组转换为Set<{}>类型", componentType != null ? componentType.getSimpleName() : "Dict");
-        List<?> list = componentType != null ?
-                JSONUtil.toList(valueStr, componentType) :
-                JSONUtil.toList(valueStr, Dict.class);
-        return new HashSet<>(list);
-    }
-
-
-    private boolean isArrayType(Class<?> targetClazz) {
-        return targetClazz.isArray();
-    }
-
-
-    private Object convertJsonArrayToArray(Class<?> targetClazz, String valueStr) {
-        // 获取数组的元素类型（如User[]中的User.class）
-        Class<?> componentType = targetClazz.getComponentType();
-        LOG.debug("将JSON数组转换为{}[]类型", componentType.getSimpleName());
-        List<?> list = JSONUtil.toList(valueStr, componentType);
-        return list.toArray((Object[]) java.lang.reflect.Array.newInstance(componentType, list.size()));
-    }
-
-
-    private Object handleCollectionConversion(Type type, Class<?> targetClazz, Collection<?> sourceCollection) {
-        if (sourceCollection == null) {
+    private Object handleCollectionConversion(Type type, Class<?> targetClass, Collection<?> sourceCollection) {
+        if (!Collection.class.isAssignableFrom(targetClass) && !targetClass.isArray()) {
             return null;
         }
-        if (isListType(targetClazz)) {
-            return convertCollectionToList(type, sourceCollection);
-        } else if (isSetType(targetClazz)) {
-            return convertCollectionToSet(type, sourceCollection);
-        } else if (isArrayType(targetClazz)) {
-            return convertCollectionToArray(targetClazz, sourceCollection);
-        } else if (Collection.class.isAssignableFrom(targetClazz) && !targetClazz.isInterface()) {
-            try {
-                @SuppressWarnings("unchecked")
-                Collection<Object> targetCollection = (Collection<Object>) targetClazz.getDeclaredConstructor().newInstance();
-                Class<?> componentType = getComponentType(type, 0);
-                if (componentType != null) {
-                    LOG.debug("将集合转换为{}类型，元素类型为{}", targetClazz.getSimpleName(), componentType.getSimpleName());
-                    return convertCollectionWithComponentType(sourceCollection, componentType, targetCollection);
-                } else {
-                    LOG.debug("将集合直接转换为{}类型（不转换元素类型）", targetClazz.getSimpleName());
-                    targetCollection.addAll(sourceCollection);
-                    return targetCollection;
+        Type componentType = targetClass.isArray() ? targetClass.getComponentType() : getTypeArgument(type, 0);
+        if (componentType == null) {
+            componentType = Object.class;
+        }
+        return convertCollectionToTarget(targetClass, sourceCollection, componentType);
+    }
+
+    private Object handleArrayConversion(Type type, Class<?> targetClass, Object sourceArray) {
+        if (!Collection.class.isAssignableFrom(targetClass) && !targetClass.isArray()) {
+            return null;
+        }
+        int length = Array.getLength(sourceArray);
+        List<Object> sourceList = new ArrayList<>(length);
+        for (int i = 0; i < length; i++) {
+            sourceList.add(Array.get(sourceArray, i));
+        }
+        return handleCollectionConversion(type, targetClass, sourceList);
+    }
+
+    private Object convertCollectionToTarget(Class<?> targetClass, Collection<?> sourceCollection, Type componentType) {
+        Class<?> componentClass = resolveClass(componentType);
+        if (componentClass == null) {
+            componentClass = Object.class;
+        }
+        if (targetClass.isArray()) {
+            Object resultArray = Array.newInstance(componentClass, sourceCollection.size());
+            int index = 0;
+            for (Object item : sourceCollection) {
+                Object convertedItem = convert(componentType, item);
+                if (convertedItem == null && componentClass.isPrimitive()) {
+                    convertedItem = primitiveDefaultValue(componentClass);
                 }
-            } catch (Exception e) {
-                LOG.warn("handleCollectionConversion方法创建集合实例失败: {} -> {}", targetClazz.getName(), e.getMessage());
+                Array.set(resultArray, index++, convertedItem);
             }
+            return resultArray;
         }
 
-        LOG.debug("不支持将集合转换为类型: {}", targetClazz.getName());
-        return null;
-    }
-
-
-    private Object convertCollectionToList(Type type, Collection<?> sourceCollection) {
-        Class<?> componentType = getComponentType(type, 0);
-        if (componentType != null) {
-            LOG.debug("将集合转换为List<{}>类型", componentType.getSimpleName());
-            return convertCollectionWithComponentType(sourceCollection, componentType, new ArrayList<>(sourceCollection.size()));
-        }
-        LOG.debug("将集合直接转换为List类型（不转换元素类型）");
-        return new ArrayList<>(sourceCollection);
-    }
-
-
-    private Object convertCollectionToSet(Type type, Collection<?> sourceCollection) {
-        Class<?> componentType = getComponentType(type, 0);
-        if (componentType != null) {
-            LOG.debug("将集合转换为Set<{}>类型", componentType.getSimpleName());
-            return convertCollectionWithComponentType(sourceCollection, componentType, new HashSet<>(sourceCollection.size()));
-        }
-        LOG.debug("将集合直接转换为Set类型（不转换元素类型）");
-        return new HashSet<>(sourceCollection);
-    }
-
-
-    private Object convertCollectionToArray(Class<?> targetClazz, Collection<?> sourceCollection) {
-        Class<?> componentType = targetClazz.getComponentType();
-        LOG.debug("将集合转换为{}[]类型", componentType.getSimpleName());
-        List<Object> resultList = new ArrayList<>(sourceCollection.size());
+        Collection<Object> targetCollection = newTargetCollection(targetClass, sourceCollection.size());
         for (Object item : sourceCollection) {
-            Object convertedItem = convert(componentType, item);
-            resultList.add(convertedItem != null ? convertedItem : item);
-        }
-        // 转换为特定类型的数组
-        return resultList.toArray((Object[]) Array.newInstance(componentType, resultList.size()));
-    }
-
-
-    private Collection<Object> convertCollectionWithComponentType(Collection<?> sourceCollection, Class<?> componentType, Collection<Object> targetCollection) {
-        for (Object item : sourceCollection) {
-            Object convertedItem = convert(componentType, item);
-            targetCollection.add(convertedItem != null ? convertedItem : item);
+            Object convertedItem = componentClass == Object.class ? normalizeJsonValue(item) : convert(componentType, item);
+            targetCollection.add(convertedItem);
         }
         return targetCollection;
     }
 
-
-    private Object handleArrayConversion(Type type, Class<?> targetClazz, Object[] sourceArray) {
-        if (sourceArray == null) {
-            return null;
+    private Collection<Object> newTargetCollection(Class<?> targetClass, int size) {
+        if (targetClass == List.class || targetClass == Collection.class || targetClass == ArrayList.class) {
+            return new ArrayList<>(size);
         }
-        if (isListType(targetClazz)) {
-            return convertArrayToList(type, sourceArray);
-        } else if (isSetType(targetClazz)) {
-            return convertArrayToSet(type, sourceArray);
+        if (targetClass == Set.class || targetClass == HashSet.class) {
+            return new HashSet<>(size);
         }
-
-        LOG.debug("不支持将数组转换为类型: {}", targetClazz.getName());
-        return null;
+        if (targetClass == LinkedHashSet.class) {
+            return new LinkedHashSet<>(size);
+        }
+        if (targetClass == ArrayDeque.class) {
+            return new ArrayDeque<>(size);
+        }
+        try {
+            @SuppressWarnings("unchecked")
+            Collection<Object> collection = (Collection<Object>) targetClass.getDeclaredConstructor().newInstance();
+            return collection;
+        } catch (Exception e) {
+            return new ArrayList<>(size);
+        }
     }
 
-
-    private Object convertArrayToList(Type type, Object[] sourceArray) {
-        Class<?> componentType = getComponentType(type, 0);
-        if (componentType != null) {
-            LOG.debug("将数组转换为List<{}>类型", componentType.getSimpleName());
-            return convertArrayWithComponentType(sourceArray, componentType, new ArrayList<>(sourceArray.length));
-        }
-        LOG.debug("将数组直接转换为List类型（不转换元素类型）");
-        return CollUtil.newArrayList(sourceArray);
-    }
-
-
-    private Object convertArrayToSet(Type type, Object[] sourceArray) {
-        Class<?> componentType = getComponentType(type, 0);
-        if (componentType != null) {
-            LOG.debug("将数组转换为Set<{}>类型", componentType.getSimpleName());
-            return convertArrayWithComponentType(sourceArray, componentType, new HashSet<>(sourceArray.length));
-        }
-        LOG.debug("将数组直接转换为Set类型（不转换元素类型）");
-        return CollUtil.newHashSet(sourceArray);
-    }
-
-
-    private Collection<Object> convertArrayWithComponentType(Object[] sourceArray, Class<?> componentType, Collection<Object> targetCollection) {
-        for (Object item : sourceArray) {
-            Object convertedItem = convert(componentType, item);
-            targetCollection.add(convertedItem != null ? convertedItem : item);
-        }
-        return targetCollection;
-    }
-
-
-    public <T> T convert(Class<T> tClass, Dict value) {
+    public <T> T convert(Class<T> targetClass, Dict value) {
         if (value == null) {
-            return null;
+            @SuppressWarnings("unchecked")
+            T defaultValue = targetClass != null && targetClass.isPrimitive() ? (T) primitiveDefaultValue(targetClass) : null;
+            return defaultValue;
         }
         try {
             ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
             if (objectMapper != null) {
-                return objectMapper.convertValue(value, tClass);
+                return objectMapper.convertValue(value, targetClass);
             }
-            LOG.debug("未找到ObjectMapper实例，尝试使用BeanUtil进行转换");
-            T instance = tClass.getDeclaredConstructor().newInstance();
-            BeanUtil.copyProperties(value, instance);
-            return instance;
+            return BeanUtil.toBean(value, targetClass, CopyOptions.create().setIgnoreError(true));
         } catch (Exception e) {
-            LOG.warn("Dict转换为{}失败: {}", tClass.getName(), e.getMessage());
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Dict转换异常详细信息", e);
-            }
+            LOG.warn("Dict convert to {} failed: {}", targetClass.getName(), e.getMessage());
             return null;
         }
     }
 
-
-    private Object handleMapConversion(Type type, Class<?> targetClazz, Map<?, ?> sourceMap) {
-        if (sourceMap == null) {
-            return null;
-        }
-        if (targetClazz.isAssignableFrom(Dict.class)) {
-            LOG.debug("将Map转换为Dict类型");
+    private Object handleMapConversion(Type type, Class<?> targetClass, Map<?, ?> sourceMap) {
+        if (Dict.class.isAssignableFrom(targetClass)) {
             Dict dict = Dict.create();
-            sourceMap.forEach((k, v) -> dict.set(k.toString(), v));
+            sourceMap.forEach((k, v) -> {
+                if (k != null) {
+                    dict.set(k.toString(), normalizeJsonValue(v));
+                }
+            });
             return dict;
         }
-        if (targetClazz.isAssignableFrom(JSONObject.class)) {
-            LOG.debug("将Map转换为JSONObject类型");
+        if (JSONObject.class.isAssignableFrom(targetClass)) {
             return JSONUtil.parseObj(sourceMap);
         }
-        if (!targetClazz.isInterface() && !Map.class.isAssignableFrom(targetClazz)) {
-            LOG.debug("将Map转换为JavaBean类型: {}", targetClazz.getName());
-            return BeanUtil.toBean(sourceMap, targetClazz, CopyOptions.create());
+        if (!targetClass.isInterface() && !Map.class.isAssignableFrom(targetClass)) {
+            return BeanUtil.toBean(sourceMap, targetClass, CopyOptions.create().setIgnoreError(true).setConverter(GXHutoolDataConvert::staticConvert));
         }
-        if (Map.class.isAssignableFrom(targetClazz)) {
-            Type keyType = TypeUtil.getTypeArgument(type, 0);
-            Type valueType = TypeUtil.getTypeArgument(type, 1);
-            if (keyType != null && valueType != null) {
-                Class<?> keyClass = TypeUtil.getClass(keyType);
-                Class<?> valueClass = TypeUtil.getClass(valueType);
-                if (keyClass != null && valueClass != null) {
-                    LOG.debug("将Map转换为Map<{}, {}>类型", keyClass.getSimpleName(), valueClass.getSimpleName());
-                    Map<Object, Object> resultMap = new HashMap<>(sourceMap.size());
-                    sourceMap.forEach((k, v) -> {
-                        Object convertedKey = convert(keyClass, k);
-                        Object convertedValue = convert(valueClass, v);
-                        resultMap.put(convertedKey, convertedValue);
-                    });
-                    return resultMap;
-                }
-            } else {
-                LOG.debug("无法确定Map的泛型参数类型，返回原始Map");
-                return new HashMap<>(sourceMap);
+        if (!Map.class.isAssignableFrom(targetClass)) {
+            return null;
+        }
+
+        Type keyType = TypeUtil.getTypeArgument(type, 0);
+        Type valueType = TypeUtil.getTypeArgument(type, 1);
+        Class<?> keyClass = keyType == null ? Object.class : resolveClass(keyType);
+        Class<?> valueClass = valueType == null ? Object.class : resolveClass(valueType);
+        Map<Object, Object> resultMap = newTargetMap(targetClass, sourceMap.size());
+
+        for (Map.Entry<?, ?> entry : sourceMap.entrySet()) {
+            Object convertedKey = keyClass == Object.class ? entry.getKey() : convert(keyType, entry.getKey());
+            Object convertedValue = valueClass == Object.class ? normalizeJsonValue(entry.getValue()) : convert(valueType, entry.getValue());
+            if (resultMap instanceof TreeMap<?, ?> && convertedKey != null && !(convertedKey instanceof Comparable<?>)) {
+                convertedKey = convertedKey.toString();
             }
+            if (rejectsNullEntries(resultMap) && (convertedKey == null || convertedValue == null)) {
+                continue;
+            }
+            resultMap.put(convertedKey, convertedValue);
         }
-        LOG.debug("不支持将Map转换为类型: {}", targetClazz.getName());
+        return resultMap;
+    }
+
+    private Map<Object, Object> newTargetMap(Class<?> targetClass, int size) {
+        if (targetClass == Map.class || targetClass == HashMap.class) {
+            return new HashMap<>(size);
+        }
+        if (targetClass == LinkedHashMap.class) {
+            return new LinkedHashMap<>(size);
+        }
+        if (targetClass == ConcurrentHashMap.class) {
+            return new ConcurrentHashMap<>(size);
+        }
+        if (targetClass == TreeMap.class) {
+            return new TreeMap<>();
+        }
+        try {
+            @SuppressWarnings("unchecked")
+            Map<Object, Object> map = (Map<Object, Object>) targetClass.getDeclaredConstructor().newInstance();
+            return map;
+        } catch (Exception e) {
+            return new HashMap<>(size);
+        }
+    }
+
+    private boolean rejectsNullEntries(Map<?, ?> map) {
+        return map instanceof ConcurrentHashMap<?, ?> || map instanceof Hashtable<?, ?>;
+    }
+
+    private boolean isGXBaseDataType(Class<?> targetClass) {
+        return TypeToken.of(targetClass).isSubtypeOf(GXBaseData.class);
+    }
+
+    private static boolean isDateTimeType(Class<?> targetClass) {
+        return Date.class.isAssignableFrom(targetClass)
+                || Calendar.class.isAssignableFrom(targetClass)
+                || Temporal.class.isAssignableFrom(targetClass);
+    }
+
+    private static boolean isAssignableValue(Class<?> targetClass, Object value) {
+        if (value == null) {
+            return !targetClass.isPrimitive();
+        }
+        if (targetClass.isInstance(value)) {
+            return true;
+        }
+        Class<?> wrapperClass = primitiveToWrapper(targetClass);
+        return wrapperClass != targetClass && wrapperClass.isInstance(value);
+    }
+
+    private static Class<?> primitiveToWrapper(Class<?> targetClass) {
+        if (!targetClass.isPrimitive()) {
+            return targetClass;
+        }
+        if (targetClass == int.class) return Integer.class;
+        if (targetClass == long.class) return Long.class;
+        if (targetClass == boolean.class) return Boolean.class;
+        if (targetClass == double.class) return Double.class;
+        if (targetClass == float.class) return Float.class;
+        if (targetClass == short.class) return Short.class;
+        if (targetClass == byte.class) return Byte.class;
+        if (targetClass == char.class) return Character.class;
+        if (targetClass == void.class) return Void.class;
+        return targetClass;
+    }
+
+    private static Object primitiveDefaultValue(Class<?> primitiveClass) {
+        if (primitiveClass == boolean.class) return false;
+        if (primitiveClass == char.class) return '\0';
+        if (primitiveClass == byte.class) return (byte) 0;
+        if (primitiveClass == short.class) return (short) 0;
+        if (primitiveClass == int.class) return 0;
+        if (primitiveClass == long.class) return 0L;
+        if (primitiveClass == float.class) return 0F;
+        if (primitiveClass == double.class) return 0D;
         return null;
     }
 
+    private static Class<?> resolveClass(Type type) {
+        if (type instanceof Class<?> clazz) {
+            return clazz;
+        }
+        return type == null ? null : TypeUtil.getClass(type);
+    }
 
-    private Class<?> getComponentType(Type type, int index) {
-        Type actualTypeArgument = TypeUtil.getTypeArgument(type, index);
-        return actualTypeArgument != null ? TypeUtil.getClass(actualTypeArgument) : null;
+    private static Type getTypeArgument(Type type, int index) {
+        return TypeUtil.getTypeArgument(type, index);
+    }
+
+    private Object normalizeJsonValue(Object value) {
+        if (value instanceof JSONObject jsonObject) {
+            Dict dict = Dict.create();
+            jsonObject.forEach((k, v) -> dict.set(k, normalizeJsonValue(v)));
+            return dict;
+        }
+        if (value instanceof Collection<?> collection) {
+            List<Object> list = new ArrayList<>(collection.size());
+            for (Object item : collection) {
+                list.add(normalizeJsonValue(item));
+            }
+            return list;
+        }
+        if (value instanceof Map<?, ?> map && !(value instanceof Dict)) {
+            Map<Object, Object> normalized = new LinkedHashMap<>(map.size());
+            map.forEach((k, v) -> normalized.put(k, normalizeJsonValue(v)));
+            return normalized;
+        }
+        return value;
     }
 }
