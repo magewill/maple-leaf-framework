@@ -2,15 +2,17 @@ package cn.maple.redisson.services.impl;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.core.util.NumberUtil;
 import cn.maple.redisson.services.GXRedissonCacheService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
 import org.redisson.api.RMapCache;
+import org.redisson.api.RReadWriteLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -34,6 +36,9 @@ public class GXRedissonCacheServiceImpl implements GXRedissonCacheService {
         validateBucketAndKey(bucketName, key);
         if (value == null) {
             throw new IllegalArgumentException("value must not be null");
+        }
+        if (expired < 0) {
+            throw new IllegalArgumentException("expired must not be negative");
         }
         if (expired > 0 && timeUnit == null) {
             throw new IllegalArgumentException("timeUnit must not be null when expired is positive");
@@ -94,6 +99,10 @@ public class GXRedissonCacheServiceImpl implements GXRedissonCacheService {
         }
 
         long ttlMillis = mapCache.remainTimeToLive(keyName);
+        if (ttlMillis == -2L) {
+            log.warn("Cache entry expired before refreshing, bucketName={}, keyName={}", bucketName, keyName);
+            return false;
+        }
         long refreshThresholdMillis = TimeUnit.SECONDS.toMillis(refreshThreshold);
         if (ttlMillis == -1L || ttlMillis > refreshThresholdMillis) {
             return true;
@@ -126,6 +135,30 @@ public class GXRedissonCacheServiceImpl implements GXRedissonCacheService {
     }
 
     @Override
+    public RLock getLock(String lockName) {
+        validateLockName(lockName);
+        return redissonClient.getLock(lockName);
+    }
+
+    @Override
+    public RReadWriteLock getReadWriteLock(String lockName) {
+        validateLockName(lockName);
+        return redissonClient.getReadWriteLock(lockName);
+    }
+
+    @Override
+    public RLock getReadLock(String lockName) {
+        validateLockName(lockName);
+        return redissonClient.getReadWriteLock(lockName).readLock();
+    }
+
+    @Override
+    public RLock getWriteLock(String lockName) {
+        validateLockName(lockName);
+        return redissonClient.getReadWriteLock(lockName).writeLock();
+    }
+
+    @Override
     public Map<Object, Object> getBucketAllData(String bucketName) {
         return getBucketAllData(bucketName, DEFAULT_SCAN_COUNT);
     }
@@ -138,7 +171,7 @@ public class GXRedissonCacheServiceImpl implements GXRedissonCacheService {
     @Override
     public Map<Object, Object> getBucketAllData(String bucketName, int count, String pattern) {
         validateBucket(bucketName);
-        int actualCount = NumberUtil.min(validateCount(count), MAX_SCAN_COUNT);
+        int actualCount = validateCount(count);
         RMapCache<Object, Object> mapCache = redissonClient.getMapCache(bucketName);
         Set<Object> keys = CharSequenceUtil.isBlank(pattern)
                 ? mapCache.keySet(actualCount)
@@ -161,7 +194,23 @@ public class GXRedissonCacheServiceImpl implements GXRedissonCacheService {
             return;
         }
         validateBatchSize(batchSize);
-        redissonClient.getMapCache(bucketName).putAll(data);
+        RMapCache<Object, Object> mapCache = redissonClient.getMapCache(bucketName);
+        if (data.size() <= batchSize) {
+            mapCache.putAll(data);
+            return;
+        }
+
+        Map<Object, Object> batch = new LinkedHashMap<>(batchSize);
+        for (Map.Entry<Object, Object> entry : data.entrySet()) {
+            batch.put(entry.getKey(), entry.getValue());
+            if (batch.size() == batchSize) {
+                mapCache.putAll(batch);
+                batch.clear();
+            }
+        }
+        if (!batch.isEmpty()) {
+            mapCache.putAll(batch);
+        }
     }
 
     @Override
@@ -183,6 +232,12 @@ public class GXRedissonCacheServiceImpl implements GXRedissonCacheService {
         }
         if (bucketName.length() > 64) {
             log.warn("bucketName [{}] is longer than 64 characters", bucketName);
+        }
+    }
+
+    private static void validateLockName(String lockName) {
+        if (CharSequenceUtil.isBlank(lockName)) {
+            throw new IllegalArgumentException("lockName must not be blank");
         }
     }
 

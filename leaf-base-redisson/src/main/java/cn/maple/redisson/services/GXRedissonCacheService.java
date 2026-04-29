@@ -1,6 +1,8 @@
 package cn.maple.redisson.services;
 
 import cn.maple.core.framework.service.GXBaseCacheService;
+import org.redisson.api.RLock;
+import org.redisson.api.RReadWriteLock;
 import org.redisson.api.RedissonClient;
 
 import java.util.Map;
@@ -12,6 +14,14 @@ public interface GXRedissonCacheService extends GXBaseCacheService {
      * @return RedissonClient
      */
     RedissonClient getRedissonClient();
+
+    RLock getLock(String lockName);
+
+    RReadWriteLock getReadWriteLock(String lockName);
+
+    RLock getReadLock(String lockName);
+
+    RLock getWriteLock(String lockName);
 
     /**
      * 获取指定桶中的所有数据

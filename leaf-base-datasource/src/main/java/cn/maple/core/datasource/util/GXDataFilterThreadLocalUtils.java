@@ -1,71 +1,80 @@
 package cn.maple.core.datasource.util;
 
-import cn.hutool.core.thread.ThreadUtil;
 import cn.maple.core.datasource.dto.GXDataFilterInnerDto;
 
+import java.util.Objects;
+import java.util.concurrent.Callable;
+
 /**
- * 数据过滤线程本地工具类
- * <p>
- * 该工具类用于在线程内部存储和管理数据过滤条件，基于ThreadLocal实现线程隔离。
- * 主要用于在多线程环境下安全地传递SQL过滤条件，避免线程间数据污染。
- * </p>
- * <p>
- * 使用示例：
- * <pre>
- * // 设置数据过滤条件
- * GXDataFilterInnerDto filterDto = new GXDataFilterInnerDto("shop_id = 1");
- * GXDataFilterThreadLocalUtils.setDataFilterInnerDto(filterDto);
- *
- * // 获取数据过滤条件
- * GXDataFilterInnerDto dto = GXDataFilterThreadLocalUtils.getDataFilterInnerDto();
- *
- * // 操作完成后，清理ThreadLocal资源，避免内存泄漏
- * GXDataFilterThreadLocalUtils.cleanDataFilterInnerDto();
- * </pre>
- * </p>
- * <p>
- * 注意：使用ThreadLocal时必须注意在使用完毕后调用cleanDataFilterInnerDto()方法清理资源，
- * 特别是在使用线程池的场景下，否则可能导致内存泄漏或数据错误。
- * </p>
+ * Thread-local data filter context.
  */
 public class GXDataFilterThreadLocalUtils {
-    /**
-     * 存储数据过滤条件的ThreadLocal对象
-     * 注意：不要使用 inheritable=true，因为在线程池环境下会导致严重的数据乱串和内存泄漏。
-     * 如果需要在线程间传递，请使用显式的传递机制或 TransmittableThreadLocal。
-     */
-    private static final ThreadLocal<GXDataFilterInnerDto> DATA_FILTER_INNER_DTO = ThreadUtil.createThreadLocal(false);
+    private static final ThreadLocal<GXDataFilterInnerDto> DATA_FILTER_INNER_DTO = new ThreadLocal<>();
 
-    /**
-     * 私有构造函数，防止实例化
-     */
     private GXDataFilterThreadLocalUtils() {
-        // 工具类不应被实例化
     }
 
-    /**
-     * 获取当前线程的数据过滤条件
-     *
-     * @return 数据过滤条件对象，如果未设置则可能返回null
-     */
     public static GXDataFilterInnerDto getDataFilterInnerDto() {
-        return DATA_FILTER_INNER_DTO.get();
+        return copy(DATA_FILTER_INNER_DTO.get());
     }
 
-    /**
-     * 设置当前线程的数据过滤条件
-     *
-     * @param dto 数据过滤条件对象
-     */
     public static void setDataFilterInnerDto(GXDataFilterInnerDto dto) {
-        DATA_FILTER_INNER_DTO.set(dto);
+        GXDataFilterInnerDto snapshot = copy(dto);
+        if (snapshot == null) {
+            DATA_FILTER_INNER_DTO.remove();
+            return;
+        }
+        DATA_FILTER_INNER_DTO.set(snapshot);
     }
 
-    /**
-     * 清理当前线程的数据过滤条件
-     * 在使用完ThreadLocal后，应当调用此方法清理资源，避免内存泄漏
-     */
     public static void cleanDataFilterInnerDto() {
         DATA_FILTER_INNER_DTO.remove();
+    }
+
+    public static Runnable wrap(Runnable task) {
+        Objects.requireNonNull(task, "Task must not be null");
+        GXDataFilterInnerDto capturedContext = snapshot();
+        return () -> {
+            GXDataFilterInnerDto previousContext = snapshot();
+            restore(capturedContext);
+            try {
+                task.run();
+            } finally {
+                restore(previousContext);
+            }
+        };
+    }
+
+    public static <V> Callable<V> wrap(Callable<V> task) {
+        Objects.requireNonNull(task, "Task must not be null");
+        GXDataFilterInnerDto capturedContext = snapshot();
+        return () -> {
+            GXDataFilterInnerDto previousContext = snapshot();
+            restore(capturedContext);
+            try {
+                return task.call();
+            } finally {
+                restore(previousContext);
+            }
+        };
+    }
+
+    private static GXDataFilterInnerDto snapshot() {
+        return copy(DATA_FILTER_INNER_DTO.get());
+    }
+
+    private static void restore(GXDataFilterInnerDto context) {
+        if (context == null) {
+            DATA_FILTER_INNER_DTO.remove();
+            return;
+        }
+        DATA_FILTER_INNER_DTO.set(copy(context));
+    }
+
+    private static GXDataFilterInnerDto copy(GXDataFilterInnerDto dto) {
+        if (dto == null) {
+            return null;
+        }
+        return new GXDataFilterInnerDto(dto.getSqlFilter());
     }
 }

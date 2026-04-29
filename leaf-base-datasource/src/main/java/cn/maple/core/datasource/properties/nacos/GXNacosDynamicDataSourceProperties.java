@@ -15,16 +15,15 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 多数据源属性
+ * Nacos 动态数据源配置。
  */
 @Data
 @Slf4j
 @Component
-@SuppressWarnings("all")
 @EqualsAndHashCode(callSuper = true)
 @ConditionalOnClass(name = {"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
 @NacosConfigurationProperties(dataId = "datasource.yml",
-        groupId = "${spring.cloud.nacos.config.group:${nacos.config.group:}}",
+        groupId = "${spring.cloud.nacos.config.group:${nacos.config.group:DEFAULT_GROUP}}",
         properties = @NacosProperties(
                 serverAddr = "${spring.cloud.nacos.config.server-addr:${nacos.config.server-addr:}}",
                 namespace = "${spring.cloud.nacos.config.namespace:${nacos.config.namespace:}}",
@@ -35,7 +34,7 @@ public class GXNacosDynamicDataSourceProperties extends GXDynamicDataSourcePrope
     private Map<String, GXDataSourceProperties> datasource = new LinkedHashMap<>();
 
     public GXNacosDynamicDataSourceProperties() {
-        log.info("MySQL数据源的配置使用的是NACOS配置");
+        log.info("MySQL 数据源配置使用 Nacos 配置");
     }
 
     @Override

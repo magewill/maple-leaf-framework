@@ -1,12 +1,19 @@
 package cn.maple.core.datasource.service;
 
+import cn.maple.core.datasource.config.GXDynamicContextHolder;
+import cn.maple.core.datasource.util.GXDataFilterThreadLocalUtils;
 import cn.maple.core.framework.dto.inner.GXValidateExistsDto;
+import cn.maple.core.framework.util.GXSpringContextUtils;
 import jakarta.validation.ConstraintValidatorContext;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ForkJoinPool;
 
 /**
  * 验证数据库中是否存在记录的服务接口
@@ -119,10 +126,31 @@ public interface GXValidateDBExistsService {
      * @return CompletableFuture<Boolean> 异步验证结果，存在返回true，不存在返回false
      */
     default CompletableFuture<Boolean> validateExistsAsync(GXValidateExistsDto validateExistsDto) {
+        return validateExistsAsync(validateExistsDto, resolveAsyncExecutor());
+    }
+
+    default CompletableFuture<Boolean> validateExistsAsync(GXValidateExistsDto validateExistsDto, Executor executor) {
         if (validateExistsDto == null) {
             return CompletableFuture.completedFuture(false);
         }
-        return CompletableFuture.supplyAsync(() -> validateExists(validateExistsDto, null));
+        Objects.requireNonNull(executor, "Executor must not be null");
+        Callable<Boolean> validateTask = () -> validateExists(validateExistsDto, null);
+        Callable<Boolean> filterAwareTask = GXDataFilterThreadLocalUtils.wrap(validateTask);
+        Callable<Boolean> task = GXDynamicContextHolder.wrap(filterAwareTask);
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return task.call();
+            } catch (RuntimeException | Error e) {
+                throw e;
+            } catch (Exception e) {
+                throw new CompletionException(e);
+            }
+        }, executor);
+    }
+
+    private static Executor resolveAsyncExecutor() {
+        Executor executor = GXSpringContextUtils.getBean("myBatisEventAsyncTaskExecutor", Executor.class);
+        return executor != null ? executor : ForkJoinPool.commonPool();
     }
 
     /**

@@ -25,7 +25,7 @@ public class GXMyBatisAsyncListener implements GXMyBatisBaseListener {
      *
      * @param saveEntityEvent 事件对象
      */
-    @EventListener(condition = "#root.event.eventType.equals(T(cn.maple.core.datasource.enums.GXModelEventNamingEnums).ASYNC_SAVE_ENTITY.eventType)")
+    @EventListener(condition = "T(cn.maple.core.datasource.enums.GXModelEventNamingEnums).ASYNC_SAVE_ENTITY.getEventType().equals(#root.event.eventType)")
     public void listenerSaveEntity(GXMyBatisModelSaveEntityEvent<Dict> saveEntityEvent) {
         GXMyBatisBaseListener.super.listenerSaveEntity(saveEntityEvent);
     }
@@ -35,7 +35,7 @@ public class GXMyBatisAsyncListener implements GXMyBatisBaseListener {
      *
      * @param updateEntityEvent 事件对象
      */
-    @EventListener(condition = "#root.event.eventType.equals(T(cn.maple.core.datasource.enums.GXModelEventNamingEnums).ASYNC_UPDATE_ENTITY.eventType)")
+    @EventListener(condition = "T(cn.maple.core.datasource.enums.GXModelEventNamingEnums).ASYNC_UPDATE_ENTITY.getEventType().equals(#root.event.eventType)")
     public void listenerUpdateEntity(GXMyBatisModelUpdateEntityEvent<Dict> updateEntityEvent) {
         GXMyBatisBaseListener.super.listenerUpdateEntity(updateEntityEvent);
     }
@@ -45,7 +45,7 @@ public class GXMyBatisAsyncListener implements GXMyBatisBaseListener {
      *
      * @param updateFieldEvent 事件对象
      */
-    @EventListener(condition = "#root.event.eventType.equals(T(cn.maple.core.datasource.enums.GXModelEventNamingEnums).ASYNC_UPDATE_FIELD.eventType)")
+    @EventListener(condition = "T(cn.maple.core.datasource.enums.GXModelEventNamingEnums).ASYNC_UPDATE_FIELD.getEventType().equals(#root.event.eventType)")
     public void listenerUpdateField(GXMyBatisModelUpdateFieldEvent<Dict> updateFieldEvent) {
         GXMyBatisBaseListener.super.listenerUpdateField(updateFieldEvent);
     }
@@ -55,7 +55,7 @@ public class GXMyBatisAsyncListener implements GXMyBatisBaseListener {
      *
      * @param deleteSoftEvent 事件对象
      */
-    @EventListener(condition = "#root.event.eventType.equals(T(cn.maple.core.datasource.enums.GXModelEventNamingEnums).ASYNC_DELETE_SOFT.eventType)")
+    @EventListener(condition = "T(cn.maple.core.datasource.enums.GXModelEventNamingEnums).ASYNC_DELETE_SOFT.getEventType().equals(#root.event.eventType)")
     public void listenerDeleteSoft(GXMyBatisModelDeleteSoftEvent<Dict> deleteSoftEvent) {
         GXMyBatisBaseListener.super.listenerDeleteSoft(deleteSoftEvent);
     }
@@ -65,7 +65,7 @@ public class GXMyBatisAsyncListener implements GXMyBatisBaseListener {
      *
      * @param saveBatchEntityEvent 事件对象
      */
-    @EventListener(condition = "#root.event.eventType.equals(T(cn.maple.core.datasource.enums.GXModelEventNamingEnums).ASYNC_SAVE_BATCH_ENTITY.eventType)")
+    @EventListener(condition = "T(cn.maple.core.datasource.enums.GXModelEventNamingEnums).ASYNC_SAVE_BATCH_ENTITY.getEventType().equals(#root.event.eventType)")
     public void listenerSaveBatch(GXMyBatisModelSaveBatchEntityEvent<Dict> saveBatchEntityEvent) {
         GXMyBatisBaseListener.super.listenerSaveBatch(saveBatchEntityEvent);
     }

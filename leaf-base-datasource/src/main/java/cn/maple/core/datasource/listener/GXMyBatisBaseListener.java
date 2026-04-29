@@ -6,15 +6,12 @@ import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.TypeUtil;
-import cn.maple.core.datasource.event.GXMyBatisModelDeleteSoftEvent;
-import cn.maple.core.datasource.event.GXMyBatisModelSaveBatchEntityEvent;
-import cn.maple.core.datasource.event.GXMyBatisModelSaveEntityEvent;
-import cn.maple.core.datasource.event.GXMyBatisModelUpdateEntityEvent;
-import cn.maple.core.datasource.event.GXMyBatisModelUpdateFieldEvent;
+import cn.maple.core.datasource.event.*;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 
+import java.beans.Introspector;
 import java.lang.reflect.Type;
 
 /**
@@ -41,8 +38,8 @@ interface GXMyBatisBaseListener {
         Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
         GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
         Object entityData = convertEntityPayload(listenerClazz, source.get("entityData"));
-        Dict keyOperatorPairs = Convert.convert(Dict.class, source.get("keyOperatorPairs"));
-        Dict keyValuePairs = Convert.convert(Dict.class, source.get("keyValuePairs"));
+        Dict keyOperatorPairs = convertToDict(source.get("keyOperatorPairs"));
+        Dict keyValuePairs = convertToDict(source.get("keyValuePairs"));
 
         listener.updateEntityListener(entityData, keyValuePairs, keyOperatorPairs);
     }
@@ -53,8 +50,8 @@ interface GXMyBatisBaseListener {
 
         Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
         GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
-        Dict updateFieldData = Convert.convert(Dict.class, source.getObj("updateFieldData"));
-        Dict conditionFieldData = Convert.convert(Dict.class, source.get("conditionFieldData"));
+        Dict updateFieldData = convertToDict(source.getObj("updateFieldData"));
+        Dict conditionFieldData = convertToDict(source.get("conditionFieldData"));
 
         listener.updateFieldListener(updateFieldData, conditionFieldData);
     }
@@ -66,7 +63,7 @@ interface GXMyBatisBaseListener {
         Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
         GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
 
-        listener.deleteSoftListener(source);
+        listener.deleteSoftListener(convertToDict(source));
     }
 
     default void listenerSaveBatch(GXMyBatisModelSaveBatchEntityEvent<Dict> saveBatchEntityEvent) {
@@ -76,12 +73,14 @@ interface GXMyBatisBaseListener {
         Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
         GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
 
-        listener.saveBatchListener(source);
+        listener.saveBatchListener(convertToDict(source));
     }
 
     private Class<? extends GXMybatisListenerService<?>> resolveListenerClass(Dict param) {
+        Object listenerClazzValue = ObjectUtil.isNull(param) ? null : param.getObj("listenerClazz");
         Class<? extends GXMybatisListenerService<?>> listenerClazz =
-                Convert.convert(new TypeReference<>() {}, param.getObj("listenerClazz"));
+                Convert.convert(new TypeReference<>() {
+                }, listenerClazzValue);
         if (ObjectUtil.isNull(listenerClazz)) {
             throw new GXBusinessException("MyBatis listener class is missing");
         }
@@ -89,8 +88,12 @@ interface GXMyBatisBaseListener {
     }
 
     private GXMybatisListenerService<Object> resolveListenerBean(Class<? extends GXMybatisListenerService<?>> listenerClazz) {
-        String listenerBeanName = CharSequenceUtil.lowerFirst(listenerClazz.getSimpleName());
+        String listenerBeanName = Introspector.decapitalize(listenerClazz.getSimpleName());
         Object bean = GXSpringContextUtils.getBean(listenerBeanName, listenerClazz);
+        if (ObjectUtil.isNull(bean)) {
+            String lowerFirstBeanName = CharSequenceUtil.lowerFirst(listenerClazz.getSimpleName());
+            bean = GXSpringContextUtils.getBean(lowerFirstBeanName, listenerClazz);
+        }
         if (ObjectUtil.isNull(bean)) {
             bean = GXSpringContextUtils.getBean(listenerBeanName);
         }
@@ -104,6 +107,14 @@ interface GXMyBatisBaseListener {
             throw new GXBusinessException("MyBatis listener bean type mismatch: " + listenerClazz.getName());
         }
         return (GXMybatisListenerService<Object>) bean;
+    }
+
+    private Dict convertToDict(Object source) {
+        if (ObjectUtil.isNull(source)) {
+            return Dict.create();
+        }
+        Dict dict = Convert.convert(Dict.class, source);
+        return ObjectUtil.defaultIfNull(dict, Dict.create());
     }
 
     private Object convertEntityPayload(Class<? extends GXMybatisListenerService<?>> listenerClazz, Object source) {

@@ -2,7 +2,7 @@ package cn.maple.core.framework.convert;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.convert.Convert;
-import cn.hutool.core.map.WeakConcurrentMap;
+import cn.hutool.core.map.reference.WeakKeyConcurrentMap;
 import cn.hutool.core.util.ClassUtil;
 import cn.hutool.core.util.ReflectUtil;
 import cn.hutool.core.util.TypeUtil;
@@ -159,7 +159,7 @@ public class GXCGLibDataConvert implements Converter {
      * 2. 使用Boolean.TRUE/FALSE作为值，减少对象创建
      * </p>
      */
-    private static final Map<Class<?>, Boolean> PROCESSED_CLASSES_CACHE = new WeakConcurrentMap<>(new ConcurrentHashMap<>(1024));
+    private static final Map<Class<?>, Boolean> PROCESSED_CLASSES_CACHE = new WeakKeyConcurrentMap<>(new ConcurrentHashMap<>(1024));
 
     /**
      * 转换器缓存 - 按目标类型缓存转换器实例
@@ -168,7 +168,7 @@ public class GXCGLibDataConvert implements Converter {
      * 使用ConcurrentHashMap确保线程安全
      * </p>
      */
-    private static final Map<Class<?>, GXCGLibDataConvert> CONVERTER_CACHE = new WeakConcurrentMap<>(new ConcurrentHashMap<>(1024));
+    private static final Map<Class<?>, GXCGLibDataConvert> CONVERTER_CACHE = new WeakKeyConcurrentMap<>(new ConcurrentHashMap<>(1024));
 
     /**
      * 字段缓存
