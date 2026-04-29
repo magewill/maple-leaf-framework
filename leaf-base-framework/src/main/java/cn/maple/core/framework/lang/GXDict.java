@@ -1,7 +1,6 @@
 package cn.maple.core.framework.lang;
 
 import cn.hutool.core.lang.Dict;
-import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.convert.GXHutoolDataConvert;
 
@@ -22,7 +21,8 @@ public class GXDict extends Dict {
     }
 
     public GXDict(Map<String, Object> map) {
-        super(map);
+        super();
+        setAll(map);
     }
 
     public static GXDict create() {
@@ -134,30 +134,43 @@ public class GXDict extends Dict {
         return defaultValue;
     }
 
-    @SuppressWarnings("all")
     public GXDict getDict(String attr, GXDict defaultValue) {
         Object value = getObj(attr);
-        if (value instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> map = (Map<String, Object>) value;
-            return new GXDict(map);
-        } else if (value instanceof Dict dict) {
+        if (value instanceof GXDict dict) {
+            return dict;
+        }
+        if (value instanceof Dict dict) {
             return new GXDict(dict);
+        }
+        if (value instanceof Map<?, ?> map) {
+            return toGXDict(map);
         }
         return defaultValue;
     }
 
     public GXDict getOrCreateDict(String attr) {
-        GXDict dict = getDict(attr, null);
-        if (dict == null) {
-            dict = new GXDict();
-            set(attr, dict);
+        Object value = getObj(attr);
+        if (value instanceof GXDict dict) {
+            return dict;
         }
+
+        GXDict dict;
+        if (value instanceof Dict hutoolDict) {
+            dict = new GXDict(hutoolDict);
+        } else if (value instanceof Map<?, ?> map) {
+            dict = toGXDict(map);
+        } else {
+            dict = new GXDict();
+        }
+        set(attr, dict);
         return dict;
     }
 
     public <T> T getSafe(String attr, Class<T> type, T defaultValue) {
         try {
+            if (type == null) {
+                return defaultValue;
+            }
             Object value = getObj(attr);
             if (value == null) {
                 return defaultValue;
@@ -213,7 +226,6 @@ public class GXDict extends Dict {
         return this;
     }
 
-    @SuppressWarnings("unchecked")
     private <T> T convert(Object value, Class<T> type) {
         if (value == null) {
             return null;
@@ -224,10 +236,45 @@ public class GXDict extends Dict {
         }
 
         Object o = GXHutoolDataConvert.staticConvert(type, value);
-        if (ObjectUtil.isNotNull(o)) {
-            return (T) o;
+        if (o == null) {
+            return null;
+        }
+        if (type.isInstance(o)) {
+            return type.cast(o);
+        }
+        Class<?> wrapperType = primitiveToWrapper(type);
+        if (wrapperType.isInstance(o)) {
+            @SuppressWarnings("unchecked")
+            T result = (T) o;
+            return result;
         }
 
         return null;
+    }
+
+    private GXDict toGXDict(Map<?, ?> map) {
+        GXDict dict = new GXDict();
+        map.forEach((key, value) -> {
+            if (key != null) {
+                dict.set(key.toString(), value);
+            }
+        });
+        return dict;
+    }
+
+    private static Class<?> primitiveToWrapper(Class<?> type) {
+        if (!type.isPrimitive()) {
+            return type;
+        }
+        if (type == int.class) return Integer.class;
+        if (type == long.class) return Long.class;
+        if (type == boolean.class) return Boolean.class;
+        if (type == double.class) return Double.class;
+        if (type == float.class) return Float.class;
+        if (type == short.class) return Short.class;
+        if (type == byte.class) return Byte.class;
+        if (type == char.class) return Character.class;
+        if (type == void.class) return Void.class;
+        return type;
     }
 }
