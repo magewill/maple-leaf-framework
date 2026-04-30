@@ -173,11 +173,6 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
         }
     }
 
-    @Deprecated
-    private void settingElasticsearchPropertiesBeanProperties(GXElasticsearchProperties dataSourceProperties) {
-        log.warn("settingElasticsearchPropertiesBeanProperties方法在Spring Boot 4中已不再使用");
-    }
-
     @Override
     public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
     }
