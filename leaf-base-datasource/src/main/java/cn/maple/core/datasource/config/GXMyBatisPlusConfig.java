@@ -14,12 +14,7 @@ import com.baomidou.mybatisplus.extension.handlers.MybatisMapWrapper;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.handler.DataPermissionHandler;
 import com.baomidou.mybatisplus.extension.plugins.handler.TenantLineHandler;
-import com.baomidou.mybatisplus.extension.plugins.inner.BlockAttackInnerInterceptor;
-import com.baomidou.mybatisplus.extension.plugins.inner.DataPermissionInterceptor;
-import com.baomidou.mybatisplus.extension.plugins.inner.DynamicTableNameInnerInterceptor;
-import com.baomidou.mybatisplus.extension.plugins.inner.OptimisticLockerInnerInterceptor;
-import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
-import com.baomidou.mybatisplus.extension.plugins.inner.TenantLineInnerInterceptor;
+import com.baomidou.mybatisplus.extension.plugins.inner.*;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.expression.Expression;
@@ -38,9 +33,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/**
- * MyBatis-Plus plugin configuration.
- */
 @Slf4j
 @EnableTransactionManagement
 @Configuration
@@ -50,6 +42,21 @@ public class GXMyBatisPlusConfig {
 
     @Resource
     private GXDataSourceProperties dataSourceProperties;
+
+    private static void customize(org.apache.ibatis.session.Configuration configuration) {
+        configuration.setObjectWrapperFactory(new ObjectWrapperFactory() {
+            @Override
+            public boolean hasWrapperFor(Object object) {
+                return object instanceof Map;
+            }
+
+            @Override
+            @SuppressWarnings("unchecked")
+            public ObjectWrapper getWrapperFor(MetaObject metaObject, Object object) {
+                return new MybatisMapWrapper(metaObject, (Map<String, Object>) object);
+            }
+        });
+    }
 
     @Bean
     public MybatisPlusInterceptor mybatisPlusInterceptor() {
@@ -103,21 +110,6 @@ public class GXMyBatisPlusConfig {
             }
             interceptor.addInnerInterceptor(new TenantLineInnerInterceptor(new GXTenantLineHandler()));
         }
-    }
-
-    private static void customize(org.apache.ibatis.session.Configuration configuration) {
-        configuration.setObjectWrapperFactory(new ObjectWrapperFactory() {
-            @Override
-            public boolean hasWrapperFor(Object object) {
-                return object instanceof Map;
-            }
-
-            @Override
-            @SuppressWarnings("unchecked")
-            public ObjectWrapper getWrapperFor(MetaObject metaObject, Object object) {
-                return new MybatisMapWrapper(metaObject, (Map<String, Object>) object);
-            }
-        });
     }
 
     private DbType resolvePaginationDbType() {

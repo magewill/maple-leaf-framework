@@ -12,29 +12,9 @@ import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 
-/**
- * MyBatis公共字段自动填充器
- * <p>
- * 该类实现了MyBatis-Plus的MetaObjectHandler接口，用于在插入和更新操作时自动填充创建和更新相关字段，
- * 如创建人、创建时间、更新人、更新时间等，无需在业务代码中手动设置这些字段值。
- * </p>
- *
- * @author britton <britton@126.com>
- * @since 1.0.0
- */
 @Slf4j
 @Component
 public class GXAutoFillMetaObjectHandler implements MetaObjectHandler {
-    /**
-     * 插入操作时自动填充字段
-     * <p>
-     * 主要填充createdBy、createdAt和tenantId字段
-     * 如果字段已有值则不会覆盖，确保用户显式设置的值优先
-     * 使用安全的类型转换和空值处理，避免异常
-     * </p>
-     *
-     * @param metaObject Mybatis元数据对象，不应为null
-     */
     @Override
     public void insertFill(MetaObject metaObject) {
         try {
@@ -48,16 +28,10 @@ public class GXAutoFillMetaObjectHandler implements MetaObjectHandler {
             fillTenantId(metaObject, autoFillService);
             fillTimestampIfAbsent(metaObject, "createdAt");
         } catch (Exception e) {
-            // 捕获所有可能的异常，确保填充过程不会中断整个SQL执行
             log.error("自动填充字段时发生异常", e);
         }
     }
 
-    /**
-     * 更新操作时自动填充字段
-     *
-     * @param metaObject Mybatis元数据对象，不应为null
-     */
     @Override
     public void updateFill(MetaObject metaObject) {
         try {
@@ -69,7 +43,6 @@ public class GXAutoFillMetaObjectHandler implements MetaObjectHandler {
             }
             fillTimestampIfAbsent(metaObject, "updatedAt");
         } catch (Exception e) {
-            // 捕获所有可能的异常，确保填充过程不会中断整个SQL执行
             log.error("自动填充更新字段时发生异常", e);
         }
     }

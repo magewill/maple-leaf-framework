@@ -9,9 +9,6 @@ import java.sql.SQLException;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-/**
- * Druid datasource factory.
- */
 public class GXDynamicDataSourceFactory {
     private GXDynamicDataSourceFactory() {
     }

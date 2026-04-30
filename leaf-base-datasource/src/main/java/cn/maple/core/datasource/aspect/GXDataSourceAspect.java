@@ -26,21 +26,7 @@ import java.util.Map;
 @Order(-1000)
 @Slf4j
 public class GXDataSourceAspect {
-
-    /**
-     * Cache class-level @GXDataSource resolution.
-     */
     private static final Map<Class<?>, DataSourceCacheEntry> CLASS_ANNOTATION_CACHE = new ConcurrentReferenceHashMap<>();
-
-    /**
-     * Method annotation cache key.
-     */
-    private record MethodCacheKey(Class<?> targetClass, Method method) {
-    }
-
-    /**
-     * Cache method-level @GXDataSource resolution.
-     */
     private static final Map<MethodCacheKey, DataSourceCacheEntry> METHOD_ANNOTATION_CACHE = new ConcurrentReferenceHashMap<>();
 
     @Pointcut("@annotation(cn.maple.core.datasource.annotation.GXDataSource) || " +
@@ -71,7 +57,6 @@ public class GXDataSourceAspect {
                 }
             }
 
-            // For proxy classes, also scan implemented interfaces.
             for (Class<?> ifc : clazz.getInterfaces()) {
                 annotation = AnnotatedElementUtils.findMergedAnnotation(ifc, GXDataSource.class);
                 if (annotation != null) {
@@ -124,9 +109,6 @@ public class GXDataSourceAspect {
         });
     }
 
-    /**
-     * Normalize datasource value to avoid invalid switch caused by blanks.
-     */
     private String normalizeDataSourceValue(String dataSourceValue) {
         return dataSourceValue == null ? "" : dataSourceValue.trim();
     }
@@ -219,6 +201,9 @@ public class GXDataSourceAspect {
                 }
             }
         }
+    }
+
+    private record MethodCacheKey(Class<?> targetClass, Method method) {
     }
 
     private record DataSourceCacheEntry(boolean needSwitch, String dataSourceValue) {

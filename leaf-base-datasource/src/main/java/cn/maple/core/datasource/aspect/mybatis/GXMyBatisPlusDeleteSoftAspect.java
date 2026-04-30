@@ -28,15 +28,11 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.util.List;
 
-/**
- * Publish MyBatis deleteSoftCondition events after successful execution.
- */
 @Aspect
 @Component
 @Slf4j
 @SuppressWarnings("all")
 public class GXMyBatisPlusDeleteSoftAspect {
-
     @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && execution(* deleteSoftCondition(..))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();

@@ -14,9 +14,6 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * Nacos 动态数据源配置。
- */
 @Data
 @Slf4j
 @Component

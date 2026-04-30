@@ -14,9 +14,6 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReadWriteLock;
 
-/**
- * Redisson-backed MyBatis second-level cache.
- */
 @Slf4j
 public class GXMybatisPlusRedissonCache implements Cache {
     private static volatile GXRedissonCacheService redissonCacheService;
@@ -31,6 +28,74 @@ public class GXMybatisPlusRedissonCache implements Cache {
         this.id = id;
         this.flushIntervalMillis = resolveFlushIntervalMillis(id);
         log.debug("Initialized MyBatis Redisson cache: id={}, ttlMillis={}", id, flushIntervalMillis);
+    }
+
+    private static GXRedissonCacheService getRedissonCacheService() {
+        GXRedissonCacheService cacheService = redissonCacheService;
+        if (isUsable(cacheService)) {
+            return cacheService;
+        }
+
+        synchronized (GXMybatisPlusRedissonCache.class) {
+            cacheService = redissonCacheService;
+            if (isUsable(cacheService)) {
+                return cacheService;
+            }
+            try {
+                cacheService = GXSpringContextUtils.getBean(GXRedissonCacheService.class);
+            } catch (RuntimeException e) {
+                log.debug("Failed to resolve GXRedissonCacheService for MyBatis cache", e);
+                cacheService = null;
+            }
+            redissonCacheService = isUsable(cacheService) ? cacheService : null;
+            return redissonCacheService;
+        }
+    }
+
+    private static boolean isUsable(GXRedissonCacheService cacheService) {
+        if (cacheService == null) {
+            return false;
+        }
+        try {
+            var client = cacheService.getRedissonClient();
+            return client != null && !client.isShutdown() && !client.isShuttingDown();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static int resolveFlushIntervalMillis(String id) {
+        try {
+            Class<?> mapperClass = Class.forName(id);
+            CacheNamespace cacheNamespace = AnnotationUtil.getAnnotation(mapperClass, CacheNamespace.class);
+            if (cacheNamespace == null || cacheNamespace.flushInterval() <= 0) {
+                return 0;
+            }
+            return toCacheTtlMillis(cacheNamespace.flushInterval());
+        } catch (ClassNotFoundException e) {
+            log.debug("Cache id is not a loadable mapper class, use non-expiring cache entries: id={}", id);
+            return 0;
+        } catch (RuntimeException e) {
+            log.warn("Failed to resolve MyBatis cache flushInterval, use non-expiring cache entries: id={}", id, e);
+            return 0;
+        }
+    }
+
+    private static int toCacheTtlMillis(long flushIntervalMillis) {
+        if (flushIntervalMillis > Integer.MAX_VALUE) {
+            log.warn("MyBatis cache flushInterval [{}] exceeds supported max [{}], cap to max",
+                    flushIntervalMillis, Integer.MAX_VALUE);
+            return Integer.MAX_VALUE;
+        }
+        return (int) flushIntervalMillis;
+    }
+
+    private static String generateCacheKey(Object key) {
+        String keyText = Objects.toString(key, "null");
+        if (keyText.length() <= 64) {
+            return keyText;
+        }
+        return DigestUtils.md5DigestAsHex(keyText.getBytes(StandardCharsets.UTF_8));
     }
 
     @Override
@@ -141,73 +206,5 @@ public class GXMybatisPlusRedissonCache implements Cache {
             log.warn("Failed to get MyBatis cache lock: id={}", id, e);
             throw e;
         }
-    }
-
-    private static GXRedissonCacheService getRedissonCacheService() {
-        GXRedissonCacheService cacheService = redissonCacheService;
-        if (isUsable(cacheService)) {
-            return cacheService;
-        }
-
-        synchronized (GXMybatisPlusRedissonCache.class) {
-            cacheService = redissonCacheService;
-            if (isUsable(cacheService)) {
-                return cacheService;
-            }
-            try {
-                cacheService = GXSpringContextUtils.getBean(GXRedissonCacheService.class);
-            } catch (RuntimeException e) {
-                log.debug("Failed to resolve GXRedissonCacheService for MyBatis cache", e);
-                cacheService = null;
-            }
-            redissonCacheService = isUsable(cacheService) ? cacheService : null;
-            return redissonCacheService;
-        }
-    }
-
-    private static boolean isUsable(GXRedissonCacheService cacheService) {
-        if (cacheService == null) {
-            return false;
-        }
-        try {
-            var client = cacheService.getRedissonClient();
-            return client != null && !client.isShutdown() && !client.isShuttingDown();
-        } catch (RuntimeException e) {
-            return false;
-        }
-    }
-
-    private static int resolveFlushIntervalMillis(String id) {
-        try {
-            Class<?> mapperClass = Class.forName(id);
-            CacheNamespace cacheNamespace = AnnotationUtil.getAnnotation(mapperClass, CacheNamespace.class);
-            if (cacheNamespace == null || cacheNamespace.flushInterval() <= 0) {
-                return 0;
-            }
-            return toCacheTtlMillis(cacheNamespace.flushInterval());
-        } catch (ClassNotFoundException e) {
-            log.debug("Cache id is not a loadable mapper class, use non-expiring cache entries: id={}", id);
-            return 0;
-        } catch (RuntimeException e) {
-            log.warn("Failed to resolve MyBatis cache flushInterval, use non-expiring cache entries: id={}", id, e);
-            return 0;
-        }
-    }
-
-    private static int toCacheTtlMillis(long flushIntervalMillis) {
-        if (flushIntervalMillis > Integer.MAX_VALUE) {
-            log.warn("MyBatis cache flushInterval [{}] exceeds supported max [{}], cap to max",
-                    flushIntervalMillis, Integer.MAX_VALUE);
-            return Integer.MAX_VALUE;
-        }
-        return (int) flushIntervalMillis;
-    }
-
-    private static String generateCacheKey(Object key) {
-        String keyText = Objects.toString(key, "null");
-        if (keyText.length() <= 64) {
-            return keyText;
-        }
-        return DigestUtils.md5DigestAsHex(keyText.getBytes(StandardCharsets.UTF_8));
     }
 }

@@ -9,9 +9,6 @@ import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 
-/**
- * Thread-local dynamic datasource context.
- */
 public class GXDynamicContextHolder {
     private static final ThreadLocal<Deque<String>> CONTEXT_HOLDER = ThreadLocal.withInitial(ArrayDeque::new);
 

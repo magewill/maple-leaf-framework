@@ -27,15 +27,11 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.util.List;
 
-/**
- * Publish MyBatis updateFieldByCondition events after successful execution.
- */
 @Aspect
 @Component
 @Slf4j
 @SuppressWarnings("all")
 public class GXMyBatisPlusUpdateFieldAspect {
-
     @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && execution(* updateFieldByCondition(..))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();

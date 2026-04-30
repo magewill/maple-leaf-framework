@@ -14,9 +14,6 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadPoolExecutor;
 
-/**
- * Thread pool configuration for asynchronous MyBatis listener events.
- */
 @Log4j2
 @Configuration
 public class GXMyBatisAsyncListenerExecutorConfig {

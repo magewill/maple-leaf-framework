@@ -9,9 +9,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-/**
- * Dynamic datasource router.
- */
 @Slf4j
 public class GXDynamicDataSource extends AbstractRoutingDataSource implements DisposableBean {
     private final List<DruidDataSource> managedDataSources = new ArrayList<>();

@@ -45,12 +45,6 @@ import java.lang.annotation.*;
  * }
  * </pre>
  *
- * <p>注意事项：</p>
- * <p>1. 如果调用的是项目内的功能，需要在XXXRepository上添加@GXDataSource("other")</p>
- * <p>2. 如果需要调用MyBatis Plus封装的功能，需要在XXXService上添加@GXDataSource("other")</p>
- * <p>3. 方法级注解的优先级高于类级注解</p>
- * <p>4. 确保配置文件中已定义相应的数据源</p>
- *
  * @author britton <britton@126.com>
  */
 @Target({ElementType.METHOD, ElementType.TYPE})

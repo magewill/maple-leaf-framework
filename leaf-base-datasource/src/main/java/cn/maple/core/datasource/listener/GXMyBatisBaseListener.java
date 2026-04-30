@@ -19,7 +19,6 @@ import java.lang.reflect.Type;
  */
 @SuppressWarnings("unchecked")
 interface GXMyBatisBaseListener {
-
     default void listenerSaveEntity(GXMyBatisModelSaveEntityEvent<Dict> saveEntityEvent) {
         Dict source = saveEntityEvent.getSource();
         Dict param = saveEntityEvent.getParam();

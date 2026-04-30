@@ -20,15 +20,8 @@ import org.springframework.core.annotation.AnnotationUtils;
 
 import javax.sql.DataSource;
 import java.lang.reflect.Constructor;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
-/**
- * Dynamic datasource configuration.
- */
 @Configuration
 @Slf4j
 public class GXDynamicDataSourceConfig extends GXApplicationContextAware {
@@ -160,6 +153,7 @@ public class GXDynamicDataSourceConfig extends GXApplicationContextAware {
         }
     }
 
-    private record DynamicDataSourceBuildResult(Map<Object, Object> targetDataSources, List<DruidDataSource> managedDataSources) {
+    private record DynamicDataSourceBuildResult(Map<Object, Object> targetDataSources,
+                                                List<DruidDataSource> managedDataSources) {
     }
 }

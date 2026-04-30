@@ -5,9 +5,6 @@ import cn.maple.core.datasource.dto.GXDataFilterInnerDto;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 
-/**
- * Thread-local data filter context.
- */
 public class GXDataFilterThreadLocalUtils {
     private static final ThreadLocal<GXDataFilterInnerDto> DATA_FILTER_INNER_DTO = new ThreadLocal<>();
 

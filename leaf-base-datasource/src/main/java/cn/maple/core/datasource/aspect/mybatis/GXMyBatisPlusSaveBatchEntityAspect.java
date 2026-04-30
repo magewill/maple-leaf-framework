@@ -24,15 +24,11 @@ import java.lang.reflect.Type;
 import java.util.Collection;
 import java.util.List;
 
-/**
- * Publish MyBatis saveBatch/saveOrUpdateBatch events after successful execution.
- */
 @Aspect
 @Component
 @Slf4j
 @SuppressWarnings("all")
 public class GXMyBatisPlusSaveBatchEntityAspect {
-
     @Around("target(com.baomidou.mybatisplus.extension.service.impl.ServiceImpl) && (execution(* saveBatch(..)) || execution(* saveOrUpdateBatch(..)))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();

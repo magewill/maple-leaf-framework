@@ -2,33 +2,16 @@ package cn.maple.core.datasource.properties;
 
 import lombok.Data;
 
-/**
- * 多数据源属性
- */
 @Data
 public class GXDataSourceProperties {
-    /**
-     * 默认的数据库驱动
-     */
     private String driverClassName = "com.mysql.cj.jdbc.Driver"; //"com.p6spy.engine.spy.P6SpyDriver";
 
-    /**
-     * 连接的URL
-     */
     private String url;
 
-    /**
-     * 数据库用户名
-     */
     private String username;
 
-    /**
-     * 数据库密码
-     */
     private String password;
-    /**
-     * Druid默认参数
-     */
+
     private int initialSize = 2;
 
     private int maxActive = 10;

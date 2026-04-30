@@ -23,15 +23,11 @@ import org.springframework.stereotype.Component;
 import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 
-/**
- * Publish MyBatis insert events after successful execution.
- */
 @Aspect
 @Component
 @Slf4j
 @SuppressWarnings("all")
 public class GXMyBatisPlusSaveEntityAspect {
-
     @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && execution(* insert(..))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();
