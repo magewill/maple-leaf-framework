@@ -20,7 +20,6 @@ public enum GXBusinessResultStatusCode implements GXResultStatusCode {
 
     DECLINE(0x22, "审核拒绝", "审核被拒绝"),
 
-
     GOODS_PUT_AWAY(0x30, "上架", "商品上架"),
 
     GOODS_SOLD_OUT(0x31, "下架", "商品下架"),

@@ -175,8 +175,8 @@ public class GXExceptionHandler {
     public GXResultUtils<Dict> handleBusinessException(GXBusinessException e) {
         log.error(e.getMessage(), e);
         Dict data = e.getData();
-        if (Objects.nonNull(e.getCause())) {
-            data = ((GXBusinessException) e.getCause()).getData();
+        if (e.getCause() instanceof GXBusinessException businessException) {
+            data = businessException.getData();
         }
         exceptionNotify(e);
         return GXResultUtils.error(e.getCode(), e.getMsg(), data);
@@ -186,8 +186,8 @@ public class GXExceptionHandler {
     public GXResultUtils<Dict> handleConciseBusinessException(GXConciseBusinessException e) {
         log.error(e.getMessage());
         Dict data = e.getData();
-        if (Objects.nonNull(e.getCause())) {
-            data = ((GXConciseBusinessException) e.getCause()).getData();
+        if (e.getCause() instanceof GXConciseBusinessException businessException) {
+            data = businessException.getData();
         }
         exceptionNotify(e);
         return GXResultUtils.error(e.getCode(), e.getMsg(), data);
@@ -268,6 +268,7 @@ public class GXExceptionHandler {
 
     @ExceptionHandler(GXWebClientAuthTokenException.class)
     public GXHttpInvokerApiErrorResDto handleGXWebClientAuthTokenException(GXWebClientAuthTokenException e) {
+        exceptionNotify(e);
         GXHttpInvokerApiErrorResDto apiErrorResDto = new GXHttpInvokerApiErrorResDto();
         apiErrorResDto.setTimestamp(DateUtil.now());
         apiErrorResDto.setStatus(HttpStatus.HTTP_INTERNAL_ERROR);
@@ -282,6 +283,7 @@ public class GXExceptionHandler {
 
     @ExceptionHandler(GXFeignAuthTokenException.class)
     public GXHttpInvokerApiErrorResDto handleGXFeignAuthTokenException(GXFeignAuthTokenException e) {
+        exceptionNotify(e);
         GXHttpInvokerApiErrorResDto apiErrorResDto = new GXHttpInvokerApiErrorResDto();
         apiErrorResDto.setTimestamp(DateUtil.now());
         apiErrorResDto.setStatus(HttpStatus.HTTP_INTERNAL_ERROR);
@@ -301,10 +303,10 @@ public class GXExceptionHandler {
 
             if (Objects.nonNull(botNotificationExceptionService)) {
                 botNotificationExceptionService.botNotificationException(throwable);
-                log.debug("已发送异常通知: {}", throwable.getMessage());
+                log.debug("Exception notification checked: {}", throwable.getMessage());
             }
         } catch (Exception e) {
-            log.warn("发送异常通知时发生错误: {}", e.getMessage());
+            log.warn("Failed to send exception notification: {}", e.getMessage());
         }
     }
 }

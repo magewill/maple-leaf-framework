@@ -96,7 +96,6 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
             try {
                 return GXCommonUtils.convertSourceToTarget(r, targetClazz, null, CopyOptions.create());
             } catch (Exception e) {
-                // 记录转换异常，但返回null而不是抛出异常，保持与原方法行为一致
                 return null;
             }
         }
