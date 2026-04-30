@@ -1,0 +1,308 @@
+package cn.maple.elasticsearch.service.impl;
+
+import cn.hutool.core.bean.copier.CopyOptions;
+import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.lang.Dict;
+import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
+import cn.maple.core.framework.dto.inner.GXUnionTypeEnums;
+import cn.maple.core.framework.dto.inner.condition.GXCondition;
+import cn.maple.core.framework.dto.inner.condition.GXConditionStrEQ;
+import cn.maple.core.framework.dto.inner.field.GXUpdateField;
+import cn.maple.core.framework.dto.res.GXBaseDBResDto;
+import cn.maple.core.framework.exception.GXBusinessException;
+import cn.maple.elasticsearch.config.GXElasticsearchBeanDefinitionRegistryPostProcessor;
+import cn.maple.elasticsearch.dao.GXElasticsearchDao;
+import cn.maple.elasticsearch.model.GXElasticsearchModel;
+import cn.maple.elasticsearch.repository.GXElasticsearchRepository;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.AnnotationConfigUtils;
+import org.springframework.context.support.GenericApplicationContext;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.data.elasticsearch.annotations.Document;
+import org.springframework.data.elasticsearch.client.elc.ElasticsearchTemplate;
+import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.convert.ElasticsearchCustomConversions;
+import org.springframework.data.elasticsearch.core.query.CriteriaQuery;
+import org.springframework.data.elasticsearch.core.query.CriteriaQueryBuilder;
+import org.springframework.data.mapping.model.SimpleTypeHolder;
+
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
+import java.util.*;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class GXElasticsearchServiceImplTest {
+    private final CapturingRepository repository = new CapturingRepository();
+
+    private final TestService service = new TestService(repository);
+
+    private static <T> T defaultMethodProxy(Class<T> type) {
+        Object proxy = Proxy.newProxyInstance(type.getClassLoader(), new Class[]{type}, (target, method, args) -> {
+            if (method.isDefault()) {
+                return InvocationHandler.invokeDefault(target, method, args);
+            }
+            throw new UnsupportedOperationException(method.toString());
+        });
+        return type.cast(proxy);
+    }
+
+    @Test
+    void findByConditionFillsDefaultIndexNameAndMapsRows() {
+        repository.findByConditionResult = List.of(Dict.create().set("name", "maple"));
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder().build();
+
+        List<TestResDto> result = service.findByCondition(queryParam);
+
+        assertThat(queryParam.getTableName()).isEqualTo("test_index");
+        assertThat(repository.lastQueryParam).isSameAs(queryParam);
+        assertThat(result).extracting(TestResDto::getName).containsExactly("maple");
+    }
+
+    @Test
+    void findOneByConditionFillsDefaultIndexNameBeforeCallingRepository() {
+        repository.findOneByConditionResult = Dict.create().set("name", "leaf");
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder().build();
+
+        String name = service.findOneByCondition(queryParam, dict -> dict.getStr("name"));
+
+        assertThat(name).isEqualTo("leaf");
+        assertThat(queryParam.getTableName()).isEqualTo("test_index");
+        assertThat(repository.lastQueryParam).isSameAs(queryParam);
+    }
+
+    @Test
+    void deleteConditionRejectsEmptyConditions() {
+        assertThatThrownBy(() -> service.deleteCondition("test_index", Collections.emptyList()))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("条件不能为空");
+    }
+
+    @Test
+    void daoDeleteConditionRejectsEmptyConditionsBeforeBuildingDeleteAllQuery() {
+        TestDao dao = defaultMethodProxy(TestDao.class);
+
+        assertThatThrownBy(() -> dao.deleteCondition("test_index", Collections.emptyList()))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("条件不能为空");
+    }
+
+    @Test
+    void unsupportedUnionAndMapperMethodsFailLoudly() {
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder().build();
+
+        assertThatThrownBy(() -> service.paginate(queryParam, Collections.emptyList(), GXUnionTypeEnums.UNION))
+                .isInstanceOf(GXBusinessException.class);
+        assertThatThrownBy(() -> service.findByCondition(queryParam, Collections.emptyList(), GXUnionTypeEnums.UNION))
+                .isInstanceOf(GXBusinessException.class);
+        assertThatThrownBy(() -> service.findOneByCondition(queryParam, Collections.emptyList(), GXUnionTypeEnums.UNION))
+                .isInstanceOf(GXBusinessException.class);
+        assertThatThrownBy(() -> service.findByCallMapperMethod("selectByName"))
+                .isInstanceOf(GXBusinessException.class);
+        assertThatThrownBy(() -> service.findByCallMapperMethod("selectByName", "customerProcess", CopyOptions.create()))
+                .isInstanceOf(GXBusinessException.class);
+        assertThatThrownBy(() -> service.findOneByCallMapperMethod("selectOne"))
+                .isInstanceOf(GXBusinessException.class);
+        assertThatThrownBy(() -> service.findOneByCallMapperMethod("selectOne", "customerProcess", CopyOptions.create()))
+                .isInstanceOf(GXBusinessException.class);
+    }
+
+    @Test
+    void repositoryDeleteSoftConditionConvertsExtraDataToUpdateFields() {
+        List<GXCondition<?>> conditions = List.of(new GXConditionStrEQ("", "id", "1"));
+        Dict extraData = Dict.create().set("deletedBy", "tester").set("deletedFlag", 1);
+
+        Integer updated = repository.deleteSoftCondition("test_index", conditions, extraData);
+
+        assertThat(updated).isEqualTo(2);
+        assertThat(repository.lastTableName).isEqualTo("test_index");
+        assertThat(repository.lastConditions).isSameAs(conditions);
+        assertThat(repository.lastUpdateFields).hasSize(2);
+        assertThat(repository.lastUpdateFields)
+                .extracting(GXUpdateField::getFieldName)
+                .containsExactlyInAnyOrder("deleted_by", "deleted_flag");
+    }
+
+    @Test
+    void repositoryDeleteSoftConditionReturnsZeroWhenNoUpdateFieldExists() {
+        Integer updated = repository.deleteSoftCondition(
+                "test_index",
+                List.of(new GXConditionStrEQ("", "id", "1")),
+                Dict.create()
+        );
+
+        assertThat(updated).isZero();
+        assertThat(repository.lastUpdateFields).isEmpty();
+    }
+
+    @Test
+    void registeredBeansPreferDynamicOperationsButStillExposeDefaultTemplateByName() {
+        StandardEnvironment environment = new StandardEnvironment();
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("elasticsearch.datasource.primary.uris[0]", "http://localhost:9200");
+        properties.put("elasticsearch.datasource.primary.primary", "true");
+        properties.put("elasticsearch.datasource.secondary.uris[0]", "http://localhost:9201");
+        properties.put("elasticsearch.datasource.secondary.primary", "false");
+        environment.getPropertySources().addFirst(new MapPropertySource("test-elasticsearch", properties));
+
+        try (GenericApplicationContext context = new GenericApplicationContext()) {
+            AnnotationConfigUtils.registerAnnotationConfigProcessors(context);
+            GXElasticsearchBeanDefinitionRegistryPostProcessor postProcessor = new GXElasticsearchBeanDefinitionRegistryPostProcessor();
+            postProcessor.setEnvironment(environment);
+            postProcessor.postProcessBeanDefinitionRegistry(context);
+            context.registerBean(ElasticsearchInjectionTarget.class);
+
+            context.refresh();
+
+            ElasticsearchInjectionTarget target = context.getBean(ElasticsearchInjectionTarget.class);
+            assertThat(target.elasticsearchOperations).isSameAs(context.getBean("elasticsearchOperations"));
+            assertThat(target.elasticsearchOperations).isNotInstanceOf(ElasticsearchTemplate.class);
+            assertThat(target.elasticsearchTemplate).isSameAs(context.getBean("elasticsearchTemplate"));
+            assertThat(target.templateWithNonDefaultFieldName).isSameAs(context.getBean("elasticsearchTemplate"));
+            assertThat(target.elasticsearchTemplate).isSameAs(context.getBean("primaryElasticsearchTemplate"));
+            assertThat(context.getBean("elasticsearchCustomConversions")).isInstanceOf(ElasticsearchCustomConversions.class);
+            assertThat(context.getBean("elasticsearchSimpleTypeHolder")).isInstanceOf(SimpleTypeHolder.class);
+        }
+    }
+
+    @Test
+    void registeredBeansReuseUserProvidedElasticsearchCustomConversions() {
+        StandardEnvironment environment = new StandardEnvironment();
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("elasticsearch.datasource.primary.uris[0]", "http://localhost:9200");
+        properties.put("elasticsearch.datasource.primary.primary", "true");
+        environment.getPropertySources().addFirst(new MapPropertySource("test-elasticsearch", properties));
+
+        ElasticsearchCustomConversions customConversions = new ElasticsearchCustomConversions(Collections.emptyList());
+
+        try (GenericApplicationContext context = new GenericApplicationContext()) {
+            AnnotationConfigUtils.registerAnnotationConfigProcessors(context);
+            context.registerBean("elasticsearchCustomConversions", ElasticsearchCustomConversions.class, () -> customConversions);
+
+            GXElasticsearchBeanDefinitionRegistryPostProcessor postProcessor = new GXElasticsearchBeanDefinitionRegistryPostProcessor();
+            postProcessor.setEnvironment(environment);
+            postProcessor.postProcessBeanDefinitionRegistry(context);
+
+            context.refresh();
+
+            assertThat(context.getBean("elasticsearchCustomConversions")).isSameAs(customConversions);
+            assertThat(context.getBean("elasticsearchSimpleTypeHolder"))
+                    .isSameAs(customConversions.getSimpleTypeHolder());
+        }
+    }
+
+    @Test
+    void registeredBeansKeepDynamicOperationsPrimaryWhenPrimaryTemplateIsRegularCandidate() {
+        StandardEnvironment environment = new StandardEnvironment();
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("elasticsearch.datasource.primary.uris[0]", "http://localhost:9200");
+        properties.put("elasticsearch.datasource.primary.primary", "true");
+        properties.put("elasticsearch.datasource.secondary.uris[0]", "http://localhost:9201");
+        properties.put("elasticsearch.datasource.secondary.primary", "false");
+        environment.getPropertySources().addFirst(new MapPropertySource("test-elasticsearch", properties));
+
+        try (GenericApplicationContext context = new GenericApplicationContext()) {
+            GXElasticsearchBeanDefinitionRegistryPostProcessor postProcessor = new GXElasticsearchBeanDefinitionRegistryPostProcessor();
+            postProcessor.setEnvironment(environment);
+            postProcessor.postProcessBeanDefinitionRegistry(context);
+            context.refresh();
+
+            assertThat(context.getBean(ElasticsearchOperations.class)).isSameAs(context.getBean("elasticsearchOperations"));
+            assertThat(context.getBean(ElasticsearchTemplate.class)).isSameAs(context.getBean("elasticsearchTemplate"));
+        }
+    }
+
+    interface TestDao extends GXElasticsearchDao<TestEntity, CriteriaQuery, CriteriaQueryBuilder, String> {
+    }
+
+    static class TestService extends GXElasticsearchServiceImpl<CapturingRepository, TestEntity, TestDao, CriteriaQuery, CriteriaQueryBuilder, TestResDto, String> {
+        TestService(CapturingRepository repository) {
+            this.repository = repository;
+        }
+    }
+
+    static class CapturingRepository extends GXElasticsearchRepository<TestEntity, TestDao, CriteriaQuery, CriteriaQueryBuilder, String> {
+        private GXBaseQueryParamInnerDto lastQueryParam;
+
+        private List<Dict> findByConditionResult = new ArrayList<>();
+
+        private Dict findOneByConditionResult;
+
+        private String lastTableName;
+
+        private List<GXUpdateField<?>> lastUpdateFields = new ArrayList<>();
+
+        private List<GXCondition<?>> lastConditions = new ArrayList<>();
+
+        @Override
+        public List<Dict> findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
+            lastQueryParam = dbQueryParamInnerDto;
+            return findByConditionResult;
+        }
+
+        @Override
+        public Dict findOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
+            lastQueryParam = dbQueryParamInnerDto;
+            return findOneByConditionResult;
+        }
+
+        @Override
+        public Integer updateFieldByCondition(String tableName, List<GXUpdateField<?>> updateFields, List<GXCondition<?>> condition) {
+            lastTableName = tableName;
+            lastUpdateFields = updateFields;
+            lastConditions = condition;
+            return CollUtil.size(updateFields);
+        }
+
+        @Override
+        public Integer deleteCondition(String tableName, List<GXCondition<?>> condition) {
+            lastTableName = tableName;
+            lastConditions = condition;
+            return CollUtil.size(condition);
+        }
+
+        @Override
+        public String getTableName() {
+            return "test_index";
+        }
+    }
+
+    static class ElasticsearchInjectionTarget {
+        @Autowired
+        private ElasticsearchOperations elasticsearchOperations;
+
+        @Autowired
+        private ElasticsearchTemplate elasticsearchTemplate;
+
+        @Autowired
+        private ElasticsearchTemplate templateWithNonDefaultFieldName;
+    }
+
+    @Document(indexName = "test_index")
+    static class TestEntity extends GXElasticsearchModel {
+        private String id;
+
+        public String getId() {
+            return id;
+        }
+
+        public void setId(String id) {
+            this.id = id;
+        }
+    }
+
+    static class TestResDto extends GXBaseDBResDto {
+        private String name;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+    }
+}

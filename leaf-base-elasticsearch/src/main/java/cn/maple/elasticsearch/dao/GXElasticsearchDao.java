@@ -286,6 +286,9 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
     }
 
     default Integer deleteCondition(String tableName, List<GXCondition<?>> condition) {
+        if (CollUtil.isEmpty(condition)) {
+            throw new GXBusinessException("条件不能为空!");
+        }
         Assert.notNull(condition, "Condition must not be null");
         GXBaseQueryParamInnerDto queryParamInnerDto = GXBaseQueryParamInnerDto.builder()
                 .tableName(tableName)

@@ -33,12 +33,15 @@ import org.springframework.data.elasticsearch.client.elc.ElasticsearchClients;
 import org.springframework.data.elasticsearch.client.elc.ElasticsearchTemplate;
 import org.springframework.data.elasticsearch.client.elc.rest5_client.Rest5Clients;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.convert.ElasticsearchCustomConversions;
 import org.springframework.data.elasticsearch.core.convert.MappingElasticsearchConverter;
 import org.springframework.data.elasticsearch.core.mapping.SimpleElasticsearchMappingContext;
 import org.springframework.data.elasticsearch.support.HttpHeaders;
+import org.springframework.data.mapping.model.SimpleTypeHolder;
 import org.springframework.util.Assert;
 
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -56,6 +59,10 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
 
     private static final String ELASTICSEARCH_OPERATIONS_BEAN_NAME = "elasticsearchOperations";
 
+    private static final String ELASTICSEARCH_CUSTOM_CONVERSIONS_BEAN_NAME = "elasticsearchCustomConversions";
+
+    private static final String ELASTICSEARCH_SIMPLE_TYPE_HOLDER_BEAN_NAME = "elasticsearchSimpleTypeHolder";
+
     private static final String PRIMARY_ELASTICSEARCH_TEMPLATE_BEAN_NAME = "primaryElasticsearchTemplate";
 
     private static final String ELASTICSEARCH_REPOSITORY_FACTORY_BEAN_POST_PROCESSOR_BEAN_NAME = "elasticsearchRepositoryFactoryBeanPostProcessor";
@@ -68,6 +75,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             Map<String, GXElasticsearchProperties> datasourceMap = getSourceElasticsearchProperties().getDatasource();
 
             checkElasticsearchDataSourceProperties(datasourceMap);
+            registerElasticsearchConversionInfrastructure(beanDefinitionRegistry);
 
             datasourceMap.forEach((key, dataSourceProperties) -> {
                 try {
@@ -78,6 +86,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
 
                     String mappingContextBeanName = key + "ElasticsearchMappingContext";
                     BeanDefinitionBuilder mappingContextBuilder = BeanDefinitionBuilder.genericBeanDefinition(SimpleElasticsearchMappingContext.class);
+                    mappingContextBuilder.addPropertyReference("simpleTypeHolder", ELASTICSEARCH_SIMPLE_TYPE_HOLDER_BEAN_NAME);
                     mappingContextBuilder.setInitMethodName("initialize");
                     mappingContextBuilder.setPrimary(dataSourceProperties.isPrimary());
                     beanDefinitionRegistry.registerBeanDefinition(mappingContextBeanName, mappingContextBuilder.getBeanDefinition());
@@ -85,6 +94,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
                     String converterBeanName = key + "MappingElasticsearchConverter";
                     BeanDefinitionBuilder converterBuilder = BeanDefinitionBuilder.genericBeanDefinition(MappingElasticsearchConverter.class);
                     converterBuilder.addConstructorArgReference(mappingContextBeanName);
+                    converterBuilder.addPropertyReference("conversions", ELASTICSEARCH_CUSTOM_CONVERSIONS_BEAN_NAME);
                     converterBuilder.setInitMethodName("afterPropertiesSet");
                     converterBuilder.setPrimary(dataSourceProperties.isPrimary());
                     beanDefinitionRegistry.registerBeanDefinition(converterBeanName, converterBuilder.getBeanDefinition());
@@ -96,11 +106,11 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
                     elasticsearchTemplateBeanDefinitionBuilder.setAutowireMode(AutowireCapableBeanFactory.AUTOWIRE_BY_NAME);
 
                     boolean primary = dataSourceProperties.isPrimary();
+                    elasticsearchTemplateBeanDefinitionBuilder.setFallback(!primary);
                     String beanName = key + "ElasticsearchTemplate";
 
                     if (primary) {
                         // settingElasticsearchPropertiesBeanProperties(dataSourceProperties);
-                        elasticsearchTemplateBeanDefinitionBuilder.setPrimary(true);
                         log.info("主Elasticsearch数据源[{}]已设置为primary", key);
                     }
 
@@ -123,6 +133,19 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
         }
     }
 
+    private void registerElasticsearchConversionInfrastructure(BeanDefinitionRegistry beanDefinitionRegistry) {
+        if (!beanDefinitionRegistry.containsBeanDefinition(ELASTICSEARCH_CUSTOM_CONVERSIONS_BEAN_NAME)) {
+            BeanDefinitionBuilder conversionsBuilder = BeanDefinitionBuilder.genericBeanDefinition(ElasticsearchCustomConversions.class);
+            conversionsBuilder.addConstructorArgValue(Collections.emptyList());
+            beanDefinitionRegistry.registerBeanDefinition(ELASTICSEARCH_CUSTOM_CONVERSIONS_BEAN_NAME, conversionsBuilder.getBeanDefinition());
+        }
+
+        removeBeanNameIfPresent(beanDefinitionRegistry, ELASTICSEARCH_SIMPLE_TYPE_HOLDER_BEAN_NAME);
+        BeanDefinitionBuilder simpleTypeHolderBuilder = BeanDefinitionBuilder.genericBeanDefinition(SimpleTypeHolder.class);
+        simpleTypeHolderBuilder.setFactoryMethodOnBean("getSimpleTypeHolder", ELASTICSEARCH_CUSTOM_CONVERSIONS_BEAN_NAME);
+        beanDefinitionRegistry.registerBeanDefinition(ELASTICSEARCH_SIMPLE_TYPE_HOLDER_BEAN_NAME, simpleTypeHolderBuilder.getBeanDefinition());
+    }
+
     private void registerPrimaryElasticsearchAliases(BeanDefinitionRegistry beanDefinitionRegistry,
                                                      String clientBeanName,
                                                      String mappingContextBeanName,
@@ -143,6 +166,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
                 ElasticsearchOperations.class,
                 () -> GXDynamicElasticsearchOperations.create(defaultTemplateBeanName)
         );
+        operationsBuilder.setPrimary(true);
         beanDefinitionRegistry.registerBeanDefinition(ELASTICSEARCH_OPERATIONS_BEAN_NAME, operationsBuilder.getBeanDefinition());
     }
 

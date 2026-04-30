@@ -21,8 +21,6 @@ import cn.maple.elasticsearch.model.GXElasticsearchModel;
 import cn.maple.elasticsearch.repository.GXElasticsearchRepository;
 import cn.maple.elasticsearch.service.GXElasticsearchService;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.elasticsearch.core.query.BaseQuery;
 import org.springframework.data.elasticsearch.core.query.BaseQueryBuilder;
@@ -35,9 +33,6 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D, Q, B, ID>, T extends GXElasticsearchModel, D extends GXElasticsearchDao<T, Q, B, ID>, Q extends BaseQuery, B extends BaseQueryBuilder<Q, B>, R extends GXBaseDBResDto, ID extends Serializable> extends GXBusinessServiceImpl implements GXElasticsearchService<P, T, D, Q, B, R, ID> {
-    @SuppressWarnings("all")
-    private static final Logger LOGGER = LoggerFactory.getLogger(GXElasticsearchServiceImpl.class);
-
     @Autowired
     @SuppressWarnings("all")
     protected P repository;
@@ -121,8 +116,7 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
 
     @Override
     public GXPaginationResDto<R> paginate(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        LOGGER.error("请自己实现此方法");
-        return null;
+        throw new GXBusinessException("Elasticsearch暂不支持union分页查询");
     }
 
     @Override
@@ -142,8 +136,7 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
 
     @Override
     public List<R> findByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        LOGGER.error("请自己实现该方法");
-        return null;
+        throw new GXBusinessException("Elasticsearch暂不支持union列表查询");
     }
 
     @Override
@@ -224,7 +217,7 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
         if (CharSequenceUtil.isEmpty(methodName[0])) {
             methodName[0] = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
         }
-        Object extraData = Optional.ofNullable(queryParamInnerDto.getExtraData()).orElse(Dict.class);
+        Object extraData = Optional.ofNullable(queryParamInnerDto.getExtraData()).orElseGet(Dict::create);
         CopyOptions copyOptions = getCopyOptions(queryParamInnerDto);
         Class<R> genericClassType = GXCommonUtils.getGenericClassType(getClass(), 5);
         Function<Dict, R> rowMapper = dict -> {
@@ -235,12 +228,15 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
 
     @Override
     public R findOneByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        LOGGER.error("请自己实现此方法");
-        return null;
+        throw new GXBusinessException("Elasticsearch暂不支持union单条查询");
     }
 
     @Override
     public <E> E findOneByCondition(GXBaseQueryParamInnerDto queryParamInnerDto, Function<Dict, E> rowMapper) {
+        String tableName = queryParamInnerDto.getTableName();
+        if (CharSequenceUtil.isBlank(tableName)) {
+            queryParamInnerDto.setTableName(repository.getTableName());
+        }
         Dict dict = repository.findOneByCondition(queryParamInnerDto);
         if (Objects.isNull(dict)) {
             return null;
@@ -342,6 +338,9 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
 
     @Override
     public Integer deleteCondition(String tableName, List<GXCondition<?>> condition) {
+        if (CollUtil.isEmpty(condition)) {
+            throw new GXBusinessException("条件不能为空!");
+        }
         return repository.deleteCondition(tableName, condition);
     }
 
@@ -433,22 +432,22 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
 
     @Override
     public Collection<R> findByCallMapperMethod(String mapperMethodMethod, String convertMethodName, CopyOptions copyOptions, Object... params) {
-        return null;
+        throw new GXBusinessException("Elasticsearch暂不支持通过Mapper方法查询");
     }
 
     @Override
     public Collection<R> findByCallMapperMethod(String mapperMethodMethod, Object... params) {
-        return null;
+        throw new GXBusinessException("Elasticsearch暂不支持通过Mapper方法查询");
     }
 
     @Override
     public R findOneByCallMapperMethod(String mapperMethodMethod, String convertMethodName, CopyOptions copyOptions, Object... params) {
-        return null;
+        throw new GXBusinessException("Elasticsearch暂不支持通过Mapper方法查询");
     }
 
     @Override
     public R findOneByCallMapperMethod(String mapperMethodName, Object... params) {
-        return null;
+        throw new GXBusinessException("Elasticsearch暂不支持通过Mapper方法查询");
     }
 
     @Override

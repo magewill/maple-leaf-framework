@@ -133,10 +133,22 @@ public class GXElasticsearchRepository<T extends GXElasticsearchModel, D extends
 
     @Override
     public Integer deleteSoftCondition(String tableName, List<GXUpdateField<?>> updateFieldList, List<GXCondition<?>> condition, Dict extraData) {
-        if (CollUtil.isEmpty(updateFieldList)) {
+        List<GXUpdateField<?>> updateFields = new ArrayList<>();
+        if (CollUtil.isNotEmpty(updateFieldList)) {
+            updateFields.addAll(updateFieldList);
+        }
+        if (extraData != null && !extraData.isEmpty()) {
+            extraData.forEach((fieldName, value) -> updateFields.add(new GXUpdateField<>(null, Convert.toStr(fieldName), value) {
+                @Override
+                public Object getFieldValue() {
+                    return value;
+                }
+            }));
+        }
+        if (CollUtil.isEmpty(updateFields)) {
             return 0;
         }
-        return updateFieldByCondition(tableName, updateFieldList, condition);
+        return updateFieldByCondition(tableName, updateFields, condition);
     }
 
     @Override
