@@ -37,7 +37,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
 import tools.jackson.core.JacksonException;
-import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
 import javax.crypto.Mac;
@@ -99,36 +98,39 @@ public class GXCommonUtils {
         try {
             Environment environment = GXSpringContextUtils.getEnvironment();
             if (ObjectUtil.isNull(environment)) {
-                LOG.debug("未找到Environment Bean，无法获取配置值!");
+                LOG.debug("Environment is unavailable, cannot read property");
                 return getClassDefaultValue(clazzType);
             }
-            boolean simpleValueType = ClassUtil.isSimpleValueType(clazzType);
-            if (simpleValueType) {
-                final R envValue = environment.getProperty(key, clazzType);
-                if (null == envValue) {
-                    return getClassDefaultValue(clazzType);
-                }
+            R envValue = null;
+            try {
+                envValue = environment.getProperty(key, clazzType);
+            } catch (Exception e) {
+                LOG.debug("Direct property conversion failed: key={}, type={}, error={}", key, clazzType.getName(), e.getMessage());
+            }
+            if (null != envValue) {
                 return envValue;
             }
+            if (ClassUtil.isSimpleValueType(clazzType)) {
+                return getClassDefaultValue(clazzType);
+            }
 
-            String envValue = environment.getProperty(key, String.class);
-            if (envValue == null) {
+            String rawValue = environment.getProperty(key, String.class);
+            if (rawValue == null) {
                 return getClassDefaultValue(clazzType);
             }
 
             ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
             if (objectMapper == null) {
-                LOG.warn("未找到ObjectMapper Bean，无法进行复杂类型转换");
+                LOG.warn("ObjectMapper bean is unavailable, cannot convert property: key={}, type={}", key, clazzType.getName());
                 return getClassDefaultValue(clazzType);
             }
 
-            return objectMapper.readValue(envValue, new TypeReference<>() {
-            });
+            return objectMapper.readValue(rawValue, clazzType);
         } catch (JacksonException exception) {
-            LOG.error("配置值[{}]转换为类型[{}]失败: {}", key, clazzType.getName(), exception.getMessage());
+            LOG.error("Failed to convert property: key={}, type={}, error={}", key, clazzType.getName(), exception.getMessage());
             throw new GXConvertException("转换失败", exception);
         } catch (Exception e) {
-            LOG.error("获取配置值过程中发生异常: {}", e.getMessage());
+            LOG.error("Failed to get property: key={}, error={}", key, e.getMessage());
             return getClassDefaultValue(clazzType);
         }
     }
@@ -142,26 +144,59 @@ public class GXCommonUtils {
         }
 
         try {
-            final R envValue = Objects.requireNonNull(GXSpringContextUtils.getEnvironment()).getProperty(key, clazzType);
-            if (null == envValue) {
+            Environment environment = GXSpringContextUtils.getEnvironment();
+            if (ObjectUtil.isNull(environment)) {
                 return defaultValue;
             }
-            return envValue;
+
+            R envValue = null;
+            try {
+                envValue = environment.getProperty(key, clazzType);
+            } catch (Exception e) {
+                LOG.debug("Direct property conversion failed: key={}, type={}, error={}", key, clazzType.getName(), e.getMessage());
+            }
+            if (null != envValue) {
+                return envValue;
+            }
+            if (ClassUtil.isSimpleValueType(clazzType)) {
+                return defaultValue;
+            }
+
+            String rawValue = environment.getProperty(key, String.class);
+            if (rawValue == null) {
+                return defaultValue;
+            }
+
+            ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
+            if (objectMapper == null) {
+                LOG.warn("ObjectMapper bean is unavailable, use default property value: key={}, type={}", key, clazzType.getName());
+                return defaultValue;
+            }
+
+            return objectMapper.readValue(rawValue, clazzType);
         } catch (Exception e) {
-            LOG.warn("获取配置值[{}]失败，使用默认值: {}", key, e.getMessage());
+            LOG.warn("Failed to get property, use default value: key={}, error={}", key, e.getMessage());
             return defaultValue;
         }
     }
 
     public static String getActiveProfile() {
         try {
-            String[] activeProfiles = Objects.requireNonNull(GXSpringContextUtils.getEnvironment()).getActiveProfiles();
+            Environment environment = GXSpringContextUtils.getEnvironment();
+            if (ObjectUtil.isNull(environment)) {
+                return "default";
+            }
+            String[] activeProfiles = environment.getActiveProfiles();
             if (activeProfiles.length > 0) {
                 return activeProfiles[0];
             }
-            return GXSpringContextUtils.getEnvironment().getDefaultProfiles()[0];
+            String[] defaultProfiles = environment.getDefaultProfiles();
+            if (defaultProfiles.length > 0) {
+                return defaultProfiles[0];
+            }
+            return "default";
         } catch (Exception e) {
-            LOG.warn("获取激活的Profile失败: {}", e.getMessage());
+            LOG.warn("Failed to get active profile: {}", e.getMessage());
             return "default";
         }
     }
@@ -250,7 +285,11 @@ public class GXCommonUtils {
         }
 
         if (ClassUtil.isSimpleTypeOrArray(tClass)) {
-            return (T) source;
+            try {
+                return tClass.isInstance(source) ? tClass.cast(source) : Convert.convert(tClass, source);
+            } catch (Exception e) {
+                throw new GXConvertException("Convert failed", e);
+            }
         }
 
         try {
@@ -757,14 +796,8 @@ public class GXCommonUtils {
         if (params == null) {
             params = new Object[0];
         }
-        Class<?>[] classes = new Class<?>[params.length];
-        for (int i = 0; i < params.length; i++) {
-            if (Objects.nonNull(params[i])) {
-                classes[i] = params[i].getClass();
-            }
-        }
-        Method method = ReflectUtil.getMethod(targetClazz, methodName, classes);
-        return ObjectUtil.isNotNull(method);
+        Method method = findMethod(targetClazz, methodName, resolveParamTypes(params));
+        return method != METHOD_NOT_FOUND;
     }
 
     public static Integer checkURLReachable(String urlString) {
