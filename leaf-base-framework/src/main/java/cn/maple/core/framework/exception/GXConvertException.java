@@ -3,9 +3,6 @@ package cn.maple.core.framework.exception;
 import cn.hutool.core.lang.Dict;
 import cn.maple.core.framework.code.GXResultStatusCode;
 
-/**
- * 框架数据转换异常
- */
 public class GXConvertException extends GXBusinessException {
 
     public GXConvertException(String msg, int code, Dict data, Throwable e) {

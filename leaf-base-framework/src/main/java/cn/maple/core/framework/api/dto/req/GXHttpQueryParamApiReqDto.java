@@ -12,14 +12,8 @@ import java.util.Set;
 @EqualsAndHashCode(callSuper = true)
 @SuppressWarnings("all")
 public class GXHttpQueryParamApiReqDto extends GXBaseApiReqDto implements Serializable {
-    /**
-     * 需要查询的主表名字(在有join查询时,需要有主表、次表的区分)
-     */
     private String tableName;
 
-    /**
-     * 搜索条件
-     */
     private HashBasedTable<String, String, Object> conditionLst;
 
     /**
@@ -32,13 +26,7 @@ public class GXHttpQueryParamApiReqDto extends GXBaseApiReqDto implements Serial
      */
     private List<GXUpdateFieldRequest> updateFieldLst;
 
-    /**
-     * 待查询字段列表
-     */
     private Set<String> columns;
 
-    /**
-     * 待查询的字段名字
-     */
     private String column;
 }

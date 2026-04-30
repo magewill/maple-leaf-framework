@@ -11,12 +11,6 @@ import lombok.EqualsAndHashCode;
 
 import java.io.Serial;
 
-/**
- * @author britton@126.com
- * @since 2021-10-19 15:06
- * <p>
- * 数据库通用异常
- */
 @EqualsAndHashCode(callSuper = true)
 @Data
 public class GXDBException extends RuntimeException {

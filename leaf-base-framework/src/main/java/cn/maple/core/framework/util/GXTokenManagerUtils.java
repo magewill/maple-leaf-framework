@@ -15,66 +15,12 @@ import org.springframework.util.ClassUtils;
 
 import java.util.Objects;
 
-/**
- * Token管理工具类
- * <p>
- * 该工具类用于管理前后端用户的Token生成、解码和验证。
- * 支持管理端和前端用户的Token处理，包括生成、解码和验证功能。
- * </p>
- * <p>
- * 使用示例：
- * <pre>
- * {@code
- * // 生成管理端Token
- * Dict param = Dict.create().set("userName", "admin");
- * String token = GXTokenManagerUtils.generateManagerToken(1, param, "secretKey", 120);
- *
- * // 解码Token
- * Dict tokenInfo = GXTokenManagerUtils.decodeManagerToken(token, "secretKey");
- *
- * // 验证Token有效性
- * boolean isValid = GXTokenManagerUtils.verifyTokenEffectiveness();
- * }
- * </pre>
- * </p>
- *
- * @author gapleaf@163.com
- */
 public class GXTokenManagerUtils {
-    /**
-     * 日志对象
-     */
     private static final Logger LOG = LoggerFactory.getLogger(GXTokenManagerUtils.class);
 
-    /**
-     * 私有构造函数，防止实例化
-     */
     private GXTokenManagerUtils() {
     }
 
-    /**
-     * 生成管理端登录的token
-     * <p>
-     * 生成的管理端Token包含用户ID、用户名、登录时间等信息。
-     * Token会使用指定的密钥进行加密，并设置过期时间。
-     * </p>
-     * <p>
-     * 使用示例：
-     * <pre>
-     * {@code
-     * Dict param = Dict.create().set("userName", "admin");
-     * String token = GXTokenManagerUtils.generateManagerToken(1, param, "secretKey", 120);
-     * }
-     * </pre>
-     * </p>
-     *
-     * @param userId    管理员ID
-     * @param param     附加信息，必须包含userName字段
-     * @param secretKey 加解密key
-     * @param expires   过期时间（秒）
-     * @return String 生成的Token
-     * @throws GXBusinessException 当param中缺少userName字段时抛出
-     */
     public static String generateManagerToken(Object userId, Dict param, String secretKey, int expires) {
         if (ObjectUtil.isNull(param)) {
             throw new GXBusinessException("参数param不能为空");
@@ -94,17 +40,6 @@ public class GXTokenManagerUtils {
         return GXAuthCodeUtils.authCodeEncode(JSONUtil.toJsonStr(param), secretKey, expires);
     }
 
-    /**
-     * 解码后端用户的加密TOKEN字符串
-     * <p>
-     * 注意: 由于后端用户不需要保持长时间的登录操作, 所以在生成token时, 为token指定了过期时间
-     * </p>
-     *
-     * @param source    加密TOKEN字符串
-     * @param secretKey 加解密KEY
-     * @return Dict Token解码后的信息
-     * @throws GXTokenInvalidException 当Token无效时抛出
-     */
     public static Dict decodeManagerToken(String source, String secretKey) {
         if (CharSequenceUtil.isEmpty(source)) {
             throw new GXTokenInvalidException("Token不能为空");
@@ -124,29 +59,6 @@ public class GXTokenManagerUtils {
         }
     }
 
-    /**
-     * 生成前端用户的登录Token
-     * <p>
-     * 生成的前端用户Token包含用户ID、用户名、登录时间等信息。
-     * Token会使用指定的密钥进行加密，并设置过期时间。
-     * </p>
-     * <p>
-     * 使用示例：
-     * <pre>
-     * {@code
-     * Dict param = Dict.create().set("userName", "user");
-     * String token = GXTokenManagerUtils.generateUserToken(1, param, "secretKey", 600);
-     * }
-     * </pre>
-     * </p>
-     *
-     * @param userId    前端用户的ID
-     * @param param     附加信息，必须包含userName字段
-     * @param secretKey 加解密KEY
-     * @param expires   过期时间（秒）
-     * @return String 生成的Token
-     * @throws GXBusinessException 当param中缺少userName字段时抛出
-     */
     public static String generateUserToken(Object userId, Dict param, String secretKey, int expires) {
         if (Objects.isNull(param)) {
             throw new GXBusinessException("参数param不能为空");
@@ -166,18 +78,6 @@ public class GXTokenManagerUtils {
         return GXAuthCodeUtils.authCodeEncode(JSONUtil.toJsonStr(param), secretKey, expires);
     }
 
-    /**
-     * 解码前端用户的TOKEN字符串
-     * <p>
-     * 注意: 由于前端用户需要保持长时间的登录信息, 在生成token字符串时, 不需要指定token的过期时间,
-     * 过期时间时存放在s_user_token表中进行维护
-     * </p>
-     *
-     * @param source    加密TOKEN字符串
-     * @param secretKey 加解密KEY
-     * @return Dict Token解码后的信息
-     * @throws GXTokenInvalidException 当Token无效时抛出
-     */
     public static Dict decodeUserToken(String source, String secretKey) {
         if (CharSequenceUtil.isEmpty(source)) {
             throw new GXTokenInvalidException("Token不能为空");
@@ -197,16 +97,6 @@ public class GXTokenManagerUtils {
         }
     }
 
-    /**
-     * 验证token的有效性
-     * <p>
-     * 验证规则可以调用别的服务，亦可以自身验证。
-     * 自身验证可以通过redis的token缓存key+tokenSecret来进行验证解密并验证是否有效，
-     * 减少服务间的通信。
-     * </p>
-     *
-     * @return true 有效 ; false 无效
-     */
     public static boolean verifyTokenEffectiveness() {
         try {
             Object tokenConfigService = GXSpringContextUtils.getBean(

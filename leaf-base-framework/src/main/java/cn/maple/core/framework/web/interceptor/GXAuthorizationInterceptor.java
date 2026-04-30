@@ -5,11 +5,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.servlet.AsyncHandlerInterceptor;
 
-/**
- * 登录用户验证拦截器
- *
- * @author britton
- */
 @Slf4j
 @SuppressWarnings("all")
 public abstract class GXAuthorizationInterceptor implements AsyncHandlerInterceptor {

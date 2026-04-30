@@ -14,32 +14,17 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.MediaType;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * XSS request wrapper.
- *
- * <p>Only JSON request bodies are consumed and cached. The cached body is already filtered,
- * so repeated calls to {@link #getInputStream()} or {@link #getReader()} do not rebuild large
- * intermediate strings and byte arrays.</p>
- */
 public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
     private static final GXHTMLFilter htmlFilter = new GXHTMLFilter();
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    /**
-     * Max JSON request body size: 50MB.
-     */
     private static final int MAX_REQUEST_SIZE = 50 * 1024 * 1024;
 
     @Getter
@@ -97,6 +82,30 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
         }
     }
 
+    private static boolean isBlank(byte[] body) {
+        for (byte b : body) {
+            if (!Character.isWhitespace((char) b)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static byte[] readBytesLimited(InputStream inputStream, int maxSize) throws IOException {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream(Math.min(maxSize, 8192));
+        byte[] buffer = new byte[8192];
+        int total = 0;
+        int readLength;
+        while ((readLength = inputStream.read(buffer)) != -1) {
+            total += readLength;
+            if (total > maxSize) {
+                throw new IllegalArgumentException("Request body is too large, max size: " + maxSize + " bytes");
+            }
+            outputStream.write(buffer, 0, readLength);
+        }
+        return outputStream.toByteArray();
+    }
+
     private byte[] filterJsonBody(byte[] rawBody) throws IOException {
         if (isBlank(rawBody)) {
             return rawBody;
@@ -115,15 +124,6 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
             String json = new String(rawBody, StandardCharsets.UTF_8);
             return xssEncode(json).getBytes(StandardCharsets.UTF_8);
         }
-    }
-
-    private static boolean isBlank(byte[] body) {
-        for (byte b : body) {
-            if (!Character.isWhitespace((char) b)) {
-                return false;
-            }
-        }
-        return true;
     }
 
     private void writeFilteredToken(JsonParser parser, JsonGenerator generator, JsonToken token) throws IOException {
@@ -167,21 +167,6 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
             default:
                 generator.copyCurrentEvent(parser);
         }
-    }
-
-    private static byte[] readBytesLimited(InputStream inputStream, int maxSize) throws IOException {
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream(Math.min(maxSize, 8192));
-        byte[] buffer = new byte[8192];
-        int total = 0;
-        int readLength;
-        while ((readLength = inputStream.read(buffer)) != -1) {
-            total += readLength;
-            if (total > maxSize) {
-                throw new IllegalArgumentException("Request body is too large, max size: " + maxSize + " bytes");
-            }
-            outputStream.write(buffer, 0, readLength);
-        }
-        return outputStream.toByteArray();
     }
 
     @Override
@@ -280,7 +265,6 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
 
         @Override
         public void setReadListener(ReadListener readListener) {
-            // Cached byte arrays are read synchronously.
         }
 
         @Override

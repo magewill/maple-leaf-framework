@@ -11,11 +11,6 @@ import lombok.EqualsAndHashCode;
 
 import java.io.Serializable;
 
-/**
- * 自定义异常
- *
- * @author zj chen <britton@126.com>
- */
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class GXBusinessException extends RuntimeException implements Serializable {

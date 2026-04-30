@@ -11,12 +11,6 @@ import lombok.EqualsAndHashCode;
 
 import java.io.Serial;
 
-/**
- * 数据格式不正确
- * 例如 :
- * 1、手机格式不正确
- * 2、邮箱格式不正确
- */
 @EqualsAndHashCode(callSuper = true)
 @Data
 public class GXDataFormatIncorrectException extends RuntimeException {

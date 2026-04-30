@@ -13,37 +13,10 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * 应用启动后任务执行器
- * <p>
- * 该类实现了Spring Boot的CommandLineRunner接口,用于在应用启动完成后执行一系列初始化任务。
- * 它会自动收集所有实现了GXCommandLineRunnerService接口的Bean,并并发执行它们的run方法。
- * <p>
- * 线程安全说明:
- * 1. 使用虚拟线程并发执行任务,提高启动效率
- * 2. 使用AtomicInteger计数器安全地跟踪任务执行情况
- * 3. 使用CountDownLatch确保所有任务完成后再继续
- * 4. 每个任务的异常都被单独捕获和处理,不会影响其他任务的执行
- * <p>
- * 使用示例:
- * <pre>
- * // 创建自定义的启动任务
- * @Component
- * public class MyStartupTask implements GXCommandLineRunnerService {
- *     @Override
- *     public void run() {
- *         // 执行初始化逻辑
- *     }
- * }
- * </pre>
- *
- * @author britton chen <britton@126.com>
- */
 @Component
 @Log4j2
-@Order(Integer.MAX_VALUE) // 确保在其他CommandLineRunner之后执行
+@Order(Integer.MAX_VALUE)
 public class GXCommandLineRunner implements CommandLineRunner {
-    // 配置超时时间,防止无限等待
     private static final long TIMEOUT_MINUTES = 10;
 
     @Override
@@ -61,7 +34,6 @@ public class GXCommandLineRunner implements CommandLineRunner {
         AtomicInteger failCount = new AtomicInteger(0);
         CountDownLatch latch = new CountDownLatch(commandLineRunnerServiceBeans.size());
 
-        // 并发执行所有启动任务
         commandLineRunnerServiceBeans.forEach((beanName, service) -> {
             Thread.ofVirtual().start(() -> {
                 try {
@@ -73,13 +45,11 @@ public class GXCommandLineRunner implements CommandLineRunner {
                     failCount.incrementAndGet();
                     log.error("启动任务执行失败: {}, 错误信息: {}", beanName, e.getMessage(), e);
                 } finally {
-                    // 确保在finally块中释放latch,防止死锁
                     latch.countDown();
                 }
             });
         });
 
-        // 在主线程中等待所有任务完成
         try {
             boolean completed = latch.await(TIMEOUT_MINUTES, TimeUnit.MINUTES);
             if (!completed) {
@@ -88,14 +58,11 @@ public class GXCommandLineRunner implements CommandLineRunner {
             }
             log.info("启动任务执行完成,成功: {},失败: {}", successCount.get(), failCount.get());
 
-            // 如果有任务失败,根据业务需求决定是否抛出异常
             if (failCount.get() > 0) {
                 log.warn("存在{}个启动任务执行失败,请检查日志", failCount.get());
-                // 可选: 抛出异常阻止应用启动
-                // throw new GXBusinessException("部分启动任务执行失败");
             }
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt(); // 恢复中断状态
+            Thread.currentThread().interrupt();
             throw new GXBusinessException("启动任务执行被中断", e);
         }
     }

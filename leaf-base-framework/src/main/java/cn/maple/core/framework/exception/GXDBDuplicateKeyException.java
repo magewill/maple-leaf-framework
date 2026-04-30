@@ -11,12 +11,6 @@ import lombok.EqualsAndHashCode;
 
 import java.io.Serial;
 
-/**
- * @author britton@126.com
- * @since 2021-10-19 15:00
- * <p>
- * 数据库主键重复异常
- */
 @EqualsAndHashCode(callSuper = true)
 @Data
 public class GXDBDuplicateKeyException extends RuntimeException {
