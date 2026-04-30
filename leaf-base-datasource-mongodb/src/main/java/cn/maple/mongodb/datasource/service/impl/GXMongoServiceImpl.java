@@ -54,6 +54,9 @@ public class GXMongoServiceImpl<P extends GXMongoRepository<T, D, ID>, T extends
 
     @Override
     public void useMongoTemplate(String mongoTemplateName, Runnable runnable) {
+        if (runnable == null) {
+            throw new IllegalArgumentException("runnable must not be null");
+        }
         repository.executeWithMongoTemplate(mongoTemplateName, () -> {
             runnable.run();
             return null;
@@ -531,6 +534,12 @@ public class GXMongoServiceImpl<P extends GXMongoRepository<T, D, ID>, T extends
         value = dict.get(CharSequenceUtil.toUnderlineCase(column));
         if (Objects.nonNull(value)) {
             return value;
+        }
+        if (CharSequenceUtil.equals(column, "id")) {
+            value = dict.get("_id");
+            if (Objects.nonNull(value)) {
+                return value;
+            }
         }
         return dict.get(CharSequenceUtil.toCamelCase(column));
     }

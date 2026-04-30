@@ -398,7 +398,7 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
         Query query = new Query();
         List<GXCondition<?>> conditions = queryParamInnerDto == null ? Collections.emptyList() : nullSafeConditions(queryParamInnerDto.getCondition());
         if (!conditions.isEmpty()) {
-            List<Criteria> criteriaList = conditions.stream().map(this::toCriteria).filter(Objects::nonNull).toList();
+            List<Criteria> criteriaList = conditions.stream().filter(Objects::nonNull).map(this::toCriteria).filter(Objects::nonNull).toList();
             if (!criteriaList.isEmpty()) {
                 query.addCriteria(new Criteria().andOperator(criteriaList.toArray(new Criteria[0])));
             }
@@ -425,8 +425,8 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
             case "<" -> criteria.lt(value);
             case "<=" -> criteria.lte(value);
             case "like" -> criteria.regex(buildLikePattern(condition));
-            case "in" -> criteria.in(toCollectionValue(condition));
-            case "not in" -> criteria.nin(toCollectionValue(condition));
+            case "in" -> applyInCriteria(criteria, condition);
+            case "not in" -> applyNotInCriteria(criteria, condition);
             case "is" -> criteria.is(null);
             case "is not" -> criteria.ne(null);
             default -> throw new GXBusinessException("Unsupported MongoDB condition op: " + op);
@@ -457,7 +457,23 @@ public class GXMongoRepository<T extends GXMongoModel, D extends GXMongoDao<T, I
             return value;
         }
         Map<String, Object> paramMap = condition.toSegment().params();
+        if (paramMap.size() == 1) {
+            Object paramValue = paramMap.values().iterator().next();
+            if (paramValue instanceof Collection<?>) {
+                return paramValue;
+            }
+        }
         return paramMap.values();
+    }
+
+    protected Criteria applyInCriteria(Criteria criteria, GXCondition<?> condition) {
+        Object value = toCollectionValue(condition);
+        return value instanceof Collection<?> collection ? criteria.in(collection) : criteria.in(value);
+    }
+
+    protected Criteria applyNotInCriteria(Criteria criteria, GXCondition<?> condition) {
+        Object value = toCollectionValue(condition);
+        return value instanceof Collection<?> collection ? criteria.nin(collection) : criteria.nin(value);
     }
 
     protected Pattern buildLikePattern(GXCondition<?> condition) {

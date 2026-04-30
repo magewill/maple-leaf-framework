@@ -30,9 +30,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
 import org.springframework.stereotype.Component;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
@@ -46,9 +44,9 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
 
     private static final String MONGO_OPERATIONS_BEAN_NAME = "mongoOperations";
 
-    private static final String DYNAMIC_MONGO_DATABASE_FACTORY_BEAN_NAME = "gxDynamicMongoDatabaseFactory";
+    private static final String DYNAMIC_MONGO_DATABASE_FACTORY_BEAN_NAME = "dynamicMongoDatabaseFactory";
 
-    private static final String DYNAMIC_MONGO_TEMPLATE_BEAN_NAME = "gxDynamicMongoTemplate";
+    private static final String DYNAMIC_MONGO_TEMPLATE_BEAN_NAME = "dynamicMongoTemplate";
 
     private Environment environment;
 
@@ -60,6 +58,7 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
         checkMongoDynamicDataSourceProperties(properties);
         PrimaryMongoBeanNames primaryMongoBeanNames = new PrimaryMongoBeanNames();
         Map<String, String> templateFactoryBeanNames = new LinkedHashMap<>();
+        Set<String> registeredMongoBeanNames = new HashSet<>();
 
         properties.getDatasource().forEach((key, dataSourceProperties) -> {
             try {
@@ -70,13 +69,16 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
                 Boolean primary = dataSourceProperties.getPrimary();
 
                 String clientBeanName = key + "MongoClient";
+                validateGeneratedBeanName(key, clientBeanName, registeredMongoBeanNames);
                 BeanDefinitionBuilder mongoClientBeanDefinitionBuilder = BeanDefinitionBuilder.rootBeanDefinition(MongoClients.class);
                 mongoClientBeanDefinitionBuilder.setFactoryMethod("create");
                 mongoClientBeanDefinitionBuilder.addConstructorArgValue(mongoClientSettings);
                 mongoClientBeanDefinitionBuilder.setDestroyMethodName("close");
+                mongoClientBeanDefinitionBuilder.setPrimary(Boolean.TRUE.equals(primary));
                 registerBeanDefinition(beanDefinitionRegistry, clientBeanName, mongoClientBeanDefinitionBuilder);
 
                 String factoryBeanName = key + "MongoDatabaseFactory";
+                validateGeneratedBeanName(key, factoryBeanName, registeredMongoBeanNames);
                 BeanDefinitionBuilder mongoDatabaseFactoryBeanDefinitionBuilder =
                         BeanDefinitionBuilder.rootBeanDefinition(SimpleMongoClientDatabaseFactory.class);
                 mongoDatabaseFactoryBeanDefinitionBuilder.addConstructorArgValue(new RuntimeBeanReference(clientBeanName));
@@ -86,6 +88,7 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
                 String templateBeanName = CharSequenceUtil.isBlank(dataSourceProperties.getBeanName())
                         ? key + "MongoTemplate"
                         : dataSourceProperties.getBeanName();
+                validateGeneratedBeanName(key, templateBeanName, registeredMongoBeanNames);
                 BeanDefinitionBuilder mongoTemplateBeanDefinitionBuilder = BeanDefinitionBuilder.rootBeanDefinition(MongoTemplate.class);
                 mongoTemplateBeanDefinitionBuilder.addConstructorArgValue(new RuntimeBeanReference(factoryBeanName));
                 registerBeanDefinition(beanDefinitionRegistry, templateBeanName, mongoTemplateBeanDefinitionBuilder);
@@ -208,7 +211,7 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
     }
 
     private String resolveDatabase(GXMongoDataSourceProperties dataSourceProperties) {
-        String database = dataSourceProperties.getDatabase();
+        String database = decode(dataSourceProperties.getDatabase());
         if (CharSequenceUtil.isNotBlank(database)) {
             return database;
         }
@@ -294,8 +297,27 @@ public class GXMongoBeanDefinitionRegistryPostProcessor implements BeanDefinitio
         if (CharSequenceUtil.equals(beanName, MONGO_TEMPLATE_BEAN_NAME)
                 || CharSequenceUtil.equals(beanName, MONGO_OPERATIONS_BEAN_NAME)
                 || CharSequenceUtil.equals(beanName, DYNAMIC_MONGO_TEMPLATE_BEAN_NAME)
-                || CharSequenceUtil.equals(beanName, DYNAMIC_MONGO_DATABASE_FACTORY_BEAN_NAME)) {
+                || CharSequenceUtil.equals(beanName, DYNAMIC_MONGO_DATABASE_FACTORY_BEAN_NAME)
+                || CharSequenceUtil.equals(beanName, MONGO_CLIENT_BEAN_NAME)
+                || CharSequenceUtil.equals(beanName, MONGO_DATABASE_FACTORY_BEAN_NAME)) {
             throw new GXBusinessException("MongoDB datasource [" + key + "] beanName [" + beanName + "] is reserved");
+        }
+    }
+
+    private void validateGeneratedBeanName(String key, String beanName, Set<String> registeredBeanNames) {
+        if (CharSequenceUtil.isBlank(beanName)) {
+            throw new GXBusinessException("MongoDB datasource [" + key + "] bean name must not be blank");
+        }
+        if (!registeredBeanNames.add(beanName)) {
+            throw new GXBusinessException("MongoDB datasource [" + key + "] bean name [" + beanName + "] is duplicated");
+        }
+        if (CharSequenceUtil.equals(beanName, DYNAMIC_MONGO_DATABASE_FACTORY_BEAN_NAME)
+                || CharSequenceUtil.equals(beanName, DYNAMIC_MONGO_TEMPLATE_BEAN_NAME)
+                || CharSequenceUtil.equals(beanName, MONGO_TEMPLATE_BEAN_NAME)
+                || CharSequenceUtil.equals(beanName, MONGO_OPERATIONS_BEAN_NAME)
+                || CharSequenceUtil.equals(beanName, MONGO_CLIENT_BEAN_NAME)
+                || CharSequenceUtil.equals(beanName, MONGO_DATABASE_FACTORY_BEAN_NAME)) {
+            throw new GXBusinessException("MongoDB datasource [" + key + "] bean name [" + beanName + "] is reserved");
         }
     }
 
