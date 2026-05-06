@@ -1,8 +1,8 @@
 package cn.maple.core.framework.config.support;
 
-import jakarta.annotation.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -15,8 +15,12 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @ConditionalOnMissingBean(value = {CachingConfigurer.class})
 public class GXCachingConfigurerSupport implements CachingConfigurer {
-    @Resource(name = "caffeineCacheManager")
-    private CaffeineCacheManager caffeineCacheManager;
+    private final CaffeineCacheManager caffeineCacheManager;
+    private final CacheErrorHandler cacheErrorHandler = new LoggingCacheErrorHandler();
+
+    public GXCachingConfigurerSupport(@Qualifier("caffeineCacheManager") CaffeineCacheManager caffeineCacheManager) {
+        this.caffeineCacheManager = caffeineCacheManager;
+    }
 
     @Override
     public CacheManager cacheManager() {
@@ -25,7 +29,7 @@ public class GXCachingConfigurerSupport implements CachingConfigurer {
 
     @Override
     public CacheErrorHandler errorHandler() {
-        return new LoggingCacheErrorHandler();
+        return cacheErrorHandler;
     }
 
     static class LoggingCacheErrorHandler extends SimpleCacheErrorHandler {
@@ -33,22 +37,22 @@ public class GXCachingConfigurerSupport implements CachingConfigurer {
 
         @Override
         public void handleCacheGetError(RuntimeException exception, Cache cache, Object key) {
-            log.error("缓存获取操作异常-->缓存名称:{},缓存键:{}", getCacheName(cache), key, exception);
+            log.error("Cache get failed: cacheName={}, key={}", getCacheName(cache), key, exception);
         }
 
         @Override
         public void handleCachePutError(RuntimeException exception, Cache cache, Object key, Object value) {
-            log.error("缓存写入操作异常-->缓存名称:{},缓存键:{}", getCacheName(cache), key, exception);
+            log.error("Cache put failed: cacheName={}, key={}", getCacheName(cache), key, exception);
         }
 
         @Override
         public void handleCacheEvictError(RuntimeException exception, Cache cache, Object key) {
-            log.error("缓存驱逐操作异常-->缓存名称:{},缓存键:{}", getCacheName(cache), key, exception);
+            log.error("Cache evict failed: cacheName={}, key={}", getCacheName(cache), key, exception);
         }
 
         @Override
         public void handleCacheClearError(RuntimeException exception, Cache cache) {
-            log.error("缓存清空操作异常-->缓存名称:{}", getCacheName(cache), exception);
+            log.error("Cache clear failed: cacheName={}", getCacheName(cache), exception);
         }
 
         private String getCacheName(Cache cache) {

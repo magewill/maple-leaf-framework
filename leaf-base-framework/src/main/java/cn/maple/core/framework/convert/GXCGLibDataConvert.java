@@ -101,6 +101,9 @@ public class GXCGLibDataConvert implements Converter {
     }
 
     private static boolean canReturnDirectly(Class<?> targetClass, Object value, String propertyName) {
+        if (propertyName != null && targetClass == Optional.class && value instanceof Optional<?>) {
+            return false;
+        }
         if (propertyName != null && (value instanceof Collection<?> || value instanceof Map<?, ?> || value.getClass().isArray())) {
             return false;
         }

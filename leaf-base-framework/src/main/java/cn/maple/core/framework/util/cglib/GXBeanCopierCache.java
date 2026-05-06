@@ -12,14 +12,14 @@ public enum GXBeanCopierCache {
 
     public BeanCopier get(final Class<?> srcClass, final Class<?> targetClass, final Converter converter) {
         if (srcClass == null || targetClass == null) {
-            throw new NullPointerException("源类或目标类不能为null");
+            throw new NullPointerException("Source class and target class must not be null");
         }
         return get(srcClass, targetClass, null != converter);
     }
 
     public BeanCopier get(final Class<?> srcClass, final Class<?> targetClass, final boolean useConverter) {
         if (srcClass == null || targetClass == null) {
-            throw new NullPointerException("源类或目标类不能为null");
+            throw new NullPointerException("Source class and target class must not be null");
         }
         final String key = genKey(srcClass, targetClass, useConverter);
         return cache.computeIfAbsent(key, (k) -> BeanCopier.create(srcClass, targetClass, useConverter));

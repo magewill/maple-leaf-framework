@@ -5,13 +5,24 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
+import org.jspecify.annotations.NullMarked;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 @SuppressWarnings("unused")
 public class GXBase64DecodedMultipartFile implements MultipartFile {
+    private static final Pattern BASE64_PAYLOAD_PATTERN = Pattern.compile("^[A-Za-z0-9+/]*={0,2}$");
+
     private byte[] imageBytes;
 
     @Getter
@@ -20,80 +31,20 @@ public class GXBase64DecodedMultipartFile implements MultipartFile {
     private String contentType;
 
     public GXBase64DecodedMultipartFile(String file) {
-        if (CharSequenceUtil.isBlank(file)) {
-            throw new GXBusinessException("Base64字符串不能为空");
-        }
-
-        this.base64 = file;
-        try {
-            if (!file.contains("data:") || !file.contains("base64,")) {
-                throw new GXBusinessException("Base64字符串格式不正确，应为data:mimetype;base64,开头");
-            }
-
-            int colonIndex = file.indexOf(':');
-            int semicolonIndex = file.indexOf(';');
-            if (colonIndex < 0 || semicolonIndex < 0 || colonIndex >= semicolonIndex) {
-                throw new GXBusinessException("无法解析内容类型，Base64字符串格式不正确");
-            }
-            this.contentType = file.substring(colonIndex + 1, semicolonIndex);
-
-            int commaIndex = file.indexOf(',');
-            if (commaIndex < 0 || commaIndex >= file.length() - 1) {
-                throw new GXBusinessException("无法解析Base64数据，字符串格式不正确");
-            }
-            this.imageBytes = Base64.decode(file.substring(commaIndex + 1));
-
-            if (this.imageBytes.length == 0) {
-                throw new GXBusinessException("Base64解码后数据为空");
-            }
-        } catch (IllegalArgumentException e) {
-            throw new GXBusinessException("Base64解码失败: " + e.getMessage(), e);
-        }
+        setBase64(file);
     }
 
     public void setBase64(String base64) {
-        if (CharSequenceUtil.isBlank(base64)) {
-            throw new GXBusinessException("Base64字符串不能为空");
-        }
-
-        try {
-            if (!base64.contains("data:") || !base64.contains("base64,")) {
-                throw new GXBusinessException("Base64字符串格式不正确，应为data:mimetype;base64,开头");
-            }
-
-            int colonIndex = base64.indexOf(':');
-            int semicolonIndex = base64.indexOf(';');
-            if (colonIndex < 0 || semicolonIndex < 0 || colonIndex >= semicolonIndex) {
-                throw new GXBusinessException("无法解析内容类型，Base64字符串格式不正确");
-            }
-            this.contentType = base64.substring(colonIndex + 1, semicolonIndex);
-
-            int commaIndex = base64.indexOf(',');
-            if (commaIndex < 0 || commaIndex >= base64.length() - 1) {
-                throw new GXBusinessException("无法解析Base64数据，字符串格式不正确");
-            }
-            this.imageBytes = Base64.decode(base64.substring(commaIndex + 1));
-
-            if (this.imageBytes.length == 0) {
-                throw new GXBusinessException("Base64解码后数据为空");
-            }
-
-            this.base64 = base64;
-        } catch (IllegalArgumentException e) {
-            throw new GXBusinessException("Base64解码失败: " + e.getMessage(), e);
-        }
+        DecodedFile decodedFile = decode(base64);
+        this.base64 = base64;
+        this.contentType = decodedFile.contentType();
+        this.imageBytes = decodedFile.bytes();
     }
 
     @Override
+    @NullMarked
     public String getName() {
-        if (CharSequenceUtil.isBlank(contentType)) {
-            return "base64.bin";
-        }
-        int slashIndex = contentType.indexOf('/');
-        if (slashIndex < 0 || slashIndex >= contentType.length() - 1) {
-            return "base64.bin";
-        }
-        return "base64." + contentType.substring(slashIndex + 1);
+        return "base64." + getSafeExtension();
     }
 
     @Override
@@ -113,39 +64,103 @@ public class GXBase64DecodedMultipartFile implements MultipartFile {
 
     @Override
     public long getSize() {
-        return imageBytes.length;
+        return imageBytes == null ? 0L : imageBytes.length;
     }
 
     @Override
+    @NullMarked
     public byte[] getBytes() throws IOException {
-        if (imageBytes == null) {
-            return new byte[0];
-        }
-        return imageBytes;
+        return imageBytes == null ? new byte[0] : Arrays.copyOf(imageBytes, imageBytes.length);
     }
 
     @Override
+    @NullMarked
     public InputStream getInputStream() throws IOException {
-        if (imageBytes == null) {
-            return new ByteArrayInputStream(new byte[0]);
-        }
-        return new ByteArrayInputStream(imageBytes);
+        return new ByteArrayInputStream(imageBytes == null ? new byte[0] : imageBytes);
     }
 
     @Override
+    @NullMarked
     public void transferTo(@NotNull File dest) throws IOException {
-        Objects.requireNonNull(dest, "目标文件不能为null");
-        if (dest.exists() && !dest.canWrite()) {
-            throw new IOException("目标文件不可写: " + dest.getAbsolutePath());
+        Objects.requireNonNull(dest, "Destination file must not be null");
+        transferTo(dest.toPath());
+    }
+
+    @Override
+    @NullMarked
+    public void transferTo(@NotNull Path dest) throws IOException {
+        Objects.requireNonNull(dest, "Destination path must not be null");
+        Path parent = dest.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
+        if (Files.exists(dest) && !Files.isWritable(dest)) {
+            throw new IOException("Destination file is not writable: " + dest.toAbsolutePath());
         }
 
-        try (final FileOutputStream outputStream = new FileOutputStream(dest)) {
-            if (imageBytes != null) {
-                outputStream.write(imageBytes);
-                outputStream.flush();
-            }
+        try {
+            Files.write(dest, imageBytes == null ? new byte[0] : imageBytes);
         } catch (IOException e) {
-            throw new IOException("写入文件失败: " + e.getMessage(), e);
+            throw new IOException("Failed to write destination file: " + e.getMessage(), e);
         }
+    }
+
+    private DecodedFile decode(String source) {
+        if (CharSequenceUtil.isBlank(source)) {
+            throw new GXBusinessException("Base64 data must not be blank");
+        }
+        if (!source.startsWith("data:")) {
+            throw new GXBusinessException("Base64 data must start with data:");
+        }
+
+        int commaIndex = source.indexOf(',');
+        if (commaIndex < 0 || commaIndex >= source.length() - 1) {
+            throw new GXBusinessException("Base64 payload is missing");
+        }
+
+        String metadata = source.substring(5, commaIndex);
+        int base64MarkerIndex = metadata.toLowerCase(Locale.ROOT).lastIndexOf(";base64");
+        if (base64MarkerIndex <= 0) {
+            throw new GXBusinessException("Base64 data must use data:mimetype;base64 format");
+        }
+
+        String parsedContentType = metadata.substring(0, base64MarkerIndex).trim();
+        if (CharSequenceUtil.isBlank(parsedContentType) || !parsedContentType.contains("/")) {
+            throw new GXBusinessException("Base64 content type is invalid");
+        }
+
+        String payload = source.substring(commaIndex + 1).trim();
+        if (payload.length() % 4 != 0 || !BASE64_PAYLOAD_PATTERN.matcher(payload).matches()) {
+            throw new GXBusinessException("Base64 payload is invalid");
+        }
+
+        try {
+            byte[] bytes = Base64.decode(payload);
+            if (bytes.length == 0) {
+                throw new GXBusinessException("Decoded Base64 payload must not be empty");
+            }
+            return new DecodedFile(parsedContentType, bytes);
+        } catch (IllegalArgumentException e) {
+            throw new GXBusinessException("Base64 decode failed: " + e.getMessage(), e);
+        }
+    }
+
+    private String getSafeExtension() {
+        if (CharSequenceUtil.isBlank(contentType)) {
+            return "bin";
+        }
+        int slashIndex = contentType.indexOf('/');
+        if (slashIndex < 0 || slashIndex >= contentType.length() - 1) {
+            return "bin";
+        }
+        String extension = contentType.substring(slashIndex + 1).toLowerCase(Locale.ROOT);
+        int suffixIndex = extension.indexOf('+');
+        if (suffixIndex > 0) {
+            extension = extension.substring(0, suffixIndex);
+        }
+        return extension.matches("[a-z0-9][a-z0-9._-]*") ? extension : "bin";
+    }
+
+    private record DecodedFile(String contentType, byte[] bytes) {
     }
 }

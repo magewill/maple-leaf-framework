@@ -9,6 +9,8 @@ import java.io.Serializable;
 
 @Data
 public class GXResultUtils<T> implements Serializable {
+    private static final long serialVersionUID = 1L;
+
     private static final String FAIL_MSG = "fail";
 
     private static final String SUCCESS_MSG = "success";
@@ -24,10 +26,16 @@ public class GXResultUtils<T> implements Serializable {
     private T data = null;
 
     public static <T> GXResultUtils<T> ok(GXDefaultResultStatusCode resultCode) {
+        if (resultCode == null) {
+            return ok();
+        }
         return ok(resultCode.getCode(), resultCode.getMsg());
     }
 
     public static <T> GXResultUtils<T> ok(GXDefaultResultStatusCode resultCode, T data) {
+        if (resultCode == null) {
+            return ok(data);
+        }
         return ok(resultCode.getCode(), resultCode.getMsg(), data);
     }
 
@@ -72,10 +80,16 @@ public class GXResultUtils<T> implements Serializable {
     }
 
     public static <T> GXResultUtils<T> error(int code, Throwable throwable) {
+        if (throwable == null) {
+            return error(code);
+        }
         return error(code, throwable.getMessage(), null);
     }
 
     public static <T> GXResultUtils<T> error(GXBusinessException e) {
+        if (e == null) {
+            return error();
+        }
         return error(e.getCode(), e.getMessage(), null);
     }
 
@@ -92,10 +106,16 @@ public class GXResultUtils<T> implements Serializable {
     }
 
     public static <T> GXResultUtils<T> error(GXDefaultResultStatusCode resultCode) {
+        if (resultCode == null) {
+            return error();
+        }
         return error(resultCode.getCode(), resultCode.getMsg());
     }
 
     public static <T> GXResultUtils<T> error(GXDefaultResultStatusCode resultCode, T data) {
+        if (resultCode == null) {
+            return error(data);
+        }
         return error(resultCode.getCode(), resultCode.getMsg(), data);
     }
 

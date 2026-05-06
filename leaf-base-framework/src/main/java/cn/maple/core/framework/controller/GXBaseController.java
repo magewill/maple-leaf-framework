@@ -44,6 +44,9 @@ public interface GXBaseController {
     }
 
     default <S, T> T convertSourceToTarget(S source, Class<T> clazz, String methodName, CopyOptions copyOptions, Dict extraData) {
+        if (clazz == null) {
+            throw new IllegalArgumentException("Target type must not be null");
+        }
         if (Objects.isNull(methodName)) {
             methodName = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
         }
@@ -51,6 +54,9 @@ public interface GXBaseController {
     }
 
     default <S, T> List<T> convertSourceListToTargetList(Collection<S> collection, Class<T> clazz, String methodName, CopyOptions copyOptions, Dict extraData) {
+        if (clazz == null) {
+            throw new IllegalArgumentException("Target type must not be null");
+        }
         if (Objects.isNull(methodName)) {
             methodName = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
         }
@@ -72,7 +78,7 @@ public interface GXBaseController {
     default <R> R getLoginFieldFromToken(String tokenName, String tokenFieldName, Class<R> clazz, String secretKey) {
         R fieldFromToken = GXCurrentRequestContextUtils.getLoginFieldFromToken(tokenName, tokenFieldName, clazz, secretKey);
         if (Objects.isNull(fieldFromToken)) {
-            LOG.error("token中不存在键为{}的值", tokenFieldName);
+            LOG.warn("Token field is missing: fieldName={}", tokenFieldName);
         }
         return fieldFromToken;
     }
@@ -82,6 +88,12 @@ public interface GXBaseController {
     }
 
     default <S extends GXBaseResDto, T extends GXBaseResProtocol> GXPaginationResProtocol<T> convertPaginationResToProtocol(GXPaginationResDto<S> pagination, Class<T> targetClazz, CopyOptions copyOptions) {
+        if (pagination == null) {
+            return new GXPaginationResProtocol<>(List.of(), 0, 0, 0, 0);
+        }
+        if (targetClazz == null) {
+            throw new IllegalArgumentException("Target type must not be null");
+        }
         List<S> records = pagination.getRecords();
         long total = pagination.getTotal();
         long pages = pagination.getPages();
@@ -96,8 +108,8 @@ public interface GXBaseController {
     }
 
     default <R> R getFrontEndUserId(String tokenName, String tokenSecretKey, Class<R> targetClass) {
-        if (Objects.isNull(tokenSecretKey)) {
-            throw new GXBusinessException("请传递token密钥!");
+        if (CharSequenceUtil.isBlank(tokenSecretKey)) {
+            throw new GXBusinessException("Token secret key must not be blank");
         }
         return getLoginFieldFromToken(tokenName, GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, targetClass, tokenSecretKey);
     }
@@ -107,8 +119,8 @@ public interface GXBaseController {
     }
 
     default <R> R getManagerUserId(String tokenName, String tokenSecretKey, Class<R> targetClass) {
-        if (Objects.isNull(tokenSecretKey)) {
-            throw new GXBusinessException("请传递token密钥!");
+        if (CharSequenceUtil.isBlank(tokenSecretKey)) {
+            throw new GXBusinessException("Token secret key must not be blank");
         }
         return getLoginFieldFromToken(tokenName, GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, targetClass, tokenSecretKey);
     }

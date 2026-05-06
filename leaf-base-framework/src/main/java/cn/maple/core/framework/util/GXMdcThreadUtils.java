@@ -8,10 +8,18 @@ import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadFactory;
 import java.util.function.*;
 
 @SuppressWarnings("unused")
 public class GXMdcThreadUtils {
+    private static final ThreadFactory DEFAULT_VIRTUAL_THREAD_FACTORY = Thread.ofVirtual().name("mdc-context-vt-", 0).factory();
+
+    private static final Executor DEFAULT_ASYNC_EXECUTOR = runnable -> {
+        Thread thread = DEFAULT_VIRTUAL_THREAD_FACTORY.newThread(runnable);
+        thread.start();
+    };
+
     private GXMdcThreadUtils() {
         throw new AssertionError("Utility class, cannot be instantiated");
     }
@@ -103,7 +111,7 @@ public class GXMdcThreadUtils {
 
     public static <T> CompletableFuture<T> supplyAsync(Supplier<T> supplier) {
         Map<String, String> context = getMdcContext();
-        return CompletableFuture.supplyAsync(wrapSupplier(supplier, context));
+        return CompletableFuture.supplyAsync(wrapSupplier(supplier, context), DEFAULT_ASYNC_EXECUTOR);
     }
 
     public static <T> CompletableFuture<T> supplyAsync(Supplier<T> supplier, Executor executor) {
@@ -113,7 +121,7 @@ public class GXMdcThreadUtils {
 
     public static CompletableFuture<Void> runAsync(Runnable runnable) {
         Map<String, String> context = getMdcContext();
-        return CompletableFuture.runAsync(wrap(runnable, context));
+        return CompletableFuture.runAsync(wrap(runnable, context), DEFAULT_ASYNC_EXECUTOR);
     }
 
     public static CompletableFuture<Void> runAsync(Runnable runnable, Executor executor) {

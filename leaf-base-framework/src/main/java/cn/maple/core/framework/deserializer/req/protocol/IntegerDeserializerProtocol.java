@@ -48,7 +48,7 @@ public class IntegerDeserializerProtocol extends StdDeserializer<Integer> {
         try {
             return p.getIntValue();
         } catch (Exception e) {
-            String text = p.getText();
+            String text = p.getString();
             if (text == null || text.isEmpty()) {
                 return null;
             }

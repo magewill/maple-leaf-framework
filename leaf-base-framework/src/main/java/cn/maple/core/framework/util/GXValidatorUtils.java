@@ -8,33 +8,34 @@ import cn.maple.core.framework.exception.GXBeanValidateException;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
+import jakarta.validation.ValidatorFactory;
 
 import java.util.Set;
 
 public class GXValidatorUtils {
-    private static final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
-
     private GXValidatorUtils() {
     }
 
     public static void validateEntity(Object object, Class<?>... groups) {
         if (object == null) {
-            throw new IllegalArgumentException("待校验对象不能为空");
+            throw new IllegalArgumentException("Validation target must not be null");
         }
-        Set<ConstraintViolation<Object>> constraintViolations = validator.validate(object, groups);
+        Set<ConstraintViolation<Object>> constraintViolations = getValidator().validate(object, groups);
         if (!constraintViolations.isEmpty()) {
             final Dict dict = Dict.create();
             for (ConstraintViolation<Object> constraint : constraintViolations) {
-                final String rootBeanName = CharSequenceUtil.lowerFirst(constraint.getRootBean().getClass().getSimpleName());
-                final String currentFormName =/* rootBeanName + "." +*/ constraint.getPropertyPath().toString();
+                final String currentFormName = constraint.getPropertyPath().toString();
                 dict.set(currentFormName, CharSequenceUtil.format("{} , value = {}", constraint.getMessage(), constraint.getInvalidValue()));
             }
-            throw new GXBeanValidateException("数据验证错误", HttpStatus.HTTP_INTERNAL_ERROR, dict);
+            throw new GXBeanValidateException("Data validation failed", HttpStatus.HTTP_INTERNAL_ERROR, dict);
         }
     }
 
     public static void validateEntity(Object object, String jsonName, Class<?>... groups) {
-        Set<ConstraintViolation<Object>> constraintViolations = validator.validate(object, groups);
+        if (object == null) {
+            throw new IllegalArgumentException("Validation target must not be null");
+        }
+        Set<ConstraintViolation<Object>> constraintViolations = getValidator().validate(object, groups);
         if (!constraintViolations.isEmpty()) {
             final Dict dict = Dict.create();
             for (ConstraintViolation<Object> constraint : constraintViolations) {
@@ -43,14 +44,31 @@ public class GXValidatorUtils {
                     currentFormName = jsonName + "." + currentFormName;
                 }
                 String message = constraint.getMessage();
-                //currentFormName = CharSequenceUtil.toSymbolCase(currentFormName, '_');
                 if (constraint.getMessageTemplate().contains("{fieldName}")) {
                     final Dict param = Dict.create().set("fieldName", currentFormName);
                     message = StrUtil.format(constraint.getMessageTemplate(), param);
                 }
                 dict.putIfAbsent(currentFormName, message);
             }
-            throw new GXBeanValidateException("数据验证错误", HttpStatus.HTTP_INTERNAL_ERROR, dict);
+            throw new GXBeanValidateException("Data validation failed", HttpStatus.HTTP_INTERNAL_ERROR, dict);
+        }
+    }
+
+    private static Validator getValidator() {
+        Validator springValidator = GXSpringContextUtils.getBean(Validator.class);
+        return springValidator == null ? DefaultValidatorHolder.VALIDATOR : springValidator;
+    }
+
+    @SuppressWarnings("resource")
+    private static final class DefaultValidatorHolder {
+        private static final ValidatorFactory VALIDATOR_FACTORY = Validation.buildDefaultValidatorFactory();
+        private static final Validator VALIDATOR = VALIDATOR_FACTORY.getValidator();
+
+        static {
+            Runtime.getRuntime().addShutdownHook(new Thread(VALIDATOR_FACTORY::close, "maple-validator-factory-shutdown"));
+        }
+
+        private DefaultValidatorHolder() {
         }
     }
 }

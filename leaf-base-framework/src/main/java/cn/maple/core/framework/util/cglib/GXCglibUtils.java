@@ -16,31 +16,31 @@ public class GXCglibUtils {
     }
 
     public static <T> T copy(final Object source, final Class<T> targetClass) {
-        Assert.notNull(source, "源对象不能为null");
-        Assert.notNull(targetClass, "目标类不能为null");
+        Assert.notNull(source, "Source object must not be null");
+        Assert.notNull(targetClass, "Target class must not be null");
         return copy(source, targetClass, null);
     }
 
     public static <T> T copy(final Object source, final Class<T> targetClass, final Converter converter) {
-        Assert.notNull(source, "源对象不能为null");
-        Assert.notNull(targetClass, "目标类不能为null");
+        Assert.notNull(source, "Source object must not be null");
+        Assert.notNull(targetClass, "Target class must not be null");
         final T target = ReflectUtil.newInstanceIfPossible(targetClass);
         if (target == null) {
-            throw new RuntimeException("无法实例化目标类: " + targetClass.getName());
+            throw new RuntimeException("Cannot instantiate target class: " + targetClass.getName());
         }
         copy(source, target, converter);
         return target;
     }
 
     public static void copy(final Object source, final Object target) {
-        Assert.notNull(source, "源对象不能为null");
-        Assert.notNull(target, "目标对象不能为null");
+        Assert.notNull(source, "Source object must not be null");
+        Assert.notNull(target, "Target object must not be null");
         copy(source, target, null);
     }
 
     public static void copy(final Object source, final Object target, final Converter converter) {
-        Assert.notNull(source, "源对象不能为null");
-        Assert.notNull(target, "目标对象不能为null");
+        Assert.notNull(source, "Source object must not be null");
+        Assert.notNull(target, "Target object must not be null");
 
         final Class<?> sourceClass = source.getClass();
         final Class<?> targetClass = target.getClass();
@@ -50,20 +50,20 @@ public class GXCglibUtils {
     }
 
     public static <S, T> List<T> copyList(final Collection<S> source, final Supplier<T> target) {
-        Assert.notNull(source, "源集合不能为null");
-        Assert.notNull(target, "目标对象供应商不能为null");
+        Assert.notNull(source, "Source collection must not be null");
+        Assert.notNull(target, "Target supplier must not be null");
         return copyList(source, target, null, null);
     }
 
     public static <S, T> List<T> copyList(final Collection<S> source, final Supplier<T> target, final Converter converter) {
-        Assert.notNull(source, "源集合不能为null");
-        Assert.notNull(target, "目标对象供应商不能为null");
+        Assert.notNull(source, "Source collection must not be null");
+        Assert.notNull(target, "Target supplier must not be null");
         return copyList(source, target, converter, null);
     }
 
     public static <S, T> List<T> copyList(final Collection<S> source, final Supplier<T> target, final BiConsumer<S, T> callback) {
-        Assert.notNull(source, "源集合不能为null");
-        Assert.notNull(target, "目标对象供应商不能为null");
+        Assert.notNull(source, "Source collection must not be null");
+        Assert.notNull(target, "Target supplier must not be null");
         return copyList(source, target, null, callback);
     }
 
@@ -76,19 +76,20 @@ public class GXCglibUtils {
     }
 
     public static <S, T> List<T> copyList(final Collection<S> source, final Class<T> targetClass, final Converter converter, final BiConsumer<S, T> callback) {
-        Assert.notNull(targetClass, "鐩爣绫讳笉鑳戒负null");
+        Assert.notNull(source, "Source collection must not be null");
+        Assert.notNull(targetClass, "Target class must not be null");
         return copyList(source, () -> {
             T target = ReflectUtil.newInstanceIfPossible(targetClass);
             if (target == null) {
-                throw new RuntimeException("鏃犳硶瀹炰緥鍖栫洰鏍囩被: " + targetClass.getName());
+                throw new RuntimeException("Cannot instantiate target class: " + targetClass.getName());
             }
             return target;
         }, converter, callback);
     }
 
     public static <S, T> List<T> copyList(final Collection<S> source, final Supplier<T> target, final Converter converter, final BiConsumer<S, T> callback) {
-        Assert.notNull(source, "源集合不能为null");
-        Assert.notNull(target, "目标对象供应商不能为null");
+        Assert.notNull(source, "Source collection must not be null");
+        Assert.notNull(target, "Target supplier must not be null");
 
         if (source.isEmpty()) {
             return Collections.emptyList();
@@ -135,14 +136,14 @@ public class GXCglibUtils {
     }
 
     public static BeanMap toMap(final Object bean) {
-        Assert.notNull(bean, "Bean对象不能为null");
+        Assert.notNull(bean, "Bean object must not be null");
         return BeanMap.create(bean);
     }
 
     @SuppressWarnings("rawtypes")
     public static <T> T fillBean(final Map map, final T bean) {
-        Assert.notNull(map, "Map不能为null");
-        Assert.notNull(bean, "Bean对象不能为null");
+        Assert.notNull(map, "Map must not be null");
+        Assert.notNull(bean, "Bean object must not be null");
         BeanMap beanMap = BeanMap.create(bean);
         GXCGLibDataConvert converter = GXCGLibDataConvert.getConverter(bean.getClass());
         for (Object key : map.keySet()) {
@@ -160,11 +161,11 @@ public class GXCglibUtils {
 
     @SuppressWarnings("rawtypes")
     public static <T> T toBean(final Map map, final Class<T> beanClass) {
-        Assert.notNull(map, "Map不能为null");
-        Assert.notNull(beanClass, "Bean类不能为null");
+        Assert.notNull(map, "Map must not be null");
+        Assert.notNull(beanClass, "Bean class must not be null");
         T bean = ReflectUtil.newInstanceIfPossible(beanClass);
         if (bean == null) {
-            throw new RuntimeException("无法实例化Bean类: " + beanClass.getName());
+            throw new RuntimeException("Cannot instantiate bean class: " + beanClass.getName());
         }
         return fillBean(map, bean);
     }

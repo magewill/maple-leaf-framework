@@ -1,6 +1,7 @@
 package cn.maple.core.framework.filter;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.hutool.http.HTMLFilter;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
@@ -17,11 +18,14 @@ import org.springframework.http.MediaType;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
-    private static final GXHTMLFilter htmlFilter = new GXHTMLFilter();
+    private static final HTMLFilter htmlFilter = new HTMLFilter();
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -36,6 +40,7 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
 
     public GXXssHttpServletRequestWrapper(HttpServletRequest request) throws IOException {
         super(request);
+        Objects.requireNonNull(request, "Request must not be null");
         orgRequest = request;
         jsonRequest = isJsonRequest(request.getHeader(HttpHeaders.CONTENT_TYPE));
 
@@ -187,8 +192,7 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
 
     @Override
     public String getParameter(String name) {
-        String filteredName = xssEncode(name);
-        String value = super.getParameter(filteredName);
+        String value = super.getParameter(name);
         if (CharSequenceUtil.isNotBlank(value)) {
             value = xssEncode(value);
         }
@@ -198,8 +202,11 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
     @Override
     public String[] getParameterValues(String name) {
         String[] parameters = super.getParameterValues(name);
-        if (parameters == null || parameters.length == 0) {
+        if (parameters == null) {
             return null;
+        }
+        if (parameters.length == 0) {
+            return new String[0];
         }
 
         String[] filteredParameters = Arrays.copyOf(parameters, parameters.length);
@@ -218,6 +225,10 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
 
         for (Map.Entry<String, String[]> entry : parameters.entrySet()) {
             String[] values = entry.getValue();
+            if (values == null) {
+                map.put(entry.getKey(), null);
+                continue;
+            }
             String[] filteredValues = Arrays.copyOf(values, values.length);
             for (int i = 0; i < filteredValues.length; i++) {
                 if (filteredValues[i] != null) {
@@ -231,12 +242,38 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
 
     @Override
     public String getHeader(String name) {
-        String filteredName = xssEncode(name);
-        String value = super.getHeader(filteredName);
+        String value = super.getHeader(name);
         if (CharSequenceUtil.isNotBlank(value)) {
             value = xssEncode(value);
         }
         return value;
+    }
+
+    @Override
+    public Enumeration<String> getHeaders(String name) {
+        Enumeration<String> headers = super.getHeaders(name);
+        if (headers == null) {
+            return Collections.emptyEnumeration();
+        }
+        return Collections.enumeration(Collections.list(headers).stream()
+                .map(this::xssEncode)
+                .toList());
+    }
+
+    @Override
+    public int getContentLength() {
+        if (!jsonRequest) {
+            return super.getContentLength();
+        }
+        return cacheRequestBody.length;
+    }
+
+    @Override
+    public long getContentLengthLong() {
+        if (!jsonRequest) {
+            return super.getContentLengthLong();
+        }
+        return cacheRequestBody.length;
     }
 
     private String xssEncode(String input) {

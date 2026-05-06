@@ -466,8 +466,9 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>${maven-compiler-plugin.version}</version>
                 <configuration>
-                    <source>${java.version}</source>
-                    <target>${java.version}</target>
+                    <!--<source>${java.version}</source>
+                    <target>${java.version}</target>-->
+                    <release>${java.version}</release>
                     <encoding>${project.build.sourceEncoding}</encoding>
                     <!--修复 Maven Install 报错-->
                     <forceJavacCompilerUse>true</forceJavacCompilerUse>

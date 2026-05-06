@@ -5,8 +5,11 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.scheduling.annotation.AsyncConfigurer;
 import org.springframework.scheduling.annotation.EnableAsync;
+
+import java.util.concurrent.Executor;
 
 @Log4j2
 @Configuration
@@ -16,6 +19,13 @@ public class GXAsyncConfig implements AsyncConfigurer {
 
     public GXAsyncConfig(ObjectProvider<GXAsyncExceptionHandler> exceptionHandlerProvider) {
         this.exceptionHandlerProvider = exceptionHandlerProvider;
+    }
+
+    @Override
+    public Executor getAsyncExecutor() {
+        SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor("maple-async-vt-");
+        executor.setVirtualThreads(true);
+        return executor;
     }
 
     @Override

@@ -33,25 +33,16 @@ public class GXStopWatchAspect {
         String threadName = Thread.currentThread().getName();
 
         MethodSignature signature = (MethodSignature) point.getSignature();
-        Class<?> targetClass = point.getTarget().getClass();
+        Object target = point.getTarget();
+        Class<?> targetClass = target == null ? methodDeclaringClass(signature) : target.getClass();
         String simpleName = targetClass.getSimpleName();
         Method method = signature.getMethod();
         String name = method.getName();
         String callInfo = CharSequenceUtil.format("{}.{}", simpleName, name);
 
-        Dict parametersDict = Dict.create();
-        Parameter[] parameters = method.getParameters();
-        Object[] args = point.getArgs();
-        int length = parameters.length;
-        for (int i = 0; i < length; i++) {
-            String key = parameters[i].getName();
-            Object realParam = args[i];
-            parametersDict.set(key, realParam);
-        }
-
         if (log.isInfoEnabled()) {
-            log.info("{} {} {} : 调用{}方法的请求参数 ---- > {}",
-                    traceIdKey, traceId, threadName, callInfo, JSONUtil.toJsonStr(parametersDict));
+            log.info("{} {} {} : call {} request parameters ---- > {}",
+                    traceIdKey, traceId, threadName, callInfo, toJson(buildParameters(method, point.getArgs())));
         }
 
         long start = System.currentTimeMillis();
@@ -60,25 +51,54 @@ public class GXStopWatchAspect {
         try {
             result = point.proceed();
         } catch (Throwable ex) {
-            log.error("{} {} {} : 调用{}方法发生异常 ---- > {}",
+            log.error("{} {} {} : call {} failed ---- > {}",
                     traceIdKey, traceId, threadName, callInfo, ex.getMessage(), ex);
             throw ex;
         } finally {
-            long end = System.currentTimeMillis();
-            long executionTimeMs = end - start;
+            long executionTimeMs = System.currentTimeMillis() - start;
             long executionTimeSec = executionTimeMs / 1000;
 
             if (log.isDebugEnabled()) {
-                log.debug("{} {} {} : 调用{}方法总共运行{}毫秒({}秒)",
+                log.debug("{} {} {} : call {} completed in {} ms ({} s)",
                         traceIdKey, traceId, threadName, callInfo, executionTimeMs, executionTimeSec);
             }
         }
 
         if (log.isDebugEnabled()) {
-            log.debug("{} {} {} : 调用{}方法的响应数据 ---- > {}",
-                    traceIdKey, traceId, threadName, callInfo, JSONUtil.toJsonStr(result));
+            log.debug("{} {} {} : call {} response ---- > {}",
+                    traceIdKey, traceId, threadName, callInfo, toJson(result));
         }
 
         return result;
+    }
+
+    private Class<?> methodDeclaringClass(MethodSignature signature) {
+        Method method = signature.getMethod();
+        return method == null ? Object.class : method.getDeclaringClass();
+    }
+
+    private Dict buildParameters(Method method, Object[] args) {
+        Dict parametersDict = Dict.create();
+        Parameter[] parameters = method.getParameters();
+        Object[] safeArgs = args == null ? new Object[0] : args;
+        int length = Math.min(parameters.length, safeArgs.length);
+        for (int i = 0; i < length; i++) {
+            parametersDict.set(parameters[i].getName(), safeArgs[i]);
+        }
+        if (safeArgs.length > parameters.length) {
+            for (int i = parameters.length; i < safeArgs.length; i++) {
+                parametersDict.set("arg" + i, safeArgs[i]);
+            }
+        }
+        return parametersDict;
+    }
+
+    private String toJson(Object value) {
+        try {
+            return JSONUtil.toJsonStr(value);
+        } catch (Exception e) {
+            log.warn("Failed to serialize stopwatch value: {}", e.getMessage());
+            return CharSequenceUtil.format("<json-serialize-error:{}>", e.getClass().getSimpleName());
+        }
     }
 }

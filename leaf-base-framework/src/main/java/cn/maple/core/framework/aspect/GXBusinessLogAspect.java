@@ -18,42 +18,31 @@ import org.springframework.core.Ordered;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicReference;
 
 @Component
 @Aspect
 @Slf4j
 public class GXBusinessLogAspect implements Ordered {
-    @Pointcut(value = "@annotation(cn.maple.core.framework.annotation.GXBusinessLog)")
+    @Pointcut(value = "@annotation(cn.maple.core.framework.annotation.GXBusinessLog) || @within(cn.maple.core.framework.annotation.GXBusinessLog)")
     public void pointcut() {
-        // 切点定义，无需实现
     }
 
     @Around("pointcut()")
-    public Object around(ProceedingJoinPoint proceedingJoinPoint) {
+    public Object around(ProceedingJoinPoint proceedingJoinPoint) throws Throwable {
         long beginAt = System.currentTimeMillis();
-        log.info("----GXBusinessLogAspect 环绕通知 START----");
-        AtomicReference<Object> resultRef = new AtomicReference<>();
         try {
-            Object result = proceedingJoinPoint.proceed();
-            resultRef.set(result);
+            return proceedingJoinPoint.proceed();
         } catch (Throwable throwable) {
-            log.error("业务方法执行异常: {}", throwable.getMessage(), throwable);
-            if (throwable instanceof RuntimeException) {
-                throw (RuntimeException) throwable;
-            } else {
-                throw new RuntimeException("业务方法执行异常", throwable);
-            }
+            log.error("Business method failed: {}", throwable.getMessage(), throwable);
+            throw throwable;
         } finally {
             long executionTime = System.currentTimeMillis() - beginAt;
             try {
                 saveBusinessLog(proceedingJoinPoint, executionTime);
             } catch (Exception e) {
-                log.error("保存业务日志时发生异常: {}", e.getMessage(), e);
+                log.error("Failed to save business log: {}", e.getMessage(), e);
             }
-            log.info("----GXBusinessLogAspect 环绕通知 END----");
         }
-        return resultRef.get();
     }
 
     private void saveBusinessLog(ProceedingJoinPoint proceedingJoinPoint, long executionTime) {
@@ -65,11 +54,14 @@ public class GXBusinessLogAspect implements Ordered {
 
             GXBusinessLogDto businessLogDto = new GXBusinessLogDto();
 
-            String name = methodAnnotation.name();
+            String name = methodAnnotation == null ? "" : methodAnnotation.name();
             if (CharSequenceUtil.isBlank(name) && Objects.nonNull(clazzAnnotation)) {
                 name = clazzAnnotation.name();
             }
-            String description = methodAnnotation.description();
+            String description = methodAnnotation == null ? "" : methodAnnotation.description();
+            if (CharSequenceUtil.isBlank(description) && Objects.nonNull(clazzAnnotation)) {
+                description = clazzAnnotation.description();
+            }
             businessLogDto.setBusinessName(name);
             businessLogDto.setBusinessDescription(description);
 
@@ -78,8 +70,7 @@ public class GXBusinessLogAspect implements Ordered {
             businessLogDto.setMethodName(className + "." + methodName + "()");
 
             Object[] args = proceedingJoinPoint.getArgs();
-            String params = JSONUtil.toJsonStr(args);
-            businessLogDto.setParams(params);
+            businessLogDto.setParams(toJson(args));
 
             businessLogDto.setIp(GXCurrentRequestContextUtils.getClientIP());
 
@@ -93,12 +84,21 @@ public class GXBusinessLogAspect implements Ordered {
                 businessLogDto.setUserName(username);
 
                 businessLogService.saveBusinessLog(businessLogDto);
-                log.debug("业务日志已保存: {}", businessLogDto.getBusinessName());
+                log.debug("Business log saved: {}", businessLogDto.getBusinessName());
             } else {
-                log.warn("未找到GXBusinessLogService的实现类，业务日志无法保存");
+                log.warn("GXBusinessLogService bean is unavailable, business log skipped");
             }
         } catch (Exception e) {
-            log.error("保存业务日志时发生异常: {}", e.getMessage(), e);
+            log.error("Failed to save business log: {}", e.getMessage(), e);
+        }
+    }
+
+    private String toJson(Object value) {
+        try {
+            return JSONUtil.toJsonStr(value);
+        } catch (Exception e) {
+            log.warn("Failed to serialize business log value: {}", e.getMessage());
+            return CharSequenceUtil.format("<json-serialize-error:{}>", e.getClass().getSimpleName());
         }
     }
 

@@ -25,6 +25,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -454,6 +455,27 @@ class GXHutoolDataConvertTest {
     }
 
     @Test
+    @DisplayName("Collection: Deque interface uses null-safe deque implementation")
+    void testCollectionToDequeInterfaceSkipsNullElements() {
+        Deque<String> deque = (Deque<String>) converter.convert(Deque.class, Arrays.asList("a", null, "b"));
+
+        assertThat(deque).isInstanceOf(ArrayDeque.class);
+        assertThat(deque).containsExactly("a", "b");
+    }
+
+    @Test
+    @DisplayName("Collection: SortedSet interface handles non-comparable elements")
+    void testCollectionToSortedSetInterfaceWithNonComparableElement() {
+        Object element = new Object();
+
+        SortedSet<?> sortedSet = (SortedSet<?>) converter.convert(SortedSet.class, List.of(element));
+
+        assertThat(sortedSet).isInstanceOf(TreeSet.class);
+        assertThat(sortedSet).hasSize(1);
+        assertThat(sortedSet.first()).isEqualTo(element.toString());
+    }
+
+    @Test
     @DisplayName("数组: 到 List")
     void testArrayToList() {
         String[] source = {"a", "b"};
@@ -599,6 +621,14 @@ class GXHutoolDataConvertTest {
         assertThat(converter.convert(SimpleBean.class, null)).isNull();
     }
 
+    @Test
+    @DisplayName("Dict to Bean: null target class is rejected explicitly")
+    void testConvertDictRejectsNullTargetClass() {
+        assertThatThrownBy(() -> converter.convert(null, Dict.create().set("id", "1001")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Target type must not be null");
+    }
+
     // ==================== IJSONTypeConverter 分支 ====================
 
     @Test
@@ -675,6 +705,21 @@ class GXHutoolDataConvertTest {
     }
 
     @Test
+    @DisplayName("Map: ConcurrentMap interface keeps concurrent implementation and skips null entries")
+    void testMapToConcurrentMapInterfaceSkipsNullEntries() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("a", "1");
+        source.put(null, "2");
+        source.put("b", null);
+
+        ConcurrentMap<?, ?> result = (ConcurrentMap<?, ?>) converter.convert(ConcurrentMap.class, source);
+
+        assertThat(result).isInstanceOf(ConcurrentHashMap.class);
+        assertThat(result.get("a")).isEqualTo("1");
+        assertThat(result).hasSize(1);
+    }
+
+    @Test
     @DisplayName("Map: TreeMap 遇到不可比较 key 时不抛异常")
     void testMapToTreeMapWithNonComparableKey() {
         Object key = new Object();
@@ -683,6 +728,19 @@ class GXHutoolDataConvertTest {
 
         TreeMap<?, ?> result = (TreeMap<?, ?>) converter.convert(TreeMap.class, source);
 
+        assertThat(result.get(key.toString())).isEqualTo("value");
+    }
+
+    @Test
+    @DisplayName("Map: SortedMap interface handles non-comparable keys")
+    void testMapToSortedMapInterfaceWithNonComparableKey() {
+        Object key = new Object();
+        Map<Object, Object> source = new LinkedHashMap<>();
+        source.put(key, "value");
+
+        SortedMap<?, ?> result = (SortedMap<?, ?>) converter.convert(SortedMap.class, source);
+
+        assertThat(result).isInstanceOf(TreeMap.class);
         assertThat(result.get(key.toString())).isEqualTo("value");
     }
 

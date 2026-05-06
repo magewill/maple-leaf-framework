@@ -214,6 +214,22 @@ class GXCGLibDataConvertTest {
     }
 
     @Test
+    void convertsOptionalSourceUsingSetterGenericType() {
+        SourceOptionalValueBean source = new SourceOptionalValueBean();
+        source.setQty(Optional.of("42"));
+
+        TargetOptionalBean target = GXCglibUtils.copy(source, TargetOptionalBean.class,
+                GXCGLibDataConvert.getConverter(TargetOptionalBean.class));
+
+        assertEquals(Optional.of(42), target.getQty());
+    }
+
+    @Test
+    void convertsNullToEmptyOptional() {
+        assertEquals(Optional.empty(), converter.convert(null, Optional.class, null));
+    }
+
+    @Test
     void fillBeanConvertsValuesAndIgnoresUnknownProperties() {
         Map<String, Object> source = new LinkedHashMap<>();
         source.put("name", 123);
@@ -241,6 +257,21 @@ class GXCGLibDataConvertTest {
         assertEquals(2, bean.getItems().size());
         assertEquals(TargetItem.class, bean.getItems().get(0).getClass());
         assertEquals(1, bean.getItems().get(0).getQty());
+    }
+
+    @Test
+    void fillBeanConvertsConcurrentMapValuesAndSkipsNullEntries() {
+        Map<String, Object> scores = new LinkedHashMap<>();
+        scores.put("math", "98");
+        scores.put("empty", null);
+        Map<String, Object> source = Map.of("scores", scores);
+
+        TargetConcurrentMapBean bean = GXCglibUtils.toBean(source, TargetConcurrentMapBean.class);
+
+        assertInstanceOf(ConcurrentHashMap.class, bean.getScores());
+        assertEquals(1, bean.getScores().size());
+        assertEquals(98, bean.getScores().get("math"));
+        assertFalse(bean.getScores().containsKey("empty"));
     }
 
     @Test
@@ -306,14 +337,37 @@ class GXCGLibDataConvertTest {
     }
 
     @Test
+    void copyAndFillRejectNullArguments() {
+        SourceBean source = new SourceBean();
+        TargetBean target = new TargetBean();
+
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.copy(null, TargetBean.class));
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.copy(source, (Class<TargetBean>) null));
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.copy(null, target));
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.copy(source, (Object) null));
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.copyList(null, TargetBean.class));
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.copyList(List.of(source), (Class<TargetBean>) null));
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.copyList(null, TargetBean::new));
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.copyList(List.of(source), (SupplierTargetFactory<TargetBean>) null));
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.toMap(null));
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.fillBean(null, target));
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.fillBean(Map.of(), null));
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.toBean(null, TargetBean.class));
+        assertThrows(IllegalArgumentException.class, () -> GXCglibUtils.toBean(Map.of(), null));
+        assertThrows(RuntimeException.class, () -> GXCglibUtils.copy(source, NoInstantiableType.class));
+        assertThrows(RuntimeException.class, () -> GXCglibUtils.toBean(Map.of("name", "alpha"), NoInstantiableType.class));
+    }
+
+    @Test
     void returnsNullWhenConversionFails() {
+        assertNull(converter.convert("1", null, null));
         assertNull(converter.convert(new Object(), Integer.class, null));
         assertNull(converter.convert("[1,2]", SimpleBean.class, null));
     }
 
     @Test
     void converterCanBeUsedConcurrently() throws Exception {
-        ExecutorService executor = Executors.newFixedThreadPool(6);
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         try {
             List<Callable<Boolean>> tasks = List.of(
                     () -> converter.convert("RED", Color.class, null) == Color.RED,
@@ -378,8 +432,18 @@ class GXCGLibDataConvertTest {
     }
 
     @Data
+    static class SourceOptionalValueBean {
+        private Optional<String> qty;
+    }
+
+    @Data
     static class TargetMapBean {
         private Map<String, Integer> scores;
+    }
+
+    @Data
+    static class TargetConcurrentMapBean {
+        private ConcurrentHashMap<String, Integer> scores;
     }
 
     @Data
@@ -392,5 +456,12 @@ class GXCGLibDataConvertTest {
     static class TargetItem {
         private String code;
         private int qty;
+    }
+
+    interface NoInstantiableType {
+    }
+
+    @FunctionalInterface
+    interface SupplierTargetFactory<T> extends java.util.function.Supplier<T> {
     }
 }

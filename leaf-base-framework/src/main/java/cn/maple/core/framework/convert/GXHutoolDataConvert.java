@@ -23,6 +23,7 @@ import java.lang.reflect.Type;
 import java.time.temporal.Temporal;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 public class GXHutoolDataConvert {
     private static final Logger LOG = LoggerFactory.getLogger(GXHutoolDataConvert.class);
@@ -91,8 +92,8 @@ public class GXHutoolDataConvert {
         return type == null ? null : TypeUtil.getClass(type);
     }
 
-    private static Type getTypeArgument(Type type, int index) {
-        return TypeUtil.getTypeArgument(type, index);
+    private static Type getTypeArgument(Type type) {
+        return TypeUtil.getTypeArgument(type, 0);
     }
 
     public Object convert(Type type, Object value) {
@@ -124,14 +125,18 @@ public class GXHutoolDataConvert {
             if (targetClass == Optional.class) {
                 return handleOptionalConversion(type, value);
             }
-            if (value instanceof CharSequence charSequence) {
-                return handleStringConversion(type, targetClass, charSequence.toString());
-            }
-            if (value instanceof IJSONTypeConverter jsonTypeConverter) {
-                return jsonTypeConverter.toBean(Objects.requireNonNullElse(type, Object.class));
-            }
-            if (value instanceof Collection<?> collection) {
-                return handleCollectionConversion(type, targetClass, collection);
+            switch (value) {
+                case CharSequence charSequence -> {
+                    return handleStringConversion(type, targetClass, charSequence.toString());
+                }
+                case IJSONTypeConverter jsonTypeConverter -> {
+                    return jsonTypeConverter.toBean(type);
+                }
+                case Collection<?> collection -> {
+                    return handleCollectionConversion(type, targetClass, collection);
+                }
+                default -> {
+                }
             }
             if (value.getClass().isArray()) {
                 return handleArrayConversion(type, targetClass, value);
@@ -148,7 +153,7 @@ public class GXHutoolDataConvert {
         } catch (Exception e) {
             LOG.warn("Type convert failed: {} -> {}, {}",
                     value.getClass().getName(),
-                    type != null ? type.getTypeName() : "null",
+                    type.getTypeName(),
                     e.getMessage());
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Type convert failed", e);
@@ -328,7 +333,7 @@ public class GXHutoolDataConvert {
             return null;
         }
         List<?> parsedList = JSONUtil.parseArray(value);
-        Type componentType = targetClass.isArray() ? targetClass.getComponentType() : getTypeArgument(type, 0);
+        Type componentType = targetClass.isArray() ? targetClass.getComponentType() : getTypeArgument(type);
         if (componentType == null) {
             componentType = Dict.class;
         }
@@ -339,7 +344,7 @@ public class GXHutoolDataConvert {
         if (!Collection.class.isAssignableFrom(targetClass) && !targetClass.isArray()) {
             return null;
         }
-        Type componentType = targetClass.isArray() ? targetClass.getComponentType() : getTypeArgument(type, 0);
+        Type componentType = targetClass.isArray() ? targetClass.getComponentType() : getTypeArgument(type);
         if (componentType == null) {
             componentType = Object.class;
         }
@@ -379,6 +384,12 @@ public class GXHutoolDataConvert {
         Collection<Object> targetCollection = newTargetCollection(targetClass, sourceCollection.size());
         for (Object item : sourceCollection) {
             Object convertedItem = componentClass == Object.class ? normalizeJsonValue(item) : convert(componentType, item);
+            if (rejectsNullElements(targetCollection) && convertedItem == null) {
+                continue;
+            }
+            if (targetCollection instanceof TreeSet<?> && convertedItem != null && !(convertedItem instanceof Comparable<?>)) {
+                convertedItem = convertedItem.toString();
+            }
             targetCollection.add(convertedItem);
         }
         return targetCollection;
@@ -394,7 +405,10 @@ public class GXHutoolDataConvert {
         if (targetClass == LinkedHashSet.class) {
             return new LinkedHashSet<>(size);
         }
-        if (targetClass == ArrayDeque.class) {
+        if (targetClass == SortedSet.class || targetClass == NavigableSet.class || targetClass == TreeSet.class) {
+            return new TreeSet<>();
+        }
+        if (targetClass == Queue.class || targetClass == Deque.class || targetClass == ArrayDeque.class) {
             return new ArrayDeque<>(size);
         }
         try {
@@ -407,9 +421,12 @@ public class GXHutoolDataConvert {
     }
 
     public <T> T convert(Class<T> targetClass, Dict value) {
+        if (targetClass == null) {
+            throw new IllegalArgumentException("Target type must not be null");
+        }
         if (value == null) {
             @SuppressWarnings("unchecked")
-            T defaultValue = targetClass != null && targetClass.isPrimitive() ? (T) primitiveDefaultValue(targetClass) : null;
+            T defaultValue = targetClass.isPrimitive() ? (T) primitiveDefaultValue(targetClass) : null;
             return defaultValue;
         }
         try {
@@ -471,10 +488,10 @@ public class GXHutoolDataConvert {
         if (targetClass == LinkedHashMap.class) {
             return new LinkedHashMap<>(size);
         }
-        if (targetClass == ConcurrentHashMap.class) {
+        if (targetClass == ConcurrentMap.class || targetClass == ConcurrentHashMap.class) {
             return new ConcurrentHashMap<>(size);
         }
-        if (targetClass == TreeMap.class) {
+        if (targetClass == SortedMap.class || targetClass == NavigableMap.class || targetClass == TreeMap.class) {
             return new TreeMap<>();
         }
         try {
@@ -487,7 +504,11 @@ public class GXHutoolDataConvert {
     }
 
     private boolean rejectsNullEntries(Map<?, ?> map) {
-        return map instanceof ConcurrentHashMap<?, ?> || map instanceof Hashtable<?, ?>;
+        return map instanceof ConcurrentMap<?, ?> || map instanceof Hashtable<?, ?> || map instanceof TreeMap<?, ?>;
+    }
+
+    private boolean rejectsNullElements(Collection<?> collection) {
+        return collection instanceof ArrayDeque<?> || collection instanceof TreeSet<?>;
     }
 
     private boolean isGXBaseDataType(Class<?> targetClass) {

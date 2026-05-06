@@ -32,6 +32,17 @@ class GXXssHttpServletRequestWrapperTest {
     }
 
     @Test
+    @DisplayName("does not encode parameter names before lookup")
+    void testParameterNameIsNotEncodedBeforeLookup() throws IOException {
+        HttpServletRequest request = jsonRequest("");
+        when(request.getParameter("<script>test</script>")).thenReturn("value");
+
+        GXXssHttpServletRequestWrapper wrapper = new GXXssHttpServletRequestWrapper(request);
+
+        assertEquals("value", wrapper.getParameter("<script>test</script>"));
+    }
+
+    @Test
     @DisplayName("filters parameter arrays without mutating the source array")
     void testParameterValuesXssFiltering() throws IOException {
         HttpServletRequest request = jsonRequest("");
@@ -59,6 +70,20 @@ class GXXssHttpServletRequestWrapperTest {
     }
 
     @Test
+    @DisplayName("preserves null parameter arrays in the parameter map")
+    void testParameterMapPreservesNullValues() throws IOException {
+        HttpServletRequest request = jsonRequest("");
+        Map<String, String[]> parameterMap = new HashMap<>();
+        parameterMap.put("param1", null);
+        when(request.getParameterMap()).thenReturn(parameterMap);
+
+        GXXssHttpServletRequestWrapper wrapper = new GXXssHttpServletRequestWrapper(request);
+
+        assertTrue(wrapper.getParameterMap().containsKey("param1"));
+        assertNull(wrapper.getParameterMap().get("param1"));
+    }
+
+    @Test
     @DisplayName("filters header values")
     void testHeaderXssFiltering() throws IOException {
         HttpServletRequest request = jsonRequest("");
@@ -67,6 +92,17 @@ class GXXssHttpServletRequestWrapperTest {
         GXXssHttpServletRequestWrapper wrapper = new GXXssHttpServletRequestWrapper(request);
 
         assertEquals("alert('XSS')", wrapper.getHeader("User-Agent"));
+    }
+
+    @Test
+    @DisplayName("does not encode header names before lookup")
+    void testHeaderNameIsNotEncodedBeforeLookup() throws IOException {
+        HttpServletRequest request = jsonRequest("");
+        when(request.getHeader("<script>User-Agent</script>")).thenReturn("value");
+
+        GXXssHttpServletRequestWrapper wrapper = new GXXssHttpServletRequestWrapper(request);
+
+        assertEquals("value", wrapper.getHeader("<script>User-Agent</script>"));
     }
 
     @Test
@@ -81,6 +117,8 @@ class GXXssHttpServletRequestWrapperTest {
         assertEquals(expectedJson, readInputStream(wrapper.getInputStream()));
         assertEquals(expectedJson, readInputStream(wrapper.getInputStream()));
         verify(request, times(1)).getInputStream();
+        assertEquals(expectedJson.getBytes(StandardCharsets.UTF_8).length, wrapper.getContentLengthLong());
+        assertEquals(expectedJson.getBytes(StandardCharsets.UTF_8).length, wrapper.getContentLength());
     }
 
     @Test

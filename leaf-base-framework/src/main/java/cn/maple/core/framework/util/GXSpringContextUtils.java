@@ -127,10 +127,10 @@ public class GXSpringContextUtils {
     public static void registerSingleton(String beanName, Object singletonObject) {
         ApplicationContext applicationContext = getApplicationContext();
         if (Objects.isNull(beanName) || beanName.trim().isEmpty()) {
-            throw new IllegalArgumentException("Bean名称不能为null或空");
+            throw new IllegalArgumentException("Bean name must not be null or empty");
         }
         if (Objects.isNull(singletonObject)) {
-            throw new IllegalArgumentException("Bean实例不能为null");
+            throw new IllegalArgumentException("Bean instance must not be null");
         }
         if (Objects.isNull(applicationContext)) {
             LOG.error("ApplicationContext is null, cannot register bean: {}", beanName);

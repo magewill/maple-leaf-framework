@@ -66,6 +66,15 @@ class GXMdcThreadUtilsTest {
     }
 
     @Test
+    void testSupplyAsyncUsesVirtualThreadByDefault() throws Exception {
+        CompletableFuture<Boolean> future = GXMdcThreadUtils.supplyAsync(() ->
+                Thread.currentThread().isVirtual() && TRACE_ID_VALUE.equals(MDC.get(TRACE_ID_KEY))
+        );
+
+        assertTrue(future.get());
+    }
+
+    @Test
     void testCompletableFutureThenApplyExplicitWrapperMdcPropagation() throws Exception {
         CompletableFuture<String> future = GXMdcThreadUtils.supplyAsync(() -> "value")
                 .thenApply(GXMdcThreadUtils.contextWrapper(value -> value + ":" + MDC.get(TRACE_ID_KEY)));
@@ -92,6 +101,13 @@ class GXMdcThreadUtilsTest {
     @Test
     void testRunAsyncMdcPropagation() throws Exception {
         CompletableFuture<Void> future = GXMdcThreadUtils.runAsync(() -> assertEquals(TRACE_ID_VALUE, MDC.get(TRACE_ID_KEY)));
+        future.get();
+    }
+
+    @Test
+    void testRunAsyncUsesVirtualThreadByDefault() throws Exception {
+        CompletableFuture<Void> future = GXMdcThreadUtils.runAsync(() -> assertTrue(Thread.currentThread().isVirtual()));
+
         future.get();
     }
 

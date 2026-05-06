@@ -13,8 +13,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.ClassUtils;
 
-import java.util.Objects;
-
 public class GXTokenManagerUtils {
     private static final Logger LOG = LoggerFactory.getLogger(GXTokenManagerUtils.class);
 
@@ -22,55 +20,33 @@ public class GXTokenManagerUtils {
     }
 
     public static String generateManagerToken(Object userId, Dict param, String secretKey, int expires) {
-        if (ObjectUtil.isNull(param)) {
-            throw new GXBusinessException("参数param不能为空");
-        }
-        if (CharSequenceUtil.isEmpty(param.getStr(GXTokenConstant.TOKEN_USER_NAME_FIELD_NAME))) {
-            throw new GXBusinessException("请在param参数中设置userName!!!");
-        }
-        if (CharSequenceUtil.isEmpty(secretKey)) {
-            throw new GXBusinessException("密钥不能为空");
-        }
-        if (expires <= 0) {
-            throw new GXBusinessException("过期时间必须大于0");
-        }
-        param.putIfAbsent(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, userId);
-        param.putIfAbsent(GXTokenConstant.LOGIN_AT_FIELD_NAME, DateUtil.currentSeconds());
-        param.putIfAbsent("platform", GXTokenConstant.PLATFORM);
-        return GXAuthCodeUtils.authCodeEncode(JSONUtil.toJsonStr(param), secretKey, expires);
+        return generateToken(userId, param, secretKey, expires);
     }
 
     public static Dict decodeManagerToken(String source, String secretKey) {
-        if (CharSequenceUtil.isEmpty(source)) {
-            throw new GXTokenInvalidException("Token不能为空");
-        }
-        if (CharSequenceUtil.isEmpty(secretKey)) {
-            throw new GXTokenInvalidException("密钥不能为空");
-        }
-        try {
-            String s = GXAuthCodeUtils.authCodeDecode(source, secretKey);
-            if (CharSequenceUtil.equalsIgnoreCase("{}", s)) {
-                throw new GXTokenInvalidException("无效用户身份!!!");
-            }
-            return JSONUtil.toBean(s, Dict.class);
-        } catch (JSONException exception) {
-            LOG.error("Token解码失败: {}", exception.getMessage());
-            throw new GXTokenInvalidException("Token解码失败");
-        }
+        return decodeToken(source, secretKey);
     }
 
     public static String generateUserToken(Object userId, Dict param, String secretKey, int expires) {
-        if (Objects.isNull(param)) {
-            throw new GXBusinessException("参数param不能为空");
+        return generateToken(userId, param, secretKey, expires);
+    }
+
+    public static Dict decodeUserToken(String source, String secretKey) {
+        return decodeToken(source, secretKey);
+    }
+
+    private static String generateToken(Object userId, Dict param, String secretKey, int expires) {
+        if (ObjectUtil.isNull(param)) {
+            throw new GXBusinessException("Token param must not be null");
         }
         if (CharSequenceUtil.isEmpty(param.getStr(GXTokenConstant.TOKEN_USER_NAME_FIELD_NAME))) {
-            throw new GXBusinessException("请在param参数中设置userName!!!");
+            throw new GXBusinessException("Token param must include userName");
         }
         if (CharSequenceUtil.isEmpty(secretKey)) {
-            throw new GXBusinessException("密钥不能为空");
+            throw new GXBusinessException("Token secret key must not be empty");
         }
         if (expires <= 0) {
-            throw new GXBusinessException("过期时间必须大于0");
+            throw new GXBusinessException("Token expires must be greater than 0");
         }
         param.putIfAbsent(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, userId);
         param.putIfAbsent(GXTokenConstant.LOGIN_AT_FIELD_NAME, DateUtil.currentSeconds());
@@ -78,22 +54,27 @@ public class GXTokenManagerUtils {
         return GXAuthCodeUtils.authCodeEncode(JSONUtil.toJsonStr(param), secretKey, expires);
     }
 
-    public static Dict decodeUserToken(String source, String secretKey) {
+    private static Dict decodeToken(String source, String secretKey) {
         if (CharSequenceUtil.isEmpty(source)) {
-            throw new GXTokenInvalidException("Token不能为空");
+            throw new GXTokenInvalidException("Token must not be empty");
         }
         if (CharSequenceUtil.isEmpty(secretKey)) {
-            throw new GXTokenInvalidException("密钥不能为空");
+            throw new GXTokenInvalidException("Token secret key must not be empty");
         }
         try {
             String s = GXAuthCodeUtils.authCodeDecode(source, secretKey);
             if (CharSequenceUtil.equalsIgnoreCase("{}", s)) {
-                throw new GXTokenInvalidException("无效用户身份!!!");
+                throw new GXTokenInvalidException("Invalid token identity");
             }
             return JSONUtil.toBean(s, Dict.class);
+        } catch (GXTokenInvalidException exception) {
+            throw exception;
+        } catch (JSONException exception) {
+            LOG.error("Token decode JSON failed: {}", exception.getMessage());
+            throw new GXTokenInvalidException("Token decode failed");
         } catch (Exception e) {
-            LOG.error("Token解码失败: {}", e.getMessage());
-            throw new GXTokenInvalidException("Token解码失败");
+            LOG.error("Token decode failed: {}", e.getMessage());
+            throw new GXTokenInvalidException("Token decode failed");
         }
     }
 
@@ -102,15 +83,15 @@ public class GXTokenManagerUtils {
             Object tokenConfigService = GXSpringContextUtils.getBean(
                     ClassUtils.forName("cn.maple.sso.service.GXTokenConfigService", GXTokenManagerUtils.class.getClassLoader()));
             if (ObjectUtil.isNull(tokenConfigService)) {
-                LOG.warn("未找到Token配置服务，跳过Token验证");
+                LOG.debug("Token config service not found, skip token verification");
                 return Boolean.TRUE;
             }
             Object result = GXCommonUtils.reflectCallObjectMethod(tokenConfigService, "verifyTokenEffectiveness");
             return Boolean.TRUE.equals(result);
         } catch (ClassNotFoundException e) {
-            LOG.error("请导入leaf-base-sso模块!");
+            LOG.debug("leaf-base-sso module is unavailable, skip token verification");
         } catch (Exception e) {
-            LOG.error("Token验证失败: {}", e.getMessage());
+            LOG.error("Token verification failed: {}", e.getMessage());
         }
         return Boolean.TRUE;
     }

@@ -3,10 +3,8 @@ package cn.maple.core.framework.config.aware;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.ConfigurableApplicationContext;
 
-import java.util.Objects;
-
-@SuppressWarnings("all")
 public enum GXApplicationContextSingleton {
     INSTANCE;
 
@@ -22,14 +20,50 @@ public enum GXApplicationContextSingleton {
     }
 
     public void setApplicationContext(ApplicationContext applicationContext) {
-        LOG.info("GXApplicationContextSingleton类设置ApplicationContext对象被调用");
-        if (Objects.isNull(this.applicationContext)) {
-            synchronized (this) {
-                if (Objects.isNull(this.applicationContext)) {
-                    this.applicationContext = applicationContext;
-                    LOG.info("ApplicationContext已成功设置到GXApplicationContextSingleton");
-                }
-            }
+        if (applicationContext == null) {
+            throw new IllegalArgumentException("ApplicationContext must not be null");
         }
+        synchronized (this) {
+            ApplicationContext currentContext = this.applicationContext;
+            if (currentContext == applicationContext) {
+                LOG.debug("ApplicationContext is already registered: id={}", applicationContext.getId());
+                return;
+            }
+            if (currentContext != null && isActive(currentContext)) {
+                LOG.debug("ApplicationContext already exists, keep current context: currentId={}, ignoredId={}",
+                        currentContext.getId(), applicationContext.getId());
+                return;
+            }
+            this.applicationContext = applicationContext;
+            LOG.info("ApplicationContext registered: id={}", applicationContext.getId());
+        }
+    }
+
+    public void clearApplicationContext(ApplicationContext applicationContext) {
+        synchronized (this) {
+            if (this.applicationContext != applicationContext) {
+                return;
+            }
+            LOG.info("ApplicationContext cleared: id={}", applicationContext.getId());
+            this.applicationContext = null;
+        }
+    }
+
+    public void clearApplicationContext() {
+        synchronized (this) {
+            ApplicationContext currentContext = this.applicationContext;
+            if (currentContext == null) {
+                return;
+            }
+            LOG.info("ApplicationContext cleared: id={}", currentContext.getId());
+            this.applicationContext = null;
+        }
+    }
+
+    private boolean isActive(ApplicationContext context) {
+        if (context instanceof ConfigurableApplicationContext configurableApplicationContext) {
+            return configurableApplicationContext.isActive();
+        }
+        return true;
     }
 }
