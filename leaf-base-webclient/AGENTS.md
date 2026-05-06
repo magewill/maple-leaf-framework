@@ -1,0 +1,97 @@
+# AGENTS.md - leaf-base-webclient
+
+本文档用于指导 `leaf-base-webclient` 模块的后续迭代开发。修改本模块时，优先保证 WebClient 自动装配、认证 token 生成与校验、TraceId 与平台信息透传、响应式异常处理，以及 Spring Boot 集成行为的稳定性，避免进行与当前职责无关的重构。
+
+## 1. 模块定位
+
+`leaf-base-webclient` 是 Maple Leaf Framework 中提供 WebClient 基础能力的模块，当前主要职责包括：
+
+1. 提供 `GXWebClientConfig`，统一装配 `WebClient.Builder`、`WebClient`、`HttpServiceProxyFactory.Builder` 与 `HttpServiceProxyFactory`。
+2. 在 `WebClient` 请求链路中补充认证 token、TraceId、平台标识、请求来源、基础安全头与超时配置。
+3. 通过 `GXWebClientService` 对外暴露默认 SPI 契约，提供 token 生成、token 校验、HMAC、敏感请求头约定、平台信息与 TraceId 获取等可覆盖扩展点。
+4. 通过 `GXWebClientAuthTokenAspect` 对标注 `@GXHttpInvokerAuthToken` 的类或方法执行 WebClient 调用 token 校验。
+5. 通过 `GXWebClientExceptionHandler` 统一处理 `WebClientRequestException` 与 `WebClientResponseException`，向上层返回框架统一结果。
+6. 统一封装 4xx/5xx 远程错误转换逻辑，将远程异常映射为框架内部可消费的业务异常。
+
+当前模块不承载以下职责：
+
+1. 不负责具体业务系统的远程 API 编排、业务 DTO 设计或某个服务专属的客户端封装。
+2. 不负责上层控制器、业务权限体系或完整的 Spring Security 方案。
+3. 不负责独立的重试调度中心、熔断限流框架或外部网关策略管理。
+
+## 2. 目录职责
+
+1. `config`：WebClient 与 HttpServiceProxyFactory 的自动装配、过滤器链、连接池、编解码与错误处理配置。
+2. `service`：模块对外暴露的 SPI 契约与默认方法实现，所有可覆盖扩展点优先放在这里。
+3. `aspect`：基于 `@GXHttpInvokerAuthToken` 的 token 校验切面逻辑，重点保证 AOP 代理兼容性与注解解析顺序。
+4. `handler`：WebClient 相关异常的统一返回与日志兜底。
+5. `src/test`：测试目录。当前模块已有测试目录结构，但尚未建立有效测试基线；后续涉及功能改动时必须补齐。
+
+## 3. 强制开发规则
+
+1. 所有 `log` 日志中的内容都必须使用 ASCII 字符，禁止新增或保留非 ASCII 日志文案，避免编码链路下出现乱码。
+2. 涉及到改动的点，都要同步查看测试用例是否完整覆盖；如果测试缺失、失效或覆盖不足，必须先补齐再提交。
+3. 不要随便将已存在的代码抽取成单独的方法或者类；只有当抽取后的逻辑可以被两个以上位置复用，或能显著降低复杂度且不破坏可读性时，才允许抽取。
+4. 测试用例要覆盖全面，至少覆盖成功路径、失败路径、异常路径、空值路径和边界条件。
+5. 如果某项功能需要在 Spring Boot 应用运行的情况下才能验证，那么测试用例必须模拟真实 Spring Boot 应用启动后的行为，优先使用 `@SpringBootTest`、真实 Bean 装配、AOP 代理和请求上下文，而不是只写纯单元测试。
+6. 将方法、类、变量上的冗余注释去掉；能通过命名、类型和局部代码结构直接表达清楚的内容，不再保留重复注释。
+7. 在复杂的方法、类和对外扩展点上适当补充 Javadoc；必要时加入简短使用示例，说明典型用法、边界条件和扩展方式，便于后续使用者参考。
+8. 修改 `GXWebClientService` 默认方法时，必须评估对现有实现类覆盖行为、环境配置键、异常语义、token 兼容性和上下游调用方的影响。
+9. 修改 `GXWebClientConfig` 时，必须保持 `WebClient` 过滤器顺序、错误转换语义、连接池参数、超时策略与编解码配置的可预期性，避免无意改变默认运行行为。
+10. 修改 `GXWebClientAuthTokenAspect` 时，必须保持方法级注解优先于类级注解的解析语义，并兼顾 AOP 代理类、目标类和无 `GXWebClientService` Bean 场景下的错误处理。
+11. 修改 `GXWebClientExceptionHandler` 时，必须明确返回码、返回文案和异常日志策略是否发生变化，避免静默改变上层接口契约。
+12. 新增公共配置、默认请求头、异常映射规则或安全相关行为前，必须先确认它是否应作为模块级默认行为，而不是某个业务方私有需求。
+
+## 4. 测试要求
+
+1. 任意功能改动前，都要先检查当前是否存在对应测试，以及这些测试是否覆盖成功、失败、异常、空值和边界分支。
+2. 当前模块虽然存在 `src/test/java` 目录，但尚未形成有效测试基线；后续首次改动本模块代码时，应优先建立最小可运行测试骨架。
+3. `GXWebClientService` 相关改动至少要覆盖：
+   - `maple.framework.web.client.token` 或 `maple.framework.web.client.secret` 缺失时的异常行为。
+   - token 生成、token 解码校验、空 token、非法 token、过期参数非法等分支。
+   - `getTraceId()` 在 `HttpServletRequest` 属性存在与不存在时的回退顺序。
+   - `getSensitiveHeaderFields()`、`generateHmac()`、`checkHmac()` 的默认兼容行为。
+4. `GXWebClientAuthTokenAspect` 相关改动至少要覆盖：
+   - 方法级注解、类级注解、注解值不匹配时的跳过逻辑。
+   - 缺失 `GXWebClientService` Bean 时的异常分支。
+   - token 校验成功与失败分支。
+   - AOP 代理目标类、注解解析优先级与方法签名缓存行为。
+5. `GXWebClientConfig` 相关改动至少要覆盖：
+   - `WebClient`、`WebClient.Builder`、`HttpServiceProxyFactory` 与 `HttpServiceProxyFactory.Builder` 的装配是否成功。
+   - 请求头透传行为，包括 token、TraceId、平台标识、请求来源与安全头。
+   - 4xx/5xx 响应转换为 `GXBusinessException` 的行为。
+   - 缺失 `GXWebClientService` Bean、缺失 `JsonMapper` Bean、非法响应体、空响应体等防御性分支。
+6. `GXWebClientExceptionHandler` 相关改动至少要覆盖：
+   - `WebClientRequestException` 的返回码与返回消息。
+   - `WebClientResponseException` 的返回码与返回消息。
+7. 涉及 Spring 容器装配、AOP、生效顺序、`@RestControllerAdvice`、请求上下文或 Bean 查找行为的测试，必须使用接近真实运行方式的 Spring Boot 集成测试。
+8. 提交前至少保证模块级验证命令可运行：`mvn -pl leaf-base-webclient test`。
+
+## 5. 变更前检查清单
+
+1. 是否明确本次改动影响的是自动装配、SPI 默认行为、AOP 鉴权、异常处理还是请求透传链路。
+2. 是否检查并补齐了与改动点对应的测试用例。
+3. 是否引入了非 ASCII 的日志内容。
+4. 是否做了没有复用价值的方法或类抽取。
+5. 是否删除了冗余注释，并为复杂逻辑补充了必要的 Javadoc 或示例。
+6. 是否改变了默认请求头、配置键、异常消息、错误映射、超时策略或过滤器顺序。
+7. 是否验证了无 `GXWebClientService` Bean、空 token、空 TraceId、空平台标识、空响应体和非法响应体等防御性分支。
+
+## 6. AGENTS.md 自动触发更新时机
+
+出现以下任一情况时，必须在同一个 PR 或提交中同步更新本文件：
+
+1. 模块职责边界发生变化，例如新增或移除 WebClient 基础能力、引入新的核心扩展点、增加新的自动装配入口。
+2. 目录结构发生变化，例如新增关键 package、拆分或合并 `config`、`service`、`aspect`、`handler` 等核心职责目录。
+3. 对外契约发生变化，例如 `GXWebClientService` 公共方法签名、默认请求头约定、配置键、异常映射规则或对外扩展方式发生变化。
+4. 默认运行行为发生变化，例如 token 生成/校验策略、TraceId 透传策略、连接池参数、超时配置、过滤器顺序或错误处理语义发生变化。
+5. 测试基线发生变化，例如新增 Spring Boot 集成测试门槛、建立或重构模块级测试骨架、调整最低验证命令。
+6. 团队沉淀出新的长期开发约束，例如日志、测试、注释、Javadoc、重构边界或兼容性规则需要被后续迭代持续遵守。
+7. 修复线上问题或高风险问题后，如果暴露出可复用的开发约束、排查规则或回归测试要求，必须回写到本文件。
+
+## 7. 提交说明建议
+
+1. 涉及默认请求头、token、TraceId、异常映射、连接池或超时策略调整时，提交说明中要明确写清行为变化、兼容性影响和回归范围。
+2. 涉及日志调整时，提交前确认新增和修改后的日志文本全部为 ASCII。
+3. 涉及 AOP、自动装配、异常处理或 WebClient 过滤器链调整时，提交说明中要写明使用了哪些单元测试或 Spring Boot 集成测试进行验证。
+4. 如果某次修改理论上应补测试但暂时无法补齐，必须在提交说明中明确风险、缺口和后续计划。
