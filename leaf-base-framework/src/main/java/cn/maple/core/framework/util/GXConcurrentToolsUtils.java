@@ -11,8 +11,16 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
+/**
+ * Shared concurrency utilities for short framework-level asynchronous tasks.
+ *
+ * <p>The internal executor is a JVM-wide singleton. Do not call
+ * {@link #shutdownThreadPool()} from ordinary request or test code unless the
+ * current JVM is intentionally being torn down.</p>
+ */
 public class GXConcurrentToolsUtils {
     public static final String FLAG_SPECIAL_VALUE = "BRT";
 
@@ -114,6 +122,8 @@ public class GXConcurrentToolsUtils {
         try {
             if (mdcContext != null) {
                 MDC.setContextMap(mdcContext);
+            } else {
+                MDC.clear();
             }
             return task.get();
         } finally {
@@ -125,12 +135,18 @@ public class GXConcurrentToolsUtils {
         }
     }
 
-    private static void ensureTraceId(Map<String, String> mdcContext) {
-        if (mdcContext == null || !mdcContext.containsKey("traceId")) {
-            GXTraceIdContextUtils.setTraceIdIfAbsent();
-        }
+    private static void ensureTraceId() {
+        GXTraceIdContextUtils.setTraceIdIfAbsent();
     }
 
+    /**
+     * Submits a supplier to the shared executor and stores the completion result
+     * in {@code results} under {@code resultKey}. Failed, cancelled, and
+     * {@code null} results are represented by {@link #FLAG_SPECIAL_VALUE}.
+     *
+     * <p>The returned {@link CompletableFuture} propagates {@code cancel(true)}
+     * to the underlying executor task.</p>
+     */
     public static <T> CompletableFuture<T> composerFuture(Supplier<T> callable, ConcurrentMap<String, Object> results, String resultKey) {
         Objects.requireNonNull(callable, "callable cannot be null");
         Objects.requireNonNull(results, "results cannot be null");
@@ -151,7 +167,7 @@ public class GXConcurrentToolsUtils {
 
         Supplier<T> wrappedTask = () -> withMdcContext(mdcContext, () -> {
             try {
-                ensureTraceId(mdcContext);
+                ensureTraceId();
 
                 return callable.get();
             } catch (Exception e) {
@@ -163,10 +179,37 @@ public class GXConcurrentToolsUtils {
             }
         });
 
-        final CompletableFuture<T> future = CompletableFuture.supplyAsync(wrappedTask, EXECUTOR_SERVICE);
+        final CompletableFuture<T> future = new CompletableFuture<>();
+        final AtomicReference<Future<?>> submittedTask = new AtomicReference<>();
+
+        try {
+            Future<?> task = EXECUTOR_SERVICE.submit(() -> {
+                if (future.isCancelled()) {
+                    return;
+                }
+                try {
+                    future.complete(wrappedTask.get());
+                } catch (Throwable e) {
+                    future.completeExceptionally(e);
+                }
+            });
+            submittedTask.set(task);
+            if (future.isCancelled()) {
+                task.cancel(true);
+            }
+        } catch (RejectedExecutionException e) {
+            future.completeExceptionally(e);
+        }
 
         future.whenComplete((result, ex) -> {
             try {
+                if (future.isCancelled()) {
+                    Future<?> task = submittedTask.get();
+                    if (task != null) {
+                        task.cancel(true);
+                    }
+                }
+
                 ACTIVE_TASKS.decrementAndGet();
 
                 long executionTime = System.currentTimeMillis() - startTime;
@@ -177,7 +220,7 @@ public class GXConcurrentToolsUtils {
                 if (ex == null) {
                     SUCCESS_COUNTER.incrementAndGet();
 
-                    results.put(resultKey, result);
+                    putResult(results, resultKey, result);
 
                     if (executionTime > 1000) {
                         LOG.warn("Task {} for key {} completed in {} ms (slow execution). {}",
@@ -188,6 +231,13 @@ public class GXConcurrentToolsUtils {
                     }
                 } else {
                     FAILURE_COUNTER.incrementAndGet();
+
+                    if (future.isCancelled() || ex instanceof CancellationException) {
+                        LOG.warn("Task {} for key {} was cancelled after {} ms. {}",
+                                taskId, resultKey, executionTime, getThreadPoolStatus());
+                        results.put(resultKey, FLAG_SPECIAL_VALUE);
+                        return;
+                    }
 
                     Throwable rootCause = findRootCause(ex);
                     String errorMessage = rootCause != null ? rootCause.getMessage() : ex.getMessage();
@@ -207,6 +257,15 @@ public class GXConcurrentToolsUtils {
         });
 
         return future;
+    }
+
+    private static void putResult(ConcurrentMap<String, Object> results, String resultKey, Object result) {
+        if (result == null) {
+            results.put(resultKey, FLAG_SPECIAL_VALUE);
+            LOG.debug("Task for key {} returned null, stored special value {}", resultKey, FLAG_SPECIAL_VALUE);
+            return;
+        }
+        results.put(resultKey, result);
     }
 
     private static void updateMaxExecutionTime(long executionTime) {
@@ -266,10 +325,18 @@ public class GXConcurrentToolsUtils {
         );
     }
 
+    /**
+     * Waits for all supplied futures to complete. On timeout, failure, or
+     * interruption, unfinished futures are cancelled and interruption status is
+     * restored before returning control to the caller.
+     */
     public static void allOf(List<CompletableFuture<?>> completableFutures, int timeOut, TimeUnit unit) {
         Objects.requireNonNull(completableFutures, "completableFutures cannot be null");
         if (completableFutures.isEmpty()) {
             throw new IllegalArgumentException("completableFutures cannot be empty");
+        }
+        if (completableFutures.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("completableFutures cannot contain null elements");
         }
         if (timeOut < 0) {
             throw new IllegalArgumentException("timeOut cannot be negative: " + timeOut);
@@ -287,7 +354,7 @@ public class GXConcurrentToolsUtils {
 
         try {
             withMdcContext(mdcContext, () -> {
-                ensureTraceId(mdcContext);
+                ensureTraceId();
 
                 LOG.info("Waiting for {} tasks to complete with timeout {} {}. {}",
                         taskCount,
@@ -300,8 +367,9 @@ public class GXConcurrentToolsUtils {
             CompletableFuture<Void> allFutures = CompletableFuture.allOf(
                     completableFutures.toArray(new CompletableFuture[0])
             );
+            CompletableFuture<Void> failureFuture = failFastOnExceptionalCompletion(completableFutures);
 
-            allFutures.get(timeOut, unit);
+            CompletableFuture.anyOf(allFutures, failureFuture).get(timeOut, unit);
 
             long executionTime = System.currentTimeMillis() - startTime;
             withMdcContext(mdcContext, () -> {
@@ -386,6 +454,9 @@ public class GXConcurrentToolsUtils {
         }
     }
 
+    /**
+     * Shuts down the shared executor for JVM teardown scenarios.
+     */
     public static void shutdownThreadPool() {
         if (EXECUTOR_SERVICE.isShutdown()) {
             LOG.info("Thread pool is already shut down, skipping shutdown operation");
@@ -437,6 +508,16 @@ public class GXConcurrentToolsUtils {
 
     private static Throwable findRootCause(Throwable throwable) {
         return findRootCause(throwable, new java.util.HashSet<>(), 0);
+    }
+
+    private static CompletableFuture<Void> failFastOnExceptionalCompletion(List<CompletableFuture<?>> futures) {
+        CompletableFuture<Void> failureFuture = new CompletableFuture<>();
+        futures.forEach(future -> future.whenComplete((result, throwable) -> {
+            if (throwable != null) {
+                failureFuture.completeExceptionally(throwable);
+            }
+        }));
+        return failureFuture;
     }
 
     private static Throwable findRootCause(Throwable throwable, java.util.Set<Throwable> seen, int depth) {

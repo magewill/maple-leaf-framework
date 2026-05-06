@@ -13,28 +13,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.cglib.beans.BeanCopier;
 import org.springframework.cglib.core.Converter;
 
-import java.lang.reflect.Array;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
+import java.lang.reflect.*;
 import java.time.temporal.Temporal;
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Hashtable;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
-import java.util.TreeMap;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class GXCGLibDataConvert implements Converter {
@@ -58,76 +39,6 @@ public class GXCGLibDataConvert implements Converter {
             throw new GXBusinessException("targetClass must not be null");
         }
         return CONVERTER_CACHE.computeIfAbsent(targetClass, GXCGLibDataConvert::new);
-    }
-
-    @Override
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    public Object convert(Object sourceValue, Class targetClass, Object context) {
-        if (targetClass == null) {
-            return null;
-        }
-        if (sourceValue == null) {
-            if (targetClass == Optional.class) {
-                return Optional.empty();
-            }
-            return targetClass.isPrimitive() ? GXCommonUtils.getClassDefaultValue(targetClass) : null;
-        }
-
-        String propertyName = context instanceof String ? getPropertyName((String) context) : null;
-        Class<?> sourceClass = sourceValue.getClass();
-        if (targetClass == Object.class || (isAssignableValue(targetClass, sourceValue) && canReturnDirectly(targetClass, sourceValue, propertyName))) {
-            return sourceValue;
-        }
-
-        try {
-            if (targetClass.isEnum()) {
-                return handleEnumConversion(targetClass, sourceValue);
-            }
-            if (isDateTimeType(targetClass)) {
-                return Convert.convert(targetClass, sourceValue);
-            }
-            if (targetClass == Optional.class) {
-                return handleOptionalConversion(propertyName, sourceValue);
-            }
-            if (sourceValue instanceof CharSequence charSequence) {
-                return handleStringSourceConversion(targetClass, propertyName, charSequence.toString());
-            }
-            if (sourceValue instanceof Collection<?> collection) {
-                return handleCollectionSourceConversion(targetClass, propertyName, collection);
-            }
-            if (sourceClass.isArray()) {
-                return handleArraySourceConversion(targetClass, propertyName, sourceValue);
-            }
-            if (sourceValue instanceof Map<?, ?> map) {
-                return handleMapSourceConversion(targetClass, propertyName, map);
-            }
-            if (isComplexBean(sourceClass) && (isComplexBean(targetClass) || Map.class.isAssignableFrom(targetClass))) {
-                if (Map.class.isAssignableFrom(targetClass)) {
-                    return BeanUtil.beanToMap(sourceValue);
-                }
-                Object targetInstance = ReflectUtil.newInstanceIfPossible(targetClass);
-                if (targetInstance == null) {
-                    LOG.warn("Cannot instantiate target bean {}", targetClass.getName());
-                    return null;
-                }
-                getBeanCopier(sourceClass, targetClass).copy(sourceValue, targetInstance, getConverter(targetClass));
-                return targetInstance;
-            }
-
-            Object convertedValue = Convert.convertWithCheck(targetClass, sourceValue, null, false);
-            if (convertedValue != null && (targetClass.isInstance(convertedValue) || isAssignableValue(targetClass, convertedValue))) {
-                return convertedValue;
-            }
-            return null;
-        } catch (Exception e) {
-            LOG.warn("Convert property [{}] from {} to {} failed: {} - {}",
-                    propertyName != null ? propertyName : "N/A",
-                    sourceClass.getName(),
-                    targetClass.getName(),
-                    e.getClass().getName(),
-                    e.getMessage());
-            return null;
-        }
     }
 
     private static BeanCopier getBeanCopier(Class<?> sourceClass, Class<?> targetClass) {
@@ -210,6 +121,76 @@ public class GXCGLibDataConvert implements Converter {
         if (clazz == char.class) return Character.class;
         if (clazz == void.class) return Void.class;
         return clazz;
+    }
+
+    @Override
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public Object convert(Object sourceValue, Class targetClass, Object context) {
+        if (targetClass == null) {
+            return null;
+        }
+        if (sourceValue == null) {
+            if (targetClass == Optional.class) {
+                return Optional.empty();
+            }
+            return targetClass.isPrimitive() ? GXCommonUtils.getClassDefaultValue(targetClass) : null;
+        }
+
+        String propertyName = context instanceof String ? getPropertyName((String) context) : null;
+        Class<?> sourceClass = sourceValue.getClass();
+        if (targetClass == Object.class || (isAssignableValue(targetClass, sourceValue) && canReturnDirectly(targetClass, sourceValue, propertyName))) {
+            return sourceValue;
+        }
+
+        try {
+            if (targetClass.isEnum()) {
+                return handleEnumConversion(targetClass, sourceValue);
+            }
+            if (isDateTimeType(targetClass)) {
+                return Convert.convert(targetClass, sourceValue);
+            }
+            if (targetClass == Optional.class) {
+                return handleOptionalConversion(propertyName, sourceValue);
+            }
+            if (sourceValue instanceof CharSequence charSequence) {
+                return handleStringSourceConversion(targetClass, propertyName, charSequence.toString());
+            }
+            if (sourceValue instanceof Collection<?> collection) {
+                return handleCollectionSourceConversion(targetClass, propertyName, collection);
+            }
+            if (sourceClass.isArray()) {
+                return handleArraySourceConversion(targetClass, propertyName, sourceValue);
+            }
+            if (sourceValue instanceof Map<?, ?> map) {
+                return handleMapSourceConversion(targetClass, propertyName, map);
+            }
+            if (isComplexBean(sourceClass) && (isComplexBean(targetClass) || Map.class.isAssignableFrom(targetClass))) {
+                if (Map.class.isAssignableFrom(targetClass)) {
+                    return BeanUtil.beanToMap(sourceValue);
+                }
+                Object targetInstance = ReflectUtil.newInstanceIfPossible(targetClass);
+                if (targetInstance == null) {
+                    LOG.warn("Cannot instantiate target bean {}", targetClass.getName());
+                    return null;
+                }
+                getBeanCopier(sourceClass, targetClass).copy(sourceValue, targetInstance, getConverter(targetClass));
+                return targetInstance;
+            }
+
+            Object convertedValue = Convert.convertWithCheck(targetClass, sourceValue, null, false);
+            if (convertedValue != null && (targetClass.isInstance(convertedValue) || isAssignableValue(targetClass, convertedValue))) {
+                return convertedValue;
+            }
+            return null;
+        } catch (Exception e) {
+            LOG.warn("Convert property [{}] from {} to {} failed: {} - {}",
+                    propertyName != null ? propertyName : "N/A",
+                    sourceClass.getName(),
+                    targetClass.getName(),
+                    e.getClass().getName(),
+                    e.getMessage());
+            return null;
+        }
     }
 
     private String getPropertyName(String setterName) {

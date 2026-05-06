@@ -1,6 +1,6 @@
 package cn.maple.core.framework.util.cglib;
 
-import cn.hutool.core.map.WeakConcurrentMap;
+import cn.hutool.core.map.reference.WeakKeyConcurrentMap;
 import cn.hutool.core.util.StrUtil;
 import org.springframework.cglib.beans.BeanCopier;
 import org.springframework.cglib.core.Converter;
@@ -8,7 +8,7 @@ import org.springframework.cglib.core.Converter;
 public enum GXBeanCopierCache {
     INSTANCE;
 
-    private final WeakConcurrentMap<String, BeanCopier> cache = new WeakConcurrentMap<>();
+    private final WeakKeyConcurrentMap<String, BeanCopier> cache = new WeakKeyConcurrentMap<>();
 
     public BeanCopier get(final Class<?> srcClass, final Class<?> targetClass, final Converter converter) {
         if (srcClass == null || targetClass == null) {
@@ -24,7 +24,7 @@ public enum GXBeanCopierCache {
         final String key = genKey(srcClass, targetClass, useConverter);
         return cache.computeIfAbsent(key, (k) -> BeanCopier.create(srcClass, targetClass, useConverter));
     }
-    
+
     private String genKey(Class<?> srcClass, Class<?> targetClass, boolean useConverter) {
         final StringBuilder key = StrUtil.builder()
                 .append(srcClass.getName())

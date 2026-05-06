@@ -59,11 +59,15 @@ public class GXCommonUtils {
 
     private static final String MAP_STR_FORMAT_REGULAR = "\\{(.+?)=(.+?)(, (.+?)=(.+?))*\\}";
 
+    private static final String BASE64_FORMAT_REGULAR = "^[A-Za-z0-9+/]*={0,2}$";
+
     @Getter
     private static final CopyOptions defaultCopyOptions = CopyOptions.create().setIgnoreNullValue(true).setIgnoreError(true).setConverter(GXHutoolDataConvert::staticConvert);
 
     @Getter
     private static final Map<GXMethodCacheKeyUtils.MethodCacheKey, Method> METHOD_CACHE = new ConcurrentHashMap<>(64);
+
+    private static final ConcurrentHashMap<String, Class<?>> UPDATE_FIELD_CLASS_CACHE = new ConcurrentHashMap<>(8);
 
     private static final Class<?>[] EMPTY_PARAM_TYPES = new Class<?>[0];
 
@@ -72,7 +76,7 @@ public class GXCommonUtils {
     private static final Method METHOD_NOT_FOUND = initMethodNotFound();
 
     private GXCommonUtils() {
-        throw new AssertionError("不能实例化 GXCommonUtils 工具类");
+        throw new AssertionError("GXCommonUtils must not be instantiated");
     }
 
     private static Method initMethodNotFound() {
@@ -89,10 +93,10 @@ public class GXCommonUtils {
 
     public static <R> R getEnvironmentValue(String key, Class<R> clazzType) {
         if (CharSequenceUtil.isBlank(key)) {
-            throw new IllegalArgumentException("配置键名不能为空");
+            throw new IllegalArgumentException("Configuration key must not be blank");
         }
         if (clazzType == null) {
-            throw new IllegalArgumentException("返回值类型不能为null");
+            throw new IllegalArgumentException("Return type must not be null");
         }
 
         try {
@@ -128,7 +132,7 @@ public class GXCommonUtils {
             return objectMapper.readValue(rawValue, clazzType);
         } catch (JacksonException exception) {
             LOG.error("Failed to convert property: key={}, type={}, error={}", key, clazzType.getName(), exception.getMessage());
-            throw new GXConvertException("转换失败", exception);
+            throw new GXConvertException("Property conversion failed", exception);
         } catch (Exception e) {
             LOG.error("Failed to get property: key={}, error={}", key, e.getMessage());
             return getClassDefaultValue(clazzType);
@@ -137,10 +141,10 @@ public class GXCommonUtils {
 
     public static <R> R getEnvironmentValue(String key, Class<R> clazzType, R defaultValue) {
         if (CharSequenceUtil.isBlank(key)) {
-            throw new IllegalArgumentException("配置键名不能为空");
+            throw new IllegalArgumentException("Configuration key must not be blank");
         }
         if (clazzType == null) {
-            throw new IllegalArgumentException("返回值类型不能为null");
+            throw new IllegalArgumentException("Return type must not be null");
         }
 
         try {
@@ -203,7 +207,7 @@ public class GXCommonUtils {
 
     public static <R> R getClassDefaultValue(Class<R> clazzType) {
         if (clazzType == null) {
-            throw new IllegalArgumentException("Class对象不能为null");
+            throw new IllegalArgumentException("Class must not be null");
         }
         try {
             if (ClassUtil.isBasicType(clazzType) && !ClassUtil.isPrimitiveWrapper(clazzType)) {
@@ -211,7 +215,7 @@ public class GXCommonUtils {
             }
             return ReflectUtil.newInstanceIfPossible(clazzType);
         } catch (Exception e) {
-            LOG.warn("为类型[{}]创建默认值失败: {}", clazzType.getName(), e.getMessage());
+            LOG.warn("Failed to create default value for type: type={}, error={}", clazzType.getName(), e.getMessage());
             return null;
         }
     }
@@ -222,7 +226,7 @@ public class GXCommonUtils {
         }
 
         if (startInclude < 0 || endExclude > phoneNumber.length() || startInclude >= endExclude) {
-            LOG.warn("手机号掩码参数无效: startInclude={}, endExclude={}, phoneLength={}",
+            LOG.warn("Invalid phone mask arguments: startInclude={}, endExclude={}, phoneLength={}",
                     startInclude, endExclude, phoneNumber.length());
             return phoneNumber.toString();
         }
@@ -235,10 +239,10 @@ public class GXCommonUtils {
 
     public static String encryptedData(Dict data, String key, int expiry) {
         if (Objects.isNull(data) || data.isEmpty()) {
-            throw new GXBusinessException("加密数据明文不能为空");
+            throw new GXBusinessException("Plain data must not be empty");
         }
         if (CharSequenceUtil.isEmpty(key)) {
-            throw new GXBusinessException("加密KEY不能为空");
+            throw new GXBusinessException("Encrypt key must not be empty");
         }
 
         int safeExpiry = Math.max(0, expiry);
@@ -251,10 +255,10 @@ public class GXCommonUtils {
 
     public static Dict decryptedData(String encryptedStr, String key) {
         if (CharSequenceUtil.isEmpty(key)) {
-            throw new GXBusinessException("解密KEY不能为空");
+            throw new GXBusinessException("Decrypt key must not be empty");
         }
         if (CharSequenceUtil.isEmpty(encryptedStr)) {
-            LOG.warn("待解密的字符串为空");
+            LOG.warn("Encrypted string is empty");
             return Dict.create();
         }
 
@@ -269,7 +273,7 @@ public class GXCommonUtils {
 
             return JSONUtil.toBean(decryptedStr, Dict.class);
         } catch (Exception e) {
-            LOG.error("数据解密失败: {}", e.getMessage());
+            LOG.error("Failed to decrypt data: {}", e.getMessage());
             return Dict.create();
         }
     }
@@ -281,7 +285,7 @@ public class GXCommonUtils {
         }
 
         if (tClass == null) {
-            throw new IllegalArgumentException("目标对象类型不能为null");
+            throw new IllegalArgumentException("Target type must not be null");
         }
 
         if (ClassUtil.isSimpleTypeOrArray(tClass)) {
@@ -302,17 +306,16 @@ public class GXCommonUtils {
 
             T target = ReflectUtil.newInstanceIfPossible(tClass);
             if (target == null) {
-                throw new GXConvertException("无法创建目标类型的实例: " + tClass.getName());
+                throw new GXConvertException("Cannot create target type instance: " + tClass.getName());
             }
 
             if (!TypeToken.of(target.getClass()).isSubtypeOf(Map.class) && TypeToken.of(source.getClass()).isSubtypeOf(GXBaseData.class) && ObjectUtil.isNull(copyOptions)) {
-                LOG.debug("使用CGLIB进行高效属性复制!!");
+                LOG.debug("Copy properties with CGLIB");
                 //GXCglibUtils.copy(source, target, new GXCGLibDataConvert(tClass));
                 GXCglibUtils.copy(source, target, GXCGLibDataConvert.getConverter(tClass));
             } else {
-                // 使用默认的复制选项（如果未指定）
                 copyOptions = ObjectUtil.defaultIfNull(copyOptions, GXCommonUtils::getDefaultCopyOptions);
-                LOG.debug("使用BeanUtil进行属性复制!!");
+                LOG.debug("Copy properties with BeanUtil");
                 BeanUtil.copyProperties(source, target, copyOptions);
             }
 
@@ -324,7 +327,7 @@ public class GXCommonUtils {
 
             return target;
         } catch (Exception e) {
-            LOG.error("对象转换失败: 源类型[{}], 目标类型[{}], 错误: {}",
+            LOG.error("Object conversion failed: sourceType={}, targetType={}, error={}",
                     source.getClass().getName(), tClass.getName(), e.getMessage());
 
             Throwable rootCause = e;
@@ -336,9 +339,9 @@ public class GXCommonUtils {
             }
 
             if (LOG.isDebugEnabled()) {
-                LOG.debug("对象转换异常详细信息:", e);
+                LOG.debug("Object conversion failure details:", e);
             }
-            String errorMessage = CharSequenceUtil.format("对象转换失败: 源类型[{}]转换为目标类型[{}]时发生错误: {}",
+            String errorMessage = CharSequenceUtil.format("Object conversion failed: sourceType={}, targetType={}, error={}",
                     source.getClass().getSimpleName(),
                     tClass.getSimpleName(),
                     rootCause.getMessage());
@@ -363,7 +366,7 @@ public class GXCommonUtils {
             return Collections.emptyList();
         }
         if (tClass == null) {
-            throw new IllegalArgumentException("目标对象类型不能为null");
+            throw new IllegalArgumentException("Target type must not be null");
         }
 
         if (collection.size() > 1000) {
@@ -381,11 +384,11 @@ public class GXCommonUtils {
 
     public static Object reflectCallObjectMethod(Class<?> serviceClass, String methodName, Object... params) {
         if (serviceClass == null) {
-            throw new IllegalArgumentException("目标对象类型不能为null");
+            throw new IllegalArgumentException("Target type must not be null");
         }
         Object target = GXSpringContextUtils.getBean(serviceClass);
         if (target == null) {
-            LOG.warn("Spring容器中未找到类型为{}的Bean", serviceClass.getName());
+            LOG.warn("Spring bean not found: type={}", serviceClass.getName());
             return null;
         }
         return reflectCallObjectMethod(target, methodName, params);
@@ -393,13 +396,13 @@ public class GXCommonUtils {
 
     public static <R> Object reflectCallObjectMethod(R object, String methodName, Object... params) {
         if (Objects.isNull(object)) {
-            LOG.warn("反射调用的object对象为null");
+            LOG.warn("Reflection target object is null");
             return null;
         }
 
         if (CharSequenceUtil.isEmpty(methodName)) {
             methodName = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
-            LOG.debug("方法名为空，使用默认方法名: {}", methodName);
+            LOG.debug("Method name is empty, using default method: {}", methodName);
         }
 
         if (Objects.isNull(params)) {
@@ -412,7 +415,8 @@ public class GXCommonUtils {
             Method method = findMethod(object.getClass(), methodName, paramTypes);
 
             if (method == METHOD_NOT_FOUND) {
-                LOG.warn("方法{}.{}({})不存在,反射调用失败!", object.getClass().getSimpleName(), methodName, Arrays.toString(params));
+                LOG.warn("Method not found, reflection call skipped: target={}.{}, params={}",
+                        object.getClass().getSimpleName(), methodName, Arrays.toString(params));
                 return null;
             }
 
@@ -427,9 +431,9 @@ public class GXCommonUtils {
     }
 
     private static Method findMethod(Class<?> clazz, String methodName, Class<?>[] paramTypes) {
-        Objects.requireNonNull(clazz, "目标类不能为null");
-        Objects.requireNonNull(methodName, "方法名不能为null");
-        Objects.requireNonNull(paramTypes, "参数类型数组不能为null");
+        Objects.requireNonNull(clazz, "Target class must not be null");
+        Objects.requireNonNull(methodName, "Method name must not be null");
+        Objects.requireNonNull(paramTypes, "Parameter type array must not be null");
 
         final GXMethodCacheKeyUtils.MethodCacheKey methodCacheKey =
                 GXMethodCacheKeyUtils.getMethodCacheKey(clazz, methodName, paramTypes);
@@ -550,20 +554,20 @@ public class GXCommonUtils {
                 if (cause instanceof InvocationTargetException ite) {
                     throw unwrapInvocationTargetException(ite, object, methodName, params);
                 }
-                LOG.error("反射调用过程中发生未知异常: {}", utilException.getMessage());
+                LOG.error("Unexpected reflection utility exception: {}", utilException.getMessage());
                 throw utilException;
             }
             case SecurityException se -> {
-                LOG.error("反射调用过程中发生安全异常: {}", se.getMessage());
-                throw new GXBusinessException("反射调用安全检查失败: " + se.getMessage(), se);
+                LOG.error("Reflection security exception: {}", se.getMessage());
+                throw new GXBusinessException("Reflection security check failed: " + se.getMessage(), se);
             }
             case IllegalArgumentException iae -> {
-                LOG.error("反射调用参数不匹配: {}", iae.getMessage());
-                throw new GXBusinessException("反射调用参数不匹配: " + iae.getMessage(), iae);
+                LOG.error("Reflection argument mismatch: {}", iae.getMessage());
+                throw new GXBusinessException("Reflection argument mismatch: " + iae.getMessage(), iae);
             }
             default -> {
-                LOG.error("反射调用过程中发生异常: {}", e.getMessage());
-                throw new GXBusinessException("反射调用失败: " + e.getMessage(), e);
+                LOG.error("Reflection call failed: {}", e.getMessage());
+                throw new GXBusinessException("Reflection call failed: " + e.getMessage(), e);
             }
         }
     }
@@ -574,8 +578,8 @@ public class GXCommonUtils {
             return beanValidateException;
         }
         String exceptionMessage = CharSequenceUtil.isEmpty(targetException.getMessage())
-                ? "系统反射调用失败" : targetException.getMessage();
-        LOG.error("系统反射调用{}.{}({})失败 , [错误消息 : {}] [错误原因 : {}]",
+                ? "Reflection invocation failed" : targetException.getMessage();
+        LOG.error("Reflection invocation failed: target={}.{}, params={}, errorMessage={}, error={}",
                 object.getClass().getSimpleName(), methodName, Arrays.toString(params),
                 exceptionMessage, targetException);
         return new GXBusinessException(exceptionMessage, Optional.ofNullable(targetException.getCause()).orElse(targetException));
@@ -638,7 +642,6 @@ public class GXCommonUtils {
             return;
         }
 
-        // 找出当前节点的所有直接子节点
         List<R> children = subs.stream().filter(sub -> {
             if (Objects.isNull(sub)) {
                 return false;
@@ -649,16 +652,14 @@ public class GXCommonUtils {
         }).collect(Collectors.toList());
 
         if (!CollUtil.isEmpty(children)) {
-            // 有子分类的情况，设置子节点并递归构建
             GXCommonUtils.reflectCallObjectMethod(parent, "setChildren", children);
-            // 递归处理每个子节点
             children.forEach(child -> buildSubs(child, subs, getParentMethodName));
         }
     }
 
     public static <R> R decodeConnectStr(String connectEncodeStr, Class<R> targetClazz) {
         if (targetClazz == null) {
-            throw new IllegalArgumentException("目标类型不能为null");
+            throw new IllegalArgumentException("Target type must not be null");
         }
 
         if (CharSequenceUtil.isEmpty(connectEncodeStr)) {
@@ -672,19 +673,19 @@ public class GXCommonUtils {
         }
 
         if (CharSequenceUtil.isEmpty(secretKey)) {
-            GXLoggerUtils.logDebug(LOG, "解密密钥为空, 连接信息不进行解密操作");
+            GXLoggerUtils.logDebug(LOG, "Datasource secret key is empty, skip decrypting connection string");
             return Convert.convert(targetClazz, connectEncodeStr);
         }
 
-        if (!Base64.isBase64(connectEncodeStr)) {
-            GXLoggerUtils.logDebug(LOG, "连接信息不是有效的Base64编码, 将直接转换原始字符串");
+        if (!isBase64(connectEncodeStr)) {
+            GXLoggerUtils.logDebug(LOG, "Connection string is not valid Base64, use raw value");
             return Convert.convert(targetClazz, connectEncodeStr);
         }
 
         String decodedStr = GXAuthCodeUtils.authCodeDecode(connectEncodeStr, secretKey);
 
         if (CharSequenceUtil.equalsIgnoreCase(decodedStr, "{}")) {
-            GXLoggerUtils.logDebug(LOG, "链接信息参数解码失败, 将使用原始的链接信息");
+            GXLoggerUtils.logDebug(LOG, "Failed to decode connection string, use raw value");
             return Convert.convert(targetClazz, connectEncodeStr);
         }
 
@@ -696,10 +697,10 @@ public class GXCommonUtils {
     @SuppressWarnings("all")
     public static <R> Class<R> getGenericClassType(Class<?> clazz, Integer index) {
         if (clazz == null) {
-            throw new IllegalArgumentException("目标Class对象不能为null");
+            throw new IllegalArgumentException("Target class must not be null");
         }
         if (index == null) {
-            throw new IllegalArgumentException("泛型索引不能为null");
+            throw new IllegalArgumentException("Generic type index must not be null");
         }
         return (Class<R>) ClassUtil.getTypeArgument(clazz, index);
     }
@@ -715,7 +716,7 @@ public class GXCommonUtils {
             Dict data = Dict.create()
                     .set("tableNameAlias", tableNameAlias)
                     .set("fieldName", column);
-            if (TypeToken.of(value.getClass()).isSubtypeOf(List.class)) {
+            if (value instanceof List<?>) {
                 var valueSet = new HashSet<>(Convert.toList(value));
                 data.set("value", valueSet);
             } else {
@@ -724,7 +725,7 @@ public class GXCommonUtils {
 
             Function<Dict, GXCondition<?>> function = GXDataSourceConstant.getFunction(op);
             if (Objects.isNull(function)) {
-                throw new GXBusinessException(CharSequenceUtil.format("请完善{}类型数据转换器", op));
+                throw new GXBusinessException(CharSequenceUtil.format("Condition converter is missing: op={}", op));
             }
 
             conditions.add(function.apply(data));
@@ -738,7 +739,7 @@ public class GXCommonUtils {
             return null;
         }
         if (targetClazz == null) {
-            LOG.warn("目标类型为null，无法进行转换");
+            LOG.warn("Target type is null, skip string conversion");
             return null;
         }
         if (ReUtil.isMatch(MAP_STR_FORMAT_REGULAR, str)) {
@@ -748,13 +749,13 @@ public class GXCommonUtils {
                 if (CharSequenceUtil.isNotEmpty(content)) {
                     Arrays.stream(content.split(","))
                             .map(String::trim)
-                            .map(arrayData -> arrayData.split("=", 2)) // 限制分割次数为2，避免值中包含=符号导致问题
-                            .filter(array -> array.length == 2) // 确保数组有两个元素
+                            .map(arrayData -> arrayData.split("=", 2))
+                            .filter(array -> array.length == 2)
                             .forEach(array -> tmpMap.put(array[0].trim(), array[1].trim()));
                 }
                 return Convert.convert(targetClazz, tmpMap);
             } catch (Exception ex) {
-                LOG.error("Map格式字符串转换失败! 原始字符串: {}, 错误信息: {}", str, ex.getMessage());
+                LOG.error("Failed to convert map-style string: rawValue={}, error={}", str, ex.getMessage());
                 return null;
             }
         }
@@ -763,10 +764,10 @@ public class GXCommonUtils {
             try {
                 return JSONUtil.toBean(str, targetClazz);
             } catch (ConvertException ex) {
-                LOG.error("JSON数据转换失败! 原始字符串: {}, 错误信息: {}", str, ex.getMessage());
+                LOG.error("Failed to convert JSON string: rawValue={}, error={}", str, ex.getMessage());
                 return null;
             } catch (Exception ex) {
-                LOG.error("JSON数据转换过程中发生未知异常! 原始字符串: {}, 错误信息: {}", str, ex.getMessage());
+                LOG.error("Unexpected JSON conversion failure: rawValue={}, error={}", str, ex.getMessage());
                 return null;
             }
         }
@@ -774,7 +775,7 @@ public class GXCommonUtils {
         try {
             return Convert.convert(targetClazz, str);
         } catch (Exception ex) {
-            LOG.debug("直接转换失败，不是有效的JSON或Map格式: {}", str);
+            LOG.debug("Direct string conversion failed, rawValue={}", str);
             return null;
         }
     }
@@ -783,15 +784,18 @@ public class GXCommonUtils {
         if (CharSequenceUtil.isEmpty(base64Str)) {
             return false;
         }
-        return Base64.isBase64(base64Str);
+        String value = base64Str.trim();
+        return value.length() % 4 == 0
+                && ReUtil.isMatch(BASE64_FORMAT_REGULAR, value)
+                && Base64.isBase64(value);
     }
 
     public static boolean checkMethodExists(Class<?> targetClazz, String methodName, Object... params) {
         if (targetClazz == null) {
-            throw new IllegalArgumentException("目标类不能为null");
+            throw new IllegalArgumentException("Target class must not be null");
         }
         if (CharSequenceUtil.isEmpty(methodName)) {
-            throw new IllegalArgumentException("方法名不能为null或空");
+            throw new IllegalArgumentException("Method name must not be null or empty");
         }
         if (params == null) {
             params = new Object[0];
@@ -802,35 +806,35 @@ public class GXCommonUtils {
 
     public static Integer checkURLReachable(String urlString) {
         if (CharSequenceUtil.isEmpty(urlString)) {
-            LOG.warn("URL地址不能为空");
+            LOG.warn("URL must not be empty");
             return -1;
         }
 
         try {
             HttpRequest request = HttpUtil.createRequest(cn.hutool.http.Method.GET, urlString);
             request.timeout(5000);
-            HttpResponse response = request.execute();
-            int responseCode = response.getStatus();
+            try (HttpResponse response = request.execute()) {
+                int responseCode = response.getStatus();
 
-            if (responseCode == HttpStatus.HTTP_OK) {
-                LOG.info("URL可访问: {}", urlString);
-                return HttpStatus.HTTP_OK;
-            } else {
-                LOG.info("URL不可访问，返回状态码: {}，URL: {}", responseCode, urlString);
+                if (responseCode == HttpStatus.HTTP_OK) {
+                    LOG.info("URL reachable: {}", urlString);
+                    return HttpStatus.HTTP_OK;
+                }
+                LOG.info("URL unreachable: statusCode={}, url={}", responseCode, urlString);
                 return responseCode;
             }
         } catch (Exception e) {
-            LOG.error(CharSequenceUtil.format("访问URL时发生错误: {}，URL: {}", e.getMessage(), urlString), e);
+            LOG.error("Failed to reach URL: url={}, error={}", urlString, e.getMessage(), e);
         }
         return -1;
     }
 
     public static String generateHmac(Object data, String secret) {
         if (data == null) {
-            throw new GXBusinessException("待签名数据不能为null");
+            throw new GXBusinessException("Signing data must not be null");
         }
         if (CharSequenceUtil.isBlank(secret)) {
-            throw new GXBusinessException("签名密钥不能为空");
+            throw new GXBusinessException("Signing secret must not be blank");
         }
         try {
             Mac mac = SecureUtil.createMac("HmacSHA256");
@@ -838,30 +842,30 @@ public class GXCommonUtils {
             mac.init(secretKeySpec);
             ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
             if (objectMapper == null) {
-                throw new GXBusinessException("Spring容器中不存在ObjectMapper Bean!!!");
+                throw new GXBusinessException("ObjectMapper bean is unavailable");
             }
 
             String jsonData = objectMapper.writeValueAsString(data);
             byte[] hmacBytes = mac.doFinal(jsonData.getBytes(StandardCharsets.UTF_8));
             return Base64Encoder.encode(hmacBytes);
         } catch (JacksonException e) {
-            throw new GXBusinessException("JSON序列化失败: " + e.getMessage(), e);
+            throw new GXBusinessException("JSON serialization failed: " + e.getMessage(), e);
         } catch (InvalidKeyException e) {
-            throw new GXBusinessException("无效的HMAC密钥: " + e.getMessage(), e);
+            throw new GXBusinessException("Invalid HMAC secret: " + e.getMessage(), e);
         } catch (Exception e) {
-            throw new GXBusinessException("HMAC签名生成失败: " + e.getMessage(), e);
+            throw new GXBusinessException("HMAC signing failed: " + e.getMessage(), e);
         }
     }
 
     public static boolean checkHmac(String secret, String clientHmac, Object payload) {
         if (CharSequenceUtil.isBlank(secret)) {
-            throw new GXBusinessException("签名密钥不能为空");
+            throw new GXBusinessException("Signing secret must not be blank");
         }
         if (CharSequenceUtil.isBlank(clientHmac)) {
             return false;
         }
         if (payload == null) {
-            throw new GXBusinessException("待验证数据不能为null");
+            throw new GXBusinessException("Payload must not be null");
         }
         try {
             Mac mac = SecureUtil.createMac("HmacSHA256");
@@ -869,7 +873,7 @@ public class GXCommonUtils {
             mac.init(secretKeySpec);
             ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
             if (objectMapper == null) {
-                throw new GXBusinessException("Spring上下文中没有ObjectMapper");
+                throw new GXBusinessException("ObjectMapper bean is unavailable");
             }
             String jsonData = objectMapper.writeValueAsString(payload);
             byte[] hmacBytes = mac.doFinal(jsonData.getBytes(StandardCharsets.UTF_8));
@@ -879,7 +883,7 @@ public class GXCommonUtils {
                     clientHmac.getBytes(StandardCharsets.UTF_8)
             );
         } catch (Exception e) {
-            LOG.error("HMAC验证失败: {}", e.getMessage(), e);
+            LOG.error("HMAC verification failed: {}", e.getMessage(), e);
             return false;
         }
     }
@@ -891,41 +895,43 @@ public class GXCommonUtils {
 
         List<GXUpdateField<?>> updateFields = new ArrayList<>(updateLst.size());
 
-        final ConcurrentHashMap<String, Class<?>> CLASS_CACHE = new ConcurrentHashMap<>(8);
-
         Stream<GXUpdateFieldRequest> stream = updateLst.size() > 100 ?
                 updateLst.parallelStream() : updateLst.stream();
 
         List<GXUpdateField<?>> result = stream.map(updateField -> {
             try {
-                String tableName = updateField.tableName();  // 表名
-                String fieldName = updateField.fieldName();  // 字段名
-                String className = updateField.className();  // 更新字段类名
-                Object value = updateField.value();          // 更新字段值
+                if (updateField == null) {
+                    throw new GXBusinessException("Update field request must not be null");
+                }
+                String tableName = updateField.tableName();
+                String fieldName = updateField.fieldName();
+                String className = updateField.className();
+                Object value = updateField.value();
 
                 if (CharSequenceUtil.isBlank(className)) {
-                    throw new GXBusinessException("更新字段类名不能为空: " + fieldName);
+                    throw new GXBusinessException("Update field class name must not be blank: " + fieldName);
                 }
 
-                Class<?> updateFieldClass = CLASS_CACHE.computeIfAbsent(className, name -> {
+                Class<?> updateFieldClass = UPDATE_FIELD_CLASS_CACHE.computeIfAbsent(className, name -> {
                     try {
                         return Class.forName(name);
                     } catch (ClassNotFoundException e) {
-                        throw new GXBusinessException("更新字段类未找到: " + name, e);
+                        throw new GXBusinessException("Update field class not found: " + name, e);
                     }
                 });
 
                 Object updateFieldObj = ReflectUtil.newInstance(updateFieldClass, tableName, fieldName, value);
 
                 if (!(updateFieldObj instanceof GXUpdateField<?>)) {
-                    throw new GXBusinessException("创建的对象不是GXUpdateField类型: " + className);
+                    throw new GXBusinessException("Created object is not a GXUpdateField: " + className);
                 }
 
                 return (GXUpdateField<?>) updateFieldObj;
             } catch (GXBusinessException e) {
                 throw e;
             } catch (Exception e) {
-                throw new GXBusinessException("创建更新字段对象失败: " + updateField.fieldName() + ", 原因: " + e.getMessage(), e);
+                String fieldName = updateField == null ? "unknown" : updateField.fieldName();
+                throw new GXBusinessException("Failed to create update field: " + fieldName + ", reason: " + e.getMessage(), e);
             }
         }).collect(Collectors.toList());
 
@@ -948,13 +954,13 @@ public class GXCommonUtils {
             }
             int processors = osBean.getAvailableProcessors();
             if (processors <= 0) {
-                LOG.warn("获取到的处理器数量无效: {}", processors);
+                LOG.warn("Invalid processor count: {}", processors);
                 return loadAverage;
             }
 
             return Math.min(loadAverage / processors, 1.0);
         } catch (Exception e) {
-            LOG.error("获取系统负载失败: {}", e.getMessage());
+            LOG.error("Failed to get system load average: {}", e.getMessage());
             return -1;
         }
     }
