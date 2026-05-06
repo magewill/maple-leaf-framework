@@ -8,11 +8,7 @@ import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 public class GXConditionStrIn extends GXCondition<String> {
@@ -23,6 +19,15 @@ public class GXConditionStrIn extends GXCondition<String> {
     public GXConditionStrIn(String tableNameAlias, String fieldName, Set<String> value) {
         super(tableNameAlias, fieldName, value);
         this.values = value;
+    }
+
+    private static void validateStringValue(String value) {
+        if (value == null) {
+            throw new GXBusinessException("IN condition value item must not be null");
+        }
+        if (GXDBStringEscapeUtils.check(value)) {
+            throw new GXSqlInjectionException("SQL injection risk detected in IN condition value");
+        }
     }
 
     @Override
@@ -99,14 +104,5 @@ public class GXConditionStrIn extends GXCondition<String> {
             params.put(paramName + "_" + index++, str);
         }
         return params;
-    }
-
-    private static void validateStringValue(String value) {
-        if (value == null) {
-            throw new GXBusinessException("IN condition value item must not be null");
-        }
-        if (GXDBStringEscapeUtils.check(value)) {
-            throw new GXSqlInjectionException("SQL injection risk detected in IN condition value");
-        }
     }
 }

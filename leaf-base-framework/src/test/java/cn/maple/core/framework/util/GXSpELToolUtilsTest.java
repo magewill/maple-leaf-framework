@@ -19,6 +19,12 @@ class GXSpELToolUtilsTest {
     private ApplicationContext originalContext;
     private GenericApplicationContext testContext;
 
+    private static void replaceApplicationContext(ApplicationContext applicationContext) throws Exception {
+        Field field = GXApplicationContextSingleton.class.getDeclaredField("applicationContext");
+        field.setAccessible(true);
+        field.set(GXApplicationContextSingleton.INSTANCE, applicationContext);
+    }
+
     @BeforeEach
     void setUp() throws Exception {
         originalContext = GXSpringContextUtils.getApplicationContext();
@@ -217,12 +223,6 @@ class GXSpELToolUtilsTest {
                 .getValue(context, String.class);
 
         assertEquals("x:y", result);
-    }
-
-    private static void replaceApplicationContext(ApplicationContext applicationContext) throws Exception {
-        Field field = GXApplicationContextSingleton.class.getDeclaredField("applicationContext");
-        field.setAccessible(true);
-        field.set(GXApplicationContextSingleton.INSTANCE, applicationContext);
     }
 
     static class SampleTarget {

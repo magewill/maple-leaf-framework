@@ -17,7 +17,10 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.time.Duration;
 import java.util.Objects;
-import java.util.concurrent.*;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 
 @Configuration
@@ -29,12 +32,9 @@ public class GuavaEventBusConfig implements ApplicationContextAware {
     private static final int ASYNC_EVENT_AWAIT_TERMINATION_SECONDS = 30;
 
     private static final int ASYNC_EVENT_KEEP_ALIVE_SECONDS = (int) Duration.ofMinutes(1).toSeconds();
-
-    private volatile Executor asyncEventBusExecutor;
-
     private final LongAdder rejectedTaskCount = new LongAdder();
-
     private final LongAdder exceptionCount = new LongAdder();
+    private volatile Executor asyncEventBusExecutor;
 
     @Bean("eventBus")
     public EventBus eventBus() {

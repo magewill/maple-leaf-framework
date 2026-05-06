@@ -7,8 +7,8 @@ import cn.maple.core.framework.event.dto.GXExceptionNotifyEventDto;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
-import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.List;

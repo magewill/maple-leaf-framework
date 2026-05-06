@@ -7,7 +7,7 @@ public interface GXResultStatusCode {
     int getCode();
 
     String getMsg();
-    
+
     default Dict getExtraData() {
         return Dict.create();
     }

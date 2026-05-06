@@ -37,6 +37,23 @@ public class GXConditionFuncJsonOverlaps extends GXConditionFunc<String> {
         this.rawJsonPath = jsonPath;
     }
 
+    private static String normalizeJsonPath(String jsonPath) {
+        if (CharSequenceUtil.isBlank(jsonPath)) {
+            return "$";
+        }
+        String trimmed = CharSequenceUtil.trim(jsonPath);
+        if ("$".equals(trimmed) || trimmed.startsWith("$.") || trimmed.startsWith("$[")) {
+            return trimmed;
+        }
+        if (trimmed.startsWith(".")) {
+            return "$" + trimmed;
+        }
+        if (trimmed.startsWith("$")) {
+            return "$." + trimmed.substring(1);
+        }
+        return "$." + trimmed;
+    }
+
     @Override
     public String getOp() {
         return jsonField;
@@ -86,22 +103,5 @@ public class GXConditionFuncJsonOverlaps extends GXConditionFunc<String> {
     @Override
     public String getFieldOriginalValue() {
         return "";
-    }
-
-    private static String normalizeJsonPath(String jsonPath) {
-        if (CharSequenceUtil.isBlank(jsonPath)) {
-            return "$";
-        }
-        String trimmed = CharSequenceUtil.trim(jsonPath);
-        if ("$".equals(trimmed) || trimmed.startsWith("$.") || trimmed.startsWith("$[")) {
-            return trimmed;
-        }
-        if (trimmed.startsWith(".")) {
-            return "$" + trimmed;
-        }
-        if (trimmed.startsWith("$")) {
-            return "$." + trimmed.substring(1);
-        }
-        return "$." + trimmed;
     }
 }

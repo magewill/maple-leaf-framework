@@ -22,6 +22,6 @@ public @interface GXValidateCRS {
     String message() default "验证失败";
 
     Class<?>[] groups() default {};
-    
+
     Class<? extends Payload>[] payload() default {};
 }

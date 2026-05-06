@@ -5,7 +5,7 @@ public abstract class GXDbJoinValue extends GXDbJoinOp {
     private final String tableNameAlias;
 
     private final String fieldName;
-    
+
     private Object fieldValue;
 
     public GXDbJoinValue(String tableNameAlias, String fieldName, Object fieldValue) {

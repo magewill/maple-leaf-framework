@@ -13,7 +13,7 @@ import java.io.Serial;
 
 @EqualsAndHashCode(callSuper = true)
 @Data
-public class GXBeanValidateException  extends RuntimeException {
+public class GXBeanValidateException extends RuntimeException {
     @Serial
     private static final long serialVersionUID = 1L;
 

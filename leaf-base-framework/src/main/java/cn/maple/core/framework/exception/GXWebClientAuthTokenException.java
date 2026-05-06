@@ -3,7 +3,7 @@ package cn.maple.core.framework.exception;
 import cn.hutool.core.lang.Dict;
 import cn.maple.core.framework.code.GXResultStatusCode;
 
-public class GXWebClientAuthTokenException  extends GXBusinessException{
+public class GXWebClientAuthTokenException extends GXBusinessException {
     public GXWebClientAuthTokenException(String msg, int code, Dict data, Throwable e) {
         super(msg, code, data, e);
     }

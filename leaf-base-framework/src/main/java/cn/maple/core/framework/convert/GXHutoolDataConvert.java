@@ -8,8 +8,8 @@ import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.TypeUtil;
-import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSON;
+import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.dto.GXBaseData;
 import cn.maple.core.framework.util.GXSpringContextUtils;
@@ -21,22 +21,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.lang.reflect.Array;
 import java.lang.reflect.Type;
 import java.time.temporal.Temporal;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Collection;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Hashtable;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
-import java.util.TreeMap;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class GXHutoolDataConvert {
@@ -52,6 +37,62 @@ public class GXHutoolDataConvert {
 
     public static Object staticConvert(Type type, Object value) {
         return getInstance().convert(type, value);
+    }
+
+    private static boolean isDateTimeType(Class<?> targetClass) {
+        return Date.class.isAssignableFrom(targetClass)
+                || Calendar.class.isAssignableFrom(targetClass)
+                || Temporal.class.isAssignableFrom(targetClass);
+    }
+
+    private static boolean isAssignableValue(Class<?> targetClass, Object value) {
+        if (value == null) {
+            return !targetClass.isPrimitive();
+        }
+        if (targetClass.isInstance(value)) {
+            return true;
+        }
+        Class<?> wrapperClass = primitiveToWrapper(targetClass);
+        return wrapperClass != targetClass && wrapperClass.isInstance(value);
+    }
+
+    private static Class<?> primitiveToWrapper(Class<?> targetClass) {
+        if (!targetClass.isPrimitive()) {
+            return targetClass;
+        }
+        if (targetClass == int.class) return Integer.class;
+        if (targetClass == long.class) return Long.class;
+        if (targetClass == boolean.class) return Boolean.class;
+        if (targetClass == double.class) return Double.class;
+        if (targetClass == float.class) return Float.class;
+        if (targetClass == short.class) return Short.class;
+        if (targetClass == byte.class) return Byte.class;
+        if (targetClass == char.class) return Character.class;
+        if (targetClass == void.class) return Void.class;
+        return targetClass;
+    }
+
+    private static Object primitiveDefaultValue(Class<?> primitiveClass) {
+        if (primitiveClass == boolean.class) return false;
+        if (primitiveClass == char.class) return '\0';
+        if (primitiveClass == byte.class) return (byte) 0;
+        if (primitiveClass == short.class) return (short) 0;
+        if (primitiveClass == int.class) return 0;
+        if (primitiveClass == long.class) return 0L;
+        if (primitiveClass == float.class) return 0F;
+        if (primitiveClass == double.class) return 0D;
+        return null;
+    }
+
+    private static Class<?> resolveClass(Type type) {
+        if (type instanceof Class<?> clazz) {
+            return clazz;
+        }
+        return type == null ? null : TypeUtil.getClass(type);
+    }
+
+    private static Type getTypeArgument(Type type, int index) {
+        return TypeUtil.getTypeArgument(type, index);
     }
 
     public Object convert(Type type, Object value) {
@@ -451,62 +492,6 @@ public class GXHutoolDataConvert {
 
     private boolean isGXBaseDataType(Class<?> targetClass) {
         return TypeToken.of(targetClass).isSubtypeOf(GXBaseData.class);
-    }
-
-    private static boolean isDateTimeType(Class<?> targetClass) {
-        return Date.class.isAssignableFrom(targetClass)
-                || Calendar.class.isAssignableFrom(targetClass)
-                || Temporal.class.isAssignableFrom(targetClass);
-    }
-
-    private static boolean isAssignableValue(Class<?> targetClass, Object value) {
-        if (value == null) {
-            return !targetClass.isPrimitive();
-        }
-        if (targetClass.isInstance(value)) {
-            return true;
-        }
-        Class<?> wrapperClass = primitiveToWrapper(targetClass);
-        return wrapperClass != targetClass && wrapperClass.isInstance(value);
-    }
-
-    private static Class<?> primitiveToWrapper(Class<?> targetClass) {
-        if (!targetClass.isPrimitive()) {
-            return targetClass;
-        }
-        if (targetClass == int.class) return Integer.class;
-        if (targetClass == long.class) return Long.class;
-        if (targetClass == boolean.class) return Boolean.class;
-        if (targetClass == double.class) return Double.class;
-        if (targetClass == float.class) return Float.class;
-        if (targetClass == short.class) return Short.class;
-        if (targetClass == byte.class) return Byte.class;
-        if (targetClass == char.class) return Character.class;
-        if (targetClass == void.class) return Void.class;
-        return targetClass;
-    }
-
-    private static Object primitiveDefaultValue(Class<?> primitiveClass) {
-        if (primitiveClass == boolean.class) return false;
-        if (primitiveClass == char.class) return '\0';
-        if (primitiveClass == byte.class) return (byte) 0;
-        if (primitiveClass == short.class) return (short) 0;
-        if (primitiveClass == int.class) return 0;
-        if (primitiveClass == long.class) return 0L;
-        if (primitiveClass == float.class) return 0F;
-        if (primitiveClass == double.class) return 0D;
-        return null;
-    }
-
-    private static Class<?> resolveClass(Type type) {
-        if (type instanceof Class<?> clazz) {
-            return clazz;
-        }
-        return type == null ? null : TypeUtil.getClass(type);
-    }
-
-    private static Type getTypeArgument(Type type, int index) {
-        return TypeUtil.getTypeArgument(type, index);
     }
 
     private Object normalizeJsonValue(Object value) {

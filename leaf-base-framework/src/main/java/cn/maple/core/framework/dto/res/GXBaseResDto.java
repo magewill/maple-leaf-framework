@@ -11,7 +11,7 @@ public class GXBaseResDto extends GXBaseDto {
     public <R> R getBean(Class<R> clazz) {
         return GXSpringContextUtils.getBean(clazz);
     }
-    
+
     public <R> R getBean(String beanName, Class<R> requiredType) {
         return GXSpringContextUtils.getBean(beanName, requiredType);
     }

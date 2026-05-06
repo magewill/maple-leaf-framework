@@ -8,6 +8,6 @@ import java.lang.annotation.*;
 @Inherited
 public @interface GXBusinessLog {
     String name() default "";
-    
+
     String description() default "";
 }

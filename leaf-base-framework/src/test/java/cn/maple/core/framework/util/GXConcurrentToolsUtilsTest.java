@@ -8,16 +8,27 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class GXConcurrentToolsUtilsTest {
+    private static void waitForResult(ConcurrentMap<String, Object> results, String key) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!results.containsKey(key) && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertTrue(results.containsKey(key), "Timed out waiting for result key: " + key);
+    }
+
+    private static void waitForCompletion(CompletableFuture<?> future) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!future.isDone() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertTrue(future.isDone(), "Timed out waiting for future completion");
+    }
+
     @AfterEach
     void tearDown() {
         MDC.clear();
@@ -202,21 +213,5 @@ class GXConcurrentToolsUtilsTest {
         for (CompletableFuture<String> probe : probes) {
             assertNull(probe.get(2, TimeUnit.SECONDS));
         }
-    }
-
-    private static void waitForResult(ConcurrentMap<String, Object> results, String key) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-        while (!results.containsKey(key) && System.nanoTime() < deadline) {
-            Thread.sleep(10);
-        }
-        assertTrue(results.containsKey(key), "Timed out waiting for result key: " + key);
-    }
-
-    private static void waitForCompletion(CompletableFuture<?> future) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-        while (!future.isDone() && System.nanoTime() < deadline) {
-            Thread.sleep(10);
-        }
-        assertTrue(future.isDone(), "Timed out waiting for future completion");
     }
 }

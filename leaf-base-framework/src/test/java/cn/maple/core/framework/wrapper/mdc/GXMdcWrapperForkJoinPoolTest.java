@@ -1,10 +1,15 @@
 package cn.maple.core.framework.wrapper.mdc;
 
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 
 import java.util.List;
-import java.util.concurrent.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -62,7 +67,8 @@ class GXMdcWrapperForkJoinPoolTest {
 
     @Test
     void testMdcContextCleanup() throws Exception {
-        Future<?> future = pool.submit(() -> {});
+        Future<?> future = pool.submit(() -> {
+        });
         future.get();
         MDC.clear();
         assertNull(pool.submit(() -> MDC.get(TRACE_ID_KEY)).get());
@@ -73,7 +79,8 @@ class GXMdcWrapperForkJoinPoolTest {
         int taskCount = 10000;
         long start = System.nanoTime();
         for (int i = 0; i < taskCount; i++) {
-            pool.execute(() -> {});
+            pool.execute(() -> {
+            });
         }
         pool.shutdown();
         pool.awaitTermination(10, TimeUnit.SECONDS);

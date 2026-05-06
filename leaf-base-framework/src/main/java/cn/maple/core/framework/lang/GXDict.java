@@ -33,6 +33,22 @@ public class GXDict extends Dict {
         return new GXDict(map);
     }
 
+    private static Class<?> primitiveToWrapper(Class<?> type) {
+        if (!type.isPrimitive()) {
+            return type;
+        }
+        if (type == int.class) return Integer.class;
+        if (type == long.class) return Long.class;
+        if (type == boolean.class) return Boolean.class;
+        if (type == double.class) return Double.class;
+        if (type == float.class) return Float.class;
+        if (type == short.class) return Short.class;
+        if (type == byte.class) return Byte.class;
+        if (type == char.class) return Character.class;
+        if (type == void.class) return Void.class;
+        return type;
+    }
+
     public String getJSONStr(String attr) {
         Object obj = getObj(attr);
         if (null == obj) {
@@ -260,21 +276,5 @@ public class GXDict extends Dict {
             }
         });
         return dict;
-    }
-
-    private static Class<?> primitiveToWrapper(Class<?> type) {
-        if (!type.isPrimitive()) {
-            return type;
-        }
-        if (type == int.class) return Integer.class;
-        if (type == long.class) return Long.class;
-        if (type == boolean.class) return Boolean.class;
-        if (type == double.class) return Double.class;
-        if (type == float.class) return Float.class;
-        if (type == short.class) return Short.class;
-        if (type == byte.class) return Byte.class;
-        if (type == char.class) return Character.class;
-        if (type == void.class) return Void.class;
-        return type;
     }
 }

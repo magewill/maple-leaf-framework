@@ -101,7 +101,7 @@ public class GXBusinessLogAspect implements Ordered {
             log.error("保存业务日志时发生异常: {}", e.getMessage(), e);
         }
     }
-    
+
     @Override
     public int getOrder() {
         return Ordered.LOWEST_PRECEDENCE;

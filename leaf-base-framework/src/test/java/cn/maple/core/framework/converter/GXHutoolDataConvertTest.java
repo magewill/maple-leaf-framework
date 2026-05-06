@@ -22,11 +22,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -317,7 +313,7 @@ class GXHutoolDataConvertTest {
     void testJsonObjectToJSONObject() {
         String json = "{\"key\":\"value\"}";
         JSONObject jsonObj = (JSONObject) converter.convert(JSONObject.class, json);
-        assertThat((Object)jsonObj).isNotNull();
+        assertThat((Object) jsonObj).isNotNull();
         assertThat(jsonObj.getStr("key")).isEqualTo("value");
     }
 
