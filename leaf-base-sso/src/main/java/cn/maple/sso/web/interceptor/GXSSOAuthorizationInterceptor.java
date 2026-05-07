@@ -15,6 +15,8 @@ import cn.maple.sso.utils.GXSSOHelperUtil;
 import cn.maple.sso.web.handler.GXSSODefaultHandler;
 import cn.maple.sso.web.handler.GXSSOHandler;
 import jakarta.annotation.Resource;
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -55,6 +57,11 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
     }
 
     private boolean shouldSkipAuth(HttpServletRequest request, Object handler) {
+        if (isErrorDispatch(request)) {
+            log.debug("Skip SSO login check for error dispatch: {}", request.getRequestURI());
+            return true;
+        }
+
         if (request.getMethod().equalsIgnoreCase("OPTIONS") || !(handler instanceof HandlerMethod handlerMethod)) {
             return true;
         }
@@ -76,6 +83,11 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
         }
 
         return false;
+    }
+
+    private boolean isErrorDispatch(HttpServletRequest request) {
+        return request.getDispatcherType() == DispatcherType.ERROR
+                || request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI) != null;
     }
 
     private boolean isWhiteListUrl(String requestURI) {

@@ -3,6 +3,7 @@ package cn.maple.sso.web.interceptor;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.annotation.GXIgnoreLoginIntercept;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.core.framework.web.interceptor.GXBaseSSOPermissionInterceptor;
@@ -29,6 +30,15 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         if (handler instanceof HandlerMethod handlerMethod) {
+            if (GXHandlerMethodAnnotationUtils.hasMergedAnnotation(handlerMethod, GXIgnoreLoginIntercept.class)) {
+                return true;
+            }
+
+            GXPermissionAnnotation permission = GXHandlerMethodAnnotationUtils.findMergedAnnotation(handlerMethod, GXPermissionAnnotation.class);
+            if (!requiresTokenForPermission(permission)) {
+                return true;
+            }
+
             Dict tokenDict = GXSSOHelperUtil.attrToken(request);
             if (CollUtil.isEmpty(tokenDict)) {
                 tokenDict = GXSSOHelperUtil.getSSOToken(request);
@@ -38,7 +48,7 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
                 request.setAttribute(GXSSOConstant.SSO_TOKEN_ATTR, tokenDict);
             }
 
-            if (isVerification(request, handler, tokenDict)) {
+            if (isVerification(request, permission, tokenDict)) {
                 return true;
             }
 
@@ -48,14 +58,21 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
         return true;
     }
 
-    protected boolean isVerification(HttpServletRequest request, Object handler, Dict token) {
+    private boolean requiresTokenForPermission(GXPermissionAnnotation permission) {
+        if (permission == null) {
+            return !this.isNothingAnnotationPass();
+        }
+        return permission.action() != GXAction.Skip;
+    }
+
+    protected boolean isVerification(HttpServletRequest request, GXPermissionAnnotation permission, Dict token) {
         if (GXSSOProperties.getInstance().isPermissionUri()) {
             String uri = request.getRequestURI();
-            return uri != null && this.getAuthorization().isPermitted(token, uri);
+            if (uri == null || this.getAuthorization().isPermitted(token, uri)) {
+                return true;
+            }
         }
 
-        HandlerMethod handlerMethod = (HandlerMethod) handler;
-        GXPermissionAnnotation permission = GXHandlerMethodAnnotationUtils.findMergedAnnotation(handlerMethod, GXPermissionAnnotation.class);
         if (permission == null) {
             return this.isNothingAnnotationPass();
         }
