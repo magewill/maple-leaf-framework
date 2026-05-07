@@ -31,17 +31,18 @@ Repository/Service 支撑，不承载业务流程编排。
    `GXDataFilterThreadLocalUtils.wrap`。
 10. 所有日志输出内容必须使用 ASCII 字符，新增或修改日志时禁止写入非 ASCII 日志文案。
 11. 现有代码已经在生产环境使用，不得随意更改对外接口规范，包括公开类、接口、方法签名、泛型约束、配置键、异常语义和默认行为。
-12. 本模块作为基础框架，性能和线程安全性是核心质量要求；涉及共享状态、缓存、ThreadLocal、线程池、异步任务和 SQL
+12. 在确保原有功能正确性的前提下进行完善；修改已存在逻辑时，不得改变现有逻辑的正确行为。
+13. 本模块作为基础框架，性能和线程安全性是核心质量要求；涉及共享状态、缓存、ThreadLocal、线程池、异步任务和 SQL
     拦截的改动必须优先评估并发安全与性能影响。
-13. 修改时只处理本 Maven 模块范围内的代码、配置、测试和文档，不得随意修改其他 Maven 模块的任何信息；每个 Maven 模块职责不同，
+14. 修改时只处理本 Maven 模块范围内的代码、配置、测试和文档，不得随意修改其他 Maven 模块的任何信息；每个 Maven 模块职责不同，
     `AGENTS.md` 的关注点也应保持独立。
-14. 在线程池与虚拟线程都能满足需求的场景中，优先使用虚拟线程；若选择传统线程池，必须说明其必要性，例如需要固定并发上限、复用线程本地资源或兼容阻塞库行为。
-15. 数据库能力必须严格符合 MyBatis-Plus 对多数据库的原生支持方式，新增 SQL 改写、分页、租户、数据权限或方言相关逻辑时，不得破坏
+15. 在线程池与虚拟线程都能满足需求的场景中，优先使用虚拟线程；若选择传统线程池，必须说明其必要性，例如需要固定并发上限、复用线程本地资源或兼容阻塞库行为。
+16. 数据库能力必须严格符合 MyBatis-Plus 对多数据库的原生支持方式，新增 SQL 改写、分页、租户、数据权限或方言相关逻辑时，不得破坏
     MyBatis-Plus 对不同数据库类型的兼容约定。
-16. 每次修改涉及到的行为变更，都必须补齐或更新测试用例，并保证完整覆盖成功、异常、边界和回归场景。
-17. `GXJoinDto` 的 `masterTableName/masterTableNameAlias` 表示 JOIN 子句中实际拼接的目标表和别名，`joinTableName/joinTableNameAlias`
+17. 每次修改涉及到的行为变更，都必须补齐或更新测试用例，并保证完整覆盖成功、异常、边界和回归场景。
+18. `GXJoinDto` 的 `masterTableName/masterTableNameAlias` 表示 JOIN 子句中实际拼接的目标表和别名，`joinTableName/joinTableNameAlias`
     主要用于白名单、逻辑删除和条件侧元数据解析；审查 `GXBaseBuilder.handleSQLJoin` 时不得将该设计误判为表名拼接错误。
-18. `SELECT`、`GROUP BY`、`ORDER BY` 和 `HAVING` 默认保持旧项目兼容行为：`maple.framework.mybatis.sql.auto-underline-field-enabled=true` 时，涉及数据库字段的引用和 SELECT 表达式别名统一渲染为下划线格式；新项目如需保留调用方传入的字段和 SELECT 别名拼写，并让 GROUP/ORDER/HAVING 按已选字段或别名原样渲染，可显式设置 `maple.framework.mybatis.sql.auto-underline-field-enabled=false`。
+19. `SELECT`、`GROUP BY`、`ORDER BY` 和 `HAVING` 默认保持旧项目兼容行为：`maple.framework.mybatis.sql.auto-underline-field-enabled=true` 时，涉及数据库字段的引用和 SELECT 表达式别名统一渲染为下划线格式；新项目如需保留调用方传入的字段和 SELECT 别名拼写，并让 GROUP/ORDER/HAVING 按已选字段或别名原样渲染，可显式设置 `maple.framework.mybatis.sql.auto-underline-field-enabled=false`。
 
 ## 3. 代码演进规则
 
