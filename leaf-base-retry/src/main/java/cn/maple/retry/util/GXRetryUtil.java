@@ -11,9 +11,11 @@ import org.springframework.core.retry.RetryException;
 import org.springframework.core.retry.RetryTemplate;
 
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -29,6 +31,12 @@ public final class GXRetryUtil {
     private static final long DEFAULT_INITIAL_INTERVAL = 1000L;
     private static final double DEFAULT_MULTIPLIER = 2.0;
     private static final long DEFAULT_MAX_INTERVAL = 10000L;
+
+    private static final int MAX_RETRY_TEMPLATE_CACHE_SIZE = 256;
+
+    private static final GXRetryConfig STANDALONE_RETRY_CONFIG = new GXRetryConfig();
+
+    private static final Map<RetryTemplateCacheKey, RetryTemplate> RETRY_TEMPLATE_CACHE = new ConcurrentHashMap<>();
 
     private GXRetryUtil() {
         throw new UnsupportedOperationException("GXRetryUtil is a utility class and cannot be instantiated.");
@@ -106,7 +114,7 @@ public final class GXRetryUtil {
             double multiplier,
             long maxInterval,
             Map<Class<? extends Throwable>, Boolean> retryExceptions) throws E {
-        Objects.requireNonNull(retryCallback, "retryCallback 不能为空");
+        Objects.requireNonNull(retryCallback, "retryCallback must not be null");
 
         RetryTemplate retryTemplate = createRetryTemplate(maxAttempts, initialInterval, multiplier, maxInterval, retryExceptions);
         AtomicInteger retryCount = new AtomicInteger(0);
@@ -142,12 +150,14 @@ public final class GXRetryUtil {
 
     public static <T, E extends Throwable> CompletableFuture<T> retryOperationAsync(
             GXRetryCallback<T, E> retryCallback, Executor executor) {
-        Objects.requireNonNull(retryCallback, "retryCallback 不能为空");
-        Objects.requireNonNull(executor, "executor 不能为空");
+        Objects.requireNonNull(retryCallback, "retryCallback must not be null");
+        Objects.requireNonNull(executor, "executor must not be null");
 
         return CompletableFuture.supplyAsync(() -> {
             try {
                 return retryOperation(retryCallback);
+            } catch (Error e) {
+                throw e;
             } catch (Throwable e) {
                 throw new GXBusinessException(e.getMessage(), e);
             }
@@ -163,26 +173,28 @@ public final class GXRetryUtil {
             long maxInterval,
             Map<Class<? extends Throwable>, Boolean> retryExceptions,
             Executor executor) {
-        Objects.requireNonNull(retryCallback, "retryCallback 不能为空");
-        Objects.requireNonNull(executor, "executor 不能为空");
+        Objects.requireNonNull(retryCallback, "retryCallback must not be null");
+        Objects.requireNonNull(executor, "executor must not be null");
 
         return CompletableFuture.supplyAsync(() -> {
             try {
                 return retryOperation(retryCallback, recoveryCallback, maxAttempts,
                         initialInterval, multiplier, maxInterval, retryExceptions);
+            } catch (Error e) {
+                throw e;
             } catch (Throwable e) {
-                throw new RuntimeException(e);
+                throw new GXBusinessException(e.getMessage(), e);
             }
         }, executor);
     }
 
     public static <T> T retrySupplier(Supplier<T> supplier) {
-        Objects.requireNonNull(supplier, "supplier 不能为空");
+        Objects.requireNonNull(supplier, "supplier must not be null");
         return retryOperation(context -> supplier.get());
     }
 
     public static <T> T retrySupplier(Supplier<T> supplier, int maxAttempts, long initialInterval) {
-        Objects.requireNonNull(supplier, "supplier 不能为空");
+        Objects.requireNonNull(supplier, "supplier must not be null");
         return retryOperation(context -> supplier.get(), maxAttempts, initialInterval);
     }
 
@@ -192,12 +204,31 @@ public final class GXRetryUtil {
             double multiplier,
             long maxInterval,
             Map<Class<? extends Throwable>, Boolean> retryExceptions) {
-        GXRetryConfig retryConfig = GXSpringContextUtils.getBean(GXRetryConfig.class);
-        if (retryConfig == null) {
-            retryConfig = new GXRetryConfig();
+        GXRetryConfig retryConfigBean = GXSpringContextUtils.getBean(GXRetryConfig.class);
+        GXRetryConfig retryConfig = retryConfigBean == null ? STANDALONE_RETRY_CONFIG : retryConfigBean;
+        Map<Class<? extends Throwable>, Boolean> effectiveRetryExceptions = getRetryableExceptionMap(retryExceptions);
+        RetryTemplateCacheKey cacheKey = new RetryTemplateCacheKey(maxAttempts, initialInterval, multiplier,
+                maxInterval, copyRetryExceptions(effectiveRetryExceptions), retryConfig.getClass().getName());
+        evictRetryTemplateCacheIfNecessary();
+        return RETRY_TEMPLATE_CACHE.computeIfAbsent(cacheKey, key ->
+                retryConfig.createCustomRetryTemplate(key.maxAttempts(), key.initialInterval(),
+                        key.multiplier(), key.maxInterval(), key.retryExceptions()));
+    }
+
+    private static Map<Class<? extends Throwable>, Boolean> copyRetryExceptions(
+            Map<Class<? extends Throwable>, Boolean> retryExceptions) {
+        return Collections.unmodifiableMap(new LinkedHashMap<>(retryExceptions));
+    }
+
+    private static void evictRetryTemplateCacheIfNecessary() {
+        if (RETRY_TEMPLATE_CACHE.size() < MAX_RETRY_TEMPLATE_CACHE_SIZE) {
+            return;
         }
-        return retryConfig.createCustomRetryTemplate(maxAttempts, initialInterval, multiplier, maxInterval,
-                getRetryableExceptionMap(retryExceptions));
+        var iterator = RETRY_TEMPLATE_CACHE.keySet().iterator();
+        for (int count = 0; iterator.hasNext() && count < MAX_RETRY_TEMPLATE_CACHE_SIZE / 2; count++) {
+            iterator.next();
+            iterator.remove();
+        }
     }
 
     private static Map<Class<? extends Throwable>, Boolean> getRetryableExceptionMap(
@@ -220,5 +251,14 @@ public final class GXRetryUtil {
     @SuppressWarnings("unchecked")
     private static <E extends Throwable> void throwAs(Throwable throwable) throws E {
         throw (E) throwable;
+    }
+
+    private record RetryTemplateCacheKey(
+            int maxAttempts,
+            long initialInterval,
+            double multiplier,
+            long maxInterval,
+            Map<Class<? extends Throwable>, Boolean> retryExceptions,
+            String retryConfigType) {
     }
 }

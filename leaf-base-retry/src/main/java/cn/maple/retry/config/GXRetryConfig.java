@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -42,6 +43,8 @@ public class GXRetryConfig {
 
     private static final long MIN_MAX_INTERVAL = 1000L;
     private static final long MAX_MAX_INTERVAL = 3600000L;
+
+    private static final GXRetryListener RETRY_LISTENER = new GXRetryListener();
 
     @Bean
     @ConditionalOnMissingBean(RetryTemplate.class)
@@ -72,13 +75,28 @@ public class GXRetryConfig {
         validateRetryParameters(maxAttempts, initialInterval, multiplier, maxInterval);
 
         Map<Class<? extends Throwable>, Boolean> exceptionMap =
-                MapUtil.isNotEmpty(retryExceptions) ? retryExceptions : createDefaultRetryExceptionMap();
+                MapUtil.isNotEmpty(retryExceptions) ? copyRetryExceptionMap(retryExceptions) : createDefaultRetryExceptionMap();
 
         RetryPolicy retryPolicy = createRetryPolicy(
                 maxAttempts, initialInterval, multiplier, maxInterval, exceptionMap);
         RetryTemplate retryTemplate = new RetryTemplate(retryPolicy);
-        retryTemplate.setRetryListener(new GXRetryListener());
+        retryTemplate.setRetryListener(RETRY_LISTENER);
         return retryTemplate;
+    }
+
+    private Map<Class<? extends Throwable>, Boolean> copyRetryExceptionMap(
+            Map<Class<? extends Throwable>, Boolean> retryExceptions) {
+        Map<Class<? extends Throwable>, Boolean> exceptionMap = new LinkedHashMap<>();
+        retryExceptions.forEach((exceptionType, retryable) -> {
+            if (exceptionType == null) {
+                throw new IllegalArgumentException("retry exception type must not be null");
+            }
+            if (retryable == null) {
+                throw new IllegalArgumentException("retry exception mapping must not be null");
+            }
+            exceptionMap.put(exceptionType, retryable);
+        });
+        return exceptionMap;
     }
 
     public RetryTemplate createCustomRetryTemplate(
@@ -131,31 +149,31 @@ public class GXRetryConfig {
             long maxInterval) {
         if (maxAttempts < MIN_MAX_ATTEMPTS || maxAttempts > MAX_MAX_ATTEMPTS) {
             throw new IllegalArgumentException(
-                    String.format("maxAttempts 必须在 %d 到 %d 之间，当前值: %d",
+                    String.format("maxAttempts must be between %d and %d, current value: %d",
                             MIN_MAX_ATTEMPTS, MAX_MAX_ATTEMPTS, maxAttempts));
         }
 
         if (initialInterval < MIN_INITIAL_INTERVAL || initialInterval > MAX_INITIAL_INTERVAL) {
             throw new IllegalArgumentException(
-                    String.format("initialInterval 必须在 %d 到 %d 毫秒之间，当前值: %d",
+                    String.format("initialInterval must be between %d and %d milliseconds, current value: %d",
                             MIN_INITIAL_INTERVAL, MAX_INITIAL_INTERVAL, initialInterval));
         }
 
         if (multiplier < MIN_MULTIPLIER || multiplier > MAX_MULTIPLIER) {
             throw new IllegalArgumentException(
-                    String.format("multiplier 必须在 %.1f 到 %.1f 之间，当前值: %.2f",
+                    String.format("multiplier must be between %.1f and %.1f, current value: %.2f",
                             MIN_MULTIPLIER, MAX_MULTIPLIER, multiplier));
         }
 
         if (maxInterval < MIN_MAX_INTERVAL || maxInterval > MAX_MAX_INTERVAL) {
             throw new IllegalArgumentException(
-                    String.format("maxInterval 必须在 %d 到 %d 毫秒之间，当前值: %d",
+                    String.format("maxInterval must be between %d and %d milliseconds, current value: %d",
                             MIN_MAX_INTERVAL, MAX_MAX_INTERVAL, maxInterval));
         }
 
         if (initialInterval > maxInterval) {
             throw new IllegalArgumentException(
-                    String.format("initialInterval (%d) 不能大于 maxInterval (%d)",
+                    String.format("initialInterval (%d) must not be greater than maxInterval (%d)",
                             initialInterval, maxInterval));
         }
     }

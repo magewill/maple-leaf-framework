@@ -35,7 +35,7 @@ public class GXRetryListener implements RetryListener {
     @Override
     public void beforeRetry(RetryPolicy retryPolicy, Retryable<?> retryable, RetryState retryState) {
         if (retryState.getRetryCount() == 0 && shouldLogAtLevel("INFO")) {
-            log.info("GXRetryListener: 开始执行重试操作. retryable: {}, retryCount: {}",
+            log.info("GXRetryListener: retry started. retryable: {}, retryCount: {}",
                     getRetryableTypeDescription(retryable), retryState.getRetryCount());
         }
     }
@@ -48,20 +48,20 @@ public class GXRetryListener implements RetryListener {
 
         Throwable throwable = retryState.getLastException();
         if (shouldLogAtLevel("WARN")) {
-            String message = "GXRetryListener: 重试操作发生错误. retryable: {}, retryCount: {}, exception: {}: {}";
+            String message = "GXRetryListener: retry execution failed. retryable: {}, retryCount: {}, exception: {}: {}";
             if (ENABLE_VERBOSE_LOGGING) {
                 message += ", exceptionCount: {}";
                 log.warn(message, getRetryableTypeDescription(retryable), retryState.getRetryCount(),
-                        throwable.getClass().getSimpleName(), Optional.ofNullable(throwable.getMessage()).orElse(""),
+                        getThrowableType(throwable), getThrowableMessage(throwable),
                         retryState.getExceptions().size());
             } else {
                 log.warn(message, getRetryableTypeDescription(retryable), retryState.getRetryCount(),
-                        throwable.getClass().getSimpleName(), Optional.ofNullable(throwable.getMessage()).orElse(""));
+                        getThrowableType(throwable), getThrowableMessage(throwable));
             }
         }
 
         if (shouldLogAtLevel("DEBUG") && log.isDebugEnabled()) {
-            log.debug("GXRetryListener: 重试失败堆栈. retryable: {}, retryCount: {}",
+            log.debug("GXRetryListener: retry failure stack. retryable: {}, retryCount: {}",
                     getRetryableTypeDescription(retryable), retryState.getRetryCount(), throwable);
         }
     }
@@ -69,23 +69,23 @@ public class GXRetryListener implements RetryListener {
     @Override
     public void onRetrySuccess(RetryPolicy retryPolicy, Retryable<?> retryable, Object result) {
         if (shouldLogAtLevel("INFO")) {
-            log.info("GXRetryListener: 重试操作成功结束. retryable: {}", getRetryableTypeDescription(retryable));
+            log.info("GXRetryListener: retry completed successfully. retryable: {}", getRetryableTypeDescription(retryable));
         }
     }
 
     @Override
     public void onRetryPolicyExhaustion(RetryPolicy retryPolicy, Retryable<?> retryable, RetryException exception) {
-        logRetryException("重试策略耗尽", retryable, exception);
+        logRetryException("retry policy exhausted", retryable, exception);
     }
 
     @Override
     public void onRetryPolicyInterruption(RetryPolicy retryPolicy, Retryable<?> retryable, RetryException exception) {
-        logRetryException("重试策略中断", retryable, exception);
+        logRetryException("retry policy interrupted", retryable, exception);
     }
 
     @Override
     public void onRetryPolicyTimeout(RetryPolicy retryPolicy, Retryable<?> retryable, RetryException exception) {
-        logRetryException("重试策略超时", retryable, exception);
+        logRetryException("retry policy timed out", retryable, exception);
     }
 
     private void logRetryException(String reason, Retryable<?> retryable, RetryException exception) {
@@ -93,10 +93,10 @@ public class GXRetryListener implements RetryListener {
             Throwable cause = exception.getCause();
             log.warn("GXRetryListener: {}. retryable: {}, retryCount: {}, lastException: {}: {}",
                     reason, getRetryableTypeDescription(retryable), exception.getRetryCount(),
-                    cause.getClass().getSimpleName(), Optional.ofNullable(cause.getMessage()).orElse(""));
+                    getThrowableType(cause), getThrowableMessage(cause));
         }
         if (shouldLogAtLevel("DEBUG") && log.isDebugEnabled()) {
-            log.debug("GXRetryListener: 重试终止堆栈. retryable: {}", getRetryableTypeDescription(retryable), exception);
+            log.debug("GXRetryListener: retry termination stack. retryable: {}", getRetryableTypeDescription(retryable), exception);
         }
     }
 
@@ -106,6 +106,14 @@ public class GXRetryListener implements RetryListener {
         }
 
         Class<?> retryableClass = retryable.getClass();
+        String retryableName = retryable.getName();
+        if (retryableName != null && !retryableName.isBlank()) {
+            return retryableName;
+        }
+        if (retryableClass.getName().contains("$$Lambda")) {
+            return "Lambda@" + Integer.toHexString(System.identityHashCode(retryable));
+        }
+
         if (RETRYABLE_TYPE_CACHE.size() >= MAX_CACHE_SIZE) {
             var iterator = RETRYABLE_TYPE_CACHE.entrySet().iterator();
             for (int count = 0; iterator.hasNext() && count < MAX_CACHE_SIZE / 2; count++) {
@@ -114,16 +122,15 @@ public class GXRetryListener implements RetryListener {
             }
         }
 
-        return RETRYABLE_TYPE_CACHE.computeIfAbsent(retryableClass, clazz -> {
-            String retryableName = retryable.getName();
-            if (retryableName != null && !retryableName.isBlank()) {
-                return retryableName;
-            }
-            if (clazz.getName().contains("$$Lambda")) {
-                return "Lambda@" + Integer.toHexString(System.identityHashCode(retryable));
-            }
-            return DEFAULT_TYPE_RESOLVER.apply(clazz);
-        });
+        return RETRYABLE_TYPE_CACHE.computeIfAbsent(retryableClass, DEFAULT_TYPE_RESOLVER);
+    }
+
+    private String getThrowableType(Throwable throwable) {
+        return throwable == null ? "<null>" : throwable.getClass().getSimpleName();
+    }
+
+    private String getThrowableMessage(Throwable throwable) {
+        return throwable == null ? "" : Optional.ofNullable(throwable.getMessage()).orElse("");
     }
 
     private boolean shouldLogAtLevel(String level) {
@@ -137,14 +144,14 @@ public class GXRetryListener implements RetryListener {
     }
 
     public static Supplier<String> getConfigInfo() {
-        return () -> String.format("日志级别=%s, 详细日志=%s, 缓存大小=%d/%d",
+        return () -> String.format("logLevel=%s, verboseLogging=%s, cacheSize=%d/%d",
                 LOG_LEVEL, ENABLE_VERBOSE_LOGGING, RETRYABLE_TYPE_CACHE.size(), MAX_CACHE_SIZE);
     }
 
     public static void clearCache() {
         RETRYABLE_TYPE_CACHE.clear();
         if (log.isDebugEnabled()) {
-            log.debug("GXRetryListener: 已清理 retryable 类型缓存");
+            log.debug("GXRetryListener: retryable type cache cleared");
         }
     }
 }

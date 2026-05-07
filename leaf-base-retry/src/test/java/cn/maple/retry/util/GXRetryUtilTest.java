@@ -334,6 +334,48 @@ class GXRetryUtilTest {
     }
 
     @Test
+    void testRetryOperationAsync_CustomFailureWrappedInBusinessException() {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            CompletableFuture<String> future = GXRetryUtil.retryOperationAsync(
+                    context -> {
+                        throw new SQLException("database unavailable");
+                    },
+                    null,
+                    2,
+                    100L,
+                    1.5,
+                    1000L,
+                    Map.of(SQLException.class, true),
+                    executor);
+
+            ExecutionException exception = assertThrows(ExecutionException.class, future::get);
+            assertInstanceOf(cn.maple.core.framework.exception.GXBusinessException.class, exception.getCause());
+            assertEquals("database unavailable", exception.getCause().getMessage());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void testRetryOperationAsync_ErrorIsNotWrappedInBusinessException() {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            CompletableFuture<String> future = GXRetryUtil.retryOperationAsync(context -> {
+                throw new AssertionError("fatal");
+            }, executor);
+
+            ExecutionException exception = assertThrows(ExecutionException.class, future::get);
+            assertInstanceOf(AssertionError.class, exception.getCause());
+            assertEquals("fatal", exception.getCause().getMessage());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     void testRetryOperation_PerformanceAndDelay() {
         AtomicInteger attempts = new AtomicInteger(0);
         long startTime = System.currentTimeMillis();
