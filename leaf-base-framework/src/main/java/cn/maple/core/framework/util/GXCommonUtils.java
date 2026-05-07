@@ -785,8 +785,7 @@ public class GXCommonUtils {
             return false;
         }
         String value = base64Str.trim();
-        return value.length() % 4 == 0
-                && ReUtil.isMatch(BASE64_FORMAT_REGULAR, value)
+        return ReUtil.isMatch(BASE64_FORMAT_REGULAR, value)
                 && Base64.isBase64(value);
     }
 
