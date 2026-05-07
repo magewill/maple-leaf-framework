@@ -14,7 +14,7 @@ import java.io.OutputStream;
  * <p>
  * 验证码抽象类
  * </p>
- * 
+ *
  * <p>
  * 该抽象类提供验证码生成和验证的基础功能，包括：
  * 1. 支持多种验证码类型（数字、字母、汉字、混合）
@@ -22,15 +22,7 @@ import java.io.OutputStream;
  * 3. 提供验证码存储和校验机制
  * 4. 支持自定义字体、颜色和干扰元素
  * </p>
- * 
- * <p>
- * 安全说明：
- * - 默认使用HttpSession存储验证码，支持自定义存储实现
- * - 验证码默认1分钟过期，防止暴力破解
- * - 支持忽略大小写验证，提高用户体验
- * - 提供干扰元素配置，增强验证码安全性
- * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
@@ -41,11 +33,11 @@ import java.io.OutputStream;
  *     .setHeight(50)        // 设置图片高度
  *     .setRandomType(GXRandomType.MIX)  // 设置验证码类型
  *     .setGif(true);        // 设置为GIF动态验证码
- * 
+ *
  * // 生成验证码
  * String ticket = UUID.randomUUID().toString();
  * captcha.generate(request, response.getOutputStream(), ticket);
- * 
+ *
  * // 验证用户输入
  * boolean valid = captcha.verification(request, ticket, userInput);
  * </pre>
@@ -145,8 +137,8 @@ public abstract class AbstractCaptcha implements ICaptcha {
      * </p>
      *
      * @param request 当前HTTP请求对象，用于获取Session
-     * @param out 输出流，用于写入生成的验证码图片
-     * @param ticket 验证码票据，作为存储验证码的唯一标识
+     * @param out     输出流，用于写入生成的验证码图片
+     * @param ticket  验证码票据，作为存储验证码的唯一标识
      * @throws IOException 如果图片生成或写入过程中发生I/O错误
      */
     @Override
@@ -175,7 +167,7 @@ public abstract class AbstractCaptcha implements ICaptcha {
      * </p>
      *
      * @param request 当前HTTP请求对象，用于获取Session
-     * @param ticket 验证码票据，用于获取存储的验证码
+     * @param ticket  验证码票据，用于获取存储的验证码
      * @param captcha 用户输入的验证码
      * @return 验证结果，true表示验证通过，false表示验证失败
      */
@@ -296,7 +288,7 @@ public abstract class AbstractCaptcha implements ICaptcha {
         if (null == randomType) {
             randomType = GXRandomType.MIX;
         }
-        
+
         // 设置默认字体
         if (null == font) {
             if (GXRandomType.CHINESE == randomType) {
@@ -307,17 +299,17 @@ public abstract class AbstractCaptcha implements ICaptcha {
                 font = new Font("Arial", Font.BOLD, 32);
             }
         }
-        
+
         // 设置默认颜色数组
         if (null == rgbArr) {
             rgbArr = ColorType.LIVELY;
         }
-        
+
         // 设置默认图片格式
         if (null == suffix) {
             suffix = gif ? "gif" : "png";
         }
-        
+
         // 设置默认尺寸
         if (width < 10) {
             width = 120;
@@ -325,7 +317,7 @@ public abstract class AbstractCaptcha implements ICaptcha {
         if (height < 10) {
             height = 48;
         }
-        
+
         // 设置默认长度，并确保长度在合理范围内
         if (length < 1) {
             length = 5;
@@ -333,7 +325,7 @@ public abstract class AbstractCaptcha implements ICaptcha {
             // 限制最大长度，防止生成过长的验证码导致显示问题
             length = 10;
         }
-        
+
         // 根据验证码类型生成随机码
         if (GXRandomType.CHINESE == randomType) {
             // 生成中文验证码
@@ -343,7 +335,7 @@ public abstract class AbstractCaptcha implements ICaptcha {
             }
             return GXRandomUtil.getChinese(chineseUnicode, length);
         }
-        
+
         // 生成数字、字母或混合验证码
         return GXRandomUtil.getText(randomType, length);
     }
