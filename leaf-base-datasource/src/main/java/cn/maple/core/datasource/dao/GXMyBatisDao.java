@@ -4,7 +4,6 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.core.util.ReflectUtil;
 import cn.maple.core.datasource.mapper.GXBaseMapper;
 import cn.maple.core.datasource.util.GXDBCommonUtils;
 import cn.maple.core.framework.dao.GXBaseDao;
@@ -24,69 +23,57 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.metadata.TableInfo;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import lombok.SneakyThrows;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.Serializable;
-import java.lang.reflect.Method;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID extends Serializable> extends ServiceImpl<M, T> implements GXBaseDao<T, ID> {
-    private static final Logger LOGGER = LoggerFactory.getLogger(GXMyBatisDao.class);
-
-    @SneakyThrows
     @Override
     public GXPaginationResDto<Dict> paginate(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
+        if (Objects.isNull(dbQueryParamInnerDto)) {
+            throw new GXBusinessException("Query param must not be null");
+        }
         IPage<Dict> iPage = GXDBCommonUtils.constructPageObject(dbQueryParamInnerDto.getPage(), dbQueryParamInnerDto.getPageSize(), dbQueryParamInnerDto.isPaginateCount());
-        String mapperMethodName = "paginate";
         Set<String> fieldSet = dbQueryParamInnerDto.getColumns();
         if (CharSequenceUtil.isBlank(dbQueryParamInnerDto.getRawSQL()) && Objects.isNull(fieldSet)) {
             dbQueryParamInnerDto.setColumns(CollUtil.newHashSet("*"));
         }
-        Method mapperMethod = ReflectUtil.getMethod(baseMapper.getClass(), mapperMethodName, IPage.class, dbQueryParamInnerDto.getClass());
-        if (Objects.nonNull(mapperMethod)) {
-            final List<Dict> records = ReflectUtil.invoke(baseMapper, mapperMethod, iPage, dbQueryParamInnerDto);
-            iPage.setRecords(records);
-            return GXDBCommonUtils.convertPageToPaginationResDto(iPage);
-        }
-        Class<?>[] interfaces = baseMapper.getClass().getInterfaces();
-        if (interfaces.length > 0) {
-            String canonicalName = interfaces[0].getCanonicalName();
-            throw new GXBusinessException(CharSequenceUtil.format("请在{}类中申明{}方法", canonicalName, mapperMethodName));
-        }
-        throw new GXBusinessException(CharSequenceUtil.format("请在Mapper类中申明{}方法", mapperMethodName));
+        final List<Dict> records = baseMapper.paginate(iPage, dbQueryParamInnerDto);
+        iPage.setRecords(records);
+        return GXDBCommonUtils.convertPageToPaginationResDto(iPage);
     }
 
-    @SneakyThrows
     @Override
     public GXPaginationResDto<Dict> paginate(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
+        if (Objects.isNull(masterQueryParamInnerDto)) {
+            throw new GXBusinessException("Master query param must not be null");
+        }
+        if (CollUtil.isEmpty(unionQueryParamInnerDtoLst)) {
+            throw new GXBusinessException("Union query param list must not be empty");
+        }
+        if (Objects.isNull(unionTypeEnums)) {
+            throw new GXBusinessException("Union type must not be null");
+        }
         IPage<Dict> iPage = GXDBCommonUtils.constructPageObject(masterQueryParamInnerDto.getPage(), masterQueryParamInnerDto.getPageSize(), masterQueryParamInnerDto.isPaginateCount());
-        String mapperMethodName = "unionPaginate";
         Set<String> fieldSet = masterQueryParamInnerDto.getColumns();
         if (CharSequenceUtil.isBlank(masterQueryParamInnerDto.getRawSQL()) && Objects.isNull(fieldSet)) {
             masterQueryParamInnerDto.setColumns(CollUtil.newHashSet("*"));
         }
-        Method mapperMethod = ReflectUtil.getMethod(baseMapper.getClass(), mapperMethodName, IPage.class, masterQueryParamInnerDto.getClass(), unionQueryParamInnerDtoLst.getClass(), unionTypeEnums.getClass());
-        if (Objects.nonNull(mapperMethod)) {
-            final List<Dict> records = ReflectUtil.invoke(baseMapper, mapperMethod, iPage, masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
-            iPage.setRecords(records);
-            return GXDBCommonUtils.convertPageToPaginationResDto(iPage);
-        }
-        Class<?>[] interfaces = baseMapper.getClass().getInterfaces();
-        if (interfaces.length > 0) {
-            String canonicalName = interfaces[0].getCanonicalName();
-            throw new GXBusinessException(CharSequenceUtil.format("请在{}类中申明{}方法", canonicalName, mapperMethodName));
-        }
-        throw new GXBusinessException(CharSequenceUtil.format("请在Mapper类中申明{}方法", mapperMethodName));
+        final List<Dict> records = baseMapper.unionPaginate(iPage, masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        iPage.setRecords(records);
+        return GXDBCommonUtils.convertPageToPaginationResDto(iPage);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Integer updateFieldByCondition(String tableName, List<GXUpdateField<?>> data, List<GXCondition<?>> condition) {
         if (Objects.isNull(condition) || condition.isEmpty()) {
-            throw new GXBusinessException("更新数据需要指定条件");
+            throw new GXBusinessException("Update condition must not be empty");
         }
         GXBaseQueryParamInnerDto dbQueryParamInnerDto = GXBaseQueryParamInnerDto.builder().tableName(tableName).condition(condition).build();
         return baseMapper.updateFieldByCondition(dbQueryParamInnerDto, data);
@@ -94,6 +81,9 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
 
     @Override
     public boolean checkRecordIsExists(String tableName, List<GXCondition<?>> condition) {
+        if (Objects.isNull(condition) || condition.isEmpty()) {
+            throw new GXBusinessException("Exists check condition must not be empty");
+        }
         GXBaseQueryParamInnerDto queryParamInnerDto = GXBaseQueryParamInnerDto.builder().tableName(tableName).condition(condition).build();
         Boolean val = baseMapper.checkRecordIsExists(queryParamInnerDto);
         return Boolean.TRUE.equals(val);
@@ -103,22 +93,20 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
     @Transactional(rollbackFor = Exception.class)
     public ID updateOrCreate(T entity, List<GXCondition<?>> condition) {
         GXValidatorUtils.validateEntity(entity);
-        if (Objects.isNull(condition) || condition.isEmpty()) {
-            condition = new ArrayList<>(4);
-        }
+        List<GXCondition<?>> effectiveCondition = Objects.isNull(condition) ? new ArrayList<>(4) : new ArrayList<>(condition);
         String pkName = getPrimaryKeyName();
         String pkMethodName = CharSequenceUtil.format("get{}", CharSequenceUtil.upperFirst(pkName));
         Object o = GXCommonUtils.reflectCallObjectMethod(entity, pkMethodName);
         Class<ID> retIDClazz = GXCommonUtils.getGenericClassType(getClass(), 2);
         if (Objects.nonNull(o) && !CollUtil.contains(Arrays.asList("0", "", 0), o)) {
-            if (o.getClass().isAssignableFrom(String.class)) {
-                condition.add(new GXConditionStrEQ(getTableName(), pkName, o.toString()));
+            if (o instanceof CharSequence) {
+                effectiveCondition.add(new GXConditionStrEQ(getTableName(), pkName, o.toString()));
             } else {
-                condition.add(new GXConditionEQ(getTableName(), pkName, Long.valueOf(o.toString())));
+                effectiveCondition.add(new GXConditionEQ(getTableName(), pkName, Long.valueOf(o.toString())));
             }
         }
-        if (!condition.isEmpty() && checkRecordIsExists(getTableName(), condition)) {
-            UpdateWrapper<T> updateWrapper = GXDBCommonUtils.assemblyUpdateWrapper(condition);
+        if (!effectiveCondition.isEmpty() && checkRecordIsExists(getTableName(), effectiveCondition)) {
+            UpdateWrapper<T> updateWrapper = GXDBCommonUtils.assemblyUpdateWrapper(effectiveCondition);
             update(entity, updateWrapper);
         } else {
             save(entity);
@@ -130,7 +118,7 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
     @Override
     public Dict findOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         if (Objects.isNull(dbQueryParamInnerDto)) {
-            throw new GXBusinessException("查询参数不能为空");
+            throw new GXBusinessException("Query param must not be null");
         }
         if (CharSequenceUtil.isEmpty(dbQueryParamInnerDto.getTableName())) {
             dbQueryParamInnerDto.setTableName(getTableName());
@@ -141,13 +129,13 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
     @Override
     public Dict findOneByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
         if (Objects.isNull(masterQueryParamInnerDto)) {
-            throw new GXBusinessException("主查询参数不能为空");
+            throw new GXBusinessException("Master query param must not be null");
         }
         if (Objects.isNull(unionQueryParamInnerDtoLst)) {
-            throw new GXBusinessException("联合查询参数列表不能为空");
+            throw new GXBusinessException("Union query param list must not be null");
         }
         if (Objects.isNull(unionTypeEnums)) {
-            throw new GXBusinessException("联合查询类型不能为空");
+            throw new GXBusinessException("Union type must not be null");
         }
         if (CharSequenceUtil.isEmpty(masterQueryParamInnerDto.getTableName())) {
             masterQueryParamInnerDto.setTableName(getTableName());
@@ -158,7 +146,7 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
     @Override
     public List<Dict> findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         if (Objects.isNull(dbQueryParamInnerDto)) {
-            throw new GXBusinessException("查询参数不能为空");
+            throw new GXBusinessException("Query param must not be null");
         }
         if (CharSequenceUtil.isEmpty(dbQueryParamInnerDto.getTableName())) {
             dbQueryParamInnerDto.setTableName(getTableName());
@@ -169,13 +157,13 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
     @Override
     public List<Dict> findByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
         if (Objects.isNull(masterQueryParamInnerDto)) {
-            throw new GXBusinessException("主查询参数不能为空");
+            throw new GXBusinessException("Master query param must not be null");
         }
         if (Objects.isNull(unionQueryParamInnerDtoLst)) {
-            throw new GXBusinessException("联合查询参数列表不能为空");
+            throw new GXBusinessException("Union query param list must not be null");
         }
         if (Objects.isNull(unionTypeEnums)) {
-            throw new GXBusinessException("联合查询类型不能为空");
+            throw new GXBusinessException("Union type must not be null");
         }
         if (CharSequenceUtil.isEmpty(masterQueryParamInnerDto.getTableName())) {
             masterQueryParamInnerDto.setTableName(getTableName());
@@ -186,7 +174,7 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
     @Override
     public Integer deleteSoftCondition(String tableName, List<GXUpdateField<?>> updateFieldList, List<GXCondition<?>> condition, Dict extraData) {
         if (Objects.isNull(condition) || condition.isEmpty()) {
-            throw new GXBusinessException("软删除数据需要指定条件，防止误删除全表数据");
+            throw new GXBusinessException("Soft delete condition must not be empty");
         }
         GXBaseQueryParamInnerDto dbQueryParamInnerDto = GXBaseQueryParamInnerDto.builder().tableName(tableName).condition(condition).extraData(extraData).build();
         return baseMapper.deleteSoftCondition(dbQueryParamInnerDto, updateFieldList);
@@ -200,7 +188,7 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
     @Override
     public Integer deleteCondition(String tableName, List<GXCondition<?>> condition) {
         if (Objects.isNull(condition) || condition.isEmpty()) {
-            throw new GXBusinessException("删除数据需要指定条件，防止误删除全表数据");
+            throw new GXBusinessException("Delete condition must not be empty");
         }
         GXBaseQueryParamInnerDto baseQueryParamInnerDto = GXBaseQueryParamInnerDto.builder().tableName(tableName).condition(condition).build();
         return baseMapper.deleteCondition(baseQueryParamInnerDto);

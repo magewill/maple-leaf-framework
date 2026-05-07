@@ -6,7 +6,6 @@ import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.Tuple;
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.maple.core.datasource.properties.GXDataSourceProperties;
 import cn.maple.core.framework.constant.GXBuilderConstant;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.GXJoinDto;
@@ -17,29 +16,26 @@ import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.dto.inner.op.GXDbJoinOp;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXDBConditionException;
-import cn.maple.core.framework.exception.GXSqlInjectionException;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
-import cn.maple.core.framework.util.GXSpringContextUtils;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.core.metadata.TableFieldInfo;
 import com.baomidou.mybatisplus.core.metadata.TableInfo;
-import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.jdbc.SQL;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.*;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 @SuppressWarnings("unused")
 public interface GXBaseBuilder {
     Logger LOGGER = LoggerFactory.getLogger(GXBaseBuilder.class);
+    String AUTO_UNDERLINE_FIELD_ENABLED_KEY = "maple.framework.mybatis.sql.auto-underline-field-enabled";
     Pattern NUMERIC_PATTERN = Pattern.compile("^-?\\d+(\\.\\d+)?$");
-    Pattern SAFE_IDENTIFIER_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_\\.]*$");
+    Pattern SAFE_IDENTIFIER_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_.]*$");
+    Pattern SAFE_ALIAS_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_]*$");
     Pattern QUALIFIED_WILDCARD_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_]*\\.\\*$");
-    Pattern HAVING_TOKEN_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_\\.]*");
+    Pattern HAVING_TOKEN_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_.]*");
     Pattern DANGEROUS_SQL_TOKEN_PATTERN = Pattern.compile("(?i)\\b(update|delete|insert|alter|drop|truncate|create|grant|revoke|call|exec|merge)\\b");
     Set<String> HAVING_KEYWORD_WHITELIST = Set.of(
             "AND", "OR", "NOT", "NULL", "IS", "LIKE", "IN", "BETWEEN", "AS", "DISTINCT",
@@ -66,77 +62,80 @@ public interface GXBaseBuilder {
             "case", "when", "then", "else", "end",
             "as", "asc", "desc", "and", "or", "not", "in", "is", "null",
             "distinct", "over", "partition", "by", "order",
-            "varchar", "nvarchar", "int", "bigint", "decimal", "char", "text"
+            "varchar", "nvarchar", "int", "integer", "tinyint", "smallint", "bigint", "decimal", "numeric",
+            "float", "double", "real", "char", "nchar", "text", "clob", "blob", "boolean", "bool",
+            "signed", "unsigned", "time", "datetime", "timestamp", "json"
     );
-
-    Pattern IDENTIFIER_IN_EXPR_PATTERN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)?");
 
     static String updateFieldByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> fieldList) {
         if (dbQueryParamInnerDto == null) {
-            throw new GXBusinessException("查询参数对象不能为null!");
+            throw new GXBusinessException("Query parameter object must not be null");
         }
         if (CollUtil.isEmpty(fieldList)) {
-            throw new GXBusinessException("更新字段列表不能为空!");
+            throw new GXBusinessException("Update field list must not be empty");
         }
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
-        String tableName = dbQueryParamInnerDto.getTableName();
+        String tableName = GXSqlTableMetadataSupport.validateMutableTableName(dbQueryParamInnerDto.getTableName());
+        GXSqlBuildContext context = new GXSqlBuildContext();
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("更新条件不能为空，为防止全表更新风险!");
+            throw new GXBusinessException("Update conditions must not be empty to prevent full-table updates");
         }
         final SQL sql = new SQL().UPDATE(tableName);
         for (GXUpdateField<?> field : fieldList) {
             sql.SET(field.updateString());
             dbQueryParamInnerDto.getParamMap().putAll(field.getParamMap());
         }
-        if (hasColumn(tableName, "updated_at")) {
+        if (GXSqlTableMetadataSupport.hasColumn(context, tableName, "updated_at")) {
             sql.SET(CharSequenceUtil.format("updated_at = {}", DateUtil.currentSeconds()));
         }
         Map<String, Object> paramMap = handleSQLCondition(sql, condition);
         dbQueryParamInnerDto.getParamMap().putAll(paramMap);
-        String logicNotDeletedCondition = buildLogicNotDeletedCondition(tableName, tableName, condition);
+        String logicNotDeletedCondition = GXSqlLogicDeleteSupport.buildLogicNotDeletedCondition(context, tableName, tableName, condition);
         if (CharSequenceUtil.isNotBlank(logicNotDeletedCondition)) {
             sql.WHERE(logicNotDeletedCondition);
         }
         String resultSql = sql.toString();
-        LOGGER.debug("生成的更新SQL: {}", resultSql);
+        LOGGER.debug("Generated update SQL: {}", resultSql);
         return resultSql;
     }
 
     static String checkRecordIsExists(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
-        Set<String> originalColumns = dbQueryParamInnerDto.getColumns();
-        Set<String> columnsSnapshot = Objects.isNull(originalColumns) ? null : new LinkedHashSet<>(originalColumns);
-        try {
-            dbQueryParamInnerDto.setColumns(CollUtil.newLinkedHashSet("1"));
-            String innerSql = findByCondition(dbQueryParamInnerDto);
-            return CharSequenceUtil.format("SELECT EXISTS ({})", innerSql);
-        } finally {
-            dbQueryParamInnerDto.setColumns(columnsSnapshot);
-        }
+        GXBaseQueryParamInnerDto existsQuery = copyQueryParam(dbQueryParamInnerDto);
+        existsQuery.setColumns(CollUtil.newLinkedHashSet("1"));
+        String innerSql = findByCondition(existsQuery);
+        dbQueryParamInnerDto.getParamMap().putAll(existsQuery.getParamMap());
+        return CharSequenceUtil.format("SELECT EXISTS ({})", innerSql);
     }
 
     static String findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
-        String tableName = dbQueryParamInnerDto.getTableName();
-        String tableNameAlias = Optional.ofNullable(dbQueryParamInnerDto.getTableNameAlias()).orElse(tableName);
+        return findByCondition(dbQueryParamInnerDto, null);
+    }
+
+    private static String findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, String conditionAliasOverride) {
+        String tableName = GXSqlTableMetadataSupport.validateQueryableTableExpression(dbQueryParamInnerDto.getTableName(), "MAIN");
+        String tableNameAlias = GXSqlTableMetadataSupport.resolveTableAlias(tableName, dbQueryParamInnerDto.getTableNameAlias(), "MAIN");
         List<GXJoinDto> joins = dbQueryParamInnerDto.getJoins();
         Set<String> selectColumns = dbQueryParamInnerDto.getColumns();
         Set<String> groupByField = dbQueryParamInnerDto.getGroupByField();
         Map<String, String> orderByField = dbQueryParamInnerDto.getOrderByField();
         Set<String> having = dbQueryParamInnerDto.getHaving();
         List<GXCondition<?>> conditions = dbQueryParamInnerDto.getCondition();
-        Set<String> allowedColumns = buildAllowedColumns(tableName, tableNameAlias, joins);
-        Set<String> columns = CollUtil.newHashSet();
+        GXSqlFieldRenderSupport.SqlFieldRenderMode fieldRenderMode = GXSqlFieldRenderSupport.resolveSqlFieldRenderMode();
+        GXSqlBuildContext context = new GXSqlBuildContext();
+        Set<String> allowedColumns = GXSqlTableMetadataSupport.buildAllowedColumns(context, tableName, tableNameAlias, joins);
+        Set<String> columns = CollUtil.newLinkedHashSet();
         if (CollUtil.isNotEmpty(selectColumns)) {
-            columns = selectColumns.stream()
-                    .map(GXBaseBuilder::normalizeRequestedSelectColumn)
-                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            columns.addAll(selectColumns);
         }
         String selectStr;
         if (CollUtil.isNotEmpty(columns)) {
             List<String> sanitizedSelectColumns = new ArrayList<>();
             for (String column : columns) {
-                String sanitizedColumn = sanitizeSelectColumn(column, allowedColumns);
-                sanitizedSelectColumns.add(CharSequenceUtil.toUnderlineCase(sanitizedColumn));
-                addExpressionAliasToWhitelist(sanitizedColumn, allowedColumns);
+                String normalizedColumn = GXSqlFieldRenderSupport.normalizeRequestedSelectColumn(column);
+                String sanitizedColumn = GXSqlFieldRenderSupport.sanitizeSelectColumn(normalizedColumn, allowedColumns);
+                String renderedColumn = GXSqlFieldRenderSupport.renderSelectColumn(column, sanitizedColumn, allowedColumns, fieldRenderMode);
+                sanitizedSelectColumns.add(renderedColumn);
+                GXSqlFieldRenderSupport.registerSelectOutputColumn(allowedColumns, renderedColumn, tableNameAlias);
             }
             selectStr = String.join(",", sanitizedSelectColumns);
         } else {
@@ -147,37 +146,29 @@ public interface GXBaseBuilder {
                 .FROM(CharSequenceUtil.format("{} {}", tableName, tableNameAlias));
         Map<String, Object> mergedParamMap = new HashMap<>();
         if (CollUtil.isNotEmpty(joins)) {
-            mergedParamMap.putAll(handleSQLJoin(sql, joins));
+            mergedParamMap.putAll(handleSQLJoin(sql, joins, context));
         }
-        mergedParamMap.putAll(handleSQLCondition(sql, conditions));
-        String logicNotDeletedCondition = buildLogicNotDeletedCondition(tableName, tableNameAlias, conditions);
+        mergedParamMap.putAll(handleSQLCondition(sql, conditions, conditionAliasOverride));
+        String logicNotDeletedCondition = GXSqlLogicDeleteSupport.buildLogicNotDeletedCondition(context, tableName, tableNameAlias, conditions);
         if (CharSequenceUtil.isNotBlank(logicNotDeletedCondition)) {
             sql.WHERE(logicNotDeletedCondition);
         }
         dbQueryParamInnerDto.getParamMap().putAll(mergedParamMap);
         if (CollUtil.isNotEmpty(groupByField)) {
             String[] groupByColumns = groupByField.stream()
-                    .map(column -> {
-                        List<String> split = CharSequenceUtil.split(column, ".");
-                        registerAllowedColumn(allowedColumns, column, split.getFirst(), split.getFirst());
-                        return sanitizeStructuralColumn(column, allowedColumns, "GROUP BY", true);
-                    })
+                    .map(column -> GXSqlFieldRenderSupport.sanitizeGroupBy(column, allowedColumns, tableName, tableNameAlias, fieldRenderMode))
                     .toArray(String[]::new);
             sql.GROUP_BY(groupByColumns);
         }
         if (CollUtil.isNotEmpty(having)) {
             String[] havingClauses = having.stream()
-                    .map(clause -> sanitizeHavingClause(clause, allowedColumns))
+                    .map(clause -> GXSqlFieldRenderSupport.sanitizeHavingClause(clause, allowedColumns, fieldRenderMode))
                     .toArray(String[]::new);
             sql.HAVING(havingClauses);
         }
         if (CollUtil.isNotEmpty(orderByField)) {
             String[] orderColumns = orderByField.entrySet().stream()
-                    .map(entry -> {
-                        List<String> split = CharSequenceUtil.split(entry.getKey(), ".");
-                        registerAllowedColumn(allowedColumns, entry.getKey(), split.getFirst(), split.getFirst());
-                        return sanitizeOrderBy(entry.getKey(), entry.getValue(), allowedColumns);
-                    })
+                    .map(entry -> GXSqlFieldRenderSupport.sanitizeOrderBy(entry.getKey(), entry.getValue(), allowedColumns, tableName, tableNameAlias, fieldRenderMode))
                     .toArray(String[]::new);
             sql.ORDER_BY(orderColumns);
         }
@@ -185,37 +176,21 @@ public interface GXBaseBuilder {
     }
 
     static Map<String, Object> handleSQLJoin(SQL sql, List<GXJoinDto> joins) {
+        return handleSQLJoin(sql, joins, new GXSqlBuildContext());
+    }
+
+    private static Map<String, Object> handleSQLJoin(SQL sql, List<GXJoinDto> joins, GXSqlBuildContext context) {
         HashMap<String, Object> paramMap = new HashMap<>();
         joins.forEach(join -> {
             GXJoinTypeEnums joinType = join.getJoinType();
-            String tableName = join.getJoinTableName();
-            String tableAliasName = join.getJoinTableNameAlias();
-            String masterTableName = join.getMasterTableName();
-            String masterTableNameAlias = join.getMasterTableNameAlias();
-            if (CharSequenceUtil.isBlank(masterTableNameAlias)) {
-                masterTableNameAlias = masterTableName;
-            }
-            if (CharSequenceUtil.isBlank(tableAliasName)) {
-                tableAliasName = tableName;
-            }
+            String tableName = CharSequenceUtil.isBlank(join.getJoinTableName())
+                    ? ""
+                    : GXSqlTableMetadataSupport.validateQueryableTableExpression(join.getJoinTableName(), "JOIN");
+            String tableAliasName = GXSqlTableMetadataSupport.resolveOptionalTableAlias(tableName, join.getJoinTableNameAlias(), "JOIN");
+            String masterTableName = GXSqlTableMetadataSupport.validateQueryableTableExpression(join.getMasterTableName(), "JOIN_MASTER");
+            String masterTableNameAlias = GXSqlTableMetadataSupport.resolveOptionalTableAlias(masterTableName, join.getMasterTableNameAlias(), "JOIN_MASTER");
             List<GXDbJoinOp> andOps = Optional.ofNullable(join.getAnd()).orElse(Collections.emptyList());
-            for (GXDbJoinOp op : andOps) {
-                if (CharSequenceUtil.isBlank(op.getMasterTableNameAlias())) {
-                    op.setMasterTableNameAlias(masterTableNameAlias);
-                }
-                if (CharSequenceUtil.isBlank(op.getJoinTableNameAlias())) {
-                    op.setJoinTableNameAlias(tableAliasName);
-                }
-            }
             List<GXDbJoinOp> orOps = Optional.ofNullable(join.getOr()).orElse(Collections.emptyList());
-            for (GXDbJoinOp op : orOps) {
-                if (CharSequenceUtil.isBlank(op.getMasterTableNameAlias())) {
-                    op.setMasterTableNameAlias(masterTableNameAlias);
-                }
-                if (CharSequenceUtil.isBlank(op.getJoinTableNameAlias())) {
-                    op.setJoinTableNameAlias(tableAliasName);
-                }
-            }
             List<GXCondition<?>> conditions = join.getConditions();
             String whereStr = "";
             if (CollUtil.isNotEmpty(conditions)) {
@@ -226,14 +201,12 @@ public interface GXBaseBuilder {
                     whereStr = " AND " + String.join(" AND ", lastWheres);
                 }
             }
-            String andClause = andOps
-                    .stream()
-                    .map(GXDbJoinOp::opString)
-                    .collect(Collectors.joining(GXBuilderConstant.AND_OP));
-            String orClause = orOps
-                    .stream()
-                    .map(GXDbJoinOp::opString)
-                    .collect(Collectors.joining(GXBuilderConstant.OR_OP));
+            Tuple andTuple = renderJoinOps(andOps, GXBuilderConstant.AND_OP, masterTableNameAlias, tableAliasName);
+            String andClause = andTuple.get(0);
+            paramMap.putAll(andTuple.get(1));
+            Tuple orTuple = renderJoinOps(orOps, GXBuilderConstant.OR_OP, masterTableNameAlias, tableAliasName);
+            String orClause = orTuple.get(0);
+            paramMap.putAll(orTuple.get(1));
             String joinTableWithAlias = CharSequenceUtil.isBlank(masterTableNameAlias)
                     ? masterTableName
                     : CharSequenceUtil.format("{} {}", masterTableName, masterTableNameAlias);
@@ -244,15 +217,7 @@ public interface GXBaseBuilder {
             String baseClause = CharSequenceUtil.isNotBlank(normalizedWhere)
                     ? CharSequenceUtil.format("{}{}{}", andClause, CharSequenceUtil.isNotBlank(andClause) ? GXBuilderConstant.AND_OP : "", normalizedWhere)
                     : andClause;
-            if (join.isAutoFillIsDeleteCondition()) {
-                String joinLogicNotDeletedCondition = buildLogicNotDeletedCondition(tableName, Optional.ofNullable(tableAliasName).orElse(tableName), Collections.emptyList());
-                if (CharSequenceUtil.isNotBlank(joinLogicNotDeletedCondition)) {
-                    baseClause = CharSequenceUtil.isBlank(baseClause)
-                            ? joinLogicNotDeletedCondition
-                            : CharSequenceUtil.format("({}) {} ({})", baseClause, GXBuilderConstant.AND_OP, joinLogicNotDeletedCondition);
-                }
-            }
-            if (CharSequenceUtil.isBlank(baseClause) && CharSequenceUtil.isBlank(orClause)) {
+            if (CharSequenceUtil.isBlank(baseClause) && CharSequenceUtil.isBlank(orClause) && !join.isAutoFillIsDeleteCondition()) {
                 throw new GXDBConditionException(CharSequenceUtil.format("JOIN [{}] must include at least one ON condition", tableName));
             }
             String onClause = CharSequenceUtil.isNotBlank(orClause)
@@ -260,6 +225,17 @@ public interface GXBaseBuilder {
                     ? CharSequenceUtil.format("({}) {} ({})", baseClause, GXBuilderConstant.OR_OP, orClause)
                     : orClause)
                     : baseClause;
+            if (join.isAutoFillIsDeleteCondition()) {
+                String joinLogicNotDeletedCondition = GXSqlLogicDeleteSupport.buildLogicNotDeletedCondition(context, tableName, Optional.ofNullable(tableAliasName).orElse(tableName), Collections.emptyList());
+                if (CharSequenceUtil.isNotBlank(joinLogicNotDeletedCondition)) {
+                    onClause = CharSequenceUtil.isBlank(onClause)
+                            ? joinLogicNotDeletedCondition
+                            : CharSequenceUtil.format("({}) {} ({})", onClause, GXBuilderConstant.AND_OP, joinLogicNotDeletedCondition);
+                }
+            }
+            if (CharSequenceUtil.isBlank(onClause)) {
+                throw new GXDBConditionException(CharSequenceUtil.format("JOIN [{}] must include at least one ON condition", tableName));
+            }
             String assemblySql = CharSequenceUtil.format("{} ON ({})", joinTableWithAlias, onClause);
             if (CharSequenceUtil.equalsIgnoreCase(GXBuilderConstant.LEFT_JOIN_TYPE, joinType.getJoinType())) {
                 sql.LEFT_OUTER_JOIN(assemblySql);
@@ -273,6 +249,10 @@ public interface GXBaseBuilder {
     }
 
     private static Tuple handleConditions(List<GXCondition<?>> conditions) {
+        return handleConditions(conditions, null);
+    }
+
+    private static Tuple handleConditions(List<GXCondition<?>> conditions, String conditionAliasOverride) {
         Map<String, Object> paramMap = new HashMap<>();
         if (Objects.isNull(conditions) || conditions.isEmpty()) {
             LOGGER.debug("No conditions provided, skipping condition rendering.");
@@ -287,31 +267,52 @@ public interface GXBaseBuilder {
                     String msg = CharSequenceUtil.format("Condition value must not be null: {}.{}", c.getTableNameAlias(), c.getFieldExpression());
                     throw new GXDBConditionException(msg);
                 }
-                GXConditionSegment segment = renderCondition(c);
+                GXConditionSegment segment = renderCondition(c, conditionAliasOverride);
                 if (Objects.nonNull(segment) && CharSequenceUtil.isNotEmpty(segment.sql())) {
                     lastWheres.add(segment.sql());
                     paramMap.putAll(segment.params());
-                    LOGGER.trace("添加WHERE条件: {}, 参数: {}", segment.sql(), segment.params());
+                    LOGGER.trace("Appending WHERE conditions: {}, parameters: {}", segment.sql(), segment.params());
                 }
             }
         });
         return new Tuple(lastWheres, paramMap);
     }
 
+    private static Tuple renderJoinOps(List<GXDbJoinOp> ops, String delimiter, String defaultMasterAlias, String defaultJoinAlias) {
+        Map<String, Object> paramMap = new HashMap<>();
+        if (CollUtil.isEmpty(ops)) {
+            return new Tuple("", paramMap);
+        }
+        List<String> clauses = new ArrayList<>();
+        for (GXDbJoinOp op : ops) {
+            String paramName = CharSequenceUtil.format("join_{}", UUID.randomUUID().toString().replace("-", ""));
+            GXConditionSegment segment = renderJoinOp(op, defaultMasterAlias, defaultJoinAlias, paramName);
+            if (Objects.nonNull(segment) && CharSequenceUtil.isNotBlank(segment.sql())) {
+                clauses.add(segment.sql());
+                paramMap.putAll(segment.params());
+            }
+        }
+        return new Tuple(String.join(delimiter, clauses), paramMap);
+    }
+
     static <R> String paginate(IPage<R> page, GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         Objects.requireNonNull(page, "page must not be null");
         if (CharSequenceUtil.isNotBlank(dbQueryParamInnerDto.getRawSQL())) {
-            return validateRawSqlStrict(dbQueryParamInnerDto.getRawSQL());
+            return GXSqlDialectSupport.validateRawSqlStrict(dbQueryParamInnerDto.getRawSQL());
         }
         return findByCondition(dbQueryParamInnerDto);
     }
 
     static String findOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         String sql = findByCondition(dbQueryParamInnerDto);
-        return applySingleRowLimit(sql);
+        return GXSqlDialectSupport.applySingleRowLimit(sql);
     }
 
     static Map<String, Object> handleSQLCondition(SQL sql, List<GXCondition<?>> conditions) {
+        return handleSQLCondition(sql, conditions, null);
+    }
+
+    private static Map<String, Object> handleSQLCondition(SQL sql, List<GXCondition<?>> conditions, String conditionAliasOverride) {
         if (sql == null) {
             throw new IllegalArgumentException("SQL object must not be null");
         }
@@ -320,28 +321,29 @@ public interface GXBaseBuilder {
             LOGGER.debug("WHERE conditions are empty, returning empty param map.");
             return paramMap;
         }
-        Tuple tuple = handleConditions(conditions);
+        Tuple tuple = handleConditions(conditions, conditionAliasOverride);
         List<String> lastWheres = tuple.get(0);
         if (!lastWheres.isEmpty()) {
             String whereStr = String.join(" AND ", lastWheres);
             sql.WHERE(whereStr);
-            LOGGER.debug("最终WHERE条件: {}", whereStr);
+            LOGGER.debug("Final WHERE condition: {}", whereStr);
         }
         return tuple.get(1);
     }
 
     static String deleteSoftCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> updateFieldList) {
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
-        String tableName = dbQueryParamInnerDto.getTableName();
+        String tableName = GXSqlTableMetadataSupport.validateMutableTableName(dbQueryParamInnerDto.getTableName());
+        GXSqlBuildContext context = new GXSqlBuildContext();
         Dict extraData = Optional.ofNullable(Convert.convert(Dict.class, dbQueryParamInnerDto.getExtraData())).orElse(Dict.create());
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Conditions cannot be empty!");
         }
-        TableInfo tableInfo = getTableInfoSafely(tableName);
+        TableInfo tableInfo = GXSqlTableMetadataSupport.getTableInfoSafely(context, tableName);
         if (Objects.isNull(tableInfo)) {
             throw new GXBusinessException(CharSequenceUtil.format("Cannot resolve TableInfo for table [{}]", tableName));
         }
-        String logicDeletedSetSql = buildLogicDeletedSetSql(tableInfo);
+        String logicDeletedSetSql = GXSqlLogicDeleteSupport.buildLogicDeletedSetSql(tableInfo);
         if (CharSequenceUtil.isBlank(logicDeletedSetSql)) {
             throw new GXBusinessException("No available logical-delete column configured (TableLogic/is_deleted)");
         }
@@ -353,14 +355,14 @@ public interface GXBaseBuilder {
                 dbQueryParamInnerDto.getParamMap().putAll(field.getParamMap());
             }
         }
-        if (CharSequenceUtil.isNotBlank(extraData.getStr("deletedBy")) && hasColumn(tableName, "deleted_by")) {
+        if (CharSequenceUtil.isNotBlank(extraData.getStr("deletedBy")) && GXSqlTableMetadataSupport.hasColumn(context, tableName, "deleted_by")) {
             String deletedByParamName = CharSequenceUtil.format("deleted_by_{}", UUID.randomUUID().toString().substring(0, 8));
-            sql.SET(CharSequenceUtil.format("deleted_by = #{{dbQueryParamInnerDto.paramMap.{}}}", deletedByParamName));
+            sql.SET(CharSequenceUtil.format("deleted_by = #{dbQueryParamInnerDto.paramMap.{}}", deletedByParamName));
             dbQueryParamInnerDto.getParamMap().put(deletedByParamName, extraData.getStr("deletedBy"));
         }
         Map<String, Object> paramMap = handleSQLCondition(sql, condition);
         dbQueryParamInnerDto.getParamMap().putAll(paramMap);
-        String logicNotDeletedCondition = buildLogicNotDeletedCondition(tableName, tableName, condition);
+        String logicNotDeletedCondition = GXSqlLogicDeleteSupport.buildLogicNotDeletedCondition(context, tableName, tableName, condition);
         if (CharSequenceUtil.isNotBlank(logicNotDeletedCondition)) {
             sql.WHERE(logicNotDeletedCondition);
         }
@@ -369,14 +371,15 @@ public interface GXBaseBuilder {
 
     static String deleteCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
-        String tableName = dbQueryParamInnerDto.getTableName();
+        String tableName = GXSqlTableMetadataSupport.validateMutableTableName(dbQueryParamInnerDto.getTableName());
+        GXSqlBuildContext context = new GXSqlBuildContext();
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Conditions must not be empty");
         }
         SQL sql = new SQL().DELETE_FROM(tableName);
         Map<String, Object> paramMap = handleSQLCondition(sql, condition);
         dbQueryParamInnerDto.getParamMap().putAll(paramMap);
-        String logicNotDeletedCondition = buildLogicNotDeletedCondition(tableName, tableName, condition);
+        String logicNotDeletedCondition = GXSqlLogicDeleteSupport.buildLogicNotDeletedCondition(context, tableName, tableName, condition);
         if (CharSequenceUtil.isNotBlank(logicNotDeletedCondition)) {
             sql.WHERE(logicNotDeletedCondition);
         }
@@ -384,281 +387,196 @@ public interface GXBaseBuilder {
     }
 
     static String unionFindByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
+        if (CollUtil.isEmpty(unionQueryParamInnerDtoLst)) {
+            throw new GXDBConditionException("UNION query list must not be empty");
+        }
+        if (Objects.isNull(unionTypeEnums)) {
+            throw new GXDBConditionException("UNION type must not be null");
+        }
         List<String> unionSqlLst = new ArrayList<>();
         unionQueryParamInnerDtoLst.forEach(queryParamInnerDto -> {
-            String originalTableName = queryParamInnerDto.getTableName();
-            String originalTableAlias = queryParamInnerDto.getTableNameAlias();
-            try {
-                if (CharSequenceUtil.isEmpty(originalTableName)) {
-                    queryParamInnerDto.setTableName(dbQueryParamInnerDto.getTableName());
-                }
-                if (CharSequenceUtil.isEmpty(originalTableAlias)) {
-                    queryParamInnerDto.setTableNameAlias(queryParamInnerDto.getTableName());
-                }
-                String sql = findByCondition(queryParamInnerDto);
-                dbQueryParamInnerDto.getParamMap().putAll(queryParamInnerDto.getParamMap());
-                unionSqlLst.add("(" + sql + ")");
-            } finally {
-                queryParamInnerDto.setTableName(originalTableName);
-                queryParamInnerDto.setTableNameAlias(originalTableAlias);
+            GXBaseQueryParamInnerDto branchQuery = copyQueryParam(queryParamInnerDto);
+            if (CharSequenceUtil.isEmpty(branchQuery.getTableName())) {
+                branchQuery.setTableName(dbQueryParamInnerDto.getTableName());
             }
+            String sql = findByCondition(branchQuery);
+            dbQueryParamInnerDto.getParamMap().putAll(branchQuery.getParamMap());
+            unionSqlLst.add("(" + sql + ")");
         });
         String unionSql = String.join("\n " + unionTypeEnums.getUnionType() + " \n", unionSqlLst);
-        String originalTableName = dbQueryParamInnerDto.getTableName();
-        String originalTableAlias = dbQueryParamInnerDto.getTableNameAlias();
-        List<GXCondition<?>> rootConditions = dbQueryParamInnerDto.getCondition();
-        Map<GXCondition<?>, String> originalAliases = new IdentityHashMap<>();
-        if (CollUtil.isNotEmpty(rootConditions)) {
-            rootConditions.forEach(condition -> originalAliases.put(condition, condition.getTableNameAlias()));
-        }
-        try {
-            dbQueryParamInnerDto.setTableName("(" + unionSql + ")");
-            dbQueryParamInnerDto.setTableNameAlias("tmp");
-            if (CollUtil.isNotEmpty(rootConditions)) {
-                rootConditions.forEach(condition -> {
-                    if (!"tmp".equalsIgnoreCase(Optional.ofNullable(condition.getTableNameAlias()).orElse(""))) {
-                        condition.setTableNameAlias("tmp");
-                    }
-                });
-            }
-            return GXBaseBuilder.findByCondition(dbQueryParamInnerDto);
-        } finally {
-            dbQueryParamInnerDto.setTableName(originalTableName);
-            dbQueryParamInnerDto.setTableNameAlias(originalTableAlias);
-            originalAliases.forEach(GXCondition::setTableNameAlias);
-        }
+        GXBaseQueryParamInnerDto outerQuery = copyQueryParam(dbQueryParamInnerDto);
+        outerQuery.setTableName("(" + unionSql + ")");
+        outerQuery.setTableNameAlias("tmp");
+        String outerSql = findByCondition(outerQuery, "tmp");
+        dbQueryParamInnerDto.getParamMap().putAll(outerQuery.getParamMap());
+        return outerSql;
     }
 
     static String unionFindOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        unionQueryParamInnerDtoLst.forEach(queryParamInnerDto -> {
-            String tableNameAlias = queryParamInnerDto.getTableNameAlias();
-            if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-                queryParamInnerDto.setTableNameAlias(queryParamInnerDto.getTableName());
-            }
-        });
-        return unionFindByCondition(dbQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        return GXSqlDialectSupport.applySingleRowLimit(unionFindByCondition(dbQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums));
     }
 
     static <R> String unionPaginate(IPage<R> page, GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
         Objects.requireNonNull(page, "page must not be null");
         if (CharSequenceUtil.isNotBlank(dbQueryParamInnerDto.getRawSQL())) {
-            return validateRawSqlStrict(dbQueryParamInnerDto.getRawSQL());
+            return GXSqlDialectSupport.validateRawSqlStrict(dbQueryParamInnerDto.getRawSQL());
         }
         return unionFindByCondition(dbQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
     }
 
-    private static String applySingleRowLimit(String sql) {
-        String dbType = resolveDbTypeFromContext().toLowerCase(Locale.ROOT);
-        if (MYSQL_LIKE_DIALECTS.contains(dbType) || POSTGRES_DIALECTS.contains(dbType)) {
-            return CharSequenceUtil.format("SELECT * FROM ({}) gx_tmp_one LIMIT 1", sql);
+    private static GXBaseQueryParamInnerDto copyQueryParam(GXBaseQueryParamInnerDto source) {
+        if (source == null) {
+            return null;
         }
-        if (SQLSERVER_DIALECTS.contains(dbType)) {
-            return CharSequenceUtil.format("SELECT TOP 1 * FROM ({}) gx_tmp_one", sql);
-        }
-        if (ORACLE_DIALECTS.contains(dbType)) {
-            return CharSequenceUtil.format("SELECT * FROM ({}) gx_tmp_one WHERE ROWNUM <= 1", sql);
-        }
-        LOGGER.warn("Unrecognized dbType [{}] for findOneByCondition, fallback to LIMIT 1 syntax.", dbType);
-        return CharSequenceUtil.format("SELECT * FROM ({}) gx_tmp_one LIMIT 1", sql);
+        return GXBaseQueryParamInnerDto.builder()
+                .tableName(source.getTableName())
+                .tableNameAlias(source.getTableNameAlias())
+                .page(source.getPage())
+                .pageSize(source.getPageSize())
+                .condition(source.getCondition())
+                .columns(Objects.isNull(source.getColumns()) ? null : new LinkedHashSet<>(source.getColumns()))
+                .orderByField(Objects.isNull(source.getOrderByField()) ? null : new LinkedHashMap<>(source.getOrderByField()))
+                .groupByField(Objects.isNull(source.getGroupByField()) ? null : new LinkedHashSet<>(source.getGroupByField()))
+                .methodName(source.getMethodName())
+                .having(Objects.isNull(source.getHaving()) ? null : new LinkedHashSet<>(source.getHaving()))
+                .copyOptions(source.getCopyOptions())
+                .limit(source.getLimit())
+                .joins(source.getJoins())
+                .extraData(source.getExtraData())
+                .rawSQL(source.getRawSQL())
+                .ignoreDataFilter(source.isIgnoreDataFilter())
+                .paginateCount(source.isPaginateCount())
+                .paramMap(Objects.isNull(source.getParamMap()) ? new HashMap<>() : new HashMap<>(source.getParamMap()))
+                .build();
     }
 
-    private static String buildLogicNotDeletedCondition(String tableName, String tableAliasName, List<GXCondition<?>> conditions) {
-        if (CollUtil.contains(conditions, c -> GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass()))) {
-            return null;
+    private static GXConditionSegment renderJoinOp(GXDbJoinOp op, String defaultMasterAlias, String defaultJoinAlias, String paramName) {
+        if (op instanceof cn.maple.core.framework.dto.inner.op.GXDbJoinValue) {
+            return renderJoinValueOp(op, defaultJoinAlias, paramName);
         }
-        String trimmedName = CharSequenceUtil.trimToEmpty(tableName);
-        if (trimmedName.isEmpty() || trimmedName.startsWith("(")) {
-            return null;
-        }
-        String alias = CharSequenceUtil.isBlank(tableAliasName) ? tableName : tableAliasName;
-        String logicColumn = null;
-        String logicNotDeletedValue = null;
-        TableInfo tableInfo = getTableInfoSafely(tableName);
-        if (tableInfo != null) {
-            Optional<TableFieldInfo> logicFieldInfo = getLogicDeleteFieldInfo(tableInfo);
-            if (logicFieldInfo.isPresent()) {
-                logicColumn = logicFieldInfo.get().getColumn();
-                logicNotDeletedValue = getLogicNotDeleteValue(tableInfo);
-            }
-        }
-        if (CharSequenceUtil.isBlank(logicColumn) && hasColumn(tableName, "is_deleted")) {
-            logicColumn = "is_deleted";
-            logicNotDeletedValue = "0";
-            LOGGER.warn("Table [{}] has no @TableLogic configuration, fallback to logical-delete condition [{}.{} = {}].",
-                    tableName, alias, logicColumn, logicNotDeletedValue);
-        }
-        if (CharSequenceUtil.isBlank(logicColumn)) {
-            return null;
-        }
-        String literal = toSqlLiteral(logicNotDeletedValue);
-        if (literal == null) {
-            return CharSequenceUtil.format("{}.{} IS NULL", alias, logicColumn);
-        }
-        return CharSequenceUtil.format("{}.{} = {}", alias, logicColumn, literal);
+        String masterAlias = CharSequenceUtil.isBlank(op.getMasterTableNameAlias()) ? defaultMasterAlias : op.getMasterTableNameAlias();
+        String joinAlias = CharSequenceUtil.isBlank(op.getJoinTableNameAlias()) ? defaultJoinAlias : op.getJoinTableNameAlias();
+        String masterField = qualifyJoinField(masterAlias, readJoinOpField(op, "masterFieldName"));
+        String joinField = qualifyJoinField(joinAlias, readJoinOpField(op, "joinFieldName"));
+        return new GXConditionSegment(masterField + readJoinOpOperator(op) + joinField, Collections.emptyMap());
     }
 
-    private static String buildLogicDeletedSetSql(TableInfo tableInfo) {
-        if (Objects.isNull(tableInfo)) {
-            return null;
-        }
-        String logicColumn = null;
-        String logicDeletedValue = null;
-        Optional<TableFieldInfo> logicFieldInfo = getLogicDeleteFieldInfo(tableInfo);
-        if (logicFieldInfo.isPresent()) {
-            logicColumn = logicFieldInfo.get().getColumn();
-            logicDeletedValue = getLogicDeleteValue(tableInfo);
-        }
-        if (CharSequenceUtil.isBlank(logicColumn)) {
-            boolean hasIsDeleted = tableInfo.getFieldList().stream()
-                    .anyMatch(f -> CharSequenceUtil.equalsIgnoreCase("is_deleted", f.getColumn()));
-            if (!hasIsDeleted) {
-                return null;
-            }
-            String keyColumn = tableInfo.getKeyColumn();
-            if (CharSequenceUtil.isBlank(keyColumn)) {
-                LOGGER.warn("Table [{}] fallback logical-delete field [is_deleted] requires primary key column, but got null.", tableInfo.getTableName());
-                logicColumn = "is_deleted";
-                logicDeletedValue = "1";
-            } else {
-                if (!GXBaseBuilder.SAFE_IDENTIFIER_PATTERN.matcher(keyColumn).matches()) {
-                    LOGGER.warn("Table [{}] primary key column [{}] is not a safe identifier, fallback to '1'.", tableInfo.getTableName(), keyColumn);
-                    logicColumn = "is_deleted";
-                    logicDeletedValue = "1";
-                } else {
-                    logicColumn = "is_deleted";
-                    logicDeletedValue = keyColumn;
-                }
-            }
-        }
-        String deletedValueSql;
-        deletedValueSql = logicDeletedValue;
-        String logicDeletedSetSql = CharSequenceUtil.format("{} = {}", logicColumn, deletedValueSql);
-        boolean hasDeletedAt = tableInfo.getFieldList().stream()
-                .anyMatch(f -> CharSequenceUtil.equalsIgnoreCase("deleted_at", f.getColumn()));
-        if (hasDeletedAt) {
-            long currentTimestamp = System.currentTimeMillis() / 1000L;
-            logicDeletedSetSql = CharSequenceUtil.format("{}, deleted_at = {}", logicDeletedSetSql, currentTimestamp);
-        }
-        return logicDeletedSetSql;
-    }
-
-    private static Optional<TableFieldInfo> getLogicDeleteFieldInfo(TableInfo tableInfo) {
-        if (Objects.isNull(tableInfo)) {
-            return Optional.empty();
-        }
-        TableFieldInfo fieldInfo = tableInfo.getLogicDeleteFieldInfo();
-        return Optional.ofNullable(fieldInfo);
-    }
-
-    private static String getLogicDeleteValue(TableInfo tableInfo) {
-        if (Objects.isNull(tableInfo)) {
-            return null;
-        }
-        TableFieldInfo logicDeleteFieldInfo = tableInfo.getLogicDeleteFieldInfo();
-        if (Objects.isNull(logicDeleteFieldInfo)) {
-            return null;
-        }
-        return logicDeleteFieldInfo.getLogicDeleteValue();
-    }
-
-    private static String getLogicNotDeleteValue(TableInfo tableInfo) {
-        if (Objects.isNull(tableInfo)) {
-            return null;
-        }
-        TableFieldInfo logicDeleteFieldInfo = tableInfo.getLogicDeleteFieldInfo();
-        if (Objects.isNull(logicDeleteFieldInfo)) {
-            return null;
-        }
-        return logicDeleteFieldInfo.getLogicNotDeleteValue();
-    }
-
-    private static String toSqlLiteral(String rawValue) {
-        if (rawValue == null) {
-            return null;
-        }
-        String value = rawValue.trim();
-        if (value.isEmpty() || "null".equalsIgnoreCase(value)) {
-            return null;
-        }
-        if (value.startsWith("'") && value.endsWith("'") && value.length() >= 2) {
-            return value;
-        }
-        if (NUMERIC_PATTERN.matcher(value).matches()) {
-            return value;
-        }
-        if ("true".equalsIgnoreCase(value) || "false".equalsIgnoreCase(value)) {
-            return value.toLowerCase(Locale.ROOT);
-        }
-        if (SQL_FUNCTION_PATTERN.matcher(value).matches()) {
-            return value;
-        }
-        return "'" + value.replace("'", "''") + "'";
-    }
-
-    private static boolean hasColumn(String tableName, String columnName) {
-        if (CharSequenceUtil.isBlank(tableName) || CharSequenceUtil.isBlank(columnName)) {
-            return false;
-        }
-        TableInfo tableInfo = getTableInfoSafely(tableName);
-        if (Objects.isNull(tableInfo)) {
-            return false;
-        }
-        String keyColumn = tableInfo.getKeyColumn();
-        if (CharSequenceUtil.isNotBlank(keyColumn) && CharSequenceUtil.equalsIgnoreCase(keyColumn, columnName)) {
-            return true;
-        }
-        return tableInfo.getFieldList().stream()
-                .anyMatch(fieldInfo -> CharSequenceUtil.equalsIgnoreCase(fieldInfo.getColumn(), columnName));
-    }
-
-    private static TableInfo getTableInfoSafely(String tableName) {
-        if (CharSequenceUtil.isBlank(tableName) || tableName.trim().startsWith("(")) {
-            return null;
-        }
+    private static GXConditionSegment renderJoinValueOp(GXDbJoinOp op, String defaultJoinAlias, String paramName) {
         try {
-            return TableInfoHelper.getTableInfo(tableName);
-        } catch (Exception ignored) {
-            return null;
+            String declaredAlias = (String) readField(op, cn.maple.core.framework.dto.inner.op.GXDbJoinValue.class, "tableNameAlias");
+            String fieldName = Objects.toString(readField(op, cn.maple.core.framework.dto.inner.op.GXDbJoinValue.class, "fieldName"), "");
+            Object fieldValue = readField(op, cn.maple.core.framework.dto.inner.op.GXDbJoinValue.class, "fieldValue");
+            String effectiveAlias = CharSequenceUtil.isBlank(declaredAlias) ? defaultJoinAlias : declaredAlias;
+            if (CharSequenceUtil.isBlank(effectiveAlias) || !SAFE_ALIAS_PATTERN.matcher(effectiveAlias).matches()) {
+                throw new GXDBConditionException(CharSequenceUtil.format("JOIN value table alias is invalid: {}", effectiveAlias));
+            }
+            String normalizedField = stripJoinFieldQualifier(fieldName);
+            if (!SAFE_ALIAS_PATTERN.matcher(normalizedField).matches()) {
+                throw new GXDBConditionException(CharSequenceUtil.format("JOIN field is invalid: {}", fieldName));
+            }
+            String sql = CharSequenceUtil.format("{}.{}{}#{dbQueryParamInnerDto.paramMap.{}}",
+                    effectiveAlias, normalizedField, readJoinOpOperator(op), paramName);
+            Map<String, Object> params = new HashMap<>();
+            params.put(paramName, fieldValue);
+            return new GXConditionSegment(sql, params);
+        } catch (GXDBConditionException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new GXDBConditionException(CharSequenceUtil.format("Unable to render JOIN value condition [{}]", op.getClass().getName()));
         }
+    }
+
+    private static String readJoinOpField(GXDbJoinOp op, String fieldName) {
+        try {
+            Object value = readField(op, GXDbJoinOp.class, fieldName);
+            return Objects.toString(value, "");
+        } catch (Exception ex) {
+            throw new GXDBConditionException(CharSequenceUtil.format("Unable to render JOIN condition [{}]", op.getClass().getName()));
+        }
+    }
+
+    private static String readJoinOpOperator(GXDbJoinOp op) {
+        try {
+            Method method = op.getClass().getDeclaredMethod("getOp");
+            method.setAccessible(true);
+            return Objects.toString(method.invoke(op), "");
+        } catch (Exception ex) {
+            throw new GXDBConditionException(CharSequenceUtil.format("Unable to resolve JOIN operator [{}]", op.getClass().getName()));
+        }
+    }
+
+    private static String qualifyJoinField(String tableAlias, String fieldName) {
+        String normalizedField = stripJoinFieldQualifier(fieldName);
+        if (CharSequenceUtil.isNotBlank(tableAlias) && !SAFE_ALIAS_PATTERN.matcher(tableAlias).matches()) {
+            throw new GXDBConditionException(CharSequenceUtil.format("JOIN table alias is invalid: {}", tableAlias));
+        }
+        if (!SAFE_ALIAS_PATTERN.matcher(normalizedField).matches()) {
+            throw new GXDBConditionException(CharSequenceUtil.format("JOIN field is invalid: {}", fieldName));
+        }
+        return CharSequenceUtil.isBlank(tableAlias)
+                ? normalizedField
+                : CharSequenceUtil.format("{}.{}", tableAlias, normalizedField);
+    }
+
+    private static String stripJoinFieldQualifier(String fieldName) {
+        String trimmed = CharSequenceUtil.trim(fieldName);
+        int dotIndex = trimmed.lastIndexOf('.');
+        return dotIndex >= 0 ? trimmed.substring(dotIndex + 1) : trimmed;
+    }
+
+    private static Object readField(Object target, Class<?> owner, String fieldName) throws IllegalAccessException, NoSuchFieldException {
+        Field field = owner.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field.get(target);
     }
 
     private static GXConditionSegment renderCondition(GXCondition<?> condition) {
+        return renderCondition(condition, null);
+    }
+
+    private static GXConditionSegment renderCondition(GXCondition<?> condition, String tableAliasOverride) {
         if (condition instanceof GXConditionJsonEQ jsonEq) {
-            return renderJsonEqCondition(jsonEq);
+            return renderJsonEqCondition(jsonEq, tableAliasOverride);
         }
-        return condition.toSegment();
+        GXConditionSegment segment = condition.toSegment();
+        if (CharSequenceUtil.isBlank(tableAliasOverride)
+                || CharSequenceUtil.isBlank(condition.getFieldExpression())
+                || condition instanceof GXConditionRaw) {
+            return segment;
+        }
+        return new GXConditionSegment(rewriteConditionAlias(segment.sql(), condition, tableAliasOverride), segment.params());
     }
 
     private static GXConditionSegment renderJsonEqCondition(GXConditionJsonEQ condition) {
-        String dbType = resolveDbTypeFromContext().toLowerCase(Locale.ROOT);
-        String field = qualifyConditionField(condition.getTableNameAlias(), condition.getFieldExpression());
+        return renderJsonEqCondition(condition, null);
+    }
+
+    private static GXConditionSegment renderJsonEqCondition(GXConditionJsonEQ condition, String tableAliasOverride) {
+        String dbType = GXSqlDialectSupport.resolveDbTypeFromContext().toLowerCase(Locale.ROOT);
+        String field = qualifyConditionField(CharSequenceUtil.isBlank(tableAliasOverride) ? condition.getTableNameAlias() : tableAliasOverride,
+                condition.getFieldExpression());
         String paramName = condition.getParamName();
         String pathParamName = paramName + "_path";
-        String pathParam = CharSequenceUtil.format("#{{dbQueryParamInnerDto.paramMap.{}}}", pathParamName);
-        String valueParam = CharSequenceUtil.format("#{{dbQueryParamInnerDto.paramMap.{}}}", paramName);
-        String sql = renderJsonEqByDialect(dbType, field, pathParam, valueParam);
+        String pathParam = CharSequenceUtil.format("#{dbQueryParamInnerDto.paramMap.{}}", pathParamName);
+        String valueParam = CharSequenceUtil.format("#{dbQueryParamInnerDto.paramMap.{}}", paramName);
+        String sql = GXSqlDialectSupport.renderJsonEqByDialect(dbType, field, pathParam, valueParam);
         Map<String, Object> params = new HashMap<>();
         params.put(paramName, condition.getValue());
         params.put(pathParamName, condition.getJsonPath());
         return new GXConditionSegment(sql, params);
     }
 
-    private static String renderJsonEqByDialect(String dbType, String field, String pathParam, String valueParam) {
-        if (MYSQL_LIKE_DIALECTS.contains(dbType)) {
-            return CharSequenceUtil.format("JSON_EXTRACT({}, {}) = {}", field, pathParam, valueParam);
+    private static String rewriteConditionAlias(String sql, GXCondition<?> condition, String tableAliasOverride) {
+        String fieldExpression = condition.getFieldExpression();
+        String originalAlias = condition.getTableNameAlias();
+        String currentPrefix = CharSequenceUtil.isBlank(originalAlias)
+                ? fieldExpression
+                : CharSequenceUtil.format("{}.{}", originalAlias, fieldExpression);
+        String overridePrefix = CharSequenceUtil.format("{}.{}", tableAliasOverride, fieldExpression);
+        if (sql.startsWith(currentPrefix)) {
+            return overridePrefix + sql.substring(currentPrefix.length());
         }
-        if (POSTGRES_DIALECTS.contains(dbType)) {
-            String normalizedPathExpr = CharSequenceUtil.format("string_to_array(replace({}, '$.', ''), '.')", pathParam);
-            return CharSequenceUtil.format("CAST({} AS jsonb) #>> {} = CAST({} AS text)", field, normalizedPathExpr, valueParam);
-        }
-        if (SQLSERVER_DIALECTS.contains(dbType)) {
-            return CharSequenceUtil.format("JSON_VALUE({}, {}) = CAST({} AS NVARCHAR(MAX))", field, pathParam, valueParam);
-        }
-        if (ORACLE_DIALECTS.contains(dbType)) {
-            return CharSequenceUtil.format("JSON_VALUE({}, {}) = CAST({} AS VARCHAR2(4000))", field, pathParam, valueParam);
-        }
-        LOGGER.warn("Unrecognized dbType [{}] for JSON_EQ condition, falling back to standard JSON_VALUE syntax.", dbType);
-        return CharSequenceUtil.format("JSON_VALUE({}, {}) = CAST({} AS VARCHAR(4000))", field, pathParam, valueParam);
+        return sql;
     }
 
     private static String qualifyConditionField(String tableAlias, String fieldExpression) {
@@ -668,320 +586,7 @@ public interface GXBaseBuilder {
             }
             return CharSequenceUtil.format("{}.{}", tableAlias, fieldExpression);
         }
-        throw new GXDBConditionException(CharSequenceUtil.format("非法字段表达式: {}", fieldExpression));
+        throw new GXDBConditionException(CharSequenceUtil.format("Invalid field expression: {}", fieldExpression));
     }
 
-    private static Set<String> buildAllowedColumns(String tableName, String tableAlias, List<GXJoinDto> joins) {
-        Set<String> allowedColumns = new HashSet<>();
-        ensureWhitelistCoverage(allowedColumns, tableName, tableAlias, "MAIN");
-        if (CollUtil.isNotEmpty(joins)) {
-            for (GXJoinDto join : joins) {
-                String joinTableName = join.getJoinTableName();
-                String joinTableAlias = join.getJoinTableNameAlias();
-                if (CharSequenceUtil.isNotBlank(joinTableName)) {
-                    ensureWhitelistCoverage(allowedColumns, joinTableName, joinTableAlias, "JOIN");
-                } else {
-                    LOGGER.warn("JOIN table name is blank, skipping whitelist coverage for alias [{}]", joinTableAlias);
-                }
-                String masterTableName = join.getMasterTableName();
-                String masterTableAlias = join.getMasterTableNameAlias();
-                if (CharSequenceUtil.isNotBlank(masterTableName)
-                        && !CharSequenceUtil.equalsIgnoreCase(masterTableName, tableName)) {
-                    ensureWhitelistCoverage(allowedColumns, masterTableName, masterTableAlias, "JOIN_MASTER");
-                }
-            }
-        }
-        if (allowedColumns.isEmpty()) {
-            LOGGER.warn("No allowed columns were resolved for table [{}], whitelist will be empty.", tableName);
-        }
-        return allowedColumns;
-    }
-
-    private static void ensureWhitelistCoverage(Set<String> allowedColumns, String tableName, String tableAlias, String scope) {
-        if (CharSequenceUtil.isBlank(tableName) || tableName.trim().startsWith("(")) {
-            return;
-        }
-        boolean loaded = collectAllowedColumns(allowedColumns, tableName, tableAlias);
-        if (!loaded) {
-            throw new GXDBConditionException(CharSequenceUtil.format("{} table [{}] has no TableInfo metadata, cannot build whitelist", scope, tableName));
-        }
-    }
-
-    private static boolean collectAllowedColumns(Set<String> allowedColumns, String tableName, String tableAlias) {
-        TableInfo tableInfo = getTableInfoSafely(tableName);
-        if (Objects.isNull(tableInfo)) {
-            return false;
-        }
-        String keyColumn = tableInfo.getKeyColumn();
-        if (CharSequenceUtil.isNotBlank(keyColumn)) {
-            registerAllowedColumn(allowedColumns, keyColumn, tableName, tableAlias);
-        }
-        tableInfo.getFieldList().forEach(fieldInfo -> {
-            String column = fieldInfo.getColumn();
-            if (CharSequenceUtil.isNotBlank(column)) {
-                registerAllowedColumn(allowedColumns, column, tableName, tableAlias);
-            }
-        });
-
-        return true;
-    }
-
-    private static void registerAllowedColumn(Set<String> allowedColumns, String column, String tableName, String tableAlias) {
-        String normalizedColumn = column.toLowerCase(Locale.ROOT);
-        allowedColumns.add(normalizedColumn);
-        if (CharSequenceUtil.isNotBlank(tableName)) {
-            allowedColumns.add(CharSequenceUtil.format("{}.{}", tableName.toLowerCase(Locale.ROOT), normalizedColumn));
-            allowedColumns.add(CharSequenceUtil.format("{}.*", tableName.toLowerCase(Locale.ROOT)));
-        }
-        if (CharSequenceUtil.isNotBlank(tableAlias)) {
-            allowedColumns.add(CharSequenceUtil.format("{}.{}", tableAlias.toLowerCase(Locale.ROOT), normalizedColumn));
-            allowedColumns.add(CharSequenceUtil.format("{}.*", tableAlias.toLowerCase(Locale.ROOT)));
-        }
-    }
-
-    private static String sanitizeSelectColumn(String column, Set<String> allowedColumns) {
-        String trimmed = CharSequenceUtil.trim(column);
-        if ("1".equals(trimmed)) {
-            return "1";
-        }
-        return sanitizeStructuralColumn(trimmed, allowedColumns, "SELECT", false);
-    }
-
-    private static String normalizeRequestedSelectColumn(String column) {
-        String trimmed = CharSequenceUtil.trim(column);
-        if (CharSequenceUtil.isBlank(trimmed)) {
-            return trimmed;
-        }
-        String expressionPart = extractExpressionPart(trimmed);
-        if ("*".equals(expressionPart) || QUALIFIED_WILDCARD_PATTERN.matcher(expressionPart).matches() || isComplexExpression(trimmed)) {
-            return trimmed;
-        }
-        return CharSequenceUtil.toUnderlineCase(trimmed);
-    }
-
-    /**
-     * 判断是否为复合表达式：含括号（函数调用）或含 AS 别名
-     */
-    private static boolean isComplexExpression(String trimmed) {
-        return trimmed.contains("(")
-                || CharSequenceUtil.containsIgnoreCase(trimmed, " as ")
-                || hasTrailingAlias(trimmed);
-    }
-
-    /**
-     * 从复合表达式中提取列引用，校验是否在白名单内。
-     * 跳过：SQL 函数/关键字、纯数值、AS 后的别名。
-     */
-    private static void validateColumnRefsInExpression(String expr, Set<String> allowedColumns, String clauseName) {
-        String exprWithoutAlias = extractExpressionPart(expr);
-        Matcher matcher = IDENTIFIER_IN_EXPR_PATTERN.matcher(exprWithoutAlias);
-        while (matcher.find()) {
-            String token = matcher.group();
-            String columnPart = token.toLowerCase(Locale.ROOT);
-            if (SQL_FUNCTION_KEYWORDS.contains(columnPart)) {
-                continue;
-            }
-            String bareColumn = extractBareColumnName(columnPart);
-            if (SQL_FUNCTION_KEYWORDS.contains(bareColumn) || bareColumn.matches("\\d+")) {
-                continue;
-            }
-            if (!allowedColumns.contains(columnPart) && !allowedColumns.contains(bareColumn)) {
-                throw new GXDBConditionException(
-                        CharSequenceUtil.format("{} expression references column [{}] which is not in whitelist: {}",
-                                clauseName, token, expr));
-            }
-        }
-    }
-
-    private static String sanitizeStructuralColumn(String column, Set<String> allowedColumns, String clauseName, boolean whitelistRequired) {
-        String trimmed = CharSequenceUtil.trim(column);
-        if (CharSequenceUtil.isBlank(trimmed)) {
-            throw new GXDBConditionException(CharSequenceUtil.format("{} field is blank", clauseName));
-        }
-        String expressionPart = extractExpressionPart(trimmed);
-        if ("*".equals(expressionPart) || QUALIFIED_WILDCARD_PATTERN.matcher(expressionPart).matches()) {
-            if (!"SELECT".equalsIgnoreCase(clauseName)) {
-                throw new GXDBConditionException(CharSequenceUtil.format("{} field does not support wildcard: {}", clauseName, column));
-            }
-            if ("*".equals(expressionPart)) {
-                LOGGER.error("SELECT field '*' is allowed for compatibility, please prefer explicit columns when possible.");
-            }
-            return trimmed;
-        }
-        if (isComplexExpression(trimmed)) {
-            if (GXDBStringEscapeUtils.check(trimmed)) {
-                throw new GXSqlInjectionException(
-                        CharSequenceUtil.format("{} field has SQL injection risk: {}", clauseName, column));
-            }
-            if (whitelistRequired && allowedColumns.isEmpty()) {
-                throw new GXDBConditionException(
-                        CharSequenceUtil.format("{} column whitelist is unavailable", clauseName));
-            }
-            if (!allowedColumns.isEmpty()) {
-                validateColumnRefsInExpression(trimmed, allowedColumns, clauseName);
-            }
-        } else {
-            if (!SAFE_IDENTIFIER_PATTERN.matcher(expressionPart).matches()) {
-                throw new GXDBConditionException(
-                        CharSequenceUtil.format("{} field is invalid: {}", clauseName, column));
-            }
-            if (GXDBStringEscapeUtils.check(trimmed)) {
-                throw new GXSqlInjectionException(
-                        CharSequenceUtil.format("{} field has SQL injection risk: {}", clauseName, column));
-            }
-            if (whitelistRequired && allowedColumns.isEmpty()) {
-                throw new GXDBConditionException(
-                        CharSequenceUtil.format("{} column whitelist is unavailable", clauseName));
-            }
-            String normalizedColumn = expressionPart.toLowerCase(Locale.ROOT);
-            String bareColumn = extractBareColumnName(normalizedColumn);
-            if (!allowedColumns.isEmpty() && !allowedColumns.contains(normalizedColumn) && !allowedColumns.contains(bareColumn)) {
-                throw new GXDBConditionException(
-                        CharSequenceUtil.format("{} field is not in whitelist: {}", clauseName, column));
-            }
-        }
-        return trimmed;
-    }
-
-    private static String sanitizeOrderBy(String column, String direction, Set<String> allowedColumns) {
-        if (CharSequenceUtil.isBlank(column)) {
-            throw new GXDBConditionException("ORDER BY column must not be blank");
-        }
-        String safeColumn = sanitizeStructuralColumn(column, allowedColumns, "ORDER BY", true);
-        String safeDirection = Optional.ofNullable(direction).map(CharSequenceUtil::trim).orElse("").toUpperCase(Locale.ROOT);
-        if (!"ASC".equals(safeDirection) && !"DESC".equals(safeDirection)) {
-            throw new GXDBConditionException(CharSequenceUtil.format("ORDER BY direction is invalid: {}", direction));
-        }
-        return CharSequenceUtil.format("{} {}", safeColumn, safeDirection);
-    }
-
-    private static String sanitizeHavingClause(String clause, Set<String> allowedColumns) {
-        String trimmed = CharSequenceUtil.trim(clause);
-        if (CharSequenceUtil.isBlank(trimmed)) {
-            throw new GXDBConditionException("HAVING clause must not be blank");
-        }
-        if (allowedColumns.isEmpty()) {
-            throw new GXDBConditionException("HAVING column whitelist is unavailable");
-        }
-        if (GXDBStringEscapeUtils.check(trimmed) || trimmed.contains(";") || trimmed.contains("--") || trimmed.contains("/*")) {
-            throw new GXSqlInjectionException(CharSequenceUtil.format("HAVING clause has SQL injection risk: {}", clause));
-        }
-        if (DANGEROUS_SQL_TOKEN_PATTERN.matcher(trimmed).find()) {
-            throw new GXSqlInjectionException(CharSequenceUtil.format("HAVING clause contains dangerous tokens: {}", clause));
-        }
-
-        java.util.regex.Matcher matcher = HAVING_TOKEN_PATTERN.matcher(trimmed);
-        while (matcher.find()) {
-            String token = matcher.group();
-            String upper = token.toUpperCase(Locale.ROOT);
-            if (HAVING_KEYWORD_WHITELIST.contains(upper)) {
-                continue;
-            }
-            String normalizedToken = token.toLowerCase(Locale.ROOT);
-            if (allowedColumns.contains(normalizedToken) || allowedColumns.contains(extractBareColumnName(normalizedToken))) {
-                continue;
-            }
-            if (isFunctionToken(trimmed, matcher.end(), token)) {
-                continue;
-            }
-            throw new GXDBConditionException(CharSequenceUtil.format("HAVING token is not in whitelist: {}", token));
-        }
-        return trimmed;
-    }
-
-    private static boolean isFunctionToken(String clause, int tokenEndIndex, String token) {
-        if (!SAFE_IDENTIFIER_PATTERN.matcher(token).matches()) {
-            return false;
-        }
-        int index = tokenEndIndex;
-        while (index < clause.length() && Character.isWhitespace(clause.charAt(index))) {
-            index++;
-        }
-        if (index >= clause.length() || clause.charAt(index) != '(') {
-            return false;
-        }
-        String upper = token.toUpperCase(Locale.ROOT);
-        if (HAVING_FUNCTION_WHITELIST.contains(upper)) {
-            return true;
-        }
-        return !DANGEROUS_SQL_TOKEN_PATTERN.matcher(token).find();
-    }
-
-    private static String extractExpressionPart(String expression) {
-        String trimmed = CharSequenceUtil.trim(expression);
-        Matcher matcher = EXPRESSION_ALIAS_PATTERN.matcher(trimmed);
-        if (!matcher.matches()) {
-            return trimmed;
-        }
-        String alias = matcher.group(2);
-        if (isReservedTrailingKeyword(alias)) {
-            return trimmed;
-        }
-        String baseExpression = CharSequenceUtil.trim(matcher.group(1));
-        return CharSequenceUtil.isBlank(baseExpression) ? trimmed : baseExpression;
-    }
-
-    private static boolean hasTrailingAlias(String expression) {
-        return !CharSequenceUtil.equals(extractExpressionPart(expression), CharSequenceUtil.trim(expression));
-    }
-
-    private static void addExpressionAliasToWhitelist(String expression, Set<String> allowedColumns) {
-        Matcher matcher = EXPRESSION_ALIAS_PATTERN.matcher(CharSequenceUtil.trim(expression));
-        if (!matcher.matches()) {
-            return;
-        }
-        String alias = matcher.group(2);
-        if (!isReservedTrailingKeyword(alias)) {
-            allowedColumns.add(alias.toLowerCase(Locale.ROOT));
-        }
-    }
-
-    private static boolean isReservedTrailingKeyword(String token) {
-        String normalized = token.toLowerCase(Locale.ROOT);
-        return SQL_FUNCTION_KEYWORDS.contains(normalized)
-                || HAVING_KEYWORD_WHITELIST.contains(token.toUpperCase(Locale.ROOT))
-                || "asc".equals(normalized)
-                || "desc".equals(normalized);
-    }
-
-    private static String extractBareColumnName(String identifier) {
-        int dotIndex = identifier.lastIndexOf('.');
-        if (dotIndex >= 0) {
-            return identifier.substring(dotIndex + 1);
-        }
-        return identifier;
-    }
-
-    private static String validateRawSqlStrict(String rawSQL) {
-        if (CharSequenceUtil.isBlank(rawSQL)) {
-            throw new GXSqlInjectionException("Raw SQL must not be blank");
-        }
-        String normalized = rawSQL.trim();
-        if (GXDBStringEscapeUtils.check(normalized)) {
-            throw new GXSqlInjectionException("SQL injection risk detected, raw SQL is blocked");
-        }
-        String lower = normalized.toLowerCase(Locale.ROOT);
-        if (lower.contains(";") || lower.contains("--") || lower.contains("/*") || lower.contains("*/")) {
-            throw new GXSqlInjectionException("Raw SQL contains illegal control symbols");
-        }
-        if (!(lower.startsWith("select") || lower.startsWith("with"))) {
-            throw new GXSqlInjectionException("Raw SQL only allows SELECT/WITH queries");
-        }
-        if (DANGEROUS_SQL_TOKEN_PATTERN.matcher(normalized).find()) {
-            throw new GXSqlInjectionException("Raw SQL contains dangerous keywords");
-        }
-        return normalized;
-    }
-
-    private static String resolveDbTypeFromContext() {
-        try {
-            GXDataSourceProperties properties = GXSpringContextUtils.getBean(GXDataSourceProperties.class);
-            if (Objects.nonNull(properties) && CharSequenceUtil.isNotBlank(properties.getDbType())) {
-                return properties.getDbType();
-            }
-        } catch (Exception ignored) {
-        }
-        LOGGER.error("Unable to resolve database type, please configure 'dbType' in GXDataSourceProperties");
-        return "mysql";
-    }
 }

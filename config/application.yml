@@ -129,3 +129,6 @@ maple:
       block-attack: true # 启防止全表更新与删除插件
       tenant: true # 开启多租户插件(请在相应的表中新增tenant_id字段)
       debezium: false # 启用debezium模块
+    mybatis:
+      sql:
+        preserve-select-alias-enabled: true # 是否开启自注册GROUP BY、ORDER BY字段

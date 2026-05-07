@@ -10,6 +10,8 @@ import cn.maple.core.framework.constant.GXBuilderConstant;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
+import cn.maple.core.framework.dto.inner.condition.GXConditionIsNULL;
+import cn.maple.core.framework.dto.inner.condition.GXConditionIsNotNULL;
 import cn.maple.core.framework.dto.inner.condition.GXExclusionDeletedFieldCondition;
 import cn.maple.core.framework.dto.res.GXPaginationResDto;
 import cn.maple.core.framework.exception.GXBusinessException;
@@ -228,6 +230,15 @@ public class GXDBCommonUtils {
                 String column = c.getFieldExpression();
                 //Object value = c.getFieldValue();
                 Object value = c.getFieldOriginalValue();
+
+                if (GXConditionIsNULL.class.isAssignableFrom(c.getClass())) {
+                    updateWrapper.isNull(CharSequenceUtil.toUnderlineCase(column));
+                    return;
+                }
+                if (GXConditionIsNotNULL.class.isAssignableFrom(c.getClass())) {
+                    updateWrapper.isNotNull(CharSequenceUtil.toUnderlineCase(column));
+                    return;
+                }
 
                 if (String.class.isAssignableFrom(value.getClass())) {
                     value = CharSequenceUtil.replace(value.toString(), "'", "");

@@ -63,6 +63,12 @@
       "name": "maple.framework.enable.data-permission",
       "type": "java.lang.Boolean",
       "description": "Enable Mybatis Plus DataPermissionHandler."
+    },
+    {
+      "defaultValue": true,
+      "name": "maple.framework.mybatis.sql.auto-underline-field-enabled",
+      "type": "java.lang.Boolean",
+      "description": "In custom SQL, whether to automatically change fields to underscores."
     }
   ]
 }

@@ -16,7 +16,7 @@ import cn.maple.core.framework.dto.inner.GXUnionTypeEnums;
 import cn.maple.core.framework.dto.inner.GXValidateExistsDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
-import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
+import cn.maple.core.framework.dto.inner.condition.GXConditionIsNULL;
 import cn.maple.core.framework.dto.inner.condition.GXConditionStrEQ;
 import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.dto.res.GXPaginationResDto;
@@ -27,8 +27,6 @@ import cn.maple.core.framework.util.GXValidatorUtils;
 import com.baomidou.mybatisplus.core.metadata.TableInfo;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import jakarta.validation.ConstraintValidatorContext;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.Serializable;
@@ -36,10 +34,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends GXBaseModel, D extends GXMyBatisDao<M, T, ID>, ID extends Serializable> implements GXBaseRepository<T, ID> {
-    @SuppressWarnings("all")
-    private static final Logger LOGGER = LoggerFactory.getLogger(GXMyBatisRepository.class);
+    private static final Pattern SAFE_FIELD_NAME_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_]*$");
 
     @SuppressWarnings("all")
     @Autowired
@@ -47,7 +45,7 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
 
     @Override
     public ID updateOrCreate(T entity, List<GXCondition<?>> condition) {
-        Assert.notNull(condition, "条件不能为null");
+        Assert.notNull(condition, "Condition list must not be null");
         GXValidatorUtils.validateEntity(entity);
         return baseDao.updateOrCreate(entity, condition);
     }
@@ -69,18 +67,20 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
 
     @Override
     public List<Dict> findByCondition(String tableName, List<GXCondition<?>> condition) {
-        Assert.notNull(condition, "条件不能为null");
+        Assert.notNull(condition, "Condition list must not be null");
         GXBaseQueryParamInnerDto queryParamInnerDto = GXBaseQueryParamInnerDto.builder().tableName(tableName).condition(condition).columns(CollUtil.newHashSet("*")).build();
         return findByCondition(queryParamInnerDto);
     }
 
     public List<Dict> findByCondition(String tableName, List<GXCondition<?>> condition, Set<String> columns) {
-        GXBaseQueryParamInnerDto queryParamInnerDto = GXBaseQueryParamInnerDto.builder().tableName(tableName).tableNameAlias(tableName).columns(columns).condition(condition).build();
+        Assert.notNull(condition, "Condition list must not be null");
+        GXBaseQueryParamInnerDto queryParamInnerDto = GXBaseQueryParamInnerDto.builder().tableName(tableName).columns(columns).condition(condition).build();
         return findByCondition(queryParamInnerDto);
     }
 
     @Override
     public Dict findOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
+        validateQueryParam(dbQueryParamInnerDto);
         if (CharSequenceUtil.isEmpty(dbQueryParamInnerDto.getTableName())) {
             dbQueryParamInnerDto.setTableName(getTableName());
         }
@@ -89,6 +89,7 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
 
     @Override
     public Dict findOneByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
+        validateUnionQueryParam(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
         if (CharSequenceUtil.isEmpty(masterQueryParamInnerDto.getTableName())) {
             masterQueryParamInnerDto.setTableName(getTableName());
         }
@@ -97,13 +98,13 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
 
     @Override
     public Dict findOneByCondition(String tableName, List<GXCondition<?>> condition) {
-        Assert.notNull(condition, "条件不能为null");
+        Assert.notNull(condition, "Condition list must not be null");
         return findOneByCondition(tableName, condition, null);
     }
 
     @Override
     public Dict findOneByCondition(String tableName, List<GXCondition<?>> condition, Set<String> columns) {
-        Assert.notNull(condition, "条件不能为null");
+        Assert.notNull(condition, "Condition list must not be null");
         GXBaseQueryParamInnerDto queryParamInnerDto = GXBaseQueryParamInnerDto.builder().tableName(tableName).condition(condition).columns(columns).build();
         return findOneByCondition(queryParamInnerDto);
     }
@@ -115,6 +116,7 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
 
     @Override
     public Dict findOneById(String tableName, ID id, Set<String> columns) {
+        Assert.notNull(id, "ID must not be null");
         GXCondition<?> condition;
         String pkFieldName = getPrimaryKeyName();
         if (ReUtil.isMatch(GXCommonConstant.DIGITAL_REGULAR_EXPRESSION, id.toString())) {
@@ -127,6 +129,7 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
 
     @Override
     public GXPaginationResDto<Dict> paginate(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
+        validateQueryParam(dbQueryParamInnerDto);
         if (CharSequenceUtil.isBlank(dbQueryParamInnerDto.getRawSQL()) && Objects.isNull(dbQueryParamInnerDto.getColumns())) {
             dbQueryParamInnerDto.setColumns(CollUtil.newHashSet("*"));
         }
@@ -135,6 +138,7 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
 
     @Override
     public GXPaginationResDto<Dict> paginate(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
+        validateUnionQueryParam(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
         if (CharSequenceUtil.isBlank(masterQueryParamInnerDto.getRawSQL()) && Objects.isNull(masterQueryParamInnerDto.getColumns())) {
             masterQueryParamInnerDto.setColumns(CollUtil.newHashSet("*"));
         }
@@ -143,7 +147,7 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
 
     @Override
     public GXPaginationResDto<Dict> paginate(String tableName, Integer page, Integer pageSize, List<GXCondition<?>> condition, Set<String> columns) {
-        Assert.notNull(condition, "条件不能为null");
+        Assert.notNull(condition, "Condition list must not be null");
         if (Objects.isNull(columns)) {
             columns = CollUtil.newHashSet("*");
         }
@@ -154,7 +158,7 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
     @Override
     public Integer deleteSoftCondition(String tableName, List<GXUpdateField<?>> updateFieldList, List<GXCondition<?>> condition, Dict extraData) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition list must not be empty");
         }
         return baseDao.deleteSoftCondition(tableName, updateFieldList, condition, extraData);
     }
@@ -162,7 +166,7 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
     @Override
     public Integer deleteSoftCondition(String tableName, List<GXCondition<?>> condition, Dict extraData) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition list must not be empty");
         }
         return deleteSoftCondition(tableName, CollUtil.newArrayList(), condition, extraData);
     }
@@ -170,7 +174,7 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
     @Override
     public Integer deleteCondition(String tableName, List<GXCondition<?>> condition) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition list must not be empty");
         }
         return baseDao.deleteCondition(tableName, condition);
     }
@@ -178,34 +182,30 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
     @Override
     public boolean checkRecordIsExists(String tableName, List<GXCondition<?>> condition) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition list must not be empty");
         }
         return baseDao.checkRecordIsExists(tableName, condition);
     }
 
     @Override
     public boolean validateExists(GXValidateExistsDto validateExistsDto, ConstraintValidatorContext constraintValidatorContext) {
+        if (Objects.isNull(validateExistsDto)) {
+            throw new GXBusinessException("Validate exists param must not be null");
+        }
         String tableName = CharSequenceUtil.isNotEmpty(validateExistsDto.getTableName()) ? validateExistsDto.getTableName() : getTableName();
         String fieldName = validateExistsDto.getFieldName();
         Object value = validateExistsDto.getValue();
         Dict originCondition = validateExistsDto.getCondition();
 
         if (CharSequenceUtil.isBlank(tableName)) {
-            throw new GXBusinessException(CharSequenceUtil.format("请指定表名 , 验证的字段 {} , 验证的值 : {}", fieldName, value));
-        }
-
-        GXCondition<?> condition;
-        if (NumberUtil.isNumber(value.toString()) && NumberUtil.isValidNumber(Convert.toNumber(value))) {
-            condition = new GXConditionEQ(tableName, fieldName, Convert.toLong(value));
-        } else {
-            condition = new GXConditionStrEQ(tableName, fieldName, Convert.toStr(value));
+            throw new GXBusinessException(CharSequenceUtil.format("Table name must be specified for field [{}] and value [{}]", fieldName, value));
         }
 
         List<GXCondition<?>> conditionLst = new ArrayList<>();
-        conditionLst.add(condition);
-        if (!originCondition.isEmpty()) {
-            GXConditionRaw conditionOrigin = new GXConditionRaw(CharSequenceUtil.removeAll(originCondition.toString(), '{', '}'));
-            conditionLst.add(conditionOrigin);
+        conditionLst.add(buildValidateExistsCondition(tableName, fieldName, value));
+        if (CollUtil.isNotEmpty(originCondition)) {
+            originCondition.forEach((key, conditionValue) ->
+                    conditionLst.add(buildValidateExistsCondition(tableName, Convert.toStr(key), conditionValue)));
         }
 
         return checkRecordIsExists(tableName, conditionLst);
@@ -213,9 +213,9 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
 
     @Override
     public Integer updateFieldByCondition(String tableName, List<GXUpdateField<?>> updateFields, List<GXCondition<?>> condition) {
-        Assert.notNull(condition, "条件不能为null");
+        Assert.notNull(condition, "Condition list must not be null");
         if (condition.isEmpty()) {
-            throw new GXBusinessException("更新数据需要指定条件");
+            throw new GXBusinessException("Update condition must not be empty");
         }
         return baseDao.updateFieldByCondition(tableName, updateFields, condition);
     }
@@ -237,11 +237,44 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
         TableInfo tableInfo = TableInfoHelper.getTableInfo(entity.getClass());
         return tableInfo.getTableName();
     }
-    
+
     @Override
     public String getTableName() {
         Class<?> entityClass = GXCommonUtils.getGenericClassType(getClass(), 1);
         TableInfo tableInfo = TableInfoHelper.getTableInfo(entityClass);
         return tableInfo.getTableName();
+    }
+
+    private void validateQueryParam(GXBaseQueryParamInnerDto queryParamInnerDto) {
+        if (Objects.isNull(queryParamInnerDto)) {
+            throw new GXBusinessException("Query param must not be null");
+        }
+    }
+
+    private void validateUnionQueryParam(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
+        validateQueryParam(masterQueryParamInnerDto);
+        if (Objects.isNull(unionQueryParamInnerDtoLst)) {
+            throw new GXBusinessException("Union query param list must not be null");
+        }
+        if (Objects.isNull(unionTypeEnums)) {
+            throw new GXBusinessException("Union type must not be null");
+        }
+    }
+
+    private GXCondition<?> buildValidateExistsCondition(String tableName, String fieldName, Object value) {
+        validateConditionFieldName(fieldName);
+        if (Objects.isNull(value)) {
+            return new GXConditionIsNULL(tableName, fieldName);
+        }
+        if (NumberUtil.isNumber(value.toString()) && NumberUtil.isValidNumber(Convert.toNumber(value))) {
+            return new GXConditionEQ(tableName, fieldName, Convert.toLong(value));
+        }
+        return new GXConditionStrEQ(tableName, fieldName, Convert.toStr(value));
+    }
+
+    private void validateConditionFieldName(String fieldName) {
+        if (CharSequenceUtil.isBlank(fieldName) || !SAFE_FIELD_NAME_PATTERN.matcher(fieldName).matches()) {
+            throw new GXBusinessException(CharSequenceUtil.format("Condition field name is invalid: {}", fieldName));
+        }
     }
 }

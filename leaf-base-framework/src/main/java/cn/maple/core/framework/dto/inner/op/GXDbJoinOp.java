@@ -1,8 +1,11 @@
 package cn.maple.core.framework.dto.inner.op;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.dto.inner.condition.GXConditionSegment;
 import lombok.Getter;
 import lombok.Setter;
+
+import java.util.Collections;
 
 public abstract class GXDbJoinOp {
     @Getter
@@ -29,18 +32,24 @@ public abstract class GXDbJoinOp {
     abstract String getOp();
 
     public String opString() {
-        if (CharSequenceUtil.contains(masterFieldName, ".")) {
-            masterFieldName = masterFieldName.split("\\.")[1];
+        String masterField = masterFieldName;
+        String joinField = joinFieldName;
+        if (CharSequenceUtil.contains(masterField, ".")) {
+            masterField = masterField.split("\\.")[1];
         }
-        if (CharSequenceUtil.contains(joinFieldName, ".")) {
-            joinFieldName = joinFieldName.split("\\.")[1];
+        if (CharSequenceUtil.contains(joinField, ".")) {
+            joinField = joinField.split("\\.")[1];
         }
-        if (CharSequenceUtil.isNotEmpty(masterTableNameAlias) && CharSequenceUtil.isNotEmpty(masterFieldName)) {
-            masterFieldName = CharSequenceUtil.format("{}.{}", masterTableNameAlias, masterFieldName);
+        if (CharSequenceUtil.isNotEmpty(masterTableNameAlias) && CharSequenceUtil.isNotEmpty(masterField)) {
+            masterField = CharSequenceUtil.format("{}.{}", masterTableNameAlias, masterField);
         }
-        if (CharSequenceUtil.isNotEmpty(joinTableNameAlias) && CharSequenceUtil.isNotEmpty(joinFieldName)) {
-            joinFieldName = CharSequenceUtil.format("{}.{}", joinTableNameAlias, joinFieldName);
+        if (CharSequenceUtil.isNotEmpty(joinTableNameAlias) && CharSequenceUtil.isNotEmpty(joinField)) {
+            joinField = CharSequenceUtil.format("{}.{}", joinTableNameAlias, joinField);
         }
-        return masterFieldName + getOp() + joinFieldName;
+        return masterField + getOp() + joinField;
+    }
+
+    public GXConditionSegment toSegment(String paramName) {
+        return new GXConditionSegment(opString(), Collections.emptyMap());
     }
 }
