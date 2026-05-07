@@ -1,7 +1,6 @@
 package cn.maple.core.framework.filter;
 
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.http.HTMLFilter;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
@@ -17,15 +16,10 @@ import org.springframework.http.MediaType;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Enumeration;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
-    private static final HTMLFilter htmlFilter = new HTMLFilter();
+    private static final GXHTMLFilter htmlFilter = new GXHTMLFilter();
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
