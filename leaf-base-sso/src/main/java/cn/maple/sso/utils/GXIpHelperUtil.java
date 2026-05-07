@@ -1,6 +1,7 @@
 package cn.maple.sso.utils;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.sso.properties.GXSSOProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 
@@ -27,7 +28,7 @@ public class GXIpHelperUtil {
             }
         } catch (UnknownHostException e) {
             ip = new StringBuilder("unknown");
-            log.error(e.getMessage());
+            log.error("Resolve local host failed: {}", e.getMessage());
         } finally {
             LOCAL_IP = ip.toString();
         }
@@ -37,25 +38,24 @@ public class GXIpHelperUtil {
     }
 
     public static String getIpAddr(HttpServletRequest request) {
-        String ip = request.getHeader("x-forwarded-for");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("Proxy-Client-IP");
+        if (request == null) {
+            return "";
         }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("WL-Proxy-Client-IP");
+
+        String ip = null;
+        if (GXSSOProperties.getInstance().isTrustForwardedIpHeaders()) {
+            ip = getForwardedIp(request);
         }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+
+        if (isUnknown(ip)) {
             ip = request.getRemoteAddr();
-            if (ip.equals("127.0.0.1")) {
+            if ("127.0.0.1".equals(ip) || "0:0:0:0:0:0:0:1".equals(ip)) {
                 try {
                     ip = InetAddress.getLocalHost().getHostAddress();
                 } catch (UnknownHostException e) {
-                    log.error("IpHelper error.{}", e.getMessage());
+                    log.error("Resolve local request IP failed: {}", e.getMessage());
                 }
             }
-        }
-        if (ip != null && ip.length() > 15 && ip.indexOf(",") > 1) {
-            ip = ip.substring(0, ip.indexOf(","));
         }
         return ip;
     }
@@ -71,9 +71,36 @@ public class GXIpHelperUtil {
                     }
                 }
             } catch (UnknownHostException e) {
-                log.error("判断本地IP时发生异常: {}", e.getMessage());
+                log.error("Check local IP failed: {}", e.getMessage());
             }
         }
         return false;
+    }
+
+    private static String getForwardedIp(HttpServletRequest request) {
+        String ip = firstKnownHeader(request, "x-forwarded-for");
+        if (isUnknown(ip)) {
+            ip = firstKnownHeader(request, "Proxy-Client-IP");
+        }
+        if (isUnknown(ip)) {
+            ip = firstKnownHeader(request, "WL-Proxy-Client-IP");
+        }
+        return ip;
+    }
+
+    private static String firstKnownHeader(HttpServletRequest request, String headerName) {
+        String value = request.getHeader(headerName);
+        if (isUnknown(value)) {
+            return null;
+        }
+        int commaIndex = value.indexOf(",");
+        if (commaIndex > -1) {
+            return value.substring(0, commaIndex).trim();
+        }
+        return value.trim();
+    }
+
+    private static boolean isUnknown(String ip) {
+        return CharSequenceUtil.isBlank(ip) || "unknown".equalsIgnoreCase(ip);
     }
 }

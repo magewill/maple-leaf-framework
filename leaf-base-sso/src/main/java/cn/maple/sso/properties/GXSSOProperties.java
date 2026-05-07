@@ -96,6 +96,11 @@ public class GXSSOProperties {
     private boolean cookieHttpOnly = true;
 
     /**
+     * Cookie SameSite attribute.
+     */
+    private String cookieSameSite = "Lax";
+
+    /**
      * cookie 有效期 -1 关闭浏览器失效
      */
     private int cookieMaxAge = -1;
@@ -109,6 +114,11 @@ public class GXSSOProperties {
      * 是否验证 cookie 设置时 IP 信息
      */
     private boolean cookieCheckIp = false;
+
+    /**
+     * Whether to trust proxy forwarded IP headers.
+     */
+    private boolean trustForwardedIpHeaders = false;
 
     /**
      * 登录地址

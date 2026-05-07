@@ -3,11 +3,21 @@ package cn.maple.sso.service;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.constant.GXTokenConstant;
-import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public interface GXTokenConfigService {
+    Logger LOG = LoggerFactory.getLogger(GXTokenConfigService.class);
+
+    AtomicBoolean DEFAULT_TOKEN_SECRET_WARNED = new AtomicBoolean();
+
     default String getTokenSecret() {
+        if (DEFAULT_TOKEN_SECRET_WARNED.compareAndSet(false, true)) {
+            LOG.warn("Using default SSO token secret. Override GXTokenConfigService#getTokenSecret for production.");
+        }
         return GXTokenConstant.TOKEN_SECRET_KEY;
     }
 
@@ -28,14 +38,14 @@ public interface GXTokenConfigService {
     }
 
     default String getTokenCacheKey(Long userId, Dict extraData) {
-        throw new GXBusinessException("请实现缓存的cache键方法!");
+        return getTokenCachePrefix() + userId;
     }
 
     default Dict getEfficaciousToken(Dict requestToken) {
         return requestToken;
     }
-    
+
     default boolean verifyTokenEffectiveness() {
-        return Boolean.TRUE;
+        return true;
     }
 }

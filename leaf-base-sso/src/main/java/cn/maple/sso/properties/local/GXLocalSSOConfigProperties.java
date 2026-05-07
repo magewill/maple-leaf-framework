@@ -10,9 +10,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.stereotype.Component;
 
-/**
- * 多数据源属性
- */
 @Data
 @Slf4j
 @Component
@@ -23,6 +20,6 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "sso")
 public class GXLocalSSOConfigProperties extends GXSSOConfigProperties {
     public GXLocalSSOConfigProperties() {
-        log.info("SSO的配置使用的是LOCAL配置");
+        log.info("SSO config source: local.");
     }
 }

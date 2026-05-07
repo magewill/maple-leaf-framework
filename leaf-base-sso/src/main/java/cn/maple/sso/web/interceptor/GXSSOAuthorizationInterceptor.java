@@ -46,13 +46,12 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
         }
 
         Dict ssoToken = GXSSOHelperUtil.getSSOToken(request);
-
         if (CollUtil.isEmpty(ssoToken)) {
             return handleEmptyToken(request, response);
-        } else {
-            request.setAttribute(GXSSOConstant.SSO_TOKEN_ATTR, ssoToken);
-            return true;
         }
+
+        request.setAttribute(GXSSOConstant.SSO_TOKEN_ATTR, ssoToken);
+        return true;
     }
 
     private boolean shouldSkipAuth(HttpServletRequest request, Object handler) {
@@ -62,17 +61,17 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
 
         String requestURI = request.getRequestURI();
         if (isWhiteListUrl(requestURI)) {
-            log.debug("URL在白名单中，跳过登录验证: {}", requestURI);
+            log.debug("Skip SSO login check for whitelist URL: {}", requestURI);
             return true;
         }
 
         if (GXHandlerMethodAnnotationUtils.hasMergedAnnotation(handlerMethod, GXIgnoreLoginIntercept.class)) {
-            log.debug("方法有@GXIgnoreLoginIntercept注解，跳过登录验证: {}", handlerMethod.getMethod().getName());
+            log.debug("Skip SSO login check for GXIgnoreLoginIntercept: {}", handlerMethod.getMethod().getName());
             return true;
         }
 
         if (GXHandlerMethodAnnotationUtils.hasMergedAnnotation(handlerMethod, GXHttpInvokerAuthToken.class)) {
-            log.debug("方法有@GXHttpInvokerAuthToken注解，跳过登录验证: {}", handlerMethod.getMethod().getName());
+            log.debug("Skip SSO login check for GXHttpInvokerAuthToken: {}", handlerMethod.getMethod().getName());
             return true;
         }
 
@@ -94,7 +93,7 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
         if (Objects.nonNull(authorizationInterceptorService)) {
             boolean interceptor = authorizationInterceptorService.interceptor(request, response);
             if (interceptor) {
-                log.debug("自定义拦截规则允许放行请求: {}", request.getRequestURI());
+                log.debug("Custom SSO interceptor allows request: {}", request.getRequestURI());
                 return true;
             }
         }
@@ -112,7 +111,7 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
             }
         } else {
             if (getHandler().preTokenIsNull(request, response)) {
-                log.debug("用户未登录，请求URL: {}", request.getRequestURL());
+                log.debug("User is not logged in, request URL: {}", request.getRequestURL());
 
                 if (Objects.nonNull(ssoCache)) {
                     ssoCache.delete(Dict.create());
@@ -139,7 +138,7 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
     }
 
     public void setHandler(GXSSOHandler handler) {
-        Objects.requireNonNull(handler, "SSO处理器不能为null");
+        Objects.requireNonNull(handler, "SSO handler must not be null");
         handlerRef.set(handler);
     }
 }

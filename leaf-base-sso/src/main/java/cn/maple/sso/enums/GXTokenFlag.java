@@ -1,9 +1,9 @@
 package cn.maple.sso.enums;
 
 public enum GXTokenFlag {
-    NORMAL(0, "正常"),
+    NORMAL(0, "normal"),
 
-    CACHE_SHUT(1, "缓存宕机");
+    CACHE_SHUT(1, "cache shut");
 
     private final Integer value;
 

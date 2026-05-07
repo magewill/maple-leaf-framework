@@ -1,9 +1,9 @@
 package cn.maple.sso.enums;
 
 public enum GXAction {
-    Normal("0", "执行权限验证"),
+    Normal("0", "verify permission"),
 
-    Skip("1", "跳过权限验证");
+    Skip("1", "skip permission");
 
     private final String key;
 

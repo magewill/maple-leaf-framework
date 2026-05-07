@@ -4,6 +4,7 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.constant.GXTokenConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCookieHelperUtil;
 import cn.maple.sso.cache.GXSSOCache;
@@ -34,43 +35,46 @@ public abstract class GXSSOSupportService {
     }
 
     protected Dict cacheSSOToken(HttpServletRequest request, GXSSOCache cache) {
-        if (cache != null) {
-            Dict requestToken = getSSOTokenFromCookie(request);
-            if (CollUtil.isEmpty(requestToken)) {
-                log.info("SSO 用户未登录....");
-                return Dict.create();
-            }
+        Dict requestToken = getSSOTokenFromCookie(request);
+        if (CollUtil.isEmpty(requestToken)) {
+            log.info("SSO user is not logged in.");
+            return Dict.create();
+        }
 
+        if (Objects.equals(requestToken.getInt("flag"), GXTokenFlag.CACHE_SHUT.value())) {
+            return requestToken;
+        }
+
+        if (cache != null) {
             Dict cacheToken = cache.get(getConfig().getCacheExpires(), requestToken);
             if (CollUtil.isEmpty(cacheToken)) {
                 log.info("cacheSSOToken GXSsoToken is null.");
                 return Dict.create();
-            } else {
-                if (!Objects.equals(cacheToken.getInt("flag"), GXTokenFlag.CACHE_SHUT.value())) {
-                    if (cache.verifyTokenConsistency(cacheToken, requestToken)) {
-                        return cacheToken;
-                    } else {
-                        log.info("Login time is not consistent or kicked out.");
-                        request.setAttribute(GXSSOConstant.SSO_KICK_FLAG, GXSSOConstant.SSO_KICK_USER);
-                        return Dict.create();
-                    }
+            }
+            if (!Objects.equals(cacheToken.getInt("flag"), GXTokenFlag.CACHE_SHUT.value())) {
+                if (cache.verifyTokenConsistency(cacheToken, requestToken)) {
+                    return cacheToken;
                 }
+                log.info("Login time is not consistent or kicked out.");
+                request.setAttribute(GXSSOConstant.SSO_KICK_FLAG, GXSSOConstant.SSO_KICK_USER);
+                return Dict.create();
             }
         }
-        return getSSOToken(request, getConfig().getCookieName());
+        return requestToken;
     }
 
     protected Dict getSSOToken(HttpServletRequest request, String cookieName) {
         String token = request.getHeader(getConfig().getTokenName());
-        log.info("SSO从header中获取token : {}", token);
         if (CharSequenceUtil.isBlank(token)) {
             Cookie cookie = GXCookieHelperUtil.findCookieByName(request, cookieName);
             if (null == cookie) {
-                log.info("Unauthorized login request, ip=" + GXIpHelperUtil.getIpAddr(request));
+                log.info("Unauthorized login request, ip={}", GXIpHelperUtil.getIpAddr(request));
                 return Dict.create();
             }
+            log.debug("SSO token source: cookie");
             return GXSSOHelperUtil.parser(cookie.getValue(), false);
         }
+        log.debug("SSO token source: header");
         return GXSSOHelperUtil.parser(token, true);
     }
 
@@ -82,11 +86,10 @@ public abstract class GXSSOSupportService {
             log.debug("The request browser is inconsistent.");
             return Dict.create();
         }
-        // 判断请求 IP 是否合法
         if (getConfig().isCookieCheckIp()) {
             String ip = GXIpHelperUtil.getIpAddr(request);
             if (ip != null && !ip.equals(ssoToken.getStr("ip"))) {
-                log.debug(String.format("ip inconsistent! return SSOToken null, SSOToken userIp:%s, reqIp:%s", ssoToken.getStr("ip"), ip));
+                log.debug("ip inconsistent! return SSOToken null, SSOToken userIp:{}, reqIp:{}", ssoToken.getStr("ip"), ip);
                 return Dict.create();
             }
         }
@@ -96,13 +99,23 @@ public abstract class GXSSOSupportService {
     public Dict getSSOTokenFromCookie(HttpServletRequest request) {
         Dict token = attrSSOToken(request);
         if (token == null) {
-            log.info("SSO组件从request的属性中未获取到");
+            log.debug("SSO token request attribute is empty.");
             token = getSSOToken(request, getConfig().getCookieName());
         }
-        log.info("SSO组件最终解码出来的token: {}", token);
+        if (log.isDebugEnabled()) {
+            log.debug("SSO token parsed: {}", summarizeToken(token));
+        }
         return token;
     }
 
+    private String summarizeToken(Dict token) {
+        if (CollUtil.isEmpty(token)) {
+            return "empty";
+        }
+        return "userId=" + token.getStr(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME)
+                + ", loginAt=" + token.getStr(GXTokenConstant.LOGIN_AT_FIELD_NAME)
+                + ", flag=" + token.getStr("flag");
+    }
 
     protected Cookie generateCookie(HttpServletRequest request, Dict token) {
         try {
@@ -137,7 +150,7 @@ public abstract class GXSSOSupportService {
             if (token != null) {
                 boolean rlt = cache.delete(token);
                 if (!rlt) {
-                    cache.delete(token);
+                    log.warn("SSO token cache delete failed.");
                 }
             }
         }
@@ -147,7 +160,7 @@ public abstract class GXSSOSupportService {
             for (GXSSOPlugin plugin : pluginList) {
                 boolean logout = plugin.logout(request, response);
                 if (!logout) {
-                    plugin.logout(request, response);
+                    log.warn("SSO plugin logout failed: {}", plugin.getClass().getName());
                 }
             }
         }

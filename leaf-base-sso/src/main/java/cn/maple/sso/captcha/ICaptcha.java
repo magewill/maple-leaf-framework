@@ -8,6 +8,6 @@ import java.io.Serializable;
 
 public interface ICaptcha extends Serializable {
     void generate(HttpServletRequest request, OutputStream out, String ticket) throws IOException;
-    
+
     boolean verification(HttpServletRequest request, String ticket, String captcha);
 }

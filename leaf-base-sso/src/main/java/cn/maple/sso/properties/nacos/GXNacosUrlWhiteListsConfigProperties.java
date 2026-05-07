@@ -26,6 +26,6 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "url")
 public class GXNacosUrlWhiteListsConfigProperties extends GXUrlWhiteListsConfigProperties {
     public GXNacosUrlWhiteListsConfigProperties() {
-        log.info("Url白名单的配置使用的是NACOS配置");
+        log.info("URL whitelist config source: nacos.");
     }
 }

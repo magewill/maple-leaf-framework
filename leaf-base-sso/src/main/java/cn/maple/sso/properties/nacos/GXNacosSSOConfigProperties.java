@@ -24,6 +24,6 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "sso")
 public class GXNacosSSOConfigProperties extends GXSSOConfigProperties {
     public GXNacosSSOConfigProperties() {
-        log.info("SSO的配置使用的是NACOS配置");
+        log.info("SSO config source: nacos.");
     }
 }

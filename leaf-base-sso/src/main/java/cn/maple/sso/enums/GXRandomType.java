@@ -1,5 +1,7 @@
 package cn.maple.sso.enums;
 
+import java.util.Locale;
+
 public enum GXRandomType {
     MIX,
 
@@ -10,19 +12,13 @@ public enum GXRandomType {
     CHINESE;
 
     public static GXRandomType fromName(String name) {
-        if (name == null || name.isEmpty()) {
+        if (name == null || name.trim().isEmpty()) {
             return MIX;
         }
 
         try {
-            return valueOf(name.toUpperCase());
+            return valueOf(name.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
-            // 尝试模糊匹配
-            for (GXRandomType type : values()) {
-                if (type.name().toUpperCase().contains(name.toUpperCase())) {
-                    return type;
-                }
-            }
             return MIX;
         }
     }
@@ -34,7 +30,7 @@ public enum GXRandomType {
     public boolean containsLetters() {
         return this == CHARACTER || this == MIX;
     }
-    
+
     public boolean isChinese() {
         return this == CHINESE;
     }

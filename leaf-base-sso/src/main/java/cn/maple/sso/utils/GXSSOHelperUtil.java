@@ -58,7 +58,7 @@ public class GXSSOHelperUtil {
                             ssoConfig.setCache(ssoCache);
                         }
                     } catch (Exception e) {
-                        LOGGER.error("初始化SSO配置时发生错误", e);
+                        LOGGER.error("Initialize SSO config failed.", e);
                         if (Objects.isNull(ssoConfig)) {
                             ssoConfig = new GXSSOProperties();
                         }
@@ -122,7 +122,7 @@ public class GXSSOHelperUtil {
     public static String getTokenCacheKey(HttpServletRequest request) {
         GXTokenConfigService tokenConfigService = GXSpringContextUtils.getBean(GXTokenConfigService.class);
         if (tokenConfigService == null) {
-            throw new GXBusinessException("未找到GXTokenConfigService实现类");
+            throw new GXBusinessException("GXTokenConfigService implementation not found");
         }
         String platform = Optional.ofNullable(request.getHeader(GXTokenConstant.PLATFORM)).orElse("");
         Dict data = Dict.create().set(GXTokenConstant.PLATFORM, platform);
@@ -149,37 +149,37 @@ public class GXSSOHelperUtil {
         }
 
         if (CharSequenceUtil.isBlank(token)) {
-            LOGGER.warn("接收到空的Token字符串");
+            LOGGER.warn("Received blank token.");
             return Dict.create();
         }
 
         if (header) {
-            LOGGER.info("token字符串来自于header");
+            LOGGER.debug("Token source: header");
         } else {
-            LOGGER.info("token字符串来自于cookie");
+            LOGGER.debug("Token source: cookie");
         }
 
         try {
             GXTokenConfigService tokenSecretService = GXSpringContextUtils.getBean(GXTokenConfigService.class);
             if (Objects.isNull(tokenSecretService)) {
-                throw new GXBusinessException("请实现GXTokenConfigService类,并将其加入到spring容器中");
+                throw new GXBusinessException("GXTokenConfigService implementation not found in Spring context");
             }
 
             String tokenSecret = tokenSecretService.getTokenSecret();
             if (CharSequenceUtil.isBlank(tokenSecret)) {
-                LOGGER.error("Token密钥为空，无法解析Token");
-                throw new GXBusinessException("Token密钥配置错误");
+                LOGGER.error("Token secret is blank.");
+                throw new GXBusinessException("Token secret config error");
             }
 
             String decodedToken;
             try {
                 decodedToken = GXAuthCodeUtils.authCodeDecode(token, tokenSecret);
                 if (CharSequenceUtil.isBlank(decodedToken)) {
-                    LOGGER.warn("Token解密结果为空");
+                    LOGGER.warn("Token decode result is blank.");
                     return Dict.create();
                 }
             } catch (Exception e) {
-                LOGGER.error("Token解密失败: {}", e.getMessage());
+                LOGGER.error("Token decode failed: {}", e.getMessage());
                 return Dict.create();
             }
 
@@ -187,24 +187,18 @@ public class GXSSOHelperUtil {
             try {
                 requestToken = JSONUtil.toBean(decodedToken, Dict.class);
             } catch (Exception e) {
-                LOGGER.error("Token JSON解析失败: {}", e.getMessage());
+                LOGGER.error("Token JSON parse failed: {}", e.getMessage());
                 return Dict.create();
             }
 
             String clientIP = GXCurrentRequestContextUtils.getClientIP();
             requestToken.putIfAbsent(GXSSOConstant.TOKEN_USER_IP, clientIP);
 
-            Dict logToken = new Dict(requestToken);
-            if (logToken.containsKey("password")) {
-                logToken.put("password", "******");
-            }
-            LOGGER.info("SSO组件解析出来的token信息 : {}", logToken);
-
             return requestToken;
         } catch (GXBusinessException e) {
             throw e;
         } catch (Exception e) {
-            LOGGER.error("解析Token时发生未预期的错误", e);
+            LOGGER.error("Unexpected token parse error.", e);
             return Dict.create();
         }
     }

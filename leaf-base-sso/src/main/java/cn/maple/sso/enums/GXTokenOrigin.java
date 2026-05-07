@@ -1,5 +1,7 @@
 package cn.maple.sso.enums;
 
+import java.util.Locale;
+
 public enum GXTokenOrigin {
     COOKIE("0", "cookie"),
 
@@ -19,12 +21,13 @@ public enum GXTokenOrigin {
     }
 
     public static GXTokenOrigin fromValue(String value) {
-        if (value == null || value.isEmpty()) {
+        if (value == null || value.trim().isEmpty()) {
             return COOKIE;
         }
 
+        String normalizedValue = value.trim();
         for (GXTokenOrigin it : values()) {
-            if (it.value().equals(value)) {
+            if (it.value().equals(normalizedValue)) {
                 return it;
             }
         }
@@ -32,13 +35,13 @@ public enum GXTokenOrigin {
     }
 
     public static GXTokenOrigin fromDesc(String desc) {
-        if (desc == null || desc.isEmpty()) {
+        if (desc == null || desc.trim().isEmpty()) {
             return COOKIE;
         }
 
-        String lowerDesc = desc.toLowerCase();
+        String normalizedDesc = desc.trim().toLowerCase(Locale.ROOT);
         for (GXTokenOrigin it : values()) {
-            if (it.desc().toLowerCase().contains(lowerDesc)) {
+            if (it.desc().equals(normalizedDesc)) {
                 return it;
             }
         }

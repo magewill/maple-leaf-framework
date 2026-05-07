@@ -8,12 +8,40 @@ import org.springframework.web.method.HandlerMethod;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 final class GXHandlerMethodAnnotationUtils {
+    private static final int CACHE_LIMIT = 4096;
+
+    private static final ConcurrentMap<CacheKey, Optional<Annotation>> ANNOTATION_CACHE = new ConcurrentHashMap<>();
+
     private GXHandlerMethodAnnotationUtils() {
     }
 
     static <A extends Annotation> A findMergedAnnotation(HandlerMethod handlerMethod, Class<A> annotationType) {
+        CacheKey cacheKey = new CacheKey(handlerMethod.getMethod(), handlerMethod.getBeanType(), annotationType);
+        Optional<Annotation> cached = ANNOTATION_CACHE.get(cacheKey);
+        if (cached == null) {
+            cached = Optional.ofNullable(findMergedAnnotationUncached(handlerMethod, annotationType));
+            if (ANNOTATION_CACHE.size() >= CACHE_LIMIT) {
+                ANNOTATION_CACHE.clear();
+            }
+            Optional<Annotation> previous = ANNOTATION_CACHE.putIfAbsent(cacheKey, cached);
+            if (previous != null) {
+                cached = previous;
+            }
+        }
+        return cached.map(annotationType::cast).orElse(null);
+    }
+
+    static boolean hasMergedAnnotation(HandlerMethod handlerMethod, Class<? extends Annotation> annotationType) {
+        return findMergedAnnotation(handlerMethod, annotationType) != null;
+    }
+
+    private static <A extends Annotation> A findMergedAnnotationUncached(HandlerMethod handlerMethod, Class<A> annotationType) {
         Method method = handlerMethod.getMethod();
         Class<?> beanType = handlerMethod.getBeanType();
 
@@ -34,10 +62,6 @@ final class GXHandlerMethodAnnotationUtils {
         }
 
         return findOnType(beanType, annotationType);
-    }
-
-    static boolean hasMergedAnnotation(HandlerMethod handlerMethod, Class<? extends Annotation> annotationType) {
-        return findMergedAnnotation(handlerMethod, annotationType) != null;
     }
 
     private static <A extends Annotation> A findOnMethod(Method method, Class<A> annotationType) {
@@ -109,5 +133,13 @@ final class GXHandlerMethodAnnotationUtils {
             }
         }
         return null;
+    }
+
+    private record CacheKey(Method method, Class<?> beanType, Class<? extends Annotation> annotationType) {
+        private CacheKey {
+            Objects.requireNonNull(method, "method must not be null");
+            Objects.requireNonNull(beanType, "beanType must not be null");
+            Objects.requireNonNull(annotationType, "annotationType must not be null");
+        }
     }
 }

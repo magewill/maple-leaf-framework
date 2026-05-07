@@ -1,7 +1,7 @@
 package cn.maple.sso.utils;
 
 import cn.hutool.core.lang.Dict;
-import cn.hutool.http.HttpStatus;
+import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.json.JSONConfig;
 import cn.hutool.json.JSONUtil;
 import cn.maple.sso.properties.GXSSOProperties;
@@ -32,7 +32,7 @@ public class GXHttpUtil {
             response.setContentType("application/json;charset=" + GXSSOProperties.getSsoEncoding());
             response.setStatus(status);
             PrintWriter out = response.getWriter();
-            Dict data = Dict.create().set("code", HttpStatus.HTTP_UNAUTHORIZED).set("msg", tip).set("data", null);
+            Dict data = Dict.create().set("code", status).set("msg", tip).set("data", null);
             JSONConfig jsonConfig = new JSONConfig();
             jsonConfig.setIgnoreNullValue(false);
             out.print(JSONUtil.toJsonStr(data, jsonConfig));
@@ -142,11 +142,28 @@ public class GXHttpUtil {
     public static String getRequestUrl(HttpServletRequest request) {
         StringBuilder url = new StringBuilder(request.getScheme());
         url.append("://");
-        url.append(request.getHeader("host"));
+        url.append(getTrustedServerName(request));
+        int serverPort = request.getServerPort();
+        if (serverPort > 0 && !isDefaultPort(request.getScheme(), serverPort)) {
+            url.append(":").append(serverPort);
+        }
         url.append(request.getRequestURI());
         if (request.getQueryString() != null) {
             url.append("?").append(request.getQueryString());
         }
         return url.toString();
+    }
+
+    private static String getTrustedServerName(HttpServletRequest request) {
+        String configuredDomain = GXSSOProperties.getInstance().getCookieDomain();
+        if (CharSequenceUtil.isNotBlank(configuredDomain)) {
+            return configuredDomain.startsWith(".") ? configuredDomain.substring(1) : configuredDomain;
+        }
+        return request.getServerName();
+    }
+
+    private static boolean isDefaultPort(String scheme, int port) {
+        return ("http".equalsIgnoreCase(scheme) && port == 80)
+                || ("https".equalsIgnoreCase(scheme) && port == 443);
     }
 }

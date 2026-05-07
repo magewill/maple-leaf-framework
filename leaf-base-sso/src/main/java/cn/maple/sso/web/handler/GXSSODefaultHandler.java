@@ -24,7 +24,7 @@ public class GXSSODefaultHandler implements GXSSOHandler, Serializable {
 
     private static final String JSON_CONTENT_TYPE = "application/json;charset=" + StandardCharsets.UTF_8.name();
 
-    private static final String UNAUTHORIZED_MESSAGE = "已经登出,请重新登录!";
+    private static final String UNAUTHORIZED_MESSAGE = "Already logged out, please login again.";
 
     private static final AtomicReference<JSONConfig> JSON_CONFIG_REF = new AtomicReference<>();
 
@@ -49,8 +49,8 @@ public class GXSSODefaultHandler implements GXSSOHandler, Serializable {
 
     @Override
     public boolean preTokenIsNullAjax(HttpServletRequest request, HttpServletResponse response) {
-        Objects.requireNonNull(request, "请求对象不能为null");
-        Objects.requireNonNull(response, "响应对象不能为null");
+        Objects.requireNonNull(request, "request must not be null");
+        Objects.requireNonNull(response, "response must not be null");
 
         try {
             Dict data = Dict.create()
@@ -63,17 +63,17 @@ public class GXSSODefaultHandler implements GXSSOHandler, Serializable {
             response.setContentType(JSON_CONTENT_TYPE);
             response.getWriter().write(JSONUtil.toJsonStr(data, getJsonConfig()));
         } catch (IOException e) {
-            log.error("处理未登录AJAX请求时发生IO异常", e);
+            log.error("Handle unauthorized AJAX request failed with IO error.", e);
         } catch (Exception e) {
-            log.error("处理未登录AJAX请求时发生未预期异常", e);
+            log.error("Handle unauthorized AJAX request failed unexpectedly.", e);
         }
         return false;
     }
 
     @Override
     public boolean preTokenIsNull(HttpServletRequest request, HttpServletResponse response) {
-        Objects.requireNonNull(request, "请求对象不能为null");
-        Objects.requireNonNull(response, "响应对象不能为null");
+        Objects.requireNonNull(request, "request must not be null");
+        Objects.requireNonNull(response, "response must not be null");
 
         return true;
     }

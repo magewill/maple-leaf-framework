@@ -3,7 +3,6 @@ package cn.maple.sso.web.interceptor;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.maple.core.framework.annotation.GXIgnoreLoginIntercept;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.core.framework.web.interceptor.GXBaseSSOPermissionInterceptor;
@@ -23,17 +22,13 @@ import org.springframework.web.method.HandlerMethod;
 @Component
 @Slf4j
 public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
-    private String illegalUrl;
+    private volatile String illegalUrl;
 
-    private boolean nothingAnnotationPass = true;
+    private volatile boolean nothingAnnotationPass = true;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         if (handler instanceof HandlerMethod handlerMethod) {
-            if (GXHandlerMethodAnnotationUtils.hasMergedAnnotation(handlerMethod, GXIgnoreLoginIntercept.class)) {
-                return true;
-            }
-
             Dict tokenDict = GXSSOHelperUtil.attrToken(request);
             if (CollUtil.isEmpty(tokenDict)) {
                 tokenDict = GXSSOHelperUtil.getSSOToken(request);
@@ -60,28 +55,24 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
         }
 
         HandlerMethod handlerMethod = (HandlerMethod) handler;
-        GXPermissionAnnotation pm = GXHandlerMethodAnnotationUtils.findMergedAnnotation(handlerMethod, GXPermissionAnnotation.class);
-
-        if (pm != null) {
-            if (pm.action() == GXAction.Skip) {
-                return true;
-            } else {
-                return CharSequenceUtil.isNotBlank(pm.value()) && this.getAuthorization().isPermitted(token, pm.value());
-            }
-        } else {
+        GXPermissionAnnotation permission = GXHandlerMethodAnnotationUtils.findMergedAnnotation(handlerMethod, GXPermissionAnnotation.class);
+        if (permission == null) {
             return this.isNothingAnnotationPass();
         }
-        // todo
+        if (permission.action() == GXAction.Skip) {
+            return true;
+        }
+        return CharSequenceUtil.isNotBlank(permission.value()) && this.getAuthorization().isPermitted(token, permission.value());
     }
 
     protected boolean unauthorizedAccess(HttpServletRequest request, HttpServletResponse response) throws Exception {
-        log.debug("请求无权限访问: {}", request.getRequestURI());
+        log.debug("Request is forbidden: {}", request.getRequestURI());
 
         if (GXHttpUtil.isAjax(request)) {
-            GXHttpUtil.ajaxStatus(response, 403, "无权限访问该资源");
+            GXHttpUtil.ajaxStatus(response, 403, "Forbidden");
         } else {
             if (this.getIllegalUrl() == null || "".equals(this.getIllegalUrl())) {
-                response.sendError(403, "无权限访问");
+                response.sendError(403, "Forbidden");
             } else {
                 response.sendRedirect(this.getIllegalUrl());
             }
@@ -93,7 +84,7 @@ public class GXSSOPermissionInterceptor extends GXBaseSSOPermissionInterceptor {
     protected GXSSOAuthorization getAuthorization() {
         GXSSOAuthorization authorization = GXSpringContextUtils.getBean(GXSSOAuthorization.class);
         if (authorization == null) {
-            throw new GXBusinessException("未找到GXSSOAuthorization接口的实现类");
+            throw new GXBusinessException("GXSSOAuthorization implementation not found");
         }
         return authorization;
     }
