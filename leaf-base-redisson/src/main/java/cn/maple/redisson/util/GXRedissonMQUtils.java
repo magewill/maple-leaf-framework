@@ -281,6 +281,12 @@ public final class GXRedissonMQUtils {
         LOGGER.info("Cleared local topic cache [{}]", topicName);
     }
 
+    public static void clearLocalCache() {
+        LISTENER_REGISTRATION_CACHE.clear();
+        TOPIC_CACHE.clear();
+        LOGGER.info("Cleared local reliable topic cache");
+    }
+
     public static String getInstanceId() {
         return InstanceIdHolder.get();
     }

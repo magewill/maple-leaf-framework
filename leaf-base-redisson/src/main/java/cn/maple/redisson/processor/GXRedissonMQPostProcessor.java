@@ -100,6 +100,7 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
     public void destroy() {
         if (registeredListeners.isEmpty()) {
             log.info("No Redisson MQ listeners need to be unsubscribed");
+            GXRedissonMQUtils.clearLocalCache();
             clearLocalState();
             return;
         }
@@ -118,6 +119,7 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
 
         log.info("Redisson MQ listener unsubscribe finished, success={}, failed={}, registeredBeans={}, registeredListenerBeans={}",
                 unsubscribeSuccessCount, unsubscribeFailCount, registeredBeans.size(), successCount.get());
+        GXRedissonMQUtils.clearLocalCache();
         clearLocalState();
     }
 

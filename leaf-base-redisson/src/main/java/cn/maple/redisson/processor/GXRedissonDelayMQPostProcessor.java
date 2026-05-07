@@ -5,6 +5,7 @@ import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.redisson.annotation.GXRedissonDelayMQToTopic;
 import cn.maple.redisson.listener.GXRedissonDelayMQListener;
+import cn.maple.redisson.util.GXRedissonDelayMQUtils;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import lombok.extern.log4j.Log4j2;
 import org.redisson.api.RBlockingQueue;
@@ -369,8 +370,20 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
         }
 
         shutdownThreadPools();
+        listenerConfigs.values().forEach(this::destroyDelayedQueue);
         listenerConfigs.clear();
+        GXRedissonDelayMQUtils.clearDelayedQueueCache();
         log.info("Redisson delayed MQ post processor stopped");
+    }
+
+    private void destroyDelayedQueue(QueueListenerConfig config) {
+        try {
+            config.delayedQueue().destroy();
+        } catch (Exception e) {
+            if (!isRedissonShutdownException(e)) {
+                log.warn("Failed to destroy delayed queue [{}]", config.queueName(), e);
+            }
+        }
     }
 
     private void shutdownThreadPools() {

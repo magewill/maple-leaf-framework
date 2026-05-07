@@ -11,10 +11,10 @@ import org.redisson.api.RReadWriteLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -42,6 +42,9 @@ public class GXRedissonCacheServiceImpl implements GXRedissonCacheService {
         }
         if (expired > 0 && timeUnit == null) {
             throw new IllegalArgumentException("timeUnit must not be null when expired is positive");
+        }
+        if (expired > 0 && timeUnit.toMillis(expired) < 1L) {
+            throw new IllegalArgumentException("expired must be at least 1 millisecond");
         }
 
         RMapCache<Object, Object> mapCache = redissonClient.getMapCache(bucketName);
@@ -92,12 +95,6 @@ public class GXRedissonCacheServiceImpl implements GXRedissonCacheService {
         }
 
         RMapCache<Object, Object> mapCache = redissonClient.getMapCache(bucketName);
-        Object value = mapCache.get(keyName);
-        if (Objects.isNull(value)) {
-            log.warn("Cache entry does not exist, bucketName={}, keyName={}", bucketName, keyName);
-            return false;
-        }
-
         long ttlMillis = mapCache.remainTimeToLive(keyName);
         if (ttlMillis == -2L) {
             log.warn("Cache entry expired before refreshing, bucketName={}, keyName={}", bucketName, keyName);
@@ -107,8 +104,7 @@ public class GXRedissonCacheServiceImpl implements GXRedissonCacheService {
         if (ttlMillis == -1L || ttlMillis > refreshThresholdMillis) {
             return true;
         }
-        mapCache.fastPut(keyName, value, expired, TimeUnit.SECONDS);
-        return true;
+        return mapCache.expireEntry(keyName, Duration.ofSeconds(expired), Duration.ZERO);
     }
 
     @Override
@@ -168,6 +164,13 @@ public class GXRedissonCacheServiceImpl implements GXRedissonCacheService {
         return getBucketAllData(bucketName, count, null);
     }
 
+    /**
+     * Returns all matched entries from the map cache.
+     * <p>
+     * The {@code count} argument is the Redisson SCAN batch size, not a result
+     * limit. Callers should avoid this method for very large buckets on hot
+     * paths because it materializes all matched keys and values in memory.
+     */
     @Override
     public Map<Object, Object> getBucketAllData(String bucketName, int count, String pattern) {
         validateBucket(bucketName);

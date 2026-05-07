@@ -40,6 +40,7 @@ public final class GXRedissonUtils {
         if (expire > 0 && timeUnit == null) {
             throw new IllegalArgumentException("timeUnit must not be null when expire is positive");
         }
+        validateExpireMillis(expire, timeUnit);
 
         try {
             RBucket<Object> bucket = getRedissonClient().getBucket(key);
@@ -132,6 +133,7 @@ public final class GXRedissonUtils {
         if (expire > 0 && timeUnit == null) {
             throw new IllegalArgumentException("timeUnit must not be null when expire is positive");
         }
+        validateExpireMillis(expire, timeUnit);
         try {
             RAtomicLong atomicLong = getRedissonClient().getAtomicLong(key);
             atomicLong.set(value);
@@ -276,6 +278,7 @@ public final class GXRedissonUtils {
         if (expire > 0 && timeUnit == null) {
             throw new IllegalArgumentException("timeUnit must not be null when expire is positive");
         }
+        long expireMillis = validateExpireMillis(expire, timeUnit);
         try {
             if (expire <= 0) {
                 RAtomicLong atomicLong = getRedissonClient().getAtomicLong(key);
@@ -291,7 +294,7 @@ public final class GXRedissonUtils {
                     luaScript,
                     RScript.ReturnType.LONG,
                     Collections.singletonList(key),
-                    timeUnit.toMillis(expire)
+                    expireMillis
             );
             return result == null ? 0L : result;
         } catch (Exception e) {
@@ -304,6 +307,17 @@ public final class GXRedissonUtils {
         if (CharSequenceUtil.isBlank(key)) {
             throw new IllegalArgumentException("key must not be blank");
         }
+    }
+
+    private static long validateExpireMillis(long expire, TimeUnit timeUnit) {
+        if (expire <= 0) {
+            return 0L;
+        }
+        long expireMillis = timeUnit.toMillis(expire);
+        if (expireMillis < 1L) {
+            throw new IllegalArgumentException("expire must be at least 1 millisecond");
+        }
+        return expireMillis;
     }
 
     private static void validateLockArguments(String lockName, TimeUnit timeUnit, Supplier<?> operation) {

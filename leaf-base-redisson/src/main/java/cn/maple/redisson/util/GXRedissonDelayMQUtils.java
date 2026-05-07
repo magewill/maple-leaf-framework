@@ -119,6 +119,18 @@ public final class GXRedissonDelayMQUtils {
         return getDelayedQueue(queueName).size();
     }
 
+    public static void clearDelayedQueueCache() {
+        DELAYED_QUEUE_CACHE.forEach((queueName, delayedQueue) -> {
+            try {
+                delayedQueue.destroy();
+            } catch (Exception e) {
+                LOGGER.warn("Failed to destroy delayed queue [{}]", queueName, e);
+            }
+        });
+        DELAYED_QUEUE_CACHE.clear();
+        LOGGER.info("Cleared local delayed queue cache");
+    }
+
     private static String convertMessageToString(Object message) {
         if (message == null) {
             throw new IllegalArgumentException("message must not be null");
