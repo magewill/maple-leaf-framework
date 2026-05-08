@@ -34,68 +34,65 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @SuppressWarnings({"unused"})
-public class GXDBCommonUtils {
+public final class GXDBCommonUtils {
     private static final Logger LOG = LoggerFactory.getLogger(GXDBCommonUtils.class);
 
-    private static final int MAX_INPUT_LENGTH = 1024 * 1024; // 1MB
+    private static final int MAX_INPUT_LENGTH = 1024 * 1024;
+
+    private static final Pattern SAFE_QUALIFIED_IDENTIFIER_PATTERN = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$");
+
+    private static final Pattern SAFE_ALIAS_PATTERN = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*$");
 
     private static final Pattern SQL_INJECTION_PATTERN = Pattern.compile(
-            "(?i)" + // 忽略大小写
+            "(?i)" +
                     "(" +
-                    // 模式 1：SQL 注释和语句分隔符（独立出现）
                     "(?:--[\\s\\r\\n]*|#|/\\*|\\*/|;)" +
                     "|" +
-                    // 模式 2：单引号后的注释或分隔符（'value' -- 或 'value';）
                     "'[^'\\\\]*(?:\\\\.[^'\\\\]*)*'\\s*(?:--[\\s\\r\\n]*|#|/\\*|\\*/|;)" +
                     "|" +
-                    // 模式 3：SQL 关键字（union select, drop, alter 等），但需后跟注入模式
                     "\\b(?:union\\s+(?:all\\s+)?select|select\\s+.*\\s+from|insert\\s+into|update\\s+.*\\s+set|delete\\s+from|drop\\s+(?:table|database)|alter\\s+(?:table|database)|truncate\\s+table|create\\s+(?:table|database))\\b" +
                     "\\s*(?:--[\\s\\r\\n]*|#|/\\*|\\*/|;|\\b(?:or|and)\\s+(?:\\d+\\s*=\\s*\\d+|'[^']+'\\s*=\\s*'[^']+'))" +
                     "|" +
-                    // 模式 4：系统表和函数（information_schema, xp_cmdshell 等）
                     "\\b(?:information_schema\\.|sys\\.|sysobjects\\.|xp_cmdshell|sp_executesql|@@version|user\\s*\\(\\s*\\)|database\\s*\\(\\s*\\)|schema\\s*\\(\\s*\\))\\b" +
                     "|" +
-                    // 模式 5：文件操作和延迟函数（load_file, outfile, sleep 等）
                     "\\b(?:load_file\\s*\\(|outfile\\s*\\(|dumpfile\\s*\\(|into\\s+(?:outfile|dumpfile)|sleep\\s*\\(\\s*\\d+\\s*\\)|benchmark\\s*\\(\\s*\\d+\\s*,\\s*[^)]+\\))\\b" +
                     "|" +
-                    // 模式 6：逻辑操作符注入（or 1=1, and 'a'='a' 等）
                     "\\b(?:or|and)\\s+(?:" +
-                    "\\d+\\s*=\\s*\\d+" + // 1=1
-                    "|\\d+\\s*=\\s*\\d+\\s*(?:--[\\s\\r\\n]*|#)" + // 1=1 --
-                    "|'[^']+'\\s*=\\s*'[^']+'" + // 'a'='a'
-                    "|'[^']+'\\s*=\\s*'[^']+'\\s*(?:--[\\s\\r\\n]*|#)" + // 'a'='a' --
+                    "\\d+\\s*=\\s*\\d+" +
+                    "|\\d+\\s*=\\s*\\d+\\s*(?:--[\\s\\r\\n]*|#)" +
+                    "|'[^']+'\\s*=\\s*'[^']+'" +
+                    "|'[^']+'\\s*=\\s*'[^']+'\\s*(?:--[\\s\\r\\n]*|#)" +
                     ")\\b" +
                     "|" +
-                    // 模式 7：其他常见注入模式（exec, execute 等）
                     "\\b(?:exec\\s+\\w+|execute\\s+\\w+)\\b" +
                     ")"
     );
 
-    // 合法子查询的正则表达式，用于豁免检测
     private static final Pattern LEGITIMATE_SUBQUERY_PATTERN = Pattern.compile(
             "^\\s*\\(\\s*SELECT\\s+.*\\s+FROM\\s+.*\\s*(?:WHERE\\s+.*)?\\s*\\)\\s*(?:UNION\\s+(?:ALL\\s+)?\\s*\\(\\s*SELECT\\s+.*\\s+FROM\\s+.*\\s*(?:WHERE\\s+.*)?\\s*\\)\\s*)*$",
             Pattern.CASE_INSENSITIVE
     );
 
-
     private GXDBCommonUtils() {
-        // 私有构造函数，防止实例化
     }
 
     public static Dict addSearchCondition(Dict requestParam, String key, Object value, boolean returnRequestParam) {
+        if (Objects.isNull(requestParam)) {
+            throw new GXBusinessException("Request param must not be null");
+        }
         final Object obj = requestParam.getObj(GXBuilderConstant.SEARCH_CONDITION_NAME);
         if (null == obj) {
             return requestParam;
         }
 
         if (CharSequenceUtil.isNotEmpty(key) && GXDBStringEscapeUtils.check(key)) {
-            String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: addSearchCondition.key)", key);
+            String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: addSearchCondition.key)", key);
             LOG.error(message);
             throw new GXSqlInjectionException(message);
         }
 
         if (value instanceof String && GXDBStringEscapeUtils.check((String) value)) {
-            String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: addSearchCondition.value)", value);
+            String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: addSearchCondition.value)", value);
             LOG.error(message);
             throw new GXSqlInjectionException(message);
         }
@@ -110,6 +107,9 @@ public class GXDBCommonUtils {
     }
 
     public static Dict addSearchCondition(Dict requestParam, Dict sourceData, boolean returnRequestParam) {
+        if (Objects.isNull(requestParam)) {
+            throw new GXBusinessException("Request param must not be null");
+        }
         final Object obj = requestParam.getObj(GXBuilderConstant.SEARCH_CONDITION_NAME);
         if (null == obj) {
             return requestParam;
@@ -118,13 +118,13 @@ public class GXDBCommonUtils {
         if (Objects.nonNull(sourceData)) {
             sourceData.forEach((k, v) -> {
                 if (CharSequenceUtil.isNotEmpty(k) && GXDBStringEscapeUtils.check(k)) {
-                    String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: addSearchCondition.sourceData.key)", k);
+                    String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: addSearchCondition.sourceData.key)", k);
                     LOG.error(message);
                     throw new GXSqlInjectionException(message);
                 }
 
                 if (v instanceof String && GXDBStringEscapeUtils.check((String) v)) {
-                    String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: addSearchCondition.sourceData.value)", v);
+                    String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: addSearchCondition.sourceData.value)", v);
                     LOG.error(message);
                     throw new GXSqlInjectionException(message);
                 }
@@ -132,7 +132,9 @@ public class GXDBCommonUtils {
         }
 
         final Dict data = Convert.convert(Dict.class, obj);
-        data.putAll(sourceData);
+        if (Objects.nonNull(sourceData)) {
+            data.putAll(sourceData);
+        }
         if (returnRequestParam) {
             requestParam.put(GXBuilderConstant.SEARCH_CONDITION_NAME, data);
             return requestParam;
@@ -141,11 +143,20 @@ public class GXDBCommonUtils {
     }
 
     public static String getTableName(Class<?> clazz) {
+        if (Objects.isNull(clazz)) {
+            throw new GXBusinessException("Entity class must not be null");
+        }
         TableInfo tableInfo = TableInfoHelper.getTableInfo(clazz);
+        if (Objects.isNull(tableInfo)) {
+            throw new GXBusinessException(CharSequenceUtil.format("Table metadata not found: {}", clazz.getName()));
+        }
         return tableInfo.getTableName();
     }
 
     public static <R> GXPaginationResDto<R> convertPageToPaginationResDto(IPage<R> page, List<R> records) {
+        if (Objects.isNull(page)) {
+            throw new GXBusinessException("Page must not be null");
+        }
         long pages = page.getPages();
         long currentPage = page.getCurrent();
         long pageSize = page.getSize();
@@ -154,6 +165,9 @@ public class GXDBCommonUtils {
     }
 
     public static <R> GXPaginationResDto<R> convertPageToPaginationResDto(IPage<R> page) {
+        if (Objects.isNull(page)) {
+            throw new GXBusinessException("Page must not be null");
+        }
         long pages = page.getPages();
         long currentPage = page.getCurrent();
         long pageSize = page.getSize();
@@ -163,14 +177,14 @@ public class GXDBCommonUtils {
 
     public static String generateJSONSearchExpression(String searchField, String searchExpression, Set<Object> searchValue) {
         if (CharSequenceUtil.isEmpty(searchField)) {
-            throw new GXBusinessException("请传递搜索的字段");
+            throw new GXBusinessException("Search field must not be empty");
         }
         if (CollUtil.isEmpty(searchValue)) {
-            throw new GXBusinessException("请传递搜索的值");
+            throw new GXBusinessException("Search value must not be empty");
         }
 
         if (GXDBStringEscapeUtils.check(searchField)) {
-            String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: generateJSONSearchExpression.searchField)", searchField);
+            String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: generateJSONSearchExpression.searchField)", searchField);
             LOG.error(message);
             throw new GXSqlInjectionException(message);
         }
@@ -181,7 +195,7 @@ public class GXDBCommonUtils {
             searchExpression = "$";
         } else {
             if (GXDBStringEscapeUtils.check(searchExpression)) {
-                String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: generateJSONSearchExpression.searchExpression)", searchExpression);
+                String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: generateJSONSearchExpression.searchExpression)", searchExpression);
                 LOG.error(message);
                 throw new GXSqlInjectionException(message);
             }
@@ -190,12 +204,15 @@ public class GXDBCommonUtils {
 
         String expressionTemplate = GXBuilderConstant.JSON_SEARCH_EXPRESSION_TEMPLATE;
         String searchStr = searchValue.stream().map(o -> {
+            if (Objects.isNull(o)) {
+                throw new GXBusinessException("Search value item must not be null");
+            }
             if (o instanceof Number) {
                 return CharSequenceUtil.format("{}", o.toString());
             }
             String strValue = o.toString();
             if (GXDBStringEscapeUtils.check(strValue)) {
-                String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: generateJSONSearchExpression.searchValue)", strValue);
+                String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: generateJSONSearchExpression.searchValue)", strValue);
                 LOG.error(message);
                 throw new GXSqlInjectionException(message);
             }
@@ -215,6 +232,9 @@ public class GXDBCommonUtils {
 
     public static <T> UpdateWrapper<T> assemblyUpdateWrapper(List<GXCondition<?>> condition) {
         UpdateWrapper<T> updateWrapper = new UpdateWrapper<>();
+        if (CollUtil.isEmpty(condition)) {
+            return updateWrapper;
+        }
         Dict methodNameDict = Dict.create()
                 .set("=", "eq")
                 .set("!=", "ne")
@@ -225,10 +245,9 @@ public class GXDBCommonUtils {
                 .set("<=", "le")
                 .set("<", "lt");
 
-        condition.forEach(c -> {
+        condition.stream().filter(Objects::nonNull).forEach(c -> {
             if (!GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())) {
                 String column = c.getFieldExpression();
-                //Object value = c.getFieldValue();
                 Object value = c.getFieldOriginalValue();
 
                 if (GXConditionIsNULL.class.isAssignableFrom(c.getClass())) {
@@ -238,6 +257,10 @@ public class GXDBCommonUtils {
                 if (GXConditionIsNotNULL.class.isAssignableFrom(c.getClass())) {
                     updateWrapper.isNotNull(CharSequenceUtil.toUnderlineCase(column));
                     return;
+                }
+
+                if (Objects.isNull(value)) {
+                    throw new GXBusinessException(CharSequenceUtil.format("Condition value must not be null: {}", column));
                 }
 
                 if (String.class.isAssignableFrom(value.getClass())) {
@@ -281,17 +304,22 @@ public class GXDBCommonUtils {
 
         condition.forEach((column, val) -> {
             if (CharSequenceUtil.isNotEmpty(column) && GXDBStringEscapeUtils.check(column)) {
-                String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: assemblySqlObjectCondition.column)", column);
+                String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: assemblySqlObjectCondition.column)", column);
                 LOG.error(message);
                 throw new GXSqlInjectionException(message);
             }
 
             String safeColumn = safeColumnName(column);
 
+            if (Objects.isNull(val)) {
+                sql.WHERE(CharSequenceUtil.format("{} IS NULL", safeColumn));
+                return;
+            }
+
             final String value = Convert.toStr(val);
 
             if (CharSequenceUtil.isNotEmpty(value) && GXDBStringEscapeUtils.check(value)) {
-                String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: assemblySqlObjectCondition.value)", value);
+                String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: assemblySqlObjectCondition.value)", value);
                 LOG.error(message);
                 throw new GXSqlInjectionException(message);
             }
@@ -313,47 +341,52 @@ public class GXDBCommonUtils {
 
     public static void checkSQLInjection(String input, String source, boolean isUserInput) {
         if (CharSequenceUtil.isEmpty(input)) {
-            LOG.debug("输入为空，直接返回 (来源: {})", source);
+            LOG.debug("Input is empty, skip SQL injection check. source={}", source);
             return;
         }
 
         if (input.length() > MAX_INPUT_LENGTH) {
-            String message = CharSequenceUtil.format("输入长度超过最大限制 ({}): {} (来源: {})", MAX_INPUT_LENGTH, input, source);
+            String message = CharSequenceUtil.format("Input length exceeds max limit ({}): {} (source: {})", MAX_INPUT_LENGTH, input, source);
             LOG.error(message);
             throw new IllegalArgumentException(message);
         }
 
         if (!isUserInput && input.length() <= 2048 && LEGITIMATE_SUBQUERY_PATTERN.matcher(input).matches()) {
-            LOG.debug("输入是合法的子查询，豁免检测: {} (来源: {})", input, source);
+            LOG.debug("Input is a permitted subquery expression, skip strict SQL injection check. source={}", source);
             return;
         }
 
         if (ReUtil.contains(SQL_INJECTION_PATTERN, input)) {
-            String message = CharSequenceUtil.format("第一步检测到潜在的SQL注入攻击: {} (来源: {})", input, source);
+            String message = CharSequenceUtil.format("Potential SQL injection detected by primary check: {} (source: {})", input, source);
             LOG.error(message);
             throw new GXSqlInjectionException(message);
         }
 
         try {
             if (GXDBStringEscapeUtils.check(input)) {
-                String message = CharSequenceUtil.format("第二步检测到潜在的SQL注入攻击: {} (来源: {})", input, source);
+                String message = CharSequenceUtil.format("Potential SQL injection detected by fallback check: {} (source: {})", input, source);
                 LOG.error(message);
                 throw new GXSqlInjectionException(message);
             }
+        } catch (GXSqlInjectionException e) {
+            throw e;
         } catch (Exception e) {
-            LOG.warn("使用GXDBStringEscapeUtils.check方法检测SQL注入时发生异常: {}", e.getMessage());
+            LOG.warn("SQL injection fallback check failed: {}", e.getMessage());
         }
     }
 
     public static String safeTableName(String tableName) {
         if (CharSequenceUtil.isEmpty(tableName)) {
-            throw new GXBusinessException("表名不能为空");
+            throw new GXBusinessException("Table name must not be empty");
         }
 
         checkSQLInjection(tableName, "tableName", false);
 
         if (CharSequenceUtil.containsAny(tableName, ";", "'", "\"", "\\", "/*", "--", "#")) {
-            throw new GXSqlInjectionException("表名包含不允许的特殊字符: " + tableName);
+            throw new GXSqlInjectionException("Table name contains unsupported characters: " + tableName);
+        }
+        if (!SAFE_QUALIFIED_IDENTIFIER_PATTERN.matcher(tableName).matches()) {
+            throw new GXSqlInjectionException("Table name is not a safe identifier: " + tableName);
         }
 
         return tableName;
@@ -367,7 +400,10 @@ public class GXDBCommonUtils {
         checkSQLInjection(tableAlias, "tableAlias", false);
 
         if (CharSequenceUtil.containsAny(tableAlias, ";", "'", "\"", "\\", "/*", "--", "#")) {
-            throw new GXSqlInjectionException("表别名包含不允许的特殊字符: " + tableAlias);
+            throw new GXSqlInjectionException("Table alias contains unsupported characters: " + tableAlias);
+        }
+        if (!SAFE_ALIAS_PATTERN.matcher(tableAlias).matches()) {
+            throw new GXSqlInjectionException("Table alias is not a safe identifier: " + tableAlias);
         }
 
         return tableAlias;
@@ -375,7 +411,7 @@ public class GXDBCommonUtils {
 
     public static String safeColumnName(String columnName) {
         if (CharSequenceUtil.isEmpty(columnName)) {
-            throw new GXBusinessException("列名不能为空");
+            throw new GXBusinessException("Column name must not be empty");
         }
 
         boolean isSqlFunction = isSqlFunctionCall(columnName);
@@ -384,13 +420,15 @@ public class GXDBCommonUtils {
             checkSQLInjection(columnName, "columnName", true);
 
             if (CharSequenceUtil.containsAny(columnName, ";", "'", "\"", "\\", "/*", "--", "#")) {
-                throw new GXSqlInjectionException("列名包含不允许的特殊字符: " + columnName);
-                //LOGGER.error("列名包含不允许的特殊字符: {}", columnName);
+                throw new GXSqlInjectionException("Column name contains unsupported characters: " + columnName);
+            }
+            if (!SAFE_QUALIFIED_IDENTIFIER_PATTERN.matcher(columnName).matches()) {
+                throw new GXSqlInjectionException("Column name is not a safe identifier: " + columnName);
             }
         } else {
             if (CharSequenceUtil.containsAny(columnName, ";", "--", "#", "/*")) {
-                LOG.error("SQL函数调用中包含可疑字符: {}", columnName);
-                throw new GXSqlInjectionException("SQL函数调用中包含可疑字符: " + columnName);
+                LOG.error("SQL function call contains suspicious characters: {}", columnName);
+                throw new GXSqlInjectionException("SQL function call contains suspicious characters: " + columnName);
             }
         }
 

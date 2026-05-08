@@ -22,6 +22,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -45,6 +46,29 @@ class GXMyBatisRepositoryTest {
         verify(dao).findByCondition(captor.capture());
         assertEquals("tenant_a.user", captor.getValue().getTableName());
         assertNull(captor.getValue().getTableNameAlias());
+    }
+
+    @Test
+    void findByConditionDoesNotExposeCallerQueryParamToDaoMutation() {
+        TestDao dao = Mockito.mock(TestDao.class);
+        TestRepository repository = new TestRepository(dao);
+        GXBaseQueryParamInnerDto query = GXBaseQueryParamInnerDto.builder()
+                .columns(CollUtil.newLinkedHashSet("id"))
+                .build();
+        when(dao.findByCondition(any(GXBaseQueryParamInnerDto.class))).thenAnswer(invocation -> {
+            GXBaseQueryParamInnerDto daoQuery = invocation.getArgument(0);
+            daoQuery.setTableName("mutated_by_dao");
+            daoQuery.setColumns(CollUtil.newLinkedHashSet("*"));
+            return List.of();
+        });
+
+        repository.findByCondition(query);
+
+        ArgumentCaptor<GXBaseQueryParamInnerDto> captor = ArgumentCaptor.forClass(GXBaseQueryParamInnerDto.class);
+        verify(dao).findByCondition(captor.capture());
+        assertNotSame(query, captor.getValue());
+        assertNull(query.getTableName());
+        assertEquals(Set.of("id"), query.getColumns());
     }
 
     @Test

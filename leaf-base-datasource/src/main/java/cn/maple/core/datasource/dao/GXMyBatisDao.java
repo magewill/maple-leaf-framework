@@ -5,6 +5,7 @@ import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.datasource.mapper.GXBaseMapper;
+import cn.maple.core.datasource.util.GXQueryParamUtils;
 import cn.maple.core.datasource.util.GXDBCommonUtils;
 import cn.maple.core.framework.dao.GXBaseDao;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
@@ -38,12 +39,13 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
         if (Objects.isNull(dbQueryParamInnerDto)) {
             throw new GXBusinessException("Query param must not be null");
         }
-        IPage<Dict> iPage = GXDBCommonUtils.constructPageObject(dbQueryParamInnerDto.getPage(), dbQueryParamInnerDto.getPageSize(), dbQueryParamInnerDto.isPaginateCount());
-        Set<String> fieldSet = dbQueryParamInnerDto.getColumns();
-        if (CharSequenceUtil.isBlank(dbQueryParamInnerDto.getRawSQL()) && Objects.isNull(fieldSet)) {
-            dbQueryParamInnerDto.setColumns(CollUtil.newHashSet("*"));
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(dbQueryParamInnerDto);
+        IPage<Dict> iPage = GXDBCommonUtils.constructPageObject(queryParam.getPage(), queryParam.getPageSize(), queryParam.isPaginateCount());
+        Set<String> fieldSet = queryParam.getColumns();
+        if (CharSequenceUtil.isBlank(queryParam.getRawSQL()) && Objects.isNull(fieldSet)) {
+            queryParam.setColumns(CollUtil.newHashSet("*"));
         }
-        final List<Dict> records = baseMapper.paginate(iPage, dbQueryParamInnerDto);
+        final List<Dict> records = baseMapper.paginate(iPage, queryParam);
         iPage.setRecords(records);
         return GXDBCommonUtils.convertPageToPaginationResDto(iPage);
     }
@@ -59,12 +61,13 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
         if (Objects.isNull(unionTypeEnums)) {
             throw new GXBusinessException("Union type must not be null");
         }
-        IPage<Dict> iPage = GXDBCommonUtils.constructPageObject(masterQueryParamInnerDto.getPage(), masterQueryParamInnerDto.getPageSize(), masterQueryParamInnerDto.isPaginateCount());
-        Set<String> fieldSet = masterQueryParamInnerDto.getColumns();
-        if (CharSequenceUtil.isBlank(masterQueryParamInnerDto.getRawSQL()) && Objects.isNull(fieldSet)) {
-            masterQueryParamInnerDto.setColumns(CollUtil.newHashSet("*"));
+        GXBaseQueryParamInnerDto masterQueryParam = copyQueryParam(masterQueryParamInnerDto);
+        IPage<Dict> iPage = GXDBCommonUtils.constructPageObject(masterQueryParam.getPage(), masterQueryParam.getPageSize(), masterQueryParam.isPaginateCount());
+        Set<String> fieldSet = masterQueryParam.getColumns();
+        if (CharSequenceUtil.isBlank(masterQueryParam.getRawSQL()) && Objects.isNull(fieldSet)) {
+            masterQueryParam.setColumns(CollUtil.newHashSet("*"));
         }
-        final List<Dict> records = baseMapper.unionPaginate(iPage, masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        final List<Dict> records = baseMapper.unionPaginate(iPage, masterQueryParam, unionQueryParamInnerDtoLst, unionTypeEnums);
         iPage.setRecords(records);
         return GXDBCommonUtils.convertPageToPaginationResDto(iPage);
     }
@@ -120,10 +123,11 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
         if (Objects.isNull(dbQueryParamInnerDto)) {
             throw new GXBusinessException("Query param must not be null");
         }
-        if (CharSequenceUtil.isEmpty(dbQueryParamInnerDto.getTableName())) {
-            dbQueryParamInnerDto.setTableName(getTableName());
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(dbQueryParamInnerDto);
+        if (CharSequenceUtil.isEmpty(queryParam.getTableName())) {
+            queryParam.setTableName(getTableName());
         }
-        return baseMapper.findOneByCondition(dbQueryParamInnerDto);
+        return baseMapper.findOneByCondition(queryParam);
     }
 
     @Override
@@ -137,10 +141,11 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
         if (Objects.isNull(unionTypeEnums)) {
             throw new GXBusinessException("Union type must not be null");
         }
-        if (CharSequenceUtil.isEmpty(masterQueryParamInnerDto.getTableName())) {
-            masterQueryParamInnerDto.setTableName(getTableName());
+        GXBaseQueryParamInnerDto masterQueryParam = copyQueryParam(masterQueryParamInnerDto);
+        if (CharSequenceUtil.isEmpty(masterQueryParam.getTableName())) {
+            masterQueryParam.setTableName(getTableName());
         }
-        return baseMapper.unionFindOneByCondition(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        return baseMapper.unionFindOneByCondition(masterQueryParam, unionQueryParamInnerDtoLst, unionTypeEnums);
     }
 
     @Override
@@ -148,10 +153,11 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
         if (Objects.isNull(dbQueryParamInnerDto)) {
             throw new GXBusinessException("Query param must not be null");
         }
-        if (CharSequenceUtil.isEmpty(dbQueryParamInnerDto.getTableName())) {
-            dbQueryParamInnerDto.setTableName(getTableName());
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(dbQueryParamInnerDto);
+        if (CharSequenceUtil.isEmpty(queryParam.getTableName())) {
+            queryParam.setTableName(getTableName());
         }
-        return baseMapper.findByCondition(dbQueryParamInnerDto);
+        return baseMapper.findByCondition(queryParam);
     }
 
     @Override
@@ -165,10 +171,11 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
         if (Objects.isNull(unionTypeEnums)) {
             throw new GXBusinessException("Union type must not be null");
         }
-        if (CharSequenceUtil.isEmpty(masterQueryParamInnerDto.getTableName())) {
-            masterQueryParamInnerDto.setTableName(getTableName());
+        GXBaseQueryParamInnerDto masterQueryParam = copyQueryParam(masterQueryParamInnerDto);
+        if (CharSequenceUtil.isEmpty(masterQueryParam.getTableName())) {
+            masterQueryParam.setTableName(getTableName());
         }
-        return baseMapper.unionFindByCondition(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        return baseMapper.unionFindByCondition(masterQueryParam, unionQueryParamInnerDtoLst, unionTypeEnums);
     }
 
     @Override
@@ -203,5 +210,9 @@ public class GXMyBatisDao<M extends GXBaseMapper<T>, T extends GXBaseModel, ID e
     private String getPrimaryKeyName() {
         TableInfo tableInfo = TableInfoHelper.getTableInfo(GXCommonUtils.getGenericClassType(getClass(), 1));
         return tableInfo.getKeyProperty();
+    }
+
+    private GXBaseQueryParamInnerDto copyQueryParam(GXBaseQueryParamInnerDto source) {
+        return GXQueryParamUtils.copy(source);
     }
 }

@@ -9,6 +9,7 @@ import cn.hutool.core.util.NumberUtil;
 import cn.hutool.core.util.ReUtil;
 import cn.maple.core.datasource.dao.GXMyBatisDao;
 import cn.maple.core.datasource.mapper.GXBaseMapper;
+import cn.maple.core.datasource.util.GXQueryParamUtils;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.ddd.repository.GXBaseRepository;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
@@ -57,12 +58,14 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
 
     @Override
     public List<Dict> findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
-        return baseDao.findByCondition(dbQueryParamInnerDto);
+        validateQueryParam(dbQueryParamInnerDto);
+        return baseDao.findByCondition(copyQueryParam(dbQueryParamInnerDto));
     }
 
     @Override
     public List<Dict> findByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        return baseDao.findByCondition(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        validateUnionQueryParam(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        return baseDao.findByCondition(copyQueryParam(masterQueryParamInnerDto), unionQueryParamInnerDtoLst, unionTypeEnums);
     }
 
     @Override
@@ -81,19 +84,21 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
     @Override
     public Dict findOneByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         validateQueryParam(dbQueryParamInnerDto);
-        if (CharSequenceUtil.isEmpty(dbQueryParamInnerDto.getTableName())) {
-            dbQueryParamInnerDto.setTableName(getTableName());
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(dbQueryParamInnerDto);
+        if (CharSequenceUtil.isEmpty(queryParam.getTableName())) {
+            queryParam.setTableName(getTableName());
         }
-        return baseDao.findOneByCondition(dbQueryParamInnerDto);
+        return baseDao.findOneByCondition(queryParam);
     }
 
     @Override
     public Dict findOneByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
         validateUnionQueryParam(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
-        if (CharSequenceUtil.isEmpty(masterQueryParamInnerDto.getTableName())) {
-            masterQueryParamInnerDto.setTableName(getTableName());
+        GXBaseQueryParamInnerDto masterQueryParam = copyQueryParam(masterQueryParamInnerDto);
+        if (CharSequenceUtil.isEmpty(masterQueryParam.getTableName())) {
+            masterQueryParam.setTableName(getTableName());
         }
-        return baseDao.findOneByCondition(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        return baseDao.findOneByCondition(masterQueryParam, unionQueryParamInnerDtoLst, unionTypeEnums);
     }
 
     @Override
@@ -130,19 +135,21 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
     @Override
     public GXPaginationResDto<Dict> paginate(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
         validateQueryParam(dbQueryParamInnerDto);
-        if (CharSequenceUtil.isBlank(dbQueryParamInnerDto.getRawSQL()) && Objects.isNull(dbQueryParamInnerDto.getColumns())) {
-            dbQueryParamInnerDto.setColumns(CollUtil.newHashSet("*"));
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(dbQueryParamInnerDto);
+        if (CharSequenceUtil.isBlank(queryParam.getRawSQL()) && Objects.isNull(queryParam.getColumns())) {
+            queryParam.setColumns(CollUtil.newHashSet("*"));
         }
-        return baseDao.paginate(dbQueryParamInnerDto);
+        return baseDao.paginate(queryParam);
     }
 
     @Override
     public GXPaginationResDto<Dict> paginate(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
         validateUnionQueryParam(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
-        if (CharSequenceUtil.isBlank(masterQueryParamInnerDto.getRawSQL()) && Objects.isNull(masterQueryParamInnerDto.getColumns())) {
-            masterQueryParamInnerDto.setColumns(CollUtil.newHashSet("*"));
+        GXBaseQueryParamInnerDto masterQueryParam = copyQueryParam(masterQueryParamInnerDto);
+        if (CharSequenceUtil.isBlank(masterQueryParam.getRawSQL()) && Objects.isNull(masterQueryParam.getColumns())) {
+            masterQueryParam.setColumns(CollUtil.newHashSet("*"));
         }
-        return baseDao.paginate(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        return baseDao.paginate(masterQueryParam, unionQueryParamInnerDtoLst, unionTypeEnums);
     }
 
     @Override
@@ -243,6 +250,10 @@ public abstract class GXMyBatisRepository<M extends GXBaseMapper<T>, T extends G
         Class<?> entityClass = GXCommonUtils.getGenericClassType(getClass(), 1);
         TableInfo tableInfo = TableInfoHelper.getTableInfo(entityClass);
         return tableInfo.getTableName();
+    }
+
+    private GXBaseQueryParamInnerDto copyQueryParam(GXBaseQueryParamInnerDto source) {
+        return GXQueryParamUtils.copy(source);
     }
 
     private void validateQueryParam(GXBaseQueryParamInnerDto queryParamInnerDto) {

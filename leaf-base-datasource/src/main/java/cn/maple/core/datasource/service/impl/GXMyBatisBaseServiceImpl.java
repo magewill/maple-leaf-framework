@@ -12,6 +12,7 @@ import cn.maple.core.datasource.dao.GXMyBatisDao;
 import cn.maple.core.datasource.mapper.GXBaseMapper;
 import cn.maple.core.datasource.repository.GXMyBatisRepository;
 import cn.maple.core.datasource.service.GXMyBatisBaseService;
+import cn.maple.core.datasource.util.GXQueryParamUtils;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.GXUnionTypeEnums;
@@ -34,8 +35,6 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import jakarta.validation.ConstraintValidatorContext;
 import jakarta.validation.constraints.NotNull;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.Serializable;
@@ -46,9 +45,6 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>, M extends GXBaseMapper<T>, T extends GXBaseModel, D extends GXMyBatisDao<M, T, ID>, R extends GXBaseDBResDto, ID extends Serializable> extends GXBusinessServiceImpl implements GXMyBatisBaseService<P, M, T, D, R, ID> {
-    @SuppressWarnings("all")
-    private static final Logger LOGGER = LoggerFactory.getLogger(GXMyBatisBaseServiceImpl.class);
-
     @Autowired
     @SuppressWarnings("all")
     protected P repository;
@@ -60,7 +56,7 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     @Override
     public boolean checkRecordIsExists(String tableName, List<GXCondition<?>> condition) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition list must not be empty");
         }
         return repository.checkRecordIsExists(tableName, condition);
     }
@@ -74,14 +70,14 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     @Override
     public Integer updateFieldByCondition(String tableName, List<GXUpdateField<?>> updateFields, List<GXCondition<?>> condition) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition list must not be empty");
         }
         if (CollUtil.isEmpty(updateFields)) {
             throw new GXBusinessException("updateFields cannot be empty");
         }
         boolean b = checkRecordIsExists(tableName, condition);
         if (!b) {
-            log.error("待更新的数据不存在!");
+            log.error("Record to update does not exist");
             return GXCommonConstant.DB_RECORD_NOT_FOUND;
         }
         if (GXCurrentRequestContextUtils.isHTTP() && GXCurrentRequestContextUtils.tokenExists()) {
@@ -114,97 +110,102 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     @Override
     public GXPaginationResDto<R> paginate(GXBaseQueryParamInnerDto queryParamReqDto) {
-        if (CharSequenceUtil.isBlank(queryParamReqDto.getRawSQL())) {
-            if (CharSequenceUtil.isEmpty(queryParamReqDto.getTableName())) {
-                queryParamReqDto.setTableName(repository.getTableName());
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(queryParamReqDto);
+        if (CharSequenceUtil.isBlank(queryParam.getRawSQL())) {
+            if (CharSequenceUtil.isEmpty(queryParam.getTableName())) {
+                queryParam.setTableName(repository.getTableName());
             }
-            if (Objects.isNull(queryParamReqDto.getColumns())) {
-                queryParamReqDto.setColumns(CollUtil.newHashSet("*"));
+            if (Objects.isNull(queryParam.getColumns())) {
+                queryParam.setColumns(CollUtil.newHashSet("*"));
             }
         }
-        if (Objects.isNull(queryParamReqDto.getMethodName())) {
-            queryParamReqDto.setMethodName(GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME);
+        if (Objects.isNull(queryParam.getMethodName())) {
+            queryParam.setMethodName(GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME);
         }
-        CopyOptions copyOptions = getCopyOptions(queryParamReqDto);
+        CopyOptions copyOptions = getCopyOptions(queryParam);
         Class<R> genericClassType = GXCommonUtils.getGenericClassType(getClass(), 4);
-        GXPaginationResDto<Dict> paginate = repository.paginate(queryParamReqDto);
+        GXPaginationResDto<Dict> paginate = repository.paginate(queryParam);
         List<R> lst = paginate.getRecords().stream().map(dict -> {
-            Object extraData = Optional.ofNullable(queryParamReqDto.getExtraData()).orElse(Dict.create());
-            return GXCommonUtils.convertSourceToTarget(dict, genericClassType, queryParamReqDto.getMethodName(), copyOptions, extraData);
+            Object extraData = Optional.ofNullable(queryParam.getExtraData()).orElse(Dict.create());
+            return GXCommonUtils.convertSourceToTarget(dict, genericClassType, queryParam.getMethodName(), copyOptions, extraData);
         }).collect(Collectors.toList());
         long total = paginate.getTotal();
-        if (!queryParamReqDto.isPaginateCount()) {
-            total = getPaginateCount(queryParamReqDto);
+        if (!queryParam.isPaginateCount()) {
+            total = getPaginateCount(queryParam);
         }
         return new GXPaginationResDto<>(lst, total, paginate.getPageSize(), paginate.getCurrentPage());
     }
 
     @Override
     public GXPaginationResDto<R> paginate(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        if (CharSequenceUtil.isBlank(masterQueryParamInnerDto.getRawSQL())) {
-            if (CharSequenceUtil.isEmpty(masterQueryParamInnerDto.getTableName())) {
-                masterQueryParamInnerDto.setTableName(repository.getTableName());
+        GXBaseQueryParamInnerDto masterQueryParam = copyQueryParam(masterQueryParamInnerDto);
+        if (CharSequenceUtil.isBlank(masterQueryParam.getRawSQL())) {
+            if (CharSequenceUtil.isEmpty(masterQueryParam.getTableName())) {
+                masterQueryParam.setTableName(repository.getTableName());
             }
-            if (Objects.isNull(masterQueryParamInnerDto.getColumns())) {
-                masterQueryParamInnerDto.setColumns(CollUtil.newHashSet("*"));
+            if (Objects.isNull(masterQueryParam.getColumns())) {
+                masterQueryParam.setColumns(CollUtil.newHashSet("*"));
             }
         }
-        if (Objects.isNull(masterQueryParamInnerDto.getMethodName())) {
-            masterQueryParamInnerDto.setMethodName(GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME);
+        if (Objects.isNull(masterQueryParam.getMethodName())) {
+            masterQueryParam.setMethodName(GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME);
         }
-        CopyOptions copyOptions = getCopyOptions(masterQueryParamInnerDto);
+        CopyOptions copyOptions = getCopyOptions(masterQueryParam);
         Class<R> genericClassType = GXCommonUtils.getGenericClassType(getClass(), 4);
-        GXPaginationResDto<Dict> paginate = repository.paginate(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        GXPaginationResDto<Dict> paginate = repository.paginate(masterQueryParam, unionQueryParamInnerDtoLst, unionTypeEnums);
         List<R> lst = paginate.getRecords().stream().map(dict -> {
-            Object extraData = Optional.ofNullable(masterQueryParamInnerDto.getExtraData()).orElse(Dict.create());
-            return GXCommonUtils.convertSourceToTarget(dict, genericClassType, masterQueryParamInnerDto.getMethodName(), copyOptions, extraData);
+            Object extraData = Optional.ofNullable(masterQueryParam.getExtraData()).orElse(Dict.create());
+            return GXCommonUtils.convertSourceToTarget(dict, genericClassType, masterQueryParam.getMethodName(), copyOptions, extraData);
         }).collect(Collectors.toList());
         long total = paginate.getTotal();
-        if (!masterQueryParamInnerDto.isPaginateCount()) {
-            total = getUnionPaginateCount(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        if (!masterQueryParam.isPaginateCount()) {
+            total = getUnionPaginateCount(masterQueryParam, unionQueryParamInnerDtoLst, unionTypeEnums);
         }
         return new GXPaginationResDto<>(lst, total, paginate.getPageSize(), paginate.getCurrentPage());
     }
 
     @Override
     public List<R> findByCondition(GXBaseQueryParamInnerDto queryParamInnerDto) {
-        CopyOptions copyOptions = getCopyOptions(queryParamInnerDto);
-        String[] methodName = new String[]{queryParamInnerDto.getMethodName()};
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(queryParamInnerDto);
+        CopyOptions copyOptions = getCopyOptions(queryParam);
+        String[] methodName = new String[]{queryParam.getMethodName()};
         if (CharSequenceUtil.isEmpty(methodName[0])) {
             methodName[0] = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
         }
         Class<R> genericClassType = GXCommonUtils.getGenericClassType(getClass(), 4);
         Function<Dict, R> rowMapper = dict -> {
-            Object extraData = Optional.ofNullable(queryParamInnerDto.getExtraData()).orElse(Dict.create());
+            Object extraData = Optional.ofNullable(queryParam.getExtraData()).orElse(Dict.create());
             return GXCommonUtils.convertSourceToTarget(dict, genericClassType, methodName[0], copyOptions, extraData);
         };
-        return findByCondition(queryParamInnerDto, rowMapper);
+        return findByConditionPrepared(queryParam, rowMapper);
     }
 
     @Override
     public List<R> findByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        CopyOptions copyOptions = getCopyOptions(masterQueryParamInnerDto);
-        String[] methodName = new String[]{masterQueryParamInnerDto.getMethodName()};
+        GXBaseQueryParamInnerDto masterQueryParam = copyQueryParam(masterQueryParamInnerDto);
+        CopyOptions copyOptions = getCopyOptions(masterQueryParam);
+        String[] methodName = new String[]{masterQueryParam.getMethodName()};
         if (CharSequenceUtil.isEmpty(methodName[0])) {
             methodName[0] = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
         }
         Class<R> genericClassType = GXCommonUtils.getGenericClassType(getClass(), 4);
         Function<Dict, R> rowMapper = dict -> {
-            Object extraData = Optional.ofNullable(masterQueryParamInnerDto.getExtraData()).orElse(Dict.create());
+            Object extraData = Optional.ofNullable(masterQueryParam.getExtraData()).orElse(Dict.create());
             return GXCommonUtils.convertSourceToTarget(dict, genericClassType, methodName[0], copyOptions, extraData);
         };
-        List<Dict> lst = repository.findByCondition(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        List<Dict> lst = repository.findByCondition(masterQueryParam, unionQueryParamInnerDtoLst, unionTypeEnums);
         return lst.stream().map(rowMapper).collect(Collectors.toList());
     }
 
     @Override
     public <E> List<E> findByCondition(GXBaseQueryParamInnerDto queryParamInnerDto, Function<Dict, E> rowMapper) {
-        String tableName = queryParamInnerDto.getTableName();
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(queryParamInnerDto);
+        String tableName = queryParam.getTableName();
         if (CharSequenceUtil.isBlank(tableName)) {
             tableName = repository.getTableName();
-            queryParamInnerDto.setTableName(tableName);
+            queryParam.setTableName(tableName);
         }
-        List<Dict> list = repository.findByCondition(queryParamInnerDto);
+        List<Dict> list = repository.findByCondition(queryParam);
         return list.stream().map(rowMapper).collect(Collectors.toList());
     }
 
@@ -254,32 +255,34 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     @Override
     public R findOneByCondition(GXBaseQueryParamInnerDto queryParamInnerDto) {
-        String[] methodName = new String[]{queryParamInnerDto.getMethodName()};
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(queryParamInnerDto);
+        String[] methodName = new String[]{queryParam.getMethodName()};
         if (CharSequenceUtil.isEmpty(methodName[0])) {
             methodName[0] = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
         }
-        Object extraData = Optional.ofNullable(queryParamInnerDto.getExtraData()).orElse(Dict.class);
-        CopyOptions copyOptions = getCopyOptions(queryParamInnerDto);
+        Object extraData = Optional.ofNullable(queryParam.getExtraData()).orElse(Dict.class);
+        CopyOptions copyOptions = getCopyOptions(queryParam);
         Class<R> genericClassType = GXCommonUtils.getGenericClassType(getClass(), 4);
         Function<Dict, R> rowMapper = dict -> {
             return GXCommonUtils.convertSourceToTarget(dict, genericClassType, methodName[0], copyOptions, extraData);
         };
-        return findOneByCondition(queryParamInnerDto, rowMapper);
+        return findOneByCondition(queryParam, rowMapper);
     }
 
     @Override
     public R findOneByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        String[] methodName = new String[]{masterQueryParamInnerDto.getMethodName()};
+        GXBaseQueryParamInnerDto masterQueryParam = copyQueryParam(masterQueryParamInnerDto);
+        String[] methodName = new String[]{masterQueryParam.getMethodName()};
         if (CharSequenceUtil.isEmpty(methodName[0])) {
             methodName[0] = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
         }
-        Object extraData = Optional.ofNullable(masterQueryParamInnerDto.getExtraData()).orElse(Dict.class);
-        CopyOptions copyOptions = getCopyOptions(masterQueryParamInnerDto);
+        Object extraData = Optional.ofNullable(masterQueryParam.getExtraData()).orElse(Dict.class);
+        CopyOptions copyOptions = getCopyOptions(masterQueryParam);
         Class<R> genericClassType = GXCommonUtils.getGenericClassType(getClass(), 4);
         Function<Dict, R> rowMapper = dict -> {
             return GXCommonUtils.convertSourceToTarget(dict, genericClassType, methodName[0], copyOptions, extraData);
         };
-        Dict dict = repository.findOneByCondition(masterQueryParamInnerDto, unionQueryParamInnerDtoLst, unionTypeEnums);
+        Dict dict = repository.findOneByCondition(masterQueryParam, unionQueryParamInnerDtoLst, unionTypeEnums);
         if (Objects.isNull(dict)) {
             return null;
         }
@@ -369,14 +372,14 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     public ID copyOneData(List<GXCondition<?>> conditions, Dict replaceData, Dict extraData) {
         R oneData = findOneByCondition(repository.getTableName(), conditions);
         if (Objects.isNull(oneData)) {
-            throw new GXDBNotExistsException("待拷贝的数据不存在!!");
+            throw new GXDBNotExistsException("Record to copy does not exist");
         }
         T entity = GXCommonUtils.convertSourceToTarget(oneData, GXCommonUtils.getGenericClassType(getClass(), 2), null, null, extraData);
         assert entity != null;
         String setPrimaryKeyMethodName = CharSequenceUtil.format("set{}", CharSequenceUtil.upperFirst(getPrimaryKeyName(entity)));
         Method method = ReflectUtil.getMethod(entity.getClass(), setPrimaryKeyMethodName, GXCommonUtils.getGenericClassType(getClass(), 5));
         if (Objects.isNull(method)) {
-            throw new GXBusinessException(CharSequenceUtil.format("方法{}不存在", setPrimaryKeyMethodName));
+            throw new GXBusinessException(CharSequenceUtil.format("Method {} does not exist", setPrimaryKeyMethodName));
         }
         ReflectUtil.invoke(entity, method, (Object) null);
         replaceData.forEach((k, v) -> GXCommonUtils.reflectCallObjectMethod(entity, CharSequenceUtil.format("set{}", CharSequenceUtil.upperFirst(CharSequenceUtil.toCamelCase(k))), v));
@@ -392,7 +395,7 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     @Override
     public Integer deleteSoftCondition(String tableName, List<GXUpdateField<?>> updateFieldList, List<GXCondition<?>> condition, @NotNull Dict extraData) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition list must not be empty");
         }
         if (ObjectUtil.isNull(extraData)) {
             extraData = Dict.create();
@@ -426,7 +429,7 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     @Override
     public Integer deleteCondition(String tableName, List<GXCondition<?>> condition) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition list must not be empty");
         }
         return repository.deleteCondition(tableName, condition);
     }
@@ -448,9 +451,10 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     }
 
     public <E> List<E> findMultiFieldByCondition(GXBaseQueryParamInnerDto queryParamInnerDto, Class<E> targetClazz) {
-        List<Dict> list = repository.findByCondition(queryParamInnerDto);
-        CopyOptions copyOptions = getCopyOptions(queryParamInnerDto);
-        String[] methodName = new String[]{queryParamInnerDto.getMethodName()};
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(queryParamInnerDto);
+        List<Dict> list = repository.findByCondition(queryParam);
+        CopyOptions copyOptions = getCopyOptions(queryParam);
+        String[] methodName = new String[]{queryParam.getMethodName()};
         if (CharSequenceUtil.isEmpty(methodName[0])) {
             methodName[0] = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
         }
@@ -462,17 +466,18 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
         if (Objects.isNull(queryParamInnerDto) || Objects.isNull(targetClazz)) {
             throw new GXBusinessException("queryParamInnerDto and targetClazz cannot be null");
         }
-        if (CollUtil.isEmpty(queryParamInnerDto.getColumns()) || queryParamInnerDto.getColumns().size() != 1) {
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(queryParamInnerDto);
+        if (CollUtil.isEmpty(queryParam.getColumns()) || queryParam.getColumns().size() != 1) {
             throw new GXBusinessException("columns size must be exactly 1");
         }
-        queryParamInnerDto.setLimit(1);
-        String column = queryParamInnerDto.getColumns().toArray(new String[0])[0];
-        String tableName = queryParamInnerDto.getTableName();
+        queryParam.setLimit(1);
+        String column = queryParam.getColumns().toArray(new String[0])[0];
+        String tableName = queryParam.getTableName();
         if (CharSequenceUtil.isEmpty(tableName)) {
             tableName = getTableName();
-            queryParamInnerDto.setTableName(tableName);
+            queryParam.setTableName(tableName);
         }
-        Dict dict = repository.findOneByCondition(queryParamInnerDto);
+        Dict dict = repository.findOneByCondition(queryParam);
         if (Objects.isNull(dict)) {
             return null;
         }
@@ -485,16 +490,17 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
         if (Objects.isNull(queryParamInnerDto) || Objects.isNull(targetClazz)) {
             throw new GXBusinessException("queryParamInnerDto and targetClazz cannot be null");
         }
-        if (CollUtil.isEmpty(queryParamInnerDto.getColumns()) || queryParamInnerDto.getColumns().size() != 1) {
-            throw new GXBusinessException("字段列长度只能为1!!!");
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(queryParamInnerDto);
+        if (CollUtil.isEmpty(queryParam.getColumns()) || queryParam.getColumns().size() != 1) {
+            throw new GXBusinessException("columns size must be exactly 1");
         }
-        String column = queryParamInnerDto.getColumns().toArray(new String[0])[0];
-        String tableName = queryParamInnerDto.getTableName();
+        String column = queryParam.getColumns().toArray(new String[0])[0];
+        String tableName = queryParam.getTableName();
         if (CharSequenceUtil.isEmpty(tableName)) {
             tableName = getTableName();
-            queryParamInnerDto.setTableName(tableName);
+            queryParam.setTableName(tableName);
         }
-        List<Dict> dictList = repository.findByCondition(queryParamInnerDto);
+        List<Dict> dictList = repository.findByCondition(queryParam);
         ArrayList<E> lst = new ArrayList<>();
         dictList.forEach(dict -> {
             Object o = readColumnValue(dict, column);
@@ -533,18 +539,19 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     @Override
     public Long countByCondition(GXBaseQueryParamInnerDto queryParamInnerDto) {
-        if (CollUtil.isEmpty(queryParamInnerDto.getColumns())) {
-            String tableNameAlias = queryParamInnerDto.getTableNameAlias();
+        GXBaseQueryParamInnerDto queryParam = copyQueryParam(queryParamInnerDto);
+        if (CollUtil.isEmpty(queryParam.getColumns())) {
+            String tableNameAlias = queryParam.getTableNameAlias();
             String countField = CharSequenceUtil.isBlank(tableNameAlias)
                     ? "count(id) as cnt"
                     : CharSequenceUtil.format("count({}.id) as cnt", tableNameAlias);
             HashSet<String> columns = CollUtil.newHashSet(countField);
-            queryParamInnerDto.setColumns(columns);
+            queryParam.setColumns(columns);
         }
-        if (CharSequenceUtil.isBlank(queryParamInnerDto.getTableName())) {
-            queryParamInnerDto.setTableName(getTableName());
+        if (CharSequenceUtil.isBlank(queryParam.getTableName())) {
+            queryParam.setTableName(getTableName());
         }
-        return findOneByCondition(queryParamInnerDto, data -> data.getLong("cnt"));
+        return findOneByCondition(queryParam, data -> data.getLong("cnt"));
     }
 
     @Override
@@ -558,10 +565,21 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
 
     @Override
     public boolean validateExists(GXValidateExistsDto validateExistsDto, ConstraintValidatorContext constraintValidatorContext) {
-        if (CharSequenceUtil.isEmpty(validateExistsDto.getTableName())) {
-            validateExistsDto.setTableName(repository.getTableName());
+        if (Objects.isNull(validateExistsDto)) {
+            throw new GXBusinessException("Validate exists param must not be null");
         }
-        return repository.validateExists(validateExistsDto, constraintValidatorContext);
+        GXValidateExistsDto query = GXValidateExistsDto.builder()
+                .fieldName(validateExistsDto.getFieldName())
+                .tableName(validateExistsDto.getTableName())
+                .value(validateExistsDto.getValue())
+                .spEL(validateExistsDto.getSpEL())
+                .condition(validateExistsDto.getCondition())
+                .groups(validateExistsDto.getGroups())
+                .build();
+        if (CharSequenceUtil.isEmpty(query.getTableName())) {
+            query.setTableName(repository.getTableName());
+        }
+        return repository.validateExists(query, constraintValidatorContext);
     }
 
     private Object readColumnValue(Dict dict, String column) {
@@ -593,5 +611,22 @@ public class GXMyBatisBaseServiceImpl<P extends GXMyBatisRepository<M, T, D, ID>
     @Override
     public String getTableName() {
         return repository.getTableName();
+    }
+
+    private GXBaseQueryParamInnerDto copyQueryParam(GXBaseQueryParamInnerDto source) {
+        if (Objects.isNull(source)) {
+            throw new GXBusinessException("Query param must not be null");
+        }
+        return GXQueryParamUtils.copy(source);
+    }
+
+    private <E> List<E> findByConditionPrepared(GXBaseQueryParamInnerDto queryParam, Function<Dict, E> rowMapper) {
+        String tableName = queryParam.getTableName();
+        if (CharSequenceUtil.isBlank(tableName)) {
+            tableName = repository.getTableName();
+            queryParam.setTableName(tableName);
+        }
+        List<Dict> list = repository.findByCondition(queryParam);
+        return list.stream().map(rowMapper).collect(Collectors.toList());
     }
 }

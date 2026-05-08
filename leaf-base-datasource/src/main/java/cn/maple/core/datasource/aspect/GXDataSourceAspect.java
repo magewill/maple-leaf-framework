@@ -12,6 +12,7 @@ import org.springframework.aop.support.AopUtils;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.springframework.util.ClassUtils;
 import org.springframework.util.ConcurrentReferenceHashMap;
 import org.springframework.util.StringUtils;
 
@@ -57,7 +58,7 @@ public class GXDataSourceAspect {
                 }
             }
 
-            for (Class<?> ifc : clazz.getInterfaces()) {
+            for (Class<?> ifc : ClassUtils.getAllInterfacesForClass(clazz)) {
                 annotation = AnnotatedElementUtils.findMergedAnnotation(ifc, GXDataSource.class);
                 if (annotation != null) {
                     String dataSourceValue = normalizeDataSourceValue(annotation.value());
@@ -91,6 +92,9 @@ public class GXDataSourceAspect {
         return METHOD_ANNOTATION_CACHE.computeIfAbsent(cacheKey, k -> {
             Method targetMethod = AopUtils.getMostSpecificMethod(k.method(), k.targetClass());
             GXDataSource annotation = AnnotatedElementUtils.findMergedAnnotation(targetMethod, GXDataSource.class);
+            if (annotation == null) {
+                annotation = findInterfaceMethodAnnotation(k.targetClass(), k.method());
+            }
             if (annotation != null) {
                 String dataSourceValue = normalizeDataSourceValue(annotation.value());
                 if (StringUtils.hasText(dataSourceValue)) {
@@ -107,6 +111,20 @@ public class GXDataSourceAspect {
             }
             return new DataSourceCacheEntry(false, "");
         });
+    }
+
+    private GXDataSource findInterfaceMethodAnnotation(Class<?> targetClass, Method method) {
+        for (Class<?> ifc : ClassUtils.getAllInterfacesForClass(targetClass)) {
+            Method interfaceMethod = ClassUtils.getMethodIfAvailable(ifc, method.getName(), method.getParameterTypes());
+            if (interfaceMethod == null) {
+                continue;
+            }
+            GXDataSource annotation = AnnotatedElementUtils.findMergedAnnotation(interfaceMethod, GXDataSource.class);
+            if (annotation != null) {
+                return annotation;
+            }
+        }
+        return null;
     }
 
     private String normalizeDataSourceValue(String dataSourceValue) {

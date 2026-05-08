@@ -1,51 +1,23 @@
 package cn.maple.core.datasource.annotation;
 
-import java.lang.annotation.*;
+import java.lang.annotation.Documented;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Inherited;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 
 /**
- * 多数据源注解
- * <p>
- * 该注解用于实现动态数据源切换功能，可以标记在类或方法上。
- * 当应用需要连接多个数据库时，通过此注解可以在运行时动态切换数据源，
- * 无需修改业务代码，提高了系统的灵活性和可扩展性。
- * </p>
+ * Switches the dynamic datasource for a class or method.
+ * Method-level annotations take precedence over class-level annotations.
  *
- * <p>使用场景：</p>
- * <p>1. 读写分离：将查询操作路由到只读数据库，将写操作路由到主数据库</p>
- * <p>2. 多租户系统：不同租户的数据存储在不同的数据库中</p>
- * <p>3. 分库分表：按业务将数据分散到不同的数据库中</p>
- *
- * <p>使用示例：</p>
  * <pre>
- * // 在Repository类上使用，影响该类的所有方法
  * @GXDataSource("slave")
- * public class UserRepository extends GXMyBatisRepository<UserEntity> {
- *     // 所有方法都会使用slave数据源
- * }
- *
- * // 在Service类上使用
- * @GXDataSource("master")
- * public class UserServiceImpl implements UserService {
- *     // 所有方法都会使用master数据源
- *
- *     // 方法级注解会覆盖类级注解
- *     @GXDataSource("slave")
- *     public List<UserEntity> getUserList() {
- *         // 该方法使用slave数据源
- *         return userRepository.selectList(null);
- *     }
- * }
- *
- * // 在具体方法上使用
- * public class OrderService {
- *     @GXDataSource("order_db")
- *     public void createOrder(OrderEntity order) {
- *         // 该方法使用order_db数据源
- *     }
+ * class UserService {
+ *     @GXDataSource("master")
+ *     void save(User user) { ... }
  * }
  * </pre>
- *
- * @author britton <britton@126.com>
  */
 @Target({ElementType.METHOD, ElementType.TYPE})
 @Retention(RetentionPolicy.RUNTIME)
@@ -53,13 +25,7 @@ import java.lang.annotation.*;
 @Inherited
 public @interface GXDataSource {
     /**
-     * 数据源名称
-     * <p>
-     * 指定要使用的数据源名称，该名称必须在配置文件中已定义
-     * 如果为空，则使用默认数据源
-     * </p>
-     *
-     * @return 数据源名称
+     * Datasource name configured in datasource properties.
      */
     String value() default "framework";
 }

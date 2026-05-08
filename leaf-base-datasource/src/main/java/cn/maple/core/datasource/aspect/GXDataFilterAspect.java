@@ -35,7 +35,6 @@ public class GXDataFilterAspect {
     @Pointcut("@annotation(cn.maple.core.datasource.annotation.GXDataFilter) || " +
             "@within(cn.maple.core.datasource.annotation.GXDataFilter)")
     public void dataFilterPointCut() {
-        // 切点定义，不需要实现
     }
 
     @Around("dataFilterPointCut()")
@@ -49,8 +48,8 @@ public class GXDataFilterAspect {
                     if (cachedDataScopeService == null) {
                         GXDataScopeService tempService = GXSpringContextUtils.getBean(GXDataScopeService.class);
                         if (Objects.isNull(tempService)) {
-                            log.error("数据权限过滤失败：未找到GXDataScopeService接口实现类");
-                            throw new GXBusinessException(CharSequenceUtil.format("请实现{}接口", GXDataScopeService.class.getName()));
+                            log.error("Data filter failed, GXDataScopeService implementation was not found.");
+                            throw new GXBusinessException(CharSequenceUtil.format("Please implement {}", GXDataScopeService.class.getName()));
                         }
                         cachedDataScopeService = tempService;
                     }
@@ -62,14 +61,14 @@ public class GXDataFilterAspect {
             MethodSignature signature = (MethodSignature) point.getSignature();
             String methodName = signature.getDeclaringTypeName() + "." + signature.getName();
 
-            log.trace("开始处理数据权限过滤，方法: {}", methodName);
+            log.trace("Start data filter handling, method={}", methodName);
 
             if (!isSuperAdmin) {
                 try {
                     String sqlFilter = getSqlFilter(point, dataScopeService);
 
                     if (CharSequenceUtil.isEmpty(sqlFilter)) {
-                        log.debug("未获取到SQL过滤条件，主动清除继承的过滤条件以防泄露: {}", methodName);
+                        log.debug("No SQL filter found, clearing inherited filter to avoid leakage. method={}", methodName);
                         GXDataFilterThreadLocalUtils.cleanDataFilterInnerDto();
                         hasSetNewFilter = true;
                     } else {
@@ -78,20 +77,20 @@ public class GXDataFilterAspect {
                                 || lowerSqlFilter.contains("delete ")
                                 || lowerSqlFilter.contains("update ")
                                 || lowerSqlFilter.contains("drop ")) {
-                            log.warn("SQL过滤条件可能存在注入风险，请确保使用参数化查询: {}", sqlFilter);
+                            log.warn("SQL filter may contain injection risk, ensure parameterized query usage. filter={}", sqlFilter);
                         }
 
                         GXDataFilterInnerDto dataScope = new GXDataFilterInnerDto(sqlFilter);
                         GXDataFilterThreadLocalUtils.setDataFilterInnerDto(dataScope);
                         hasSetNewFilter = true;
-                        log.debug("已应用数据权限过滤条件: {}, 方法: {}", sqlFilter, methodName);
+                        log.debug("Applied data filter. filter={}, method={}", sqlFilter, methodName);
                     }
                 } catch (Exception e) {
-                    log.error("应用数据权限过滤条件时发生异常: {}", e.getMessage(), e);
-                    throw new GXBusinessException("应用数据权限过滤条件失败: " + e.getMessage(), e);
+                    log.error("Failed to apply data filter: {}", e.getMessage(), e);
+                    throw new GXBusinessException("Failed to apply data filter: " + e.getMessage(), e);
                 }
             } else {
-                log.debug("超级管理员访问，清理可能的过滤条件并跳过: {}", methodName);
+                log.debug("Super admin access, clearing possible data filter and skipping. method={}", methodName);
                 if (oldFilterDto != null) {
                     GXDataFilterThreadLocalUtils.cleanDataFilterInnerDto();
                     hasSetNewFilter = true;
@@ -103,14 +102,14 @@ public class GXDataFilterAspect {
         } finally {
             if (hasSetNewFilter) {
                 if (oldFilterDto != null) {
-                    log.debug("当前方法执行完毕(或中断)，恢复外层数据过滤条件: {}", oldFilterDto.getSqlFilter());
+                    log.debug("Restoring outer data filter after method completion. filter={}", oldFilterDto.getSqlFilter());
                     GXDataFilterThreadLocalUtils.setDataFilterInnerDto(oldFilterDto);
                 } else {
-                    log.debug("当前方法执行完毕(或中断)，清除当前挂载的数据过滤条件");
+                    log.debug("Clearing current data filter after method completion.");
                     GXDataFilterThreadLocalUtils.cleanDataFilterInnerDto();
                 }
             } else {
-                log.trace("当前切面未挂载新过滤条件，跳过上下文恢复/清理");
+                log.trace("No new data filter was mounted, skip context restore.");
             }
         }
     }
@@ -141,11 +140,11 @@ public class GXDataFilterAspect {
         });
 
         if (!cacheEntry.hasAnnotation() || cacheEntry.annotation() == null) {
-            throw new GXBusinessException("无法找到 @GXDataFilter 注解, 请确认切面拦截目标是否正确");
+            throw new GXBusinessException("Unable to find @GXDataFilter annotation for the intercepted target.");
         }
 
         String sqlFilter = dataScopeService.getSqlFilter(cacheEntry.annotation(), point);
-        log.debug("获取到SQL过滤条件: {}", sqlFilter);
+        log.debug("Resolved SQL filter: {}", sqlFilter);
         return sqlFilter;
     }
 
