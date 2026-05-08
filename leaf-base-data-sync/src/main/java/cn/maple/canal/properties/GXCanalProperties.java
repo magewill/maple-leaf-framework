@@ -1,30 +1,27 @@
 package cn.maple.canal.properties;
 
+import cn.maple.canal.constant.CanalConstant;
 import lombok.Data;
 
+/**
+ * Shared Canal RabbitMQ properties for local and Nacos sources.
+ */
 @Data
 public class GXCanalProperties {
     /**
-     * RABBITMQ 消费CANAL的线程数量
+     * Rabbit listener concurrency.
      */
-    protected String concurrencyCount = "10";
-
+    protected String concurrencyCount = CanalConstant.RABBITMQ_CANAL_CONCURRENCY_COUNT;
     /**
-     * canal的queue的名字
-     * <p>
-     * 监听的队列名字
+     * Queue name consumed by application.
      */
-    protected String canalQueueName = "canalQueue";
-
+    protected String canalQueueName = CanalConstant.RABBITMQ_CANAL_QUEUE_NAME;
     /**
-     * 交换机的名字
-     * 对应 conf/canal.properties文件里面配置的 rabbitmq.exchange = exchange.fanout.canal
+     * Exchange name used by Canal producer.
      */
-    protected String exchangeName = "exchange.fanout.canal";
-
+    protected String exchangeName = CanalConstant.RABBITMQ_CANAL_EXCHANGE_NAME;
     /**
-     * 交换机的名字
-     * 对应 conf/example/instance.properties文件里面配置的  canal.mq.topic = canal.example.exchange.routingkey
+     * Routing key used by Canal producer.
      */
-    protected String routingKey = "canal.example.exchange.routingkey";
+    protected String routingKey = CanalConstant.RABBITMQ_CANAL_ROUTING_KEY;
 }

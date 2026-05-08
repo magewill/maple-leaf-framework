@@ -17,6 +17,6 @@ import org.springframework.stereotype.Component;
 @NacosConfigurationProperties(groupId = "${nacos.config.group:DEFAULT_GROUP}", prefix = "canal", dataId = "canal.yml", autoRefreshed = true, type = ConfigType.YAML)
 public class GXNacosCanalProperties extends GXCanalProperties {
     public GXNacosCanalProperties() {
-        log.info("CANAL数据源配置使用NACOS配置");
+        log.info("Canal config source: NACOS");
     }
 }

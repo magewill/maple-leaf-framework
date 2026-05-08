@@ -19,6 +19,6 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "canal")
 public class GXLocalCanalProperties extends GXCanalProperties {
     public GXLocalCanalProperties() {
-        log.info("CANAL数据源配置使用LOCAL配置");
+        log.info("Canal config source: LOCAL");
     }
 }
