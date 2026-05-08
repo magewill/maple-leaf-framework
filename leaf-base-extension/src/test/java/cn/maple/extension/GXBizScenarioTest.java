@@ -33,4 +33,11 @@ class GXBizScenarioTest {
         assertThrows(IllegalArgumentException.class, () -> GXBizScenario.valueOf("biz", "", "scenario"));
         assertThrows(IllegalArgumentException.class, () -> GXBizScenario.valueOf("biz", "useCase", "  "));
     }
+
+    @Test
+    void rejectsPartsContainingIdentitySeparator() {
+        assertThrows(IllegalArgumentException.class, () -> GXBizScenario.valueOf("biz.id", "useCase", "scenario"));
+        assertThrows(IllegalArgumentException.class, () -> GXBizScenario.valueOf("biz", "use.case", "scenario"));
+        assertThrows(IllegalArgumentException.class, () -> GXBizScenario.valueOf("biz", "useCase", "sce.nario"));
+    }
 }

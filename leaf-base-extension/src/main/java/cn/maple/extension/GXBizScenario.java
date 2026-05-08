@@ -1,10 +1,13 @@
 package cn.maple.extension;
 
+import lombok.Getter;
+
 import java.util.Objects;
 
 /**
  * Business scenario identifier: bizId + useCase + scenario.
  */
+@Getter
 public final class GXBizScenario {
     public static final String DEFAULT_BIZ_ID = "#defaultBizId#";
     public static final String DEFAULT_USE_CASE = "#defaultUseCase#";
@@ -15,11 +18,17 @@ public final class GXBizScenario {
     private final String bizId;
     private final String useCase;
     private final String scenario;
+    private final String uniqueIdentity;
+    private final String identityWithDefaultScenario;
+    private final String identityWithDefaultUseCase;
 
     private GXBizScenario(String bizId, String useCase, String scenario) {
         this.bizId = requireText(bizId, "bizId");
         this.useCase = requireText(useCase, "useCase");
         this.scenario = requireText(scenario, "scenario");
+        this.uniqueIdentity = this.bizId + DOT_SEPARATOR + this.useCase + DOT_SEPARATOR + this.scenario;
+        this.identityWithDefaultScenario = this.bizId + DOT_SEPARATOR + this.useCase + DOT_SEPARATOR + DEFAULT_SCENARIO;
+        this.identityWithDefaultUseCase = this.bizId + DOT_SEPARATOR + DEFAULT_USE_CASE + DOT_SEPARATOR + DEFAULT_SCENARIO;
     }
 
     public static GXBizScenario valueOf(String bizId, String useCase, String scenario) {
@@ -38,33 +47,12 @@ public final class GXBizScenario {
         return GXBizScenario.valueOf(DEFAULT_BIZ_ID, DEFAULT_USE_CASE, DEFAULT_SCENARIO);
     }
 
-    public String getBizId() {
-        return bizId;
-    }
-
-    public String getUseCase() {
-        return useCase;
-    }
-
-    public String getScenario() {
-        return scenario;
-    }
-
-    public String getUniqueIdentity() {
-        return bizId + DOT_SEPARATOR + useCase + DOT_SEPARATOR + scenario;
-    }
-
-    public String getIdentityWithDefaultScenario() {
-        return bizId + DOT_SEPARATOR + useCase + DOT_SEPARATOR + DEFAULT_SCENARIO;
-    }
-
-    public String getIdentityWithDefaultUseCase() {
-        return bizId + DOT_SEPARATOR + DEFAULT_USE_CASE + DOT_SEPARATOR + DEFAULT_SCENARIO;
-    }
-
     private static String requireText(String value, String fieldName) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(fieldName + " cannot be blank");
+        }
+        if (value.contains(DOT_SEPARATOR)) {
+            throw new IllegalArgumentException(fieldName + " cannot contain '.'");
         }
         return value;
     }

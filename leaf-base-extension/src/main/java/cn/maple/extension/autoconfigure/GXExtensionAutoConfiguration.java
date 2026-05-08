@@ -18,7 +18,7 @@ import org.springframework.context.annotation.Bean;
  * 4. {@link GXExtensionRegister} - 扩展点注册器，负责将扩展点实现注册到扩展点仓库
  * <p>
  * 所有Bean都使用{@link ConditionalOnMissingBean}注解，允许用户自定义实现覆盖默认配置。
- * 组件之间的依赖关系和初始化顺序已经通过Spring的依赖注入机制和{@code initMethod}属性保证。
+ * 组件之间的依赖关系通过Spring依赖注入保证，扩展点注册通过{@link jakarta.annotation.PostConstruct}触发。
  * 使用示例：
  * <pre>
  * // 在Spring Boot应用中，只需要引入依赖，无需额外配置
@@ -50,8 +50,8 @@ public class GXExtensionAutoConfiguration {
      * 创建扩展点启动引导类Bean
      * <p>
      * 该Bean负责在应用启动时自动扫描并注册所有标记了{@link cn.maple.extension.GXExtension}或
-     * {@link cn.maple.extension.GXExtensions}注解的扩展点实现类。通过{@code initMethod="init"}属性，
-     * 确保在Bean创建后自动调用{@code init()}方法完成初始化。
+     * {@link cn.maple.extension.GXExtensions}注解的扩展点实现类。
+     * {@link GXExtensionBootstrap}通过{@link jakarta.annotation.PostConstruct}完成初始化。
      * <p>
      * 线程安全性：该Bean在应用启动时执行一次初始化，之后不再修改状态，因此是线程安全的。
      *

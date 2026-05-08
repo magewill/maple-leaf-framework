@@ -11,12 +11,23 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class GXExtensionAutoConfigurationTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(GXExtensionAutoConfiguration.class));
+
+    @Test
+    void autoConfigurationIsDiscoveredFromImports() {
+        String imports = readAutoConfigurationImports();
+
+        assertThat(imports).contains(GXExtensionAutoConfiguration.class.getName());
+    }
 
     @Test
     void createsDefaultExtensionBeans() {
@@ -58,5 +69,15 @@ class GXExtensionAutoConfigurationTest {
     }
 
     static class CustomExtensionRepository extends GXExtensionRepository {
+    }
+
+    private String readAutoConfigurationImports() {
+        try (var inputStream = Thread.currentThread().getContextClassLoader()
+                .getResourceAsStream("META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports")) {
+            assertThat(inputStream).isNotNull();
+            return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 }
