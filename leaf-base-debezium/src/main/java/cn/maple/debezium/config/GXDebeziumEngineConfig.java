@@ -22,346 +22,218 @@ import org.springframework.context.annotation.Configuration;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Debezium引擎配置类 - 高性能CDC数据变更捕获
- * <p>
- * 该类负责初始化和管理Debezium引擎，用于捕获数据库变更事件(CDC - Change Data Capture)。
- * 采用现代Java虚拟线程技术，实现轻量级、高并发的数据库变更事件处理，显著降低系统资源占用。
- * </p>
- *
- * <p>
- * <b>核心特性：</b>
- * <ul>
- *   <li>基于Java 21+虚拟线程，极低内存占用和线程创建开销</li>
- *   <li>懒加载执行器，仅在需要时创建虚拟线程，最小化资源占用</li>
- *   <li>分布式锁机制确保集群环境下单实例运行，避免重复消费</li>
- *   <li>优雅关闭机制，确保数据完整性和资源正确释放</li>
- *   <li>异步事件处理，提高系统吞吐量和响应性能</li>
- *   <li>完善的异常处理和监控日志，便于问题排查</li>
- *   <li>条件化配置，支持动态启用/禁用功能</li>
- * </ul>
- * </p>
- *
- * <p>
- * <b>资源优化策略：</b>
- * <ul>
- *   <li>使用虚拟线程替代传统线程池，减少内存占用</li>
- *   <li>懒加载机制，仅在需要时创建虚拟线程</li>
- *   <li>无状态设计，避免不必要的对象缓存</li>
- *   <li>快速失败策略，及时释放无效资源</li>
- *   <li>原子引用管理，确保线程安全</li>
- * </ul>
- * </p>
- *
- * <p>
- * <b>使用示例：</b>
- * <pre>
- * // 1. 实现GXDebeziumService接口
- * &#64;Service
- * public class MyDebeziumServiceImpl implements GXDebeziumService {
- *     &#64;Override
- *     public void initialEngineLock(String lockKey) {
- *         // 实现分布式锁获取逻辑
- *         redisTemplate.opsForValue().setIfAbsent(lockKey, "locked", Duration.ofMinutes(5));
- *     }
- *
- *     &#64;Override
- *     public void initialEngineUnLock(String lockKey) {
- *         // 实现分布式锁释放逻辑
- *         redisTemplate.delete(lockKey);
- *     }
- *
- *     &#64;Override
- *     public boolean isEngineInitialized(String lockKey) {
- *         // 检查是否已初始化
- *         return redisTemplate.hasKey(lockKey);
- *     }
- *
- *     &#64;Override
- *     public void processCaptureDataChange(Dict payload) {
- *         // 处理数据变更事件
- *         String operation = payload.getStr("op"); // c=create, u=update, d=delete
- *         Dict before = payload.getDict("before");
- *         Dict after = payload.getDict("after");
- *
- *         switch (operation) {
- *             case "c" -> handleInsert(after);
- *             case "u" -> handleUpdate(before, after);
- *             case "d" -> handleDelete(before);
- *         }
- *     }
- * }
- *
- * // 2. 配置Debezium属性 (application.yml)
- * maple:
- *   framework:
- *     enable:
- *       debezium: true
- *
- * debezium:
- *   config:
- *     name: "my-connector"
- *     connector.class: "io.debezium.connector.mysql.MySqlConnector"
- *     database.hostname: "localhost"
- *     database.port: "3306"
- *     database.user: "debezium"
- *     database.password: "password"
- *     database.server.id: "184054"
- *     database.server.name: "my-app-connector"
- *     database.include.list: "inventory"
- *     table.include.list: "inventory.customers,inventory.orders"
- *     database.history.kafka.bootstrap.servers: "localhost:9092"
- *     database.history.kafka.topic: "schema-changes.inventory"
- *
- * // 3. Spring容器会自动初始化该配置类并启动Debezium引擎
- * </pre>
- * </p>
- *
- * <p>
- * <b>性能监控指标：</b>
- * <ul>
- *   <li>虚拟线程创建数量和存活时间</li>
- *   <li>事件处理延迟和吞吐量</li>
- *   <li>异常发生频率和类型</li>
- *   <li>资源使用情况（内存、CPU）</li>
- * </ul>
- * </p>
- *
- * <p>
- * <b>注意事项：</b>
- * <ul>
- *   <li>需要Java 21+支持虚拟线程特性</li>
- *   <li>确保数据库开启binlog且格式为ROW</li>
- *   <li>在集群环境下必须实现分布式锁</li>
- *   <li>建议配置适当的数据库连接池大小</li>
- * </ul>
- * </p>
- *
- * @author 系统架构师
- * @version 2.1.0
- * @see GXDebeziumService 数据变更处理服务接口
- * @see GXDebeziumProperties Debezium配置属性类
- * @since 1.0.0
+ * Manages the lifecycle of the embedded Debezium engine.
  */
 @Configuration
 @Log4j2
 @ConditionalOnExpression("${maple.framework.enable.debezium:false}")
 public class GXDebeziumEngineConfig implements DisposableBean {
-    /**
-     * 用于执行Debezium引擎的线程池
-     * <p>
-     * 使用Java虚拟线程(Virtual Thread)实现，相比传统线程更加轻量级，
-     * 适合IO密集型任务，如数据库事件监听。采用懒加载模式，仅在需要时创建。
-     * </p>
-     */
+    private static final long LOCK_RENEW_INTERVAL_MINUTES = Math.max(1L, GXDebeziumService.LOCK_TTL_MINUTES / 2L);
+
     private final AtomicReference<ExecutorService> executorServiceRef = new AtomicReference<>();
-
-    /**
-     * Debezium引擎实例
-     * <p>
-     * 负责连接数据库并捕获数据变更事件
-     * </p>
-     */
+    private final AtomicReference<ScheduledExecutorService> lockRenewalExecutorRef = new AtomicReference<>();
     private final AtomicReference<DebeziumEngine<ChangeEvent<String, String>>> debeziumEngineRef = new AtomicReference<>();
-
-    /**
-     * 引擎初始化状态标志
-     * <p>
-     * 用于标记Debezium引擎是否已经初始化，避免重复初始化
-     * </p>
-     */
     private final AtomicBoolean engineInitialized = new AtomicBoolean(false);
-
-    /**
-     * 引擎关闭状态标志
-     * <p>
-     * 用于标记Debezium引擎是否已经关闭，避免重复关闭
-     * </p>
-     */
     private final AtomicBoolean engineShutdown = new AtomicBoolean(false);
-
-    /**
-     * 当前实例是否持有Debezium初始化占位。
-     */
     private final AtomicBoolean engineLockAcquired = new AtomicBoolean(false);
 
-    /**
-     * Debezium配置属性
-     * <p>
-     * 包含连接数据库的配置信息以及Debezium的相关配置
-     * </p>
-     */
     @Resource
     private GXDebeziumProperties debeziumProperties;
 
-    /**
-     * 获取虚拟线程执行器
-     * <p>
-     * 懒加载模式，仅在首次调用时创建执行器，减少资源占用
-     * </p>
-     *
-     * @return 虚拟线程执行器
-     */
     private ExecutorService getExecutorService() {
+        if (engineShutdown.get()) {
+            throw new RejectedExecutionException("Debezium engine is shutting down");
+        }
+
         ExecutorService executorService = executorServiceRef.get();
         if (executorService == null) {
-            synchronized (GXDebeziumEngineConfig.class) {
+            synchronized (this) {
                 executorService = executorServiceRef.get();
                 if (executorService == null) {
                     Thread.Builder.OfVirtual ofVirtual = Thread.ofVirtual().name("debezium-virtual-thread#", 0)
-                            .uncaughtExceptionHandler((thread, throwable) -> {
-                                // 处理未捕获的异常，防止虚拟线程异常导致应用崩溃
-                                log.error("Debezium虚拟线程[{}]发生未捕获异常: {}",
-                                        thread.getName(), throwable.getMessage(), throwable);
-                            });
+                            .uncaughtExceptionHandler((thread, throwable) ->
+                                    log.error("Unhandled Debezium virtual thread failure: thread={}, error={}",
+                                            thread.getName(), throwable.getMessage(), throwable));
                     ThreadFactory factory = ofVirtual.factory();
                     ExecutorService newExecutorService = Executors.newThreadPerTaskExecutor(factory);
-                    executorServiceRef.set(newExecutorService);
-                    executorService = newExecutorService;
-                    log.info("已创建Debezium虚拟线程执行器");
+                    if (!executorServiceRef.compareAndSet(null, newExecutorService)) {
+                        newExecutorService.shutdownNow();
+                    }
+                    executorService = executorServiceRef.get();
+                    log.info("Debezium virtual thread executor created");
                 }
             }
         }
         return executorService;
     }
 
-    /**
-     * 初始化Debezium引擎
-     * <p>
-     * 该方法在Spring容器启动时自动执行，负责初始化Debezium引擎并启动数据库变更事件监听。
-     * 通过分布式锁机制确保在分布式环境下只有一个服务实例初始化并运行Debezium引擎。
-     * </p>
-     * <p>
-     * 初始化流程：
-     * 1. 获取GXDebeziumService实现类
-     * 2. 获取分布式锁，确保只有一个服务实例初始化引擎
-     * 3. 加载Debezium配置
-     * 4. 创建并配置Debezium引擎
-     * 5. 启动引擎
-     * 6. 释放分布式锁
-     * </p>
-     */
     @PostConstruct
     public void initDebeziumEngine() {
-        // 如果引擎已初始化或已关闭，则不再执行初始化
         if (engineInitialized.get() || engineShutdown.get()) {
-            log.info("Debezium引擎已初始化或已关闭，跳过初始化");
+            log.info("Debezium engine init skipped: initialized={}, shutdown={}", engineInitialized.get(), engineShutdown.get());
             return;
         }
 
         GXDebeziumService debeziumService = GXSpringContextUtils.getBean(GXDebeziumService.class);
         if (ObjectUtil.isNull(debeziumService)) {
-            log.error("请实现GXDebeziumService接口，Debezium引擎初始化失败");
+            log.error("GXDebeziumService bean is required to start Debezium engine");
             return;
         }
 
         String lockKey = getLockKey();
-
-        // 原子占位，避免多个实例同时通过 exists 检查后重复启动引擎
-        if (!debeziumService.tryInitialEngineLock(lockKey)) {
-            log.info("其他服务实例已初始化Debezium引擎，当前服务实例不执行初始化操作");
-            return;
-        }
-        engineLockAcquired.set(true);
-
-        log.info("开始初始化应用[{}]的Debezium引擎", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
-
         try {
-            // 加载Debezium配置
+            if (!debeziumService.tryInitialEngineLock(lockKey)) {
+                log.info("Debezium engine lock is owned by another instance");
+                return;
+            }
+            engineLockAcquired.set(true);
+            startLockRenewal(debeziumService, lockKey);
+
+            log.info("Starting Debezium engine: app={}", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
             Map<String, String> config = debeziumProperties.getConfig();
             if (config == null || config.isEmpty()) {
-                log.error("Debezium配置为空，请检查配置信息");
+                log.error("Debezium config is empty");
                 return;
             }
 
-            // 验证必要的配置项
             if (!validateConfiguration(config)) {
-                log.error("Debezium配置验证失败，请检查必要的配置项");
+                log.error("Debezium config validation failed");
                 return;
             }
 
-            Properties properties = new Properties();
-            Set<Map.Entry<String, String>> entries = config.entrySet();
-            for (Map.Entry<String, String> entry : entries) {
-                properties.setProperty(entry.getKey(), entry.getValue());
-            }
+            DebeziumEngine<ChangeEvent<String, String>> engine = createDebeziumEngine(config, debeziumService);
+            debeziumEngineRef.set(engine);
 
-            // 创建并配置Debezium引擎
             try {
-                DebeziumEngine<ChangeEvent<String, String>> engine = DebeziumEngine.create(Json.class)
-                        .using(properties)
-                        .notifying(record -> {
-                            try {
-                                if (record == null || record.value() == null) {
-                                    log.warn("接收到空的数据库变更记录");
-                                    return;
-                                }
-
-                                log.debug("监听到数据库数据变化 : {}", record);
-                                String value = record.value();
-                                Dict dbChangeData = JSONUtil.toBean(value, Dict.class);
-                                Dict payload = Convert.convert(Dict.class, dbChangeData.getObj("payload"));
-                                if (payload == null) {
-                                    log.warn("接收到空的Debezium payload，忽略该记录: {}", record.key());
-                                    return;
-                                }
-
-                                // 调用自定义处理逻辑（异步处理，避免阻塞Debezium引擎）
-                                getExecutorService().submit(() -> {
-                                    try {
-                                        long startTime = System.currentTimeMillis();
-                                        debeziumService.processCaptureDataChange(payload);
-                                        long endTime = System.currentTimeMillis();
-                                        log.debug("处理数据库变更事件耗时: {}ms", (endTime - startTime));
-                                    } catch (Exception e) {
-                                        log.error("处理数据库变更事件时发生异常: {}", e.getMessage(), e);
-                                    }
-                                });
-                            } catch (Exception e) {
-                                log.error("解析数据库变更事件时发生异常: {}", e.getMessage(), e);
-                            }
-                        }).build();
-
-                // 保存引擎实例
-                debeziumEngineRef.set(engine);
-
-                // 启动引擎
-                try {
-                    getExecutorService().execute(() -> runDebeziumEngine(engine, debeziumService, lockKey));
-                    log.info("应用[{}]的Debezium引擎启动任务已提交", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
-                } catch (RejectedExecutionException e) {
-                    log.error("Debezium引擎启动失败，线程池已关闭或已满: {}", e.getMessage(), e);
-                    debeziumEngineRef.compareAndSet(engine, null);
-                }
-            } catch (Exception e) {
-                log.error("创建Debezium引擎时发生异常: {}", e.getMessage(), e);
+                getExecutorService().execute(() -> runDebeziumEngine(engine, debeziumService, lockKey));
+                log.info("Debezium engine start task submitted: app={}", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
+            } catch (RejectedExecutionException e) {
+                log.error("Debezium engine start rejected: {}", e.getMessage(), e);
+                debeziumEngineRef.compareAndSet(engine, null);
             }
         } catch (Exception e) {
-            log.error("初始化Debezium引擎时发生异常: {}", e.getMessage(), e);
+            log.error("Debezium engine init failed: {}", e.getMessage(), e);
         } finally {
-            // 如果引擎初始化失败，释放锁
             if (!engineInitialized.get() && debeziumEngineRef.get() == null) {
                 releaseEngineLock(debeziumService, lockKey);
             }
         }
     }
 
+    private DebeziumEngine<ChangeEvent<String, String>> createDebeziumEngine(
+            Map<String, String> config, GXDebeziumService debeziumService) {
+        Properties properties = new Properties();
+        Set<Map.Entry<String, String>> entries = config.entrySet();
+        for (Map.Entry<String, String> entry : entries) {
+            properties.setProperty(entry.getKey(), entry.getValue());
+        }
+
+        return DebeziumEngine.create(Json.class)
+                .using(properties)
+                .notifying(record -> handleChangeEvent(record, debeziumService))
+                .build();
+    }
+
+    private void handleChangeEvent(ChangeEvent<String, String> record, GXDebeziumService debeziumService) {
+        try {
+            if (engineShutdown.get()) {
+                log.debug("Debezium event ignored because engine is shutting down");
+                return;
+            }
+            if (record == null || record.value() == null) {
+                log.warn("Debezium event ignored because value is empty");
+                return;
+            }
+
+            log.debug("Debezium event received: key={}", record.key());
+            Dict dbChangeData = JSONUtil.toBean(record.value(), Dict.class);
+            Dict payload = Convert.convert(Dict.class, dbChangeData.getObj("payload"));
+            if (payload == null) {
+                log.warn("Debezium event ignored because payload is empty: key={}", record.key());
+                return;
+            }
+
+            getExecutorService().submit(() -> processPayload(debeziumService, payload));
+        } catch (RejectedExecutionException e) {
+            log.warn("Debezium event ignored because executor rejected the task: {}", e.getMessage());
+        } catch (Exception e) {
+            log.error("Debezium event parse failed: {}", e.getMessage(), e);
+        }
+    }
+
+    private void processPayload(GXDebeziumService debeziumService, Dict payload) {
+        try {
+            long startTime = System.currentTimeMillis();
+            debeziumService.processCaptureDataChange(payload);
+            log.debug("Debezium event processed: cost={}ms", System.currentTimeMillis() - startTime);
+        } catch (Exception e) {
+            log.error("Debezium event processing failed: {}", e.getMessage(), e);
+        }
+    }
+
     private void runDebeziumEngine(DebeziumEngine<ChangeEvent<String, String>> engine, GXDebeziumService debeziumService, String lockKey) {
         engineInitialized.set(true);
-        log.info("应用[{}]的Debezium引擎启动成功", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
+        log.info("Debezium engine started: app={}", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
         try {
             engine.run();
         } catch (Exception e) {
-            log.error("Debezium引擎运行时发生异常: {}", e.getMessage(), e);
+            log.error("Debezium engine run failed: {}", e.getMessage(), e);
         } finally {
             engineInitialized.set(false);
             debeziumEngineRef.compareAndSet(engine, null);
             releaseEngineLock(debeziumService, lockKey);
-            log.info("应用[{}]的Debezium引擎运行任务已退出", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
+            log.info("Debezium engine task exited: app={}", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
+        }
+    }
+
+    private void startLockRenewal(GXDebeziumService debeziumService, String lockKey) {
+        ScheduledExecutorService existingExecutor = lockRenewalExecutorRef.get();
+        if (existingExecutor != null && !existingExecutor.isShutdown()) {
+            return;
+        }
+
+        ScheduledExecutorService renewalExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "debezium-lock-renewal");
+            thread.setDaemon(true);
+            return thread;
+        });
+        if (!lockRenewalExecutorRef.compareAndSet(existingExecutor, renewalExecutor)) {
+            renewalExecutor.shutdownNow();
+            return;
+        }
+
+        renewalExecutor.scheduleWithFixedDelay(() -> {
+            if (!engineLockAcquired.get() || engineShutdown.get()) {
+                return;
+            }
+            try {
+                if (!debeziumService.renewInitialEngineLock(lockKey)) {
+                    log.error("Debezium engine lock ownership was lost; closing engine");
+                    DebeziumEngine<ChangeEvent<String, String>> engine = debeziumEngineRef.get();
+                    if (engine != null) {
+                        engine.close();
+                    }
+                }
+            } catch (Exception e) {
+                log.error("Debezium engine lock renewal failed: {}", e.getMessage(), e);
+            }
+        }, LOCK_RENEW_INTERVAL_MINUTES, LOCK_RENEW_INTERVAL_MINUTES, TimeUnit.MINUTES);
+    }
+
+    private void stopLockRenewal() {
+        ScheduledExecutorService renewalExecutor = lockRenewalExecutorRef.getAndSet(null);
+        if (renewalExecutor != null) {
+            renewalExecutor.shutdownNow();
         }
     }
 
@@ -370,26 +242,17 @@ public class GXDebeziumEngineConfig implements DisposableBean {
             return;
         }
 
+        stopLockRenewal();
         try {
             debeziumService.initialEngineUnLock(lockKey);
-            log.info("已释放Debezium引擎初始化锁");
+            log.info("Debezium engine lock released");
         } catch (Exception e) {
-            log.error("释放Debezium初始化锁时发生异常: {}", e.getMessage(), e);
             engineLockAcquired.set(true);
+            log.error("Debezium engine lock release failed: {}", e.getMessage(), e);
         }
     }
 
-    /**
-     * 验证Debezium配置
-     * <p>
-     * 检查必要的配置项是否存在，确保Debezium引擎能够正常工作
-     * </p>
-     *
-     * @param config Debezium配置
-     * @return 配置验证结果，true表示验证通过，false表示验证失败
-     */
     private boolean validateConfiguration(Map<String, String> config) {
-        // 必要的配置项列表
         String[] requiredConfigs = {
                 "name",
                 "connector.class",
@@ -398,13 +261,12 @@ public class GXDebeziumEngineConfig implements DisposableBean {
                 "database.user",
                 "database.password",
                 "database.server.id",
-                //"database.server.name"
+                "topic.prefix"
         };
 
-        // 检查必要的配置项是否存在
         for (String requiredConfig : requiredConfigs) {
             if (!config.containsKey(requiredConfig) || CharSequenceUtil.isBlank(config.get(requiredConfig))) {
-                log.error("缺少必要的Debezium配置项: {}", requiredConfig);
+                log.error("Required Debezium config is missing: {}", requiredConfig);
                 return false;
             }
         }
@@ -412,89 +274,66 @@ public class GXDebeziumEngineConfig implements DisposableBean {
         return true;
     }
 
-    /**
-     * 销毁Debezium引擎并释放资源
-     * <p>
-     * 该方法在Spring容器关闭时自动执行，负责优雅地关闭Debezium引擎和释放相关资源。
-     * 确保在应用关闭时能够正确地释放数据库连接和线程资源，避免资源泄漏。
-     * </p>
-     * <p>
-     * 销毁流程：
-     * 1. 标记引擎为关闭状态
-     * 2. 关闭Debezium引擎
-     * 3. 关闭线程池
-     * 4. 等待线程池中的任务完成
-     * 5. 释放分布式锁
-     * </p>
-     *
-     * @throws Exception 在关闭过程中可能发生的异常，这些异常会被记录但不会重新抛出，
-     *                   以允许其他Bean也能释放它们的资源
-     */
     @Override
-    public void destroy() throws Exception {
-        // 如果引擎已经关闭，则不再执行关闭操作
+    public void destroy() {
         if (engineShutdown.getAndSet(true)) {
-            log.info("Debezium引擎已经关闭，跳过关闭操作");
+            log.info("Debezium engine shutdown skipped because it is already closed");
             return;
         }
 
         String lockKey = getLockKey();
-        log.info("开始关闭应用[{}]的Debezium引擎", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
+        log.info("Stopping Debezium engine: app={}", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
 
-        // 关闭Debezium引擎
         DebeziumEngine<ChangeEvent<String, String>> engine = debeziumEngineRef.getAndSet(null);
         if (engine != null) {
             try {
                 engine.close();
-                log.info("Debezium引擎已关闭");
+                log.info("Debezium engine closed");
             } catch (Exception e) {
-                log.error("关闭Debezium引擎时发生异常: {}", e.getMessage(), e);
+                log.error("Debezium engine close failed: {}", e.getMessage(), e);
             }
         }
 
-        // 关闭线程池并等待任务完成
-        ExecutorService executorService = executorServiceRef.getAndSet(null);
-        if (executorService != null && !executorService.isShutdown()) {
-            executorService.shutdown();
-            try {
-                // 等待任务完成，最多等待2分钟
-                boolean terminated = false;
-                for (int i = 0; i < 2 && !terminated; i++) {
-                    log.info("等待Debezium线程池关闭，最多再等待60秒...");
-                    terminated = executorService.awaitTermination(60, TimeUnit.SECONDS);
-                }
+        shutdownExecutorService(executorServiceRef.getAndSet(null));
+        stopLockRenewal();
 
-                if (!terminated) {
-                    log.warn("Debezium线程池未能在指定时间内完全关闭，将强制关闭");
-                    executorService.shutdownNow();
-                    // 再次等待，给予任务中断的机会
-                    executorService.awaitTermination(10, TimeUnit.SECONDS);
-                }
-            } catch (InterruptedException e) {
-                log.warn("等待Debezium线程池关闭时被中断，将强制关闭线程池", e);
-                executorService.shutdownNow();
-                Thread.currentThread().interrupt(); // 重新设置中断标志
-            }
-        }
-
-        // 释放分布式锁
         try {
             GXDebeziumService debeziumService = GXSpringContextUtils.getBean(GXDebeziumService.class);
             if (debeziumService != null) {
                 releaseEngineLock(debeziumService, lockKey);
             }
         } catch (Exception e) {
-            log.error("释放Debezium初始化锁时发生异常: {}", e.getMessage(), e);
+            log.error("Debezium engine lock release failed during shutdown: {}", e.getMessage(), e);
         }
 
-        log.info("~~~~ 应用[{}]的Debezium引擎关闭完成，再见 ~~~~~", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
+        log.info("Debezium engine stopped: app={}", GXCommonUtils.getEnvironmentValue("spring.application.name", String.class));
     }
 
-    /**
-     * 获取分布式锁的Key
-     *
-     * @return 分布式锁的Key
-     */
+    private void shutdownExecutorService(ExecutorService executorService) {
+        if (executorService == null || executorService.isShutdown()) {
+            return;
+        }
+
+        executorService.shutdown();
+        try {
+            boolean terminated = false;
+            for (int i = 0; i < 2 && !terminated; i++) {
+                log.info("Waiting for Debezium executor shutdown: timeout=60s");
+                terminated = executorService.awaitTermination(60, TimeUnit.SECONDS);
+            }
+
+            if (!terminated) {
+                log.warn("Debezium executor did not stop before timeout; forcing shutdown");
+                executorService.shutdownNow();
+                executorService.awaitTermination(10, TimeUnit.SECONDS);
+            }
+        } catch (InterruptedException e) {
+            log.warn("Interrupted while waiting for Debezium executor shutdown", e);
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private String getLockKey() {
         String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class);
         String activeProfile = GXCommonUtils.getActiveProfile();

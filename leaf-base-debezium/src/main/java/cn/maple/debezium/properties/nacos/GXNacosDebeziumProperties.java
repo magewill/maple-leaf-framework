@@ -17,7 +17,6 @@ import java.util.Map;
 @Data
 @Slf4j
 @Component
-@SuppressWarnings("all")
 @EqualsAndHashCode(callSuper = true)
 @ConditionalOnClass(name = {"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
 @NacosConfigurationProperties(dataId = "debezium.yml",
@@ -32,7 +31,7 @@ public class GXNacosDebeziumProperties extends GXDebeziumProperties {
     private Map<String, String> config = new LinkedHashMap<>();
 
     public GXNacosDebeziumProperties() {
-        log.info("Debezium配置使用的是NACOS配置");
+        log.info("Debezium config source: nacos");
     }
 
     @Override
