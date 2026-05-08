@@ -14,14 +14,10 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * 多数据源属性
- */
 @Data
 @Slf4j
 @EqualsAndHashCode(callSuper = true)
 @Component
-@SuppressWarnings("all")
 @ConditionalOnClass(name = {"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
 //@ConfigurationProperties(prefix = "mongodb")
 //@ConfigurationProperties(prefix = "spring.data.mongodb")  可以直接使用MongoTemplate对象  不需要在GXMongoConfig中进行配置
@@ -35,11 +31,11 @@ import java.util.Map;
                 password = "${spring.cloud.nacos.password:${nacos.config.password:}}"),
         autoRefreshed = true,
         type = ConfigType.YAML)
-public class GXNacosMongoDynamicDataSourceProperties extends GXMongoDynamicDataSourceProperties/*MongoProperties*/ {
+public class GXNacosMongoDynamicDataSourceProperties extends GXMongoDynamicDataSourceProperties {
     private Map<String, GXMongoDataSourceProperties> datasource = new LinkedHashMap<>();
 
     public GXNacosMongoDynamicDataSourceProperties() {
-        log.info("MongoDB数据源的配置使用的是NACOS配置");
+        log.info("Use Nacos MongoDB datasource configuration");
     }
 
     @Override

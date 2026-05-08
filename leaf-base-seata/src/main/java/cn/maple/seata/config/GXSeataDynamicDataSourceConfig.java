@@ -49,7 +49,7 @@ public class GXSeataDynamicDataSourceConfig {
     @Bean
     public SqlSessionFactoryBeanCustomizer seataDynamicDataSourceCustomizer(GXDynamicDataSource dynamicDataSource) {
         return factoryBean -> {
-            log.debug("[Seata] SqlSessionFactoryBeanCustomizer 正在将 GXDynamicDataSource 注入 MyBatis-Plus");
+            log.debug("[Seata] Inject GXDynamicDataSource into MyBatis-Plus SqlSessionFactoryBean");
             factoryBean.setDataSource(dynamicDataSource);
         };
     }

@@ -14,13 +14,9 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * 多数据源属性
- */
 @Data
 @Slf4j
 @Component
-@SuppressWarnings("all")
 @EqualsAndHashCode(callSuper = true)
 @ConditionalOnMissingClass({"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
 @PropertySource(value = {"classpath:/${spring.profiles.active}/mongodb.yml"}, factory = GXYamlPropertySourceFactory.class, ignoreResourceNotFound = false)
@@ -30,7 +26,7 @@ public class GXLocalMongoDynamicDataSourceProperties extends GXMongoDynamicDataS
     private Map<String, GXMongoDataSourceProperties> datasource = new LinkedHashMap<>();
 
     public GXLocalMongoDynamicDataSourceProperties() {
-        log.info("MongoDB数据源的配置使用的是本地配置");
+        log.info("Use local MongoDB datasource configuration");
     }
 
     @Override
