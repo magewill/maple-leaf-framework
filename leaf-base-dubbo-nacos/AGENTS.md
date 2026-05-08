@@ -1,6 +1,8 @@
 # AGENTS.md - leaf-base-dubbo-nacos
 
-本文档用于指导 `leaf-base-dubbo-nacos` 模块的后续迭代开发。修改本模块时，优先保持 Dubbo 调用链 TraceId 透传、Provider 侧异常语义、Spring Boot 启动期 RPC 绑定行为和 Dubbo SPI 注册方式的稳定性，避免无关重构。
+本文档用于指导 `leaf-base-dubbo-nacos` 模块的后续迭代开发与代码审查。修改本模块时，默认优先保持现有 Dubbo/Nacos 集成方式、TraceId 透传语义、Provider 侧异常处理语义、Spring Boot 启动期 RPC 绑定行为和 Dubbo SPI 注册方式稳定。
+
+本模块代码已经在生产环境使用。任何修改都必须在确保原有功能正确性的前提下进行，不得随意改变对外接口规范、运行时契约或兼容性行为。
 
 ## 1. 模块定位
 
@@ -14,104 +16,116 @@
 6. Dubbo `ServiceBean` 启动期 RPC API 与业务服务类绑定增强：`GXDubboRpcApiBeanPostProcessor`
 7. Dubbo SPI 扩展声明与序列化白名单资源注册：`META-INF/dubbo/*`、`security/serialize.allowlist`
 
-本模块不承载具体业务 RPC 接口实现、不承载业务编排、不承载 Sentinel 控制台规则管理，也不承载 Dubbo Sentinel 适配能力；后者由 `leaf-base-dubbo-nacos-sentinel` 负责。
+本模块不承载具体业务 RPC 接口实现、不承载业务编排、不承载 Sentinel 控制台规则管理，也不承载 Dubbo Sentinel 适配能力；Dubbo + Nacos + Sentinel 的适配能力由 `leaf-base-dubbo-nacos-sentinel` 负责。
 
 ## 2. 目录职责
 
 1. `src/main/java/cn/maple/dubbo/nacos/filter`
-负责 Dubbo Filter 扩展，包括 Consumer/Provider TraceId 处理和 Provider 侧异常过滤。
+   负责 Dubbo Filter 扩展，包括 Consumer/Provider TraceId 处理和 Provider 侧异常过滤。
 2. `src/main/java/cn/maple/dubbo/nacos/selector`
-负责 `PenetrateAttachmentSelector` 扩展，决定请求和响应阶段哪些附件需要跨链路透传。
+   负责 `PenetrateAttachmentSelector` 扩展，决定请求和响应阶段哪些附件需要跨链路透传。
 3. `src/main/java/cn/maple/dubbo/nacos/processor`
-负责 Spring 容器启动后对 Dubbo `ServiceBean` 做增强绑定。
+   负责 Spring 容器启动后对 Dubbo `ServiceBean` 做增强绑定。
 4. `src/main/java/cn/maple/dubbo/nacos/handler`
-负责 Spring MVC 场景下对 Dubbo 调用异常做统一返回包装。
+   负责 Spring MVC 场景中对 Dubbo 调用异常做统一返回包装。
 5. `src/main/resources/META-INF/dubbo`
-负责声明 Dubbo SPI 扩展名到实现类的映射，属于运行时装配基线。
+   负责声明 Dubbo SPI 扩展名到实现类的映射，属于运行时装配基线。
 6. `src/main/resources/security`
-负责 Dubbo 序列化安全白名单资源，新增跨进程传输对象时要同步评估是否需要更新。
+   负责 Dubbo 序列化安全白名单资源。新增跨进程传输对象时，要同步评估是否需要更新。
 
-## 3. 模块功能基线
+## 3. 核心行为基线
 
 开发前必须理解并保持以下行为稳定：
 
-1. TraceId 获取优先级在不同阶段有明确顺序，且都以 `Invocation attachment`、`RpcContext attachment`、`GXTraceIdContextUtils` 为核心来源，不能随意改乱优先级。
+1. TraceId 获取优先级在不同阶段有明确顺序，核心来源包括 `Invocation attachment`、`RpcContext attachment` 和 `GXTraceIdContextUtils`，不得随意调整优先级。
 2. Consumer Filter 和 Provider Filter 都会把 TraceId 写回 `Invocation`、`RpcContext.getClientAttachment()`、`RpcContext.getServerAttachment()`，这是跨服务透传的核心机制。
-3. 两个 TraceId Filter 都会保存进入前的原始 TraceId，并在 `finally` 中调用 `GXTraceIdContextUtils.restoreTraceId(originalTraceId)` 恢复线程上下文，不能删除。
-4. `GXPenetrateAttachmentSelector` 与两个 TraceId Filter 是互相配合的，变更任意一方时必须一起评估请求链和响应链的透传行为。
-5. `GXDubboExceptionFilter` 只在 Provider 侧生效，且对 `GXBusinessException`、方法签名已声明异常、`RpcException`、JDK/Jakarta 异常、MyBatis 异常、Sentinel 限流异常的处理策略不同，不能合并成单一路径。
+3. 两个 TraceId Filter 都会保存进入前的原始 TraceId，并在 `finally` 中调用 `GXTraceIdContextUtils.restoreTraceId(originalTraceId)` 恢复线程上下文，禁止删除或绕过。
+4. `GXPenetrateAttachmentSelector` 与两个 TraceId Filter 相互配合，变更任意一方时必须一起评估请求链和响应链的透传行为。
+5. `GXDubboExceptionFilter` 只在 Provider 侧生效，并且对 `GXBusinessException`、方法签名已声明异常、`RpcException`、JDK/Jakarta 异常、MyBatis 异常、Sentinel 限流异常的处理策略不同，不得合并成单一路径。
 6. `GXDubboExceptionFilter` 对 Sentinel 限流异常的识别依赖类名和消息内容双重兜底，修改判断逻辑时必须考虑未直接引入 Sentinel 依赖的运行场景。
-7. `GXDubboRpcApiBeanPostProcessor` 依赖 Dubbo `ServiceBean#getRef()`、泛型参数解析、Spring 容器按类型取 Bean，以及反射调用 `staticBindServeServiceClass` 完成绑定；这是一条约定式链路，不要轻易改协议。
-8. SPI 文件中的扩展名是外部装配点，修改扩展名、实现类路径或资源位置时，需要视为兼容性变更。
-9. `serialize.allowlist` 当前只包含 `com.google.common.collect.HashBasedTable`，新增 Dubbo 传输对象若触发安全校验，需要同步评估白名单是否扩展。
+7. `GXDubboRpcApiBeanPostProcessor` 依赖 Dubbo `ServiceBean#getRef()`、泛型参数解析、Spring 容器按类型取 Bean，以及反射调用 `staticBindServeServiceClass` 完成绑定。这是一条约定式链路，不得轻易变更协议。
+8. SPI 文件中的扩展名是外部装配点。修改扩展名、实现类路径或资源位置时，必须视为兼容性变更。
+9. `serialize.allowlist` 当前只包含 `com.google.common.collect.HashBasedTable`。新增 Dubbo 传输对象若触发安全校验，需要同步评估白名单是否扩展。
 
 ## 4. 强制开发规则
 
-1. 所有 `log` 日志中的内容都必须使用 ASCII 字符。新增或修改日志时，禁止写入中文、全角符号或其他非 ASCII 文案。
-2. 涉及到改动的点，都要同步查看测试用例是否完整覆盖。没有测试、测试失效、或覆盖不足时，先补测试再提交。
-3. 不要随便将已存在的代码抽取成单独的方法或者类，除非抽取后的方法或类可以被两个以上位置复用，并且明显降低维护成本。
-4. 将方法、类、变量上的冗余注释去掉。注释不能重复解释命名已经表达清楚的内容。
-5. 对复杂的方法、类、扩展点要适当补充 Javadoc；必要时加入最小使用示例，帮助调用方理解前置条件、典型用法和异常语义。
-6. 涉及 Filter、Selector、BeanPostProcessor、ExceptionHandler 的改动时，优先保持现有扩展点名称、装配入口、触发时机和上下文恢复语义不变。
-7. 涉及异常转换的改动时，必须明确哪些异常继续透传，哪些异常包装成框架异常，哪些异常需要记录日志，禁止静默改变线上错误分类。
-8. 涉及 ThreadLocal、`RpcContext`、`Invocation attachment` 的改动时，必须保证设置路径和恢复路径成对出现，避免上下文串用。
+1. 每次修改只能发生在当前 Maven 模块 `leaf-base-dubbo-nacos` 内，不得修改其他模块、父工程或无关共享文件；确需跨模块修改时，必须先明确说明原因并获得确认。
+2. 现有代码已经在线上生产环境使用，不得随意变更对外接口、异常类型、返回结构、SPI 扩展名、资源路径、配置键、序列化白名单语义和启动期绑定协议。
+3. 所有 `log` 日志内容都必须使用 ASCII 字符。新增或修改日志时，禁止写入中文、全角符号或其他非 ASCII 文案。
+4. 涉及任何改动点，都要先检查对应测试用例是否完整。没有测试、测试失效或覆盖不足时，应先补齐测试再修改实现。
+5. 严格遵循测试驱动最佳实践。先通过测试描述目标行为和兼容边界，再实现或调整生产代码，最后运行与改动范围匹配的测试。
+6. 不要随意将已存在的代码抽取成单独方法或类。只有当抽取后的方法或类可以被两个以上位置复用，并且确实降低维护成本时，才允许抽取。
+7. 删除方法、类、变量上的冗余注释。命名已经表达清楚的内容，不要再用注释重复解释。
+8. 对复杂方法、复杂类、扩展点、异常转换规则和 SPI 约定，适当补充 Javadoc；使用方式复杂时，可以加入最小使用示例，帮助使用者理解前置条件、典型用法和异常语义。
+9. 清理 Javadoc 中的冗余信息，只保留必要文档。不要堆砌参数描述、空洞说明或与代码命名重复的信息。
+10. 基础框架代码对性能和线程安全性要求很高。修改 ThreadLocal、`RpcContext`、缓存、反射、集合共享状态、并发初始化和异常处理路径时，必须显式考虑性能开销与线程安全。
+11. 在线程池与虚拟线程都能满足场景需求时，优先使用虚拟线程；如果继续使用线程池，需要有明确理由，例如兼容性、生命周期控制、资源隔离或三方库限制。
+12. 在确保原有功能正确性的前提下完善代码。修改已经存在的逻辑时，不得破坏现有逻辑的正确性、兼容性和线上行为。
+13. 涉及 Filter、Selector、BeanPostProcessor、ExceptionHandler 的改动时，优先保持现有扩展点名称、装配入口、触发时机和上下文恢复语义不变。
+14. 涉及异常转换的改动时，必须明确哪些异常继续透传，哪些异常包装成框架异常，哪些异常需要记录日志，禁止静默改变线上错误分类。
+15. 涉及 ThreadLocal、`RpcContext`、`Invocation attachment` 的改动时，必须保证设置路径和恢复路径成对出现，避免上下文串用。
 
 ## 5. 测试要求
 
-当前模块下没有现成的 `src/test` 测试目录。后续凡是改动本模块功能代码，必须先补齐对应测试基线。
+当前模块下没有现成的 `src/test` 测试目录。后续凡是修改本模块功能代码，必须同步补齐与变更点对应的测试基线。
 
 1. 测试用例要覆盖全面，至少覆盖成功路径、失败路径、异常路径、空值路径和边界条件。
-2. 如果该功能需要在 Spring Boot 应用运行的情况下才能测试，那么测试用例就应该模拟真实 Spring Boot 应用启动之后再测试，优先使用 `@SpringBootTest`、真实 Bean 装配、AOP/BeanPostProcessor 生效后的上下文。
-3. `GXDubboClientTraceIdFilter` 和 `GXDubboServerTraceIdFilter` 的改动，至少覆盖：
-   - `Invocation`、`client attachment`、`server attachment`、`ThreadLocal` 的 TraceId 优先级
+2. 如果功能需要在 Spring Boot 应用运行后才能验证，测试用例就应该模拟真实 Spring Boot 应用启动之后再测试，优先使用 `@SpringBootTest`、真实 Bean 装配、AOP/BeanPostProcessor 生效后的上下文。
+3. 修改 `GXDubboClientTraceIdFilter` 或 `GXDubboServerTraceIdFilter` 时，至少覆盖：
+   - `Invocation`、client attachment、server attachment、ThreadLocal 的 TraceId 优先级
    - 进入前已有 TraceId、进入前为空、调用后恢复原值
    - 异常抛出时 `finally` 仍然恢复上下文
-4. `GXPenetrateAttachmentSelector` 的改动，至少覆盖：
+4. 修改 `GXPenetrateAttachmentSelector` 时，至少覆盖：
    - `select` 与 `selectReverse` 的 TraceId 选择优先级
    - 响应链透传
    - 生成新 TraceId 的兜底分支
-5. `GXDubboExceptionFilter` 的改动，至少覆盖：
+5. 修改 `GXDubboExceptionFilter` 时，至少覆盖：
    - `GXBusinessException` 直接透传
    - 方法签名已声明异常直接透传
    - Sentinel 限流异常转换为 `GXSentinelFlowException`
    - 其他运行时异常包装为 `GXBusinessException`
    - `GenericService` 调用场景跳过处理
-6. `GXDubboRpcApiBeanPostProcessor` 的改动，至少覆盖：
+6. 修改 `GXDubboRpcApiBeanPostProcessor` 时，至少覆盖：
    - `ServiceBean` 识别成功路径
    - `ref` 为空、泛型解析失败、目标 Spring Bean 不存在时的跳过分支
    - 绑定方法反射调用路径
-7. `GXDubboCallExceptionHandler` 的改动，至少覆盖：
+7. 修改 `GXDubboCallExceptionHandler` 时，至少覆盖：
    - `RpcException` 返回的状态码和消息结构
    - `GXSentinelFlowException` 返回 `code`、`msg`、`data` 的透传行为
 
 ## 6. 变更前检查清单
 
-1. 是否影响 TraceId 在请求链和响应链中的获取优先级、透传路径或恢复语义。
-2. 是否影响 `GXDubboExceptionFilter` 的异常分类边界。
-3. 是否影响 `GXDubboRpcApiBeanPostProcessor` 的泛型约定、Bean 查找方式或反射绑定协议。
-4. 是否修改了 `META-INF/dubbo` 下的 SPI 声明，进而影响运行时装配。
-5. 是否引入了非 ASCII 日志文案。
-6. 是否删除了必要测试，或遗漏了与改动点对应的新增测试。
-7. 是否只是为了“代码更好看”而做了无复用价值的抽方法、拆类或重构。
-8. 是否清理了冗余注释，并为真正复杂的逻辑补上了必要的 Javadoc。
+1. 是否只修改了 `leaf-base-dubbo-nacos` 当前 Maven 模块。
+2. 是否影响 TraceId 在请求链和响应链中的获取优先级、透传路径或恢复语义。
+3. 是否影响 `GXDubboExceptionFilter` 的异常分类边界。
+4. 是否影响 `GXDubboRpcApiBeanPostProcessor` 的泛型约定、Bean 查找方式或反射绑定协议。
+5. 是否修改了 `META-INF/dubbo` 下的 SPI 声明，进而影响运行时装配。
+6. 是否引入了非 ASCII 日志文案。
+7. 是否删除了必要测试，或遗漏了与改动点对应的新增测试。
+8. 是否只是为了代码看起来更整洁而做了无复用价值的方法抽取、拆类或重构。
+9. 是否清理了冗余注释，并为真正复杂的逻辑补上必要 Javadoc 或使用示例。
+10. 是否评估了性能、线程安全、上下文泄漏和并发初始化风险。
+11. 是否改变了外部接口、返回结构、异常语义、SPI 扩展名或配置契约。
 
 ## 7. AGENTS.md 自动触发更新时机
 
-出现以下任一情况时，必须在同一个 PR 或提交中同步更新本文件：
+出现以下任一情况时，必须在同一个 PR 或提交中同步更新本文档：
 
 1. 模块职责边界发生变化，例如新增或移除 RPC 基础能力、异常处理能力、调用链透传能力。
-2. 目录结构发生变化，例如新增新的核心 `package`，或把 `filter`、`selector`、`processor`、`handler` 的职责重新拆分。
+2. 目录结构发生变化，例如新增新的核心 `package`，或将 `filter`、`selector`、`processor`、`handler` 的职责重新拆分。
 3. TraceId 透传规则、优先级、ThreadLocal 恢复策略、`RpcContext` 使用方式发生变化。
 4. Provider 侧异常分类、包装策略、Sentinel 兼容策略、返回错误语义发生变化。
 5. `ServiceBean` 绑定约定、泛型解析方式、反射方法名、Spring Bean 获取方式发生变化。
 6. Dubbo SPI 扩展名、资源文件路径、序列化白名单策略发生变化。
 7. 测试策略发生变化，例如新增必须使用 Spring Boot 集成测试验证的场景，或新增模块最低测试门槛。
-8. 团队新增了需要长期遵守的开发规则，并且会影响后续所有迭代。
+8. 团队新增需要长期遵守的开发规则，并且会影响后续所有迭代。
+9. 发现本文档描述与当前代码实现不一致，或文档遗漏了已经稳定下来的关键约定。
 
-如果本次改动不触发以上条件，可以不更新本文件。
+如果本次改动不触发以上条件，可以不更新本文档。
 
 ## 8. 提交说明建议
 
 1. 涉及 TraceId 透传、异常处理、SPI 装配、启动期绑定增强的改动，PR 描述中要写清楚旧行为、新行为和兼容性影响。
 2. 涉及日志调整时，提交前确认新增和修改后的日志全部为 ASCII。
 3. 涉及测试补充时，提交说明中写明新增覆盖了哪些关键分支。
+4. 涉及性能、线程安全或虚拟线程选择时，提交说明中写明判断依据和验证方式。
