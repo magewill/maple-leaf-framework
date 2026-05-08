@@ -2,7 +2,6 @@ package cn.maple.extension;
 
 import org.springframework.stereotype.Component;
 
-import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -17,7 +16,7 @@ public class GXExtensionRepository {
     private final ConcurrentMap<GXExtensionCoordinate, GXExtensionPoint> extensionRepo = new ConcurrentHashMap<>();
 
     public Map<GXExtensionCoordinate, GXExtensionPoint> getExtensionRepo() {
-        return Collections.unmodifiableMap(extensionRepo);
+        return Map.copyOf(extensionRepo);
     }
 
     public Optional<GXExtensionPoint> findExtension(GXExtensionCoordinate coordinate) {
@@ -32,7 +31,9 @@ public class GXExtensionRepository {
     public void registerExtension(GXExtensionCoordinate coordinate, GXExtensionPoint extension) {
         Objects.requireNonNull(coordinate, "Extension coordinate cannot be null");
         Objects.requireNonNull(extension, "Extension implementation cannot be null");
-        extensionRepo.put(coordinate, extension);
+        if (extensionRepo.putIfAbsent(coordinate, extension) != null) {
+            throw new IllegalStateException("Extension coordinate already exists: " + coordinate);
+        }
     }
 
     public Optional<GXExtensionPoint> registerExtensionIfAbsent(GXExtensionCoordinate coordinate, GXExtensionPoint extension) {

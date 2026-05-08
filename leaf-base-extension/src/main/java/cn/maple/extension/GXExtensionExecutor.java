@@ -47,6 +47,8 @@ import org.springframework.stereotype.Component;
 @Component
 @Slf4j
 public class GXExtensionExecutor extends GXAbstractComponentExecutor {
+    private static final String DEFAULT_BIZ_SCENARIO_IDENTITY = GXBizScenario.newDefault().getUniqueIdentity();
+
     @Resource
     private GXExtensionRepository extensionRepository;
 
@@ -69,6 +71,18 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
             throw new NullPointerException("Target class cannot be null");
         }
         C extension = locateExtension(targetClz, bizScenario);
+        log.debug("[Located Extension]: {}", extension.getClass().getSimpleName());
+        return extension;
+    }
+
+    @Override
+    protected <C> C locateComponent(String extensionPointName, String bizScenarioUniqueIdentity) {
+        C extension = locate(extensionPointName, bizScenarioUniqueIdentity);
+        if (extension == null) {
+            String errMessage = "Can not find extension with ExtensionPoint: " + extensionPointName
+                    + " BizScenario:" + bizScenarioUniqueIdentity;
+            throw new GXExtensionException(errMessage, HttpStatus.HTTP_NOT_FOUND);
+        }
         log.debug("[Located Extension]: {}", extension.getClass().getSimpleName());
         return extension;
     }
@@ -101,29 +115,30 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
         checkNull(bizScenario);
 
         E extension;
+        String extensionPointName = targetClz.getName();
 
         log.debug("BizScenario in locateExtension is : {}", bizScenario.getUniqueIdentity());
 
         // 1、 first try with full namespace
-        extension = firstTry(targetClz, bizScenario);
+        extension = firstTry(extensionPointName, bizScenario);
         if (extension != null) {
             return extension;
         }
 
         // 2、 second try with default scenario
-        extension = secondTry(targetClz, bizScenario);
+        extension = secondTry(extensionPointName, bizScenario);
         if (extension != null) {
             return extension;
         }
 
         // 3、 third try with default use case + default scenario
-        extension = defaultUseCaseTry(targetClz, bizScenario);
+        extension = defaultUseCaseTry(extensionPointName, bizScenario);
         if (extension != null) {
             return extension;
         }
 
         // 4. fourth try with default biz id + default use case + default scenario
-        extension = defaultBizIdTry(targetClz);
+        extension = defaultBizIdTry(extensionPointName);
         if (extension != null) {
             return extension;
         }
@@ -144,9 +159,9 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
      * @param <E>         扩展点接口类型
      * @return 扩展点实现实例，如果找不到返回null
      */
-    private <E> E firstTry(Class<E> targetClz, GXBizScenario bizScenario) {
+    private <E> E firstTry(String extensionPointName, GXBizScenario bizScenario) {
         log.debug("First trying with {}", bizScenario.getUniqueIdentity());
-        return locate(targetClz.getName(), bizScenario.getUniqueIdentity());
+        return locate(extensionPointName, bizScenario.getUniqueIdentity());
     }
 
     /**
@@ -161,9 +176,9 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
      * @param <E>         扩展点接口类型
      * @return 扩展点实现实例，如果找不到返回null
      */
-    private <E> E secondTry(Class<E> targetClz, GXBizScenario bizScenario) {
+    private <E> E secondTry(String extensionPointName, GXBizScenario bizScenario) {
         log.debug("Second trying with {}", bizScenario.getIdentityWithDefaultScenario());
-        return locate(targetClz.getName(), bizScenario.getIdentityWithDefaultScenario());
+        return locate(extensionPointName, bizScenario.getIdentityWithDefaultScenario());
     }
 
     /**
@@ -178,9 +193,9 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
      * @param <E>         扩展点接口类型
      * @return 扩展点实现实例，如果找不到返回null
      */
-    private <E> E defaultUseCaseTry(Class<E> targetClz, GXBizScenario bizScenario) {
+    private <E> E defaultUseCaseTry(String extensionPointName, GXBizScenario bizScenario) {
         log.debug("Third trying with {}", bizScenario.getIdentityWithDefaultUseCase());
-        return locate(targetClz.getName(), bizScenario.getIdentityWithDefaultUseCase());
+        return locate(extensionPointName, bizScenario.getIdentityWithDefaultUseCase());
     }
 
     /**
@@ -190,10 +205,9 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
      * @param <E>       extension point interface type
      * @return extension implementation, or null when absent
      */
-    private <E> E defaultBizIdTry(Class<E> targetClz) {
-        String defaultIdentity = GXBizScenario.newDefault().getUniqueIdentity();
-        log.debug("Fourth trying with {}", defaultIdentity);
-        return locate(targetClz.getName(), defaultIdentity);
+    private <E> E defaultBizIdTry(String extensionPointName) {
+        log.debug("Fourth trying with {}", DEFAULT_BIZ_SCENARIO_IDENTITY);
+        return locate(extensionPointName, DEFAULT_BIZ_SCENARIO_IDENTITY);
     }
 
     /**

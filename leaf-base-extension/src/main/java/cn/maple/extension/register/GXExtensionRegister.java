@@ -1,9 +1,7 @@
 package cn.maple.extension.register;
 
 import cn.hutool.core.collection.CollUtil;
-import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
-import cn.maple.core.framework.util.GXLoggerUtils;
 import cn.maple.extension.GXBizScenario;
 import cn.maple.extension.GXExtension;
 import cn.maple.extension.GXExtensionCoordinate;
@@ -11,20 +9,19 @@ import cn.maple.extension.GXExtensionPoint;
 import cn.maple.extension.GXExtensionRepository;
 import cn.maple.extension.GXExtensions;
 import jakarta.annotation.Resource;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.ClassUtils;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 /**
  * Registers extension point implementations into {@link GXExtensionRepository}.
  */
 @Component
-@Slf4j
 public class GXExtensionRegister {
     public static final String EXTENSION_EXT_PT_NAMING = "ExtPoint";
 
@@ -77,9 +74,12 @@ public class GXExtensionRegister {
 
     private void registerExtension(Class<?> extensionClz, GXBizScenario bizScenario, GXExtensionPoint extensionObject) {
         GXExtensionCoordinate extensionCoordinate = new GXExtensionCoordinate(calculateExtensionPoint(extensionClz), bizScenario.getUniqueIdentity());
-        if (extensionRepository.registerExtensionIfAbsent(extensionCoordinate, extensionObject).isPresent()) {
-            GXLoggerUtils.logWarn(log, CharSequenceUtil.format("Duplicate registration is not allowed for : {}", extensionCoordinate));
-        }
+        extensionRepository.registerExtensionIfAbsent(extensionCoordinate, extensionObject)
+                .ifPresent(registeredExtension -> {
+                    throw new GXBusinessException("Duplicate extension registration for " + extensionCoordinate
+                            + ", existing=" + registeredExtension.getClass().getName()
+                            + ", duplicate=" + extensionObject.getClass().getName());
+                });
     }
 
     private String calculateExtensionPoint(Class<?> targetClz) {
@@ -89,12 +89,19 @@ public class GXExtensionRegister {
         if (CollUtil.isEmpty(Arrays.asList(interfaces))) {
             throw new GXBusinessException("Please assign a extension point interface for " + targetClz);
         }
-        for (Class<?> clazz : interfaces) {
-            String extensionPoint = clazz.getSimpleName();
-            if (extensionPoint.contains(EXTENSION_EXT_PT_NAMING)) {
-                return clazz.getName();
-            }
+        List<Class<?>> extensionPointInterfaces = Arrays.stream(interfaces)
+                .filter(clazz -> clazz != GXExtensionPoint.class)
+                .filter(GXExtensionPoint.class::isAssignableFrom)
+                .filter(clazz -> clazz.getSimpleName().contains(EXTENSION_EXT_PT_NAMING))
+                .toList();
+        if (extensionPointInterfaces.size() == 1) {
+            return extensionPointInterfaces.getFirst().getName();
         }
-        throw new GXBusinessException("Your name of ExtensionPoint for " + targetClz + " is not valid, must contain '" + EXTENSION_EXT_PT_NAMING + "'");
+        if (extensionPointInterfaces.size() > 1) {
+            throw new GXBusinessException("Only one extension point interface is allowed for " + targetClz
+                    + ", found " + extensionPointInterfaces);
+        }
+        throw new GXBusinessException("Your name of ExtensionPoint for " + targetClz
+                + " is not valid, must contain '" + EXTENSION_EXT_PT_NAMING + "'");
     }
 }

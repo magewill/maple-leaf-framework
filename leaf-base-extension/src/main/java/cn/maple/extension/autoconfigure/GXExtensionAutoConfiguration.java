@@ -19,11 +19,6 @@ import org.springframework.context.annotation.Bean;
  * <p>
  * 所有Bean都使用{@link ConditionalOnMissingBean}注解，允许用户自定义实现覆盖默认配置。
  * 组件之间的依赖关系和初始化顺序已经通过Spring的依赖注入机制和{@code initMethod}属性保证。
- * <p>
- * 线程安全性：所有组件都设计为线程安全的。{@link GXExtensionRepository}使用{@code ConcurrentHashMap}存储扩展点信息，
- * 确保在多线程环境下的并发安全。{@link GXExtensionBootstrap}在应用启动时执行一次初始化，之后不再修改状态。
- * {@link GXExtensionExecutor}和{@link GXExtensionRegister}不存储状态，主要依赖{@link GXExtensionRepository}的线程安全性。
- * <p>
  * 使用示例：
  * <pre>
  * // 在Spring Boot应用中，只需要引入依赖，无需额外配置
@@ -32,12 +27,12 @@ import org.springframework.context.annotation.Bean;
  * public class OrderService {
  *     @Resource
  *     private GXExtensionExecutor extensionExecutor;
- *     
+ * <p>
  *     public OrderResult processOrder(Order order, String bizId) {
  *         // 创建业务场景
  *         GXBizScenario scenario = GXBizScenario.valueOf(bizId, "process", "normal");
  *         // 执行扩展点方法
- *         return extensionExecutor.execute(OrderProcessExtPoint.class, scenario, 
+ *         return extensionExecutor.execute(OrderProcessExtPoint.class, scenario,
  *                 extension -> extension.process(order));
  *     }
  * }
@@ -50,7 +45,7 @@ import org.springframework.context.annotation.Bean;
  * @see GXExtensionRegister 扩展点注册器
  */
 @AutoConfiguration
-public class ExtensionAutoConfiguration {
+public class GXExtensionAutoConfiguration {
     /**
      * 创建扩展点启动引导类Bean
      * <p>

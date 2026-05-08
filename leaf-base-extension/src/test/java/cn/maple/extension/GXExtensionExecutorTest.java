@@ -40,6 +40,31 @@ class GXExtensionExecutorTest {
         assertEquals("biz-default", result);
     }
 
+    @Test
+    void executeSupportsStringCoordinate() {
+        GXBizScenario bizScenario = GXBizScenario.valueOf("bizA", "useCaseA", "scenarioA");
+        register(bizScenario, new TestDefaultExtension("string-coordinate"));
+
+        GXExtensionCoordinate coordinate = GXExtensionCoordinate.valueOf(
+                TestDefaultExtPoint.class.getName(), bizScenario.getUniqueIdentity());
+        String result = extensionExecutor.execute(coordinate, (TestDefaultExtPoint extension) -> extension.name());
+
+        assertEquals("string-coordinate", result);
+    }
+
+    @Test
+    void executeVoidSupportsStringCoordinate() {
+        GXBizScenario bizScenario = GXBizScenario.valueOf("bizA", "useCaseA", "scenarioA");
+        register(bizScenario, new TestDefaultExtension("string-coordinate-void"));
+
+        GXExtensionCoordinate coordinate = GXExtensionCoordinate.valueOf(
+                TestDefaultExtPoint.class.getName(), bizScenario.getUniqueIdentity());
+        StringBuilder result = new StringBuilder();
+        extensionExecutor.executeVoid(coordinate, (TestDefaultExtPoint extension) -> result.append(extension.name()));
+
+        assertEquals("string-coordinate-void", result.toString());
+    }
+
     private void register(GXBizScenario bizScenario, TestDefaultExtPoint extension) {
         extensionRepository.registerExtension(new GXExtensionCoordinate(TestDefaultExtPoint.class, bizScenario), extension);
     }

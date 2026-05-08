@@ -1,6 +1,6 @@
 package cn.maple.extension;
 
-import cn.maple.extension.autoconfigure.ExtensionAutoConfiguration;
+import cn.maple.extension.autoconfigure.GXExtensionAutoConfiguration;
 import cn.maple.extension.stereotype.StereotypeExtPoint;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class GXExtensionStereotypeTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(ExtensionAutoConfiguration.class))
+            .withConfiguration(AutoConfigurations.of(GXExtensionAutoConfiguration.class))
             .withUserConfiguration(TestConfig.class);
 
     @Test

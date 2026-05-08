@@ -5,6 +5,8 @@ import cn.hutool.http.HttpStatus;
 import cn.maple.core.framework.code.GXResultStatusCode;
 import cn.maple.core.framework.exception.GXBusinessException;
 
+import java.io.Serial;
+
 /**
  * 扩展点异常类，用于处理扩展点框架中的异常情况
  * <p>
@@ -34,13 +36,9 @@ public class GXExtensionException extends GXBusinessException {
     /**
      * 序列化版本号
      */
+    @Serial
     private static final long serialVersionUID = 1L;
     
-    /**
-     * 默认异常消息
-     */
-    private static final String MSG = "扩展点异常";
-
     /**
      * 创建扩展点异常对象（完整参数）
      * <p>
@@ -59,14 +57,13 @@ public class GXExtensionException extends GXBusinessException {
      * 创建扩展点异常对象（无原始异常）
      * <p>
      * 该构造方法用于创建一个不包含原始异常的扩展点异常对象
-     * 注意：该方法使用默认异常消息，而不是传入的消息
      *
-     * @param msg  异常消息（注：实际使用默认消息）
+     * @param msg  异常消息，详细描述异常原因
      * @param code 异常代码，用于标识异常类型
      * @param data 异常附加数据，可以包含更多的上下文信息
      */
     public GXExtensionException(String msg, int code, Dict data) {
-        this(MSG, code, data, null);
+        this(msg, code, data, null);
     }
 
     /**

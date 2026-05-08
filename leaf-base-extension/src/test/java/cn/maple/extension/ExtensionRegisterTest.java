@@ -15,13 +15,19 @@ public class ExtensionRegisterTest {
 
     @Test
     public void test() {
-        GXSomeExtPoint extA = new SomeExtensionA();
-        register.doRegistration(extA);
-
-        GXSomeExtPoint extB = CglibProxyFactory.createProxy(new SomeExtensionB());
-        register.doRegistration(extB);
+        GXSomeExtPoint proxyExtension = CglibProxyFactory.createProxy(new ManualProxyExtension());
+        register.doRegistration(proxyExtension);
 
         executor.executeVoid(GXSomeExtPoint.class, GXBizScenario.valueOf("A"), GXSomeExtPoint::doSomeThing);
         executor.executeVoid(GXSomeExtPoint.class, GXBizScenario.valueOf("B"), GXSomeExtPoint::doSomeThing);
+        executor.executeVoid(GXSomeExtPoint.class, GXBizScenario.valueOf("manualProxy"), GXSomeExtPoint::doSomeThing);
+    }
+
+    @GXExtension(bizId = "manualProxy")
+    public static class ManualProxyExtension implements GXSomeExtPoint {
+        @Override
+        public void doSomeThing() {
+            System.out.println("ManualProxyExtension::doSomeThing");
+        }
     }
 }

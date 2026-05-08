@@ -35,10 +35,10 @@ public class ExtensionTest {
         GXResultUtils<String> response = customerService.addCustomer(addCustomerCmd);
 
         //3. Expect Success
-        Assert.assertTrue(response != null);
+        Assert.assertNotNull(response);
     }
 
-    //@Test
+    @Test
     public void testBiz1UseCase1AddCustomerSuccess() {
         //1. Prepare
         AddCustomerCmd addCustomerCmd = new AddCustomerCmd();
@@ -54,10 +54,10 @@ public class ExtensionTest {
         GXResultUtils<String> response = customerService.addCustomer(addCustomerCmd);
 
         //3. Expect Success
-        Assert.assertTrue(response != null);
+        Assert.assertNotNull(response);
     }
 
-    //@Test
+    @Test
     public void testBiz1AddCustomerSuccess() {
         //1. Prepare
         AddCustomerCmd addCustomerCmd = new AddCustomerCmd();
@@ -73,6 +73,6 @@ public class ExtensionTest {
         GXResultUtils<String> response = customerService.addCustomer(addCustomerCmd);
 
         //3. Expect Success
-        Assert.assertTrue(response != null);
+        Assert.assertNotNull(response);
     }
 }

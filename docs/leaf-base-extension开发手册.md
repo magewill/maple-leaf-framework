@@ -8697,7 +8697,7 @@ public class WechatPaymentExt implements PaymentExtPoint {
 
 ### 3.10 `autoconfigure/ExtensionAutoConfiguration`
 
-`cn.maple.extension.autoconfigure.ExtensionAutoConfiguration` 是一个Spring Boot的自动配置类 (`@Configuration`)。它负责将 `leaf-base-extension` 模块的核心组件（如 `GXExtensionBootstrap`, `GXExtensionRepository`, `GXExtensionExecutor`, `GXExtensionRegister`）自动注册为Spring容器中的Bean。
+`cn.maple.extension.autoconfigure.GXExtensionAutoConfiguration` 是一个Spring Boot的自动配置类 (`@Configuration`)。它负责将 `leaf-base-extension` 模块的核心组件（如 `GXExtensionBootstrap`, `GXExtensionRepository`, `GXExtensionExecutor`, `GXExtensionRegister`）自动注册为Spring容器中的Bean。
 
 -   使用了 `@ConditionalOnMissingBean` 注解，这意味着如果用户在自己的配置中定义了同类型的Bean，则自动配置会跳过，允许用户自定义覆盖这些核心组件的实现。
 -   `GXExtensionBootstrap` Bean定义中使用了 `initMethod = "init"`，确保在Bean实例化并注入依赖后，其 `init()` 方法被调用，从而启动扩展点注册流程。

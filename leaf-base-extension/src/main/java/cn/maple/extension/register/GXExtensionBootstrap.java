@@ -5,7 +5,9 @@ import cn.maple.extension.GXExtensionPoint;
 import cn.maple.extension.GXExtensions;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.context.ApplicationContext;
+import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -68,7 +70,9 @@ public class GXExtensionBootstrap {
         Map<String, Object> extensionBeans = applicationContext.getBeansWithAnnotation(GXExtension.class);
         extensionBeans.values().forEach(extension -> {
             if (extension instanceof GXExtensionPoint) {
-                extensionRegister.doRegistration((GXExtensionPoint) extension);
+                if (AnnotationUtils.findAnnotation(AopUtils.getTargetClass(extension), GXExtensions.class) == null) {
+                    extensionRegister.doRegistration((GXExtensionPoint) extension);
+                }
             } else {
                 throw new IllegalStateException("Bean with GXExtension annotation must implement GXExtensionPoint interface: " + extension.getClass().getName());
             }

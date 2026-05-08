@@ -13,9 +13,6 @@ import java.util.function.Function;
  * <p>
  * 该类是扩展点执行框架的核心抽象类，提供了执行扩展点的通用方法。
  * 通过函数式编程的方式，支持有返回值和无返回值的扩展点执行。
- * <p>
- * 线程安全性：该类本身不存储状态，主要依赖子类实现的locateComponent方法的线程安全性。
- * <p>
  * 使用示例：
  * <pre>
  * // 假设有一个订单处理扩展点
@@ -23,24 +20,24 @@ import java.util.function.Function;
  *     OrderResult process(Order order);
  *     void notify(Order order);
  * }
- * 
+ *
  * // 在业务代码中使用
  * @Component
  * public class OrderService {
  *     @Resource
  *     private GXExtensionExecutor extensionExecutor;
- *     
+ *
  *     public OrderResult processOrder(Order order, String bizId) {
  *         // 执行有返回值的扩展点方法
  *         GXBizScenario scenario = GXBizScenario.valueOf(bizId, "process", "normal");
- *         return extensionExecutor.execute(OrderProcessExtPoint.class, scenario, 
+ *         return extensionExecutor.execute(OrderProcessExtPoint.class, scenario,
  *                 extension -> extension.process(order));
  *     }
- *     
+ *
  *     public void notifyOrderStatus(Order order, String bizId) {
  *         // 执行无返回值的扩展点方法
  *         GXBizScenario scenario = GXBizScenario.valueOf(bizId, "notify", "normal");
- *         extensionExecutor.executeVoid(OrderProcessExtPoint.class, scenario, 
+ *         extensionExecutor.executeVoid(OrderProcessExtPoint.class, scenario,
  *                 extension -> extension.notify(order));
  *     }
  * }
@@ -64,7 +61,7 @@ public abstract class GXAbstractComponentExecutor {
      * @param <R>         返回值类型
      * @param <T>         扩展点接口类型
      * @return 扩展点方法的执行结果
-     * @throws NullPointerException 如果任何参数为null
+     * @throws NullPointerException                              如果任何参数为null
      * @throws cn.maple.extension.exception.GXExtensionException 如果找不到对应的扩展点实现
      */
     public <R, T> R execute(Class<T> targetClz, GXBizScenario bizScenario, Function<T, R> exeFunction) {
@@ -86,17 +83,19 @@ public abstract class GXAbstractComponentExecutor {
      * @param <R>                 返回值类型
      * @param <T>                 扩展点接口类型
      * @return 扩展点方法的执行结果
-     * @throws NullPointerException 如果任何参数为null
+     * @throws NullPointerException                              如果任何参数为null
      * @throws cn.maple.extension.exception.GXExtensionException 如果找不到对应的扩展点实现
      */
     public <R, T> R execute(GXExtensionCoordinate extensionCoordinate, Function<T, R> exeFunction) {
         if (extensionCoordinate == null || exeFunction == null) {
             throw new NullPointerException("extensionCoordinate and exeFunction cannot be null");
         }
-        if (extensionCoordinate.getExtensionPointClass() == null || extensionCoordinate.getBizScenario() == null) {
-            throw new IllegalArgumentException("extensionCoordinate must contain extensionPointClass and bizScenario");
+        if (extensionCoordinate.getExtensionPointClass() != null && extensionCoordinate.getBizScenario() != null) {
+            return execute(extensionCoordinate.getExtensionPointClass(), extensionCoordinate.getBizScenario(), exeFunction);
         }
-        return execute(extensionCoordinate.getExtensionPointClass(), extensionCoordinate.getBizScenario(), exeFunction);
+        T component = locateComponent(extensionCoordinate.getExtensionPointName(),
+                extensionCoordinate.getBizScenarioUniqueIdentity());
+        return exeFunction.apply(component);
     }
 
     /**
@@ -109,7 +108,7 @@ public abstract class GXAbstractComponentExecutor {
      * @param context     业务场景，不能为null
      * @param exeFunction 执行函数，定义如何调用扩展点方法，不能为null
      * @param <T>         扩展点接口类型
-     * @throws NullPointerException 如果任何参数为null
+     * @throws NullPointerException                              如果任何参数为null
      * @throws cn.maple.extension.exception.GXExtensionException 如果找不到对应的扩展点实现
      */
     public <T> void executeVoid(Class<T> targetClz, GXBizScenario context, Consumer<T> exeFunction) {
@@ -129,17 +128,20 @@ public abstract class GXAbstractComponentExecutor {
      * @param extensionCoordinate 扩展坐标，包含扩展点类型和业务场景，不能为null
      * @param exeFunction         执行函数，定义如何调用扩展点方法，不能为null
      * @param <T>                 扩展点接口类型
-     * @throws NullPointerException 如果任何参数为null
+     * @throws NullPointerException                              如果任何参数为null
      * @throws cn.maple.extension.exception.GXExtensionException 如果找不到对应的扩展点实现
      */
     public <T> void executeVoid(GXExtensionCoordinate extensionCoordinate, Consumer<T> exeFunction) {
         if (extensionCoordinate == null || exeFunction == null) {
             throw new NullPointerException("extensionCoordinate and exeFunction cannot be null");
         }
-        if (extensionCoordinate.getExtensionPointClass() == null || extensionCoordinate.getBizScenario() == null) {
-            throw new IllegalArgumentException("extensionCoordinate must contain extensionPointClass and bizScenario");
+        if (extensionCoordinate.getExtensionPointClass() != null && extensionCoordinate.getBizScenario() != null) {
+            executeVoid(extensionCoordinate.getExtensionPointClass(), extensionCoordinate.getBizScenario(), exeFunction);
+            return;
         }
-        executeVoid(extensionCoordinate.getExtensionPointClass(), extensionCoordinate.getBizScenario(), exeFunction);
+        T component = locateComponent(extensionCoordinate.getExtensionPointName(),
+                extensionCoordinate.getBizScenarioUniqueIdentity());
+        exeFunction.accept(component);
     }
 
     /**
@@ -154,4 +156,16 @@ public abstract class GXAbstractComponentExecutor {
      * @throws cn.maple.extension.exception.GXExtensionException 如果找不到对应的扩展点实现
      */
     protected abstract <C> C locateComponent(Class<C> targetClz, GXBizScenario context);
+
+    /**
+     * 定位组件（扩展点实现）。
+     *
+     * @param extensionPointName        扩展点接口全限定名
+     * @param bizScenarioUniqueIdentity 业务场景唯一标识
+     * @param <C>                       扩展点接口类型
+     * @return 扩展点实现实例
+     */
+    protected <C> C locateComponent(String extensionPointName, String bizScenarioUniqueIdentity) {
+        throw new UnsupportedOperationException("String coordinate locate is not supported");
+    }
 }

@@ -1,5 +1,6 @@
 package cn.maple.extension.register;
 
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.extension.GXBizScenario;
 import cn.maple.extension.GXExtension;
 import cn.maple.extension.GXExtensionCoordinate;
@@ -13,6 +14,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class GXExtensionRegisterTest {
     private GXExtensionRepository extensionRepository;
@@ -36,13 +38,23 @@ class GXExtensionRegisterTest {
     }
 
     @Test
-    void duplicateRegistrationKeepsFirstExtension() {
+    void duplicateRegistrationFailsFast() {
         FirstDuplicateExtension first = new FirstDuplicateExtension();
 
         extensionRegister.doRegistration(first);
-        extensionRegister.doRegistration(new SecondDuplicateExtension());
 
+        assertThrows(GXBusinessException.class, () -> extensionRegister.doRegistration(new SecondDuplicateExtension()));
         assertSame(first, extensionRepository.findExtension(coordinate(GXBizScenario.valueOf("dup"))).orElseThrow());
+    }
+
+    @Test
+    void directMarkerInterfaceIsNotTreatedAsExtensionPoint() {
+        assertThrows(GXBusinessException.class, () -> extensionRegister.doRegistration(new MarkerOnlyExtension()));
+    }
+
+    @Test
+    void multipleExtensionPointInterfacesFailFast() {
+        assertThrows(GXBusinessException.class, () -> extensionRegister.doRegistration(new MultiExtPointExtension()));
     }
 
     private void assertRegistered(GXBizScenario bizScenario) {
@@ -55,6 +67,9 @@ class GXExtensionRegisterTest {
     }
 
     private interface RegisterTestExtPoint extends GXExtensionPoint {
+    }
+
+    private interface AnotherRegisterTestExtPoint extends GXExtensionPoint {
     }
 
     @GXExtensions(value = {
@@ -70,5 +85,13 @@ class GXExtensionRegisterTest {
 
     @GXExtension(bizId = "dup")
     private static class SecondDuplicateExtension implements RegisterTestExtPoint {
+    }
+
+    @GXExtension(bizId = "marker")
+    private static class MarkerOnlyExtension implements GXExtensionPoint {
+    }
+
+    @GXExtension(bizId = "multi")
+    private static class MultiExtPointExtension implements RegisterTestExtPoint, AnotherRegisterTestExtPoint {
     }
 }
