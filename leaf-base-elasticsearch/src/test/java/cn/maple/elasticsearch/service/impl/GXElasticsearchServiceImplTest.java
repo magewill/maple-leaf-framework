@@ -3,6 +3,7 @@ package cn.maple.elasticsearch.service.impl;
 import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Dict;
+import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.GXUnionTypeEnums;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
@@ -57,8 +58,9 @@ class GXElasticsearchServiceImplTest {
 
         List<TestResDto> result = service.findByCondition(queryParam);
 
-        assertThat(queryParam.getTableName()).isEqualTo("test_index");
-        assertThat(repository.lastQueryParam).isSameAs(queryParam);
+        assertThat(queryParam.getTableName()).isNull();
+        assertThat(repository.lastQueryParam).isNotSameAs(queryParam);
+        assertThat(repository.lastQueryParam.getTableName()).isEqualTo("test_index");
         assertThat(result).extracting(TestResDto::getName).containsExactly("maple");
     }
 
@@ -70,15 +72,16 @@ class GXElasticsearchServiceImplTest {
         String name = service.findOneByCondition(queryParam, dict -> dict.getStr("name"));
 
         assertThat(name).isEqualTo("leaf");
-        assertThat(queryParam.getTableName()).isEqualTo("test_index");
-        assertThat(repository.lastQueryParam).isSameAs(queryParam);
+        assertThat(queryParam.getTableName()).isNull();
+        assertThat(repository.lastQueryParam).isNotSameAs(queryParam);
+        assertThat(repository.lastQueryParam.getTableName()).isEqualTo("test_index");
     }
 
     @Test
     void deleteConditionRejectsEmptyConditions() {
         assertThatThrownBy(() -> service.deleteCondition("test_index", Collections.emptyList()))
                 .isInstanceOf(GXBusinessException.class)
-                .hasMessageContaining("条件不能为空");
+                .hasMessageContaining("Condition cannot be empty");
     }
 
     @Test
@@ -87,7 +90,7 @@ class GXElasticsearchServiceImplTest {
 
         assertThatThrownBy(() -> dao.deleteCondition("test_index", Collections.emptyList()))
                 .isInstanceOf(GXBusinessException.class)
-                .hasMessageContaining("条件不能为空");
+                .hasMessageContaining("Condition cannot be empty");
     }
 
     @Test
@@ -136,6 +139,81 @@ class GXElasticsearchServiceImplTest {
 
         assertThat(updated).isZero();
         assertThat(repository.lastUpdateFields).isEmpty();
+    }
+
+    @Test
+    void serviceUpdateFieldByConditionDoesNotProbeExistenceBeforeUpdating() {
+        repository.updateFieldByConditionResult = 1;
+        List<GXCondition<?>> conditions = List.of(new GXConditionStrEQ("", "id", "1"));
+        List<GXUpdateField<?>> updates = List.of(new TestUpdateField("status", "active"));
+
+        Integer updated = service.updateFieldByCondition("test_index", updates, conditions);
+
+        assertThat(updated).isEqualTo(1);
+        assertThat(repository.updateFieldByConditionCalls).isEqualTo(1);
+        assertThat(repository.checkRecordCalls).isZero();
+    }
+
+    @Test
+    void serviceUpdateFieldByConditionReturnsNotFoundWhenRepositoryUpdatesNothing() {
+        repository.updateFieldByConditionResult = 0;
+        List<GXCondition<?>> conditions = List.of(new GXConditionStrEQ("", "id", "1"));
+        List<GXUpdateField<?>> updates = List.of(new TestUpdateField("status", "active"));
+
+        Integer updated = service.updateFieldByCondition("test_index", updates, conditions);
+
+        assertThat(updated).isEqualTo(GXCommonConstant.DB_RECORD_NOT_FOUND);
+    }
+
+    @Test
+    void daoRejectsUnsupportedConditionOperator() {
+        TestDao dao = defaultMethodProxy(TestDao.class);
+
+        assertThatThrownBy(() -> dao.conditions2Criteria(GXBaseQueryParamInnerDto.builder()
+                        .condition(List.of(new TestCondition("name", "contains", "leaf")))
+                        .build()))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("unsupported condition operator");
+    }
+
+    @Test
+    void daoRejectsUnsafeUpdateFieldName() {
+        TestDao dao = defaultMethodProxy(TestDao.class);
+
+        assertThatThrownBy(() -> dao.updateFieldByCondition(
+                "test_index",
+                List.of(new TestUpdateField("status['x']", "active")),
+                List.of(new GXConditionStrEQ("", "id", "1"))))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("Invalid Elasticsearch update field name");
+    }
+
+    @Test
+    void daoAppliesSourceFilterAndLimitFromQueryParam() {
+        TestDao dao = defaultMethodProxy(TestDao.class);
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+                .columns(CollUtil.newHashSet("userName", "status"))
+                .limit(7)
+                .build();
+        CriteriaQuery query = new CriteriaQueryBuilder(new org.springframework.data.elasticsearch.core.query.Criteria()).build();
+
+        dao.buildPageable(query, queryParam);
+        dao.buildSourceFilter(query, queryParam);
+
+        assertThat(query.getMaxResults()).isEqualTo(7);
+        assertThat(query.getSourceFilter()).isNotNull();
+        assertThat(query.getSourceFilter().getIncludes()).containsExactlyInAnyOrder("user_name", "status");
+    }
+
+    @Test
+    void daoRejectsGroupByFieldForUnsupportedQueryShape() {
+        TestDao dao = defaultMethodProxy(TestDao.class);
+
+        assertThatThrownBy(() -> dao.executeQuery(GXBaseQueryParamInnerDto.builder()
+                        .groupByField(Set.of("status"))
+                        .build()))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("groupByField is not supported");
     }
 
     @Test
@@ -237,6 +315,12 @@ class GXElasticsearchServiceImplTest {
 
         private List<GXCondition<?>> lastConditions = new ArrayList<>();
 
+        private Integer updateFieldByConditionResult;
+
+        private Integer updateFieldByConditionCalls = 0;
+
+        private Integer checkRecordCalls = 0;
+
         @Override
         public List<Dict> findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
             lastQueryParam = dbQueryParamInnerDto;
@@ -254,7 +338,8 @@ class GXElasticsearchServiceImplTest {
             lastTableName = tableName;
             lastUpdateFields = updateFields;
             lastConditions = condition;
-            return CollUtil.size(updateFields);
+            updateFieldByConditionCalls++;
+            return updateFieldByConditionResult == null ? CollUtil.size(updateFields) : updateFieldByConditionResult;
         }
 
         @Override
@@ -262,6 +347,12 @@ class GXElasticsearchServiceImplTest {
             lastTableName = tableName;
             lastConditions = condition;
             return CollUtil.size(condition);
+        }
+
+        @Override
+        public boolean checkRecordIsExists(String tableName, List<GXCondition<?>> condition) {
+            checkRecordCalls++;
+            return true;
         }
 
         @Override
@@ -303,6 +394,42 @@ class GXElasticsearchServiceImplTest {
 
         public void setName(String name) {
             this.name = name;
+        }
+    }
+
+    static class TestCondition extends GXCondition<String> {
+        private final String op;
+
+        TestCondition(String fieldExpression, String op, String value) {
+            super(fieldExpression, value);
+            this.op = op;
+        }
+
+        @Override
+        public String getOp() {
+            return op;
+        }
+
+        @Override
+        public String getFieldValue() {
+            Object value = getValue();
+            return value == null ? null : value.toString();
+        }
+
+        @Override
+        public String getFieldOriginalValue() {
+            return getFieldValue();
+        }
+    }
+
+    static class TestUpdateField extends GXUpdateField<String> {
+        TestUpdateField(String fieldName, String value) {
+            super("", fieldName, value);
+        }
+
+        @Override
+        public String getFieldValue() {
+            return (String) value;
         }
     }
 }

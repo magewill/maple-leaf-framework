@@ -31,7 +31,7 @@ public class GXLocalElasticsearchProperties extends GXElasticsearchSourcePropert
     private Map<String, GXElasticsearchProperties> datasource = new LinkedHashMap<>();
 
     public GXLocalElasticsearchProperties() {
-        log.info("Elasticsearch数据源的配置使用的是本地配置");
+        log.info("Using local Elasticsearch configuration");
     }
 
     @Override

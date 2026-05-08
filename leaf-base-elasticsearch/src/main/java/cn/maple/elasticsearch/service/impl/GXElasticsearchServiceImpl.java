@@ -70,7 +70,7 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
     @Override
     public boolean checkRecordIsExists(String tableName, List<GXCondition<?>> condition) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition cannot be empty");
         }
         String indexName = CharSequenceUtil.isBlank(tableName) ? repository.getTableName() : tableName;
         return repository.checkRecordIsExists(indexName, condition);
@@ -84,17 +84,14 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
     @Override
     public Integer updateFieldByCondition(String tableName, List<GXUpdateField<?>> updateFields, List<GXCondition<?>> condition) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition cannot be empty");
         }
         if (CollUtil.isEmpty(updateFields)) {
             throw new GXBusinessException("updateFields cannot be empty");
         }
         String indexName = CharSequenceUtil.isBlank(tableName) ? repository.getTableName() : tableName;
-        if (!checkRecordIsExists(indexName, condition)) {
-            log.error("待更新的数据不存在!");
-            return GXCommonConstant.DB_RECORD_NOT_FOUND;
-        }
-        return repository.updateFieldByCondition(indexName, updateFields, condition);
+        Integer updated = repository.updateFieldByCondition(indexName, updateFields, condition);
+        return Objects.equals(updated, 0) ? GXCommonConstant.DB_RECORD_NOT_FOUND : updated;
     }
 
     @Override
@@ -104,49 +101,52 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
 
     @Override
     public GXPaginationResDto<R> paginate(GXBaseQueryParamInnerDto queryParamInnerDto) {
-        CopyOptions copyOptions = getCopyOptions(queryParamInnerDto);
+        GXBaseQueryParamInnerDto effectiveQueryParam = copyQueryParam(queryParamInnerDto);
+        CopyOptions copyOptions = getCopyOptions(effectiveQueryParam);
         Class<R> genericClassType = GXCommonUtils.getGenericClassType(getClass(), 5);
-        GXPaginationResDto<Dict> paginate = repository.paginate(queryParamInnerDto);
+        GXPaginationResDto<Dict> paginate = repository.paginate(effectiveQueryParam);
         List<R> lst = paginate.getRecords().stream().map(dict -> {
-            Object extraData = Optional.ofNullable(queryParamInnerDto.getExtraData()).orElse(Dict.create());
-            return GXCommonUtils.convertSourceToTarget(dict, genericClassType, queryParamInnerDto.getMethodName(), copyOptions, extraData);
+            Object extraData = Optional.ofNullable(effectiveQueryParam.getExtraData()).orElse(Dict.create());
+            return GXCommonUtils.convertSourceToTarget(dict, genericClassType, effectiveQueryParam.getMethodName(), copyOptions, extraData);
         }).collect(Collectors.toList());
         return new GXPaginationResDto<>(lst, paginate.getTotal(), paginate.getPageSize(), paginate.getCurrentPage());
     }
 
     @Override
     public GXPaginationResDto<R> paginate(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        throw new GXBusinessException("Elasticsearch暂不支持union分页查询");
+        throw new GXBusinessException("Elasticsearch union pagination query is not supported");
     }
 
     @Override
     public List<R> findByCondition(GXBaseQueryParamInnerDto queryParamInnerDto) {
-        CopyOptions copyOptions = getCopyOptions(queryParamInnerDto);
-        String[] methodName = new String[]{queryParamInnerDto.getMethodName()};
+        GXBaseQueryParamInnerDto effectiveQueryParam = copyQueryParam(queryParamInnerDto);
+        CopyOptions copyOptions = getCopyOptions(effectiveQueryParam);
+        String[] methodName = new String[]{effectiveQueryParam.getMethodName()};
         if (CharSequenceUtil.isEmpty(methodName[0])) {
             methodName[0] = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
         }
         Class<R> genericClassType = GXCommonUtils.getGenericClassType(getClass(), 5);
         Function<Dict, R> rowMapper = dict -> {
-            Object extraData = Optional.ofNullable(queryParamInnerDto.getExtraData()).orElse(Dict.create());
+            Object extraData = Optional.ofNullable(effectiveQueryParam.getExtraData()).orElse(Dict.create());
             return GXCommonUtils.convertSourceToTarget(dict, genericClassType, methodName[0], copyOptions, extraData);
         };
-        return findByCondition(queryParamInnerDto, rowMapper);
+        return findByCondition(effectiveQueryParam, rowMapper);
     }
 
     @Override
     public List<R> findByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        throw new GXBusinessException("Elasticsearch暂不支持union列表查询");
+        throw new GXBusinessException("Elasticsearch union list query is not supported");
     }
 
     @Override
     public <E> List<E> findByCondition(GXBaseQueryParamInnerDto queryParamInnerDto, Function<Dict, E> rowMapper) {
-        String tableName = queryParamInnerDto.getTableName();
+        GXBaseQueryParamInnerDto effectiveQueryParam = copyQueryParam(queryParamInnerDto);
+        String tableName = effectiveQueryParam.getTableName();
         if (CharSequenceUtil.isBlank(tableName)) {
             tableName = repository.getTableName();
-            queryParamInnerDto.setTableName(tableName);
+            effectiveQueryParam.setTableName(tableName);
         }
-        List<Dict> list = repository.findByCondition(queryParamInnerDto);
+        List<Dict> list = repository.findByCondition(effectiveQueryParam);
         return list.stream().map(rowMapper).collect(Collectors.toList());
     }
 
@@ -213,31 +213,33 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
 
     @Override
     public R findOneByCondition(GXBaseQueryParamInnerDto queryParamInnerDto) {
-        String[] methodName = new String[]{queryParamInnerDto.getMethodName()};
+        GXBaseQueryParamInnerDto effectiveQueryParam = copyQueryParam(queryParamInnerDto);
+        String[] methodName = new String[]{effectiveQueryParam.getMethodName()};
         if (CharSequenceUtil.isEmpty(methodName[0])) {
             methodName[0] = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
         }
-        Object extraData = Optional.ofNullable(queryParamInnerDto.getExtraData()).orElseGet(Dict::create);
-        CopyOptions copyOptions = getCopyOptions(queryParamInnerDto);
+        Object extraData = Optional.ofNullable(effectiveQueryParam.getExtraData()).orElseGet(Dict::create);
+        CopyOptions copyOptions = getCopyOptions(effectiveQueryParam);
         Class<R> genericClassType = GXCommonUtils.getGenericClassType(getClass(), 5);
         Function<Dict, R> rowMapper = dict -> {
             return GXCommonUtils.convertSourceToTarget(dict, genericClassType, methodName[0], copyOptions, extraData);
         };
-        return findOneByCondition(queryParamInnerDto, rowMapper);
+        return findOneByCondition(effectiveQueryParam, rowMapper);
     }
 
     @Override
     public R findOneByCondition(GXBaseQueryParamInnerDto masterQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
-        throw new GXBusinessException("Elasticsearch暂不支持union单条查询");
+        throw new GXBusinessException("Elasticsearch union single query is not supported");
     }
 
     @Override
     public <E> E findOneByCondition(GXBaseQueryParamInnerDto queryParamInnerDto, Function<Dict, E> rowMapper) {
-        String tableName = queryParamInnerDto.getTableName();
+        GXBaseQueryParamInnerDto effectiveQueryParam = copyQueryParam(queryParamInnerDto);
+        String tableName = effectiveQueryParam.getTableName();
         if (CharSequenceUtil.isBlank(tableName)) {
-            queryParamInnerDto.setTableName(repository.getTableName());
+            effectiveQueryParam.setTableName(repository.getTableName());
         }
-        Dict dict = repository.findOneByCondition(queryParamInnerDto);
+        Dict dict = repository.findOneByCondition(effectiveQueryParam);
         if (Objects.isNull(dict)) {
             return null;
         }
@@ -295,15 +297,15 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
     @Override
     public ID copyOneData(List<GXCondition<?>> copyCondition, Dict replaceData, Dict extraData) {
         if (CollUtil.isEmpty(copyCondition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition cannot be empty");
         }
         R oneData = findOneByCondition(repository.getTableName(), copyCondition);
         if (Objects.isNull(oneData)) {
-            throw new GXBusinessException("待拷贝的数据不存在!!");
+            throw new GXBusinessException("Source record does not exist");
         }
         T entity = GXCommonUtils.convertSourceToTarget(oneData, GXCommonUtils.getGenericClassType(getClass(), 1), null, null, Optional.ofNullable(extraData).orElseGet(Dict::create));
         if (Objects.isNull(entity)) {
-            throw new GXBusinessException("数据转换失败!");
+            throw new GXBusinessException("Data conversion failed");
         }
         String primaryKeyName = getPrimaryKeyName(entity);
         GXCommonUtils.reflectCallObjectMethod(entity, CharSequenceUtil.format("set{}", CharSequenceUtil.upperFirst(CharSequenceUtil.toCamelCase(primaryKeyName))), (Object) null);
@@ -320,7 +322,7 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
     @Override
     public Integer deleteSoftCondition(String tableName, List<GXCondition<?>> condition, Dict extraData) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition cannot be empty");
         }
         String indexName = CharSequenceUtil.isBlank(tableName) ? repository.getTableName() : tableName;
         return repository.deleteSoftCondition(indexName, condition, Optional.ofNullable(extraData).orElseGet(Dict::create));
@@ -339,7 +341,7 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
     @Override
     public Integer deleteCondition(String tableName, List<GXCondition<?>> condition) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition cannot be empty");
         }
         return repository.deleteCondition(tableName, condition);
     }
@@ -374,15 +376,16 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
         if (Objects.isNull(queryParamInnerDto) || Objects.isNull(targetClazz)) {
             throw new GXBusinessException("queryParamInnerDto and targetClazz cannot be null");
         }
-        if (CharSequenceUtil.isBlank(queryParamInnerDto.getTableName())) {
-            queryParamInnerDto.setTableName(getTableName());
+        GXBaseQueryParamInnerDto effectiveQueryParam = copyQueryParam(queryParamInnerDto);
+        if (CharSequenceUtil.isBlank(effectiveQueryParam.getTableName())) {
+            effectiveQueryParam.setTableName(getTableName());
         }
-        CopyOptions copyOptions = getCopyOptions(queryParamInnerDto);
-        String[] methodName = new String[]{queryParamInnerDto.getMethodName()};
+        CopyOptions copyOptions = getCopyOptions(effectiveQueryParam);
+        String[] methodName = new String[]{effectiveQueryParam.getMethodName()};
         if (CharSequenceUtil.isEmpty(methodName[0])) {
             methodName[0] = GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME;
         }
-        return repository.findByCondition(queryParamInnerDto).stream()
+        return repository.findByCondition(effectiveQueryParam).stream()
                 .map(dict -> GXCommonUtils.convertSourceToTarget(dict, targetClazz, methodName[0], copyOptions))
                 .collect(Collectors.toList());
     }
@@ -392,15 +395,16 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
         if (Objects.isNull(queryParamInnerDto) || Objects.isNull(targetClazz)) {
             throw new GXBusinessException("queryParamInnerDto and targetClazz cannot be null");
         }
-        if (CollUtil.isEmpty(queryParamInnerDto.getColumns()) || queryParamInnerDto.getColumns().size() != 1) {
+        GXBaseQueryParamInnerDto effectiveQueryParam = copyQueryParam(queryParamInnerDto);
+        if (CollUtil.isEmpty(effectiveQueryParam.getColumns()) || effectiveQueryParam.getColumns().size() != 1) {
             throw new GXBusinessException("columns size must be exactly 1");
         }
-        queryParamInnerDto.setLimit(1);
-        String column = queryParamInnerDto.getColumns().toArray(new String[0])[0];
-        if (CharSequenceUtil.isBlank(queryParamInnerDto.getTableName())) {
-            queryParamInnerDto.setTableName(getTableName());
+        effectiveQueryParam.setLimit(1);
+        String column = effectiveQueryParam.getColumns().toArray(new String[0])[0];
+        if (CharSequenceUtil.isBlank(effectiveQueryParam.getTableName())) {
+            effectiveQueryParam.setTableName(getTableName());
         }
-        Dict dict = repository.findOneByCondition(queryParamInnerDto);
+        Dict dict = repository.findOneByCondition(effectiveQueryParam);
         if (Objects.isNull(dict)) {
             return null;
         }
@@ -412,14 +416,15 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
         if (Objects.isNull(queryParamInnerDto) || Objects.isNull(targetClazz)) {
             throw new GXBusinessException("queryParamInnerDto and targetClazz cannot be null");
         }
-        if (CollUtil.isEmpty(queryParamInnerDto.getColumns()) || queryParamInnerDto.getColumns().size() != 1) {
+        GXBaseQueryParamInnerDto effectiveQueryParam = copyQueryParam(queryParamInnerDto);
+        if (CollUtil.isEmpty(effectiveQueryParam.getColumns()) || effectiveQueryParam.getColumns().size() != 1) {
             throw new GXBusinessException("columns size must be exactly 1");
         }
-        String column = queryParamInnerDto.getColumns().toArray(new String[0])[0];
-        if (CharSequenceUtil.isBlank(queryParamInnerDto.getTableName())) {
-            queryParamInnerDto.setTableName(getTableName());
+        String column = effectiveQueryParam.getColumns().toArray(new String[0])[0];
+        if (CharSequenceUtil.isBlank(effectiveQueryParam.getTableName())) {
+            effectiveQueryParam.setTableName(getTableName());
         }
-        List<Dict> dictList = repository.findByCondition(queryParamInnerDto);
+        List<Dict> dictList = repository.findByCondition(effectiveQueryParam);
         List<E> result = new ArrayList<>();
         dictList.forEach(dict -> {
             Object value = readColumnValue(dict, column);
@@ -432,22 +437,22 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
 
     @Override
     public Collection<R> findByCallMapperMethod(String mapperMethodMethod, String convertMethodName, CopyOptions copyOptions, Object... params) {
-        throw new GXBusinessException("Elasticsearch暂不支持通过Mapper方法查询");
+        throw new GXBusinessException("Elasticsearch mapper method query is not supported");
     }
 
     @Override
     public Collection<R> findByCallMapperMethod(String mapperMethodMethod, Object... params) {
-        throw new GXBusinessException("Elasticsearch暂不支持通过Mapper方法查询");
+        throw new GXBusinessException("Elasticsearch mapper method query is not supported");
     }
 
     @Override
     public R findOneByCallMapperMethod(String mapperMethodMethod, String convertMethodName, CopyOptions copyOptions, Object... params) {
-        throw new GXBusinessException("Elasticsearch暂不支持通过Mapper方法查询");
+        throw new GXBusinessException("Elasticsearch mapper method query is not supported");
     }
 
     @Override
     public R findOneByCallMapperMethod(String mapperMethodName, Object... params) {
-        throw new GXBusinessException("Elasticsearch暂不支持通过Mapper方法查询");
+        throw new GXBusinessException("Elasticsearch mapper method query is not supported");
     }
 
     @Override
@@ -466,12 +471,13 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
         if (Objects.isNull(queryParamInnerDto)) {
             throw new GXBusinessException("queryParamInnerDto cannot be null");
         }
-        if (CharSequenceUtil.isBlank(queryParamInnerDto.getTableName())) {
-            queryParamInnerDto.setTableName(getTableName());
+        GXBaseQueryParamInnerDto effectiveQueryParam = copyQueryParam(queryParamInnerDto);
+        if (CharSequenceUtil.isBlank(effectiveQueryParam.getTableName())) {
+            effectiveQueryParam.setTableName(getTableName());
         }
-        queryParamInnerDto.setPage(1);
-        queryParamInnerDto.setPageSize(1);
-        return repository.paginate(queryParamInnerDto).getTotal();
+        effectiveQueryParam.setPage(1);
+        effectiveQueryParam.setPageSize(1);
+        return repository.paginate(effectiveQueryParam).getTotal();
     }
 
     @Override
@@ -482,6 +488,32 @@ public class GXElasticsearchServiceImpl<P extends GXElasticsearchRepository<T, D
     @Override
     public String getTableName() {
         return repository.getTableName();
+    }
+
+    private GXBaseQueryParamInnerDto copyQueryParam(GXBaseQueryParamInnerDto source) {
+        if (Objects.isNull(source)) {
+            throw new GXBusinessException("queryParamInnerDto cannot be null");
+        }
+        return GXBaseQueryParamInnerDto.builder()
+                .tableName(source.getTableName())
+                .tableNameAlias(source.getTableNameAlias())
+                .page(source.getPage())
+                .pageSize(source.getPageSize())
+                .condition(source.getCondition() == null ? new ArrayList<>() : new ArrayList<>(source.getCondition()))
+                .columns(source.getColumns() == null ? null : new LinkedHashSet<>(source.getColumns()))
+                .orderByField(source.getOrderByField() == null ? null : new LinkedHashMap<>(source.getOrderByField()))
+                .groupByField(source.getGroupByField() == null ? null : new LinkedHashSet<>(source.getGroupByField()))
+                .methodName(source.getMethodName())
+                .having(source.getHaving() == null ? null : new LinkedHashSet<>(source.getHaving()))
+                .copyOptions(source.getCopyOptions())
+                .limit(source.getLimit())
+                .joins(source.getJoins() == null ? null : new ArrayList<>(source.getJoins()))
+                .extraData(source.getExtraData())
+                .rawSQL(source.getRawSQL())
+                .ignoreDataFilter(source.isIgnoreDataFilter())
+                .paginateCount(source.isPaginateCount())
+                .paramMap(source.getParamMap() == null ? new HashMap<>() : new HashMap<>(source.getParamMap()))
+                .build();
     }
 
     private Object readColumnValue(Dict dict, String column) {

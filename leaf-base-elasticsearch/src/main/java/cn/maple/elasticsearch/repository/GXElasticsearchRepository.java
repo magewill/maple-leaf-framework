@@ -174,7 +174,7 @@ public class GXElasticsearchRepository<T extends GXElasticsearchModel, D extends
         Object value = validateExistsDto.getValue();
 
         if (CharSequenceUtil.isBlank(tableName)) {
-            throw new GXBusinessException(CharSequenceUtil.format("请指定Elasticsearch索引名称, 验证字段: {}, 验证值: {}", fieldName, value));
+            throw new GXBusinessException(CharSequenceUtil.format("Elasticsearch index name is required, field: {}, value: {}", fieldName, value));
         }
 
         GXCondition<?> condition;
@@ -230,7 +230,7 @@ public class GXElasticsearchRepository<T extends GXElasticsearchModel, D extends
     protected String getIndexName(Class<?> entityClass) {
         Document document = entityClass.getAnnotation(Document.class);
         if (document == null || CharSequenceUtil.isBlank(document.indexName())) {
-            throw new GXBusinessException(CharSequenceUtil.format("{}未配置@Document(indexName)", entityClass.getName()));
+            throw new GXBusinessException(CharSequenceUtil.format("{} missing @Document(indexName)", entityClass.getName()));
         }
         return document.indexName();
     }

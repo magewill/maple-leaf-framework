@@ -111,7 +111,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
 
                     if (primary) {
                         // settingElasticsearchPropertiesBeanProperties(dataSourceProperties);
-                        log.info("主Elasticsearch数据源[{}]已设置为primary", key);
+                        log.info("Primary Elasticsearch datasource [{}] registered", key);
                     }
 
                     beanDefinitionRegistry.registerBeanDefinition(beanName, elasticsearchTemplateBeanDefinitionBuilder.getBeanDefinition());
@@ -120,16 +120,16 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
                         registerPrimaryElasticsearchAliases(beanDefinitionRegistry, clientBeanName, mappingContextBeanName, converterBeanName, beanName);
                     }
 
-                    log.info("Elasticsearch数据源[{}]注册成功", key);
+                    log.info("Elasticsearch datasource [{}] registered", key);
 
                 } catch (Exception e) {
-                    log.error("Elasticsearch数据源[{}]注册失败: {}", key, e.getMessage());
-                    throw new GXBusinessException("Elasticsearch数据源注册失败: " + e.getMessage());
+                    log.error("Elasticsearch datasource [{}] registration failed: {}", key, e.getMessage());
+                    throw new GXBusinessException("Elasticsearch datasource registration failed: " + e.getMessage());
                 }
             });
         } catch (Exception e) {
-            log.error("Elasticsearch多数据源配置处理失败: {}", e.getMessage());
-            throw new GXBusinessException("Elasticsearch多数据源配置处理失败: " + e.getMessage());
+            log.error("Elasticsearch datasource configuration failed: {}", e.getMessage());
+            throw new GXBusinessException("Elasticsearch datasource configuration failed: " + e.getMessage());
         }
     }
 
@@ -190,7 +190,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
     private void removeBeanNameIfPresent(BeanDefinitionRegistry beanDefinitionRegistry, String beanName) {
         if (beanDefinitionRegistry.containsBeanDefinition(beanName)) {
             beanDefinitionRegistry.removeBeanDefinition(beanName);
-            log.info("已移除Spring Boot自动装配的Elasticsearch Bean定义[{}]，使用框架自定义主数据源", beanName);
+            log.info("Removed auto-configured Elasticsearch bean definition [{}]", beanName);
         }
         if (beanDefinitionRegistry.isAlias(beanName)) {
             beanDefinitionRegistry.removeAlias(beanName);
@@ -218,35 +218,35 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             BindResult<Map<String, GXElasticsearchProperties>> bind = Binder.get(this.environment)
                     .bind("elasticsearch.datasource", Bindable.mapOf(String.class, GXElasticsearchProperties.class));
             if (!bind.isBound() || bind.get() == null) {
-                throw new IllegalStateException("未找到有效的Elasticsearch数据源配置，请检查配置文件中是否包含elasticsearch.datasource节点");
+                throw new IllegalStateException("No valid Elasticsearch datasource configuration found");
             }
 
             Map<String, GXElasticsearchProperties> datasource = bind.get();
 
             if (datasource == null || datasource.isEmpty()) {
-                throw new IllegalStateException("Elasticsearch数据源配置为空，请检查配置格式是否正确");
+                throw new IllegalStateException("Elasticsearch datasource configuration must not be empty");
             }
 
-            log.info("成功加载{}个Elasticsearch数据源配置", datasource.size());
+            log.info("Loaded {} Elasticsearch datasource configurations", datasource.size());
 
             try {
                 Class.forName("com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties");
                 if (!isNacosConfigEnabled()) {
                     throw new ClassNotFoundException("Nacos config is not enabled");
                 }
-                log.info("检测到Nacos配置中心，使用Nacos的Elasticsearch配置");
+                log.info("Using Nacos Elasticsearch configuration");
                 GXNacosElasticsearchProperties elasticsearchSourceProperties = new GXNacosElasticsearchProperties();
                 elasticsearchSourceProperties.setDatasource(datasource);
                 return elasticsearchSourceProperties;
             } catch (ClassNotFoundException e) {
-                log.info("未检测到Nacos配置中心，使用本地Elasticsearch配置");
+                log.info("Using local Elasticsearch configuration");
                 GXLocalElasticsearchProperties elasticsearchSourceProperties = new GXLocalElasticsearchProperties();
                 elasticsearchSourceProperties.setDatasource(datasource);
                 return elasticsearchSourceProperties;
             }
         } catch (Exception e) {
-            log.error("解析Elasticsearch数据源配置失败: {}", e.getMessage());
-            throw new IllegalStateException("解析Elasticsearch数据源配置失败: " + e.getMessage(), e);
+            log.error("Failed to parse Elasticsearch datasource configuration: {}", e.getMessage());
+            throw new IllegalStateException("Failed to parse Elasticsearch datasource configuration: " + e.getMessage(), e);
         }
     }
 
@@ -259,7 +259,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
     }
 
     private ElasticsearchClient buildElasticsearchClient(GXElasticsearchProperties elasticsearchSourceProperties) {
-        Assert.notNull(elasticsearchSourceProperties, "Elasticsearch数据源配置不能为null");
+        Assert.notNull(elasticsearchSourceProperties, "Elasticsearch datasource properties must not be null");
 
         try {
             ClientConfiguration.TerminalClientConfigurationBuilder configurationBuilder =
@@ -267,13 +267,13 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
 
             return ElasticsearchClients.createImperative(configurationBuilder.build());
         } catch (Exception e) {
-            log.error("创建ElasticsearchClient失败: {}", e.getMessage());
-            throw new IllegalStateException("创建ElasticsearchClient失败: " + e.getMessage(), e);
+            log.error("Failed to create ElasticsearchClient: {}", e.getMessage());
+            throw new IllegalStateException("Failed to create ElasticsearchClient: " + e.getMessage(), e);
         }
     }
 
     private ClientConfiguration.TerminalClientConfigurationBuilder buildElasticsearchConfigurationBuilder(GXElasticsearchProperties elasticsearchSourceProperties) {
-        Assert.notNull(elasticsearchSourceProperties, "Elasticsearch数据源配置不能为null");
+        Assert.notNull(elasticsearchSourceProperties, "Elasticsearch datasource properties must not be null");
 
         try {
             String username = elasticsearchSourceProperties.getUsername();
@@ -281,18 +281,25 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
 
             List<String> uris = elasticsearchSourceProperties.getUris();
             if (uris == null || uris.isEmpty()) {
-                throw new IllegalArgumentException("Elasticsearch URI列表不能为空");
+                throw new IllegalArgumentException("Elasticsearch URI list must not be empty");
             }
-            boolean useSsl = uris.stream().anyMatch(uri -> CharSequenceUtil.startWithIgnoreCase(uri, "https://"));
-            String[] uriArray = uris.stream()
+            List<String> validUris = uris.stream()
                     .filter(CharSequenceUtil::isNotBlank)
+                    .toList();
+            if (validUris.isEmpty()) {
+                throw new IllegalArgumentException("Elasticsearch URI list must not be empty");
+            }
+            boolean hasHttp = validUris.stream().anyMatch(uri -> CharSequenceUtil.startWithIgnoreCase(uri, "http://"));
+            boolean hasHttps = validUris.stream().anyMatch(uri -> CharSequenceUtil.startWithIgnoreCase(uri, "https://"));
+            if (hasHttp && hasHttps) {
+                throw new IllegalArgumentException("Elasticsearch URI protocols must be consistent");
+            }
+            boolean useSsl = hasHttps;
+            String[] uriArray = validUris.stream()
                     .map(uri -> CharSequenceUtil.removePrefixIgnoreCase(uri, "http://"))
                     .map(uri -> CharSequenceUtil.removePrefixIgnoreCase(uri, "https://"))
                     .map(uri -> CharSequenceUtil.subBefore(uri, "/", false))
                     .toArray(String[]::new);
-            if (uriArray.length == 0) {
-                throw new IllegalArgumentException("Elasticsearch URI列表不能为空");
-            }
 
             ClientConfiguration.MaybeSecureClientConfigurationBuilder connectedBuilder =
                     ClientConfiguration.builder().connectedTo(uriArray);
@@ -300,14 +307,14 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
 
             if (CharSequenceUtil.isAllNotEmpty(username, password)) {
                 configurationBuilder.withBasicAuth(username, password);
-                log.debug("已配置Elasticsearch认证信息");
+                log.debug("Elasticsearch basic authentication configured");
             } else {
-                log.warn("未配置Elasticsearch认证信息，将使用匿名访问");
+                log.warn("Elasticsearch basic authentication is not configured");
             }
 
             if (CharSequenceUtil.isNotEmpty(elasticsearchSourceProperties.getPathPrefix())) {
                 configurationBuilder.withPathPrefix(elasticsearchSourceProperties.getPathPrefix());
-                log.debug("已配置Elasticsearch路径前缀: {}", elasticsearchSourceProperties.getPathPrefix());
+                log.debug("Elasticsearch path prefix configured: {}", elasticsearchSourceProperties.getPathPrefix());
             }
 
             HttpHeaders compatibilityHeaders = new HttpHeaders();
@@ -331,18 +338,18 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             Duration socketTimeout = elasticsearchSourceProperties.getSocketTimeout();
             configurationBuilder.withConnectTimeout(connectionTimeout).withSocketTimeout(socketTimeout);
 
-            log.debug("Elasticsearch客户端配置构建成功");
+            log.debug("Elasticsearch client configuration built");
             return configurationBuilder;
         } catch (Exception e) {
-            log.error("构建Elasticsearch客户端配置失败: {}", e.getMessage());
-            throw new IllegalStateException("构建Elasticsearch客户端配置失败: " + e.getMessage(), e);
+            log.error("Failed to build Elasticsearch client configuration: {}", e.getMessage());
+            throw new IllegalStateException("Failed to build Elasticsearch client configuration: " + e.getMessage(), e);
         }
     }
 
     private void checkElasticsearchDataSourceProperties(Map<String, GXElasticsearchProperties> datasourceMap) {
         try {
             if (datasourceMap == null || datasourceMap.isEmpty()) {
-                throw new GXBusinessException("未找到有效的Elasticsearch数据源配置");
+                throw new GXBusinessException("No valid Elasticsearch datasource configuration found");
             }
 
             int primaryBeanCount = 0;
@@ -356,18 +363,18 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             }
 
             if (primaryBeanCount > 1) {
-                throw new GXBusinessException("只能有一个主ElasticsearchTemplate，请检查primary是否设置了多个!");
+                throw new GXBusinessException("Only one primary ElasticsearchTemplate is allowed");
             }
             if (primaryBeanCount == 0) {
-                throw new GXBusinessException("必须有一个主ElasticsearchTemplate，请检查primary是否被设置!");
+                throw new GXBusinessException("One primary ElasticsearchTemplate is required");
             }
 
-            log.info("已确认主Elasticsearch数据源: {}", primaryDataSourceName);
+            log.info("Primary Elasticsearch datasource confirmed: {}", primaryDataSourceName);
         } catch (GXBusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("检查Elasticsearch数据源配置失败: {}", e.getMessage());
-            throw new GXBusinessException("检查Elasticsearch数据源配置失败: " + e.getMessage());
+            log.error("Failed to validate Elasticsearch datasource configuration: {}", e.getMessage());
+            throw new GXBusinessException("Failed to validate Elasticsearch datasource configuration: " + e.getMessage());
         }
     }
 

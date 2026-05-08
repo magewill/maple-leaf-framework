@@ -33,9 +33,14 @@ import java.lang.reflect.Array;
 import java.util.*;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends BaseQuery, B extends BaseQueryBuilder<Q, B>, ID extends Serializable> extends ElasticsearchRepository<T, ID> {
+    Pattern PAINLESS_FIELD_NAME_PATTERN = Pattern.compile("[A-Za-z0-9_@.-]+");
+
+    Pattern PAINLESS_PARAM_NAME_PATTERN = Pattern.compile("[A-Za-z0-9_]+");
+
     default <R> R useElasticsearchTemplate(String elasticsearchTemplateName, Supplier<R> supplier) {
         Assert.hasText(elasticsearchTemplateName, "ElasticsearchTemplate bean name must not be blank");
         Assert.notNull(supplier, "Supplier must not be null");
@@ -287,7 +292,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
 
     default Integer deleteCondition(String tableName, List<GXCondition<?>> condition) {
         if (CollUtil.isEmpty(condition)) {
-            throw new GXBusinessException("条件不能为空!");
+            throw new GXBusinessException("Condition cannot be empty");
         }
         Assert.notNull(condition, "Condition must not be null");
         GXBaseQueryParamInnerDto queryParamInnerDto = GXBaseQueryParamInnerDto.builder()
@@ -376,6 +381,8 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
                 return;
             }
             String paramName = updateField.getParamName();
+            validatePainlessFieldName(updateField.getFieldName());
+            validatePainlessParamName(paramName);
             Object paramValue = updateField.getParamMap().get(paramName);
             params.put(paramName, paramValue);
             script.append("ctx._source['")
@@ -403,10 +410,12 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
 
     default Dict executeQuery(GXBaseQueryParamInnerDto queryParamInnerDto) {
         Assert.notNull(queryParamInnerDto, "Query parameters must not be null");
+        rejectUnsupportedGroupBy(queryParamInnerDto);
 
         Q query = buildQuery(queryParamInnerDto);
         query = buildOrderBy(query, queryParamInnerDto);
         query = buildPageable(query, queryParamInnerDto);
+        query = buildSourceFilter(query, queryParamInnerDto);
 
         ElasticsearchTemplate elasticsearchTemplate = getElasticsearchTemplate();
         Class<?> genericClassType = GXCommonUtils.getGenericClassType((Class<?>) getClass().getGenericInterfaces()[0], 0);
@@ -461,6 +470,10 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
         int pageSize = Optional.ofNullable(queryParamInnerDto.getPageSize()).orElse(GXCommonConstant.DEFAULT_MAX_PAGE_SIZE);
         pageSize = NumberUtil.max(pageSize, 1);
         query.setPageable(PageRequest.of(page, pageSize));
+        Integer limit = queryParamInnerDto.getLimit();
+        if (limit != null && limit > 0) {
+            query.setMaxResults(limit);
+        }
         return query;
     }
 
@@ -490,6 +503,21 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
         return query;
     }
 
+    default Q buildSourceFilter(Q query, GXBaseQueryParamInnerDto queryParamInnerDto) {
+        Set<String> columns = queryParamInnerDto.getColumns();
+        if (CollUtil.isEmpty(columns) || columns.contains("*")) {
+            return query;
+        }
+        String[] includes = columns.stream()
+                .filter(CharSequenceUtil::isNotBlank)
+                .map(CharSequenceUtil::toUnderlineCase)
+                .toArray(String[]::new);
+        if (includes.length > 0) {
+            query.addSourceFilter(new FetchSourceFilterBuilder().withIncludes(includes).build());
+        }
+        return query;
+    }
+
     default Criteria buildCriteria(Criteria criteria) {
         return criteria;
     }
@@ -511,11 +539,13 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
                 Object value = condition.getValue();
                 String op = CharSequenceUtil.trim(condition.getOp());
 
-                String methodName = methodMapping.get(op);
-
-                if (CharSequenceUtil.isNotEmpty(methodName)) {
-                    criteria.and(buildConditionCriteria(fieldName, op, value));
+                if (CharSequenceUtil.isBlank(op)) {
+                    throw new GXBusinessException("Elasticsearch condition operator must not be blank");
                 }
+                if (!methodMapping.containsKey(op)) {
+                    throw new GXBusinessException(CharSequenceUtil.format("Elasticsearch unsupported condition operator: {}", op));
+                }
+                criteria.and(buildConditionCriteria(fieldName, op, value));
             });
         }
 
@@ -544,7 +574,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
 
         ElasticsearchTemplate elasticsearchTemplate = GXSpringContextUtils.getBean(beanName, ElasticsearchTemplate.class);
 
-        Assert.notNull(elasticsearchTemplate, "请配置ElasticsearchTemplate对象->[" +
+        Assert.notNull(elasticsearchTemplate, "ElasticsearchTemplate bean is required -> [" +
                 GXSpringContextUtils.getBeans(ElasticsearchTemplate.class).keySet().stream()
                         .map(name -> CharSequenceUtil.format("'{}'", name))
                         .collect(Collectors.joining(",")) +
@@ -573,6 +603,24 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
     private ElasticsearchOperations getElasticsearchOperations(RefreshPolicy refreshPolicy) {
         ElasticsearchTemplate elasticsearchTemplate = getElasticsearchTemplate();
         return refreshPolicy == null ? elasticsearchTemplate : elasticsearchTemplate.withRefreshPolicy(refreshPolicy);
+    }
+
+    private void rejectUnsupportedGroupBy(GXBaseQueryParamInnerDto queryParamInnerDto) {
+        if (CollUtil.isNotEmpty(queryParamInnerDto.getGroupByField())) {
+            throw new GXBusinessException("Elasticsearch groupByField is not supported");
+        }
+    }
+
+    private void validatePainlessFieldName(String fieldName) {
+        if (!PAINLESS_FIELD_NAME_PATTERN.matcher(fieldName).matches()) {
+            throw new GXBusinessException(CharSequenceUtil.format("Invalid Elasticsearch update field name: {}", fieldName));
+        }
+    }
+
+    private void validatePainlessParamName(String paramName) {
+        if (CharSequenceUtil.isBlank(paramName) || !PAINLESS_PARAM_NAME_PATTERN.matcher(paramName).matches()) {
+            throw new GXBusinessException(CharSequenceUtil.format("Invalid Elasticsearch update param name: {}", paramName));
+        }
     }
 
     private <R> R withElasticsearchTemplateContext(String elasticsearchTemplateName, Supplier<R> supplier) {

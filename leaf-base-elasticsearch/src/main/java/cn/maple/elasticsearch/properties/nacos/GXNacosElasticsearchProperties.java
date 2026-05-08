@@ -39,7 +39,7 @@ public class GXNacosElasticsearchProperties extends GXElasticsearchSourcePropert
     private Map<String, GXElasticsearchProperties> datasource = new LinkedHashMap<>();
 
     public GXNacosElasticsearchProperties() {
-        log.info("Elasticsearch数据源的配置使用的是NACOS配置");
+        log.info("Using Nacos Elasticsearch configuration");
     }
 
     @Override
