@@ -6,37 +6,37 @@ import cn.maple.rocketmq.dto.inner.GXRocketMQMessageReqDto;
 
 public interface GXSendRocketMQService extends GXBusinessService {
     /**
-     * 发送常规消息的ACT消息
+     * Sends a normal message.
      *
-     * @param messageReqDto 待发送的消息
+     * @param messageReqDto message to send
      */
     void sendNormalMessage(GXRocketMQMessageReqDto messageReqDto);
 
     /**
-     * 发送延迟消息
+     * Sends a delayed message.
      *
-     * @param messageReqDto 待发送的消息
+     * @param messageReqDto message to send
      */
     String sendDelayMessage(GXRocketMQMessageReqDto messageReqDto);
 
     /**
-     * 异步发送
+     * Sends a message asynchronously.
      *
-     * @param messageReqDto 待发送的消息
+     * @param messageReqDto message to send
      */
     boolean sendAsync(GXRocketMQMessageReqDto messageReqDto);
 
     /**
-     * 快速发送
+     * Sends a one-way message.
      *
-     * @param messageReqDto 待发送的消息对象
+     * @param messageReqDto message to send
      */
     boolean sendOneway(GXRocketMQMessageReqDto messageReqDto);
 
     /**
-     * 同步消息
+     * Sends a message synchronously.
      *
-     * @param messageReqDto 待发送的消息对象
+     * @param messageReqDto message to send
      */
     boolean syncSend(GXRocketMQMessageReqDto messageReqDto);
 }

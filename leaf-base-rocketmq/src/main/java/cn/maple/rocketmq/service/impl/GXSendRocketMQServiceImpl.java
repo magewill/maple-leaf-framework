@@ -31,15 +31,15 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
             Message<String> message = buildMessage(messageRequest);
             String destination = getDestination(messageRequest);
 
-            log.info("开始发送普通消息，主题: {}，标签: {}", messageRequest.topic(), messageRequest.tag());
+            log.debug("Start sending normal message. topic={}, tag={}", messageRequest.topic(), messageRequest.tag());
             SendResult sendResult = rocketMQTemplate.syncSend(destination, message);
-            checkSendResult("普通消息", sendResult);
-            log.info("普通消息发送成功，消息ID: {}", sendResult.getMsgId());
+            checkSendResult("Normal message", sendResult);
+            log.info("Normal message sent. msgId={}", sendResult.getMsgId());
         } catch (GXBusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("普通消息发送失败: {}", e.getMessage(), e);
-            throw new GXBusinessException("发送普通消息失败: " + e.getMessage(), e);
+            log.error("Failed to send normal message: {}", e.getMessage(), e);
+            throw new GXBusinessException("Failed to send normal message: " + e.getMessage(), e);
         }
     }
 
@@ -48,26 +48,26 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
         MessageRequest messageRequest = MessageRequest.from(messageReqDto);
         try {
             if (messageRequest.deliverTime() <= 0) {
-                throw new GXBusinessException("延时时间必须大于0秒");
+                throw new GXBusinessException("Delay time must be greater than 0 seconds");
             }
 
             Message<String> message = buildMessage(messageRequest);
             String destination = getDestination(messageRequest);
             long deliveryTimeMills = getDeliveryTimeMills(messageRequest.deliverTime());
 
-            log.info("开始发送延时消息，主题: {}，标签: {}，延时: {}秒",
+            log.debug("Start sending delay message. topic={}, tag={}, delaySeconds={}",
                     messageRequest.topic(), messageRequest.tag(), messageRequest.deliverTime());
 
             SendResult sendResult = rocketMQTemplate.syncSendDeliverTimeMills(destination, message, deliveryTimeMills);
-            checkSendResult("延时消息", sendResult);
+            checkSendResult("Delay message", sendResult);
 
-            log.info("延时消息发送成功，消息ID: {}，投递时间: {}", sendResult.getMsgId(), deliveryTimeMills);
+            log.info("Delay message sent. msgId={}, deliveryTimeMillis={}", sendResult.getMsgId(), deliveryTimeMills);
             return sendResult.getMsgId();
         } catch (GXBusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("延时消息发送失败: {}", e.getMessage(), e);
-            throw new GXBusinessException("发送延时消息失败: " + e.getMessage(), e);
+            log.error("Failed to send delay message: {}", e.getMessage(), e);
+            throw new GXBusinessException("Failed to send delay message: " + e.getMessage(), e);
         }
     }
 
@@ -78,17 +78,17 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
             Message<String> message = buildMessage(messageRequest);
             String destination = getDestination(messageRequest);
 
-            log.info("开始同步发送消息，主题: {}，标签: {}", messageRequest.topic(), messageRequest.tag());
+            log.debug("Start sending sync message. topic={}, tag={}", messageRequest.topic(), messageRequest.tag());
 
             SendResult sendResult = rocketMQTemplate.syncSend(destination, message);
-            checkSendResult("同步消息", sendResult);
-            log.info("同步消息发送成功，消息ID: {}", sendResult.getMsgId());
+            checkSendResult("Sync message", sendResult);
+            log.info("Sync message sent. msgId={}", sendResult.getMsgId());
             return true;
         } catch (GXBusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("同步消息发送失败: {}", e.getMessage(), e);
-            throw new GXBusinessException("同步消息发送失败: " + e.getMessage(), e);
+            log.error("Failed to send sync message: {}", e.getMessage(), e);
+            throw new GXBusinessException("Failed to send sync message: " + e.getMessage(), e);
         }
     }
 
@@ -99,36 +99,36 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
             Message<String> message = buildMessage(messageRequest);
             String destination = getDestination(messageRequest);
 
-            log.info("开始异步发送消息，主题: {}，标签: {}", messageRequest.topic(), messageRequest.tag());
+            log.debug("Start sending async message. topic={}, tag={}", messageRequest.topic(), messageRequest.tag());
 
             rocketMQTemplate.asyncSend(destination, message, new SendCallback() {
                 @Override
                 public void onSuccess(SendResult sendResult) {
                     if (!isSendOk(sendResult)) {
-                        log.error("异步消息发送状态异常，主题: {}，标签: {}，状态: {}，消息ID: {}",
+                        log.error("Async message send status is not ok. topic={}, tag={}, status={}, msgId={}",
                                 messageRequest.topic(), messageRequest.tag(), getSendStatus(sendResult),
                                 sendResult == null ? null : sendResult.getMsgId());
                         return;
                     }
-                    log.info("异步消息发送成功，主题: {}，标签: {}，消息ID: {}",
+                    log.info("Async message sent. topic={}, tag={}, msgId={}",
                             messageRequest.topic(), messageRequest.tag(), sendResult.getMsgId());
                 }
 
                 @Override
                 public void onException(Throwable throwable) {
                     String errorMessage = throwable == null ? null : throwable.getMessage();
-                    log.error("异步消息发送失败，主题: {}，标签: {}，错误: {}",
+                    log.error("Failed to send async message. topic={}, tag={}, error={}",
                             messageRequest.topic(), messageRequest.tag(), errorMessage, throwable);
                 }
             });
 
-            log.info("异步消息发送请求已提交");
+            log.debug("Async message send request submitted.");
             return true;
         } catch (GXBusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("异步消息发送请求提交失败: {}", e.getMessage(), e);
-            throw new GXBusinessException("异步消息发送请求提交失败: " + e.getMessage(), e);
+            log.error("Failed to submit async message send request: {}", e.getMessage(), e);
+            throw new GXBusinessException("Failed to submit async message send request: " + e.getMessage(), e);
         }
     }
 
@@ -139,17 +139,17 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
             Message<String> message = buildMessage(messageRequest);
             String destination = getDestination(messageRequest);
 
-            log.info("开始发送单向消息，主题: {}，标签: {}", messageRequest.topic(), messageRequest.tag());
+            log.debug("Start sending oneway message. topic={}, tag={}", messageRequest.topic(), messageRequest.tag());
 
             rocketMQTemplate.sendOneWay(destination, message);
 
-            log.info("单向消息发送操作完成，主题: {}，标签: {}", messageRequest.topic(), messageRequest.tag());
+            log.info("Oneway message send operation completed. topic={}, tag={}", messageRequest.topic(), messageRequest.tag());
             return true;
         } catch (GXBusinessException e) {
             throw e;
         } catch (Exception e) {
-            log.error("单向消息发送失败: {}", e.getMessage(), e);
-            throw new GXBusinessException("单向消息发送失败: " + e.getMessage(), e);
+            log.error("Failed to send oneway message: {}", e.getMessage(), e);
+            throw new GXBusinessException("Failed to send oneway message: " + e.getMessage(), e);
         }
     }
 
@@ -173,13 +173,13 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
         try {
             return Math.addExact(System.currentTimeMillis(), Math.multiplyExact(deliverTimeSeconds, 1000L));
         } catch (ArithmeticException e) {
-            throw new GXBusinessException("延时时间过大，无法计算投递时间", e);
+            throw new GXBusinessException("Delay time is too large to calculate delivery time", e);
         }
     }
 
     private void checkSendResult(String messageType, SendResult sendResult) {
         if (!isSendOk(sendResult)) {
-            throw new GXBusinessException(CharSequenceUtil.format("{}发送失败，状态: {}，消息ID: {}",
+            throw new GXBusinessException(CharSequenceUtil.format("{} send failed. status={}, msgId={}",
                     messageType, getSendStatus(sendResult), sendResult == null ? null : sendResult.getMsgId()));
         }
     }
@@ -195,13 +195,13 @@ public class GXSendRocketMQServiceImpl extends GXBusinessServiceImpl implements 
     private record MessageRequest(String topic, String tag, String body, long deliverTime, String messageKey) {
         private static MessageRequest from(GXRocketMQMessageReqDto messageReqDto) {
             if (messageReqDto == null) {
-                throw new GXBusinessException("消息对象不能为空");
+                throw new GXBusinessException("Message request must not be null");
             }
             if (CharSequenceUtil.isBlank(messageReqDto.getTopic())) {
-                throw new GXBusinessException("消息主题(Topic)不能为空");
+                throw new GXBusinessException("Message topic must not be blank");
             }
             if (CharSequenceUtil.isBlank(messageReqDto.getBody())) {
-                throw new GXBusinessException("消息内容不能为空");
+                throw new GXBusinessException("Message body must not be blank");
             }
 
             String topic = messageReqDto.getTopic().trim();

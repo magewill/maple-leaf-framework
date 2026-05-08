@@ -69,7 +69,7 @@ class GXSendRocketMQServiceImplTest {
 
         assertThatThrownBy(() -> sendRocketMQService.sendNormalMessage(messageReqDto("order", "created", "key-1")))
                 .isInstanceOf(GXBusinessException.class)
-                .hasMessageContaining("普通消息发送失败")
+                .hasMessageContaining("Normal message send failed")
                 .hasMessageContaining("SLAVE_NOT_AVAILABLE");
     }
 
@@ -88,7 +88,7 @@ class GXSendRocketMQServiceImplTest {
 
         assertThatThrownBy(() -> sendRocketMQService.syncSend(messageReqDto("order", "created", "key-1")))
                 .isInstanceOf(GXBusinessException.class)
-                .hasMessageContaining("同步消息发送失败")
+                .hasMessageContaining("Sync message send failed")
                 .hasMessageContaining("FLUSH_DISK_TIMEOUT");
     }
 
@@ -118,7 +118,7 @@ class GXSendRocketMQServiceImplTest {
 
         assertThatThrownBy(() -> sendRocketMQService.sendDelayMessage(reqDto))
                 .isInstanceOf(GXBusinessException.class)
-                .hasMessageContaining("延时消息发送失败");
+                .hasMessageContaining("Delay message send failed");
     }
 
     @Test
@@ -128,7 +128,7 @@ class GXSendRocketMQServiceImplTest {
 
         assertThatThrownBy(() -> sendRocketMQService.sendDelayMessage(reqDto))
                 .isInstanceOf(GXBusinessException.class)
-                .hasMessageContaining("延时时间必须大于0秒");
+                .hasMessageContaining("Delay time must be greater than 0 seconds");
     }
 
     @Test
@@ -138,7 +138,7 @@ class GXSendRocketMQServiceImplTest {
 
         assertThatThrownBy(() -> sendRocketMQService.sendDelayMessage(reqDto))
                 .isInstanceOf(GXBusinessException.class)
-                .hasMessageContaining("延时时间过大");
+                .hasMessageContaining("Delay time is too large");
     }
 
     @Test
@@ -185,7 +185,7 @@ class GXSendRocketMQServiceImplTest {
 
         assertThatThrownBy(() -> sendRocketMQService.sendOneway(reqDto))
                 .isInstanceOf(GXBusinessException.class)
-                .hasMessageContaining("单向消息发送失败")
+                .hasMessageContaining("Failed to send oneway message")
                 .hasMessageContaining("producer not ready");
     }
 
@@ -193,7 +193,7 @@ class GXSendRocketMQServiceImplTest {
     void sendNormalMessageRejectsNullRequest() {
         assertThatThrownBy(() -> sendRocketMQService.sendNormalMessage(null))
                 .isInstanceOf(GXBusinessException.class)
-                .hasMessageContaining("消息对象不能为空");
+                .hasMessageContaining("Message request must not be null");
     }
 
     @Test
@@ -203,7 +203,7 @@ class GXSendRocketMQServiceImplTest {
 
         assertThatThrownBy(() -> sendRocketMQService.sendNormalMessage(reqDto))
                 .isInstanceOf(GXBusinessException.class)
-                .hasMessageContaining("消息内容不能为空");
+                .hasMessageContaining("Message body must not be blank");
     }
 
     @Test
@@ -212,7 +212,7 @@ class GXSendRocketMQServiceImplTest {
 
         assertThatThrownBy(() -> sendRocketMQService.sendOneway(reqDto))
                 .isInstanceOf(GXBusinessException.class)
-                .hasMessageContaining("消息主题(Topic)不能为空");
+                .hasMessageContaining("Message topic must not be blank");
     }
 
     private GXRocketMQMessageReqDto messageReqDto(String topic, String tag, String messageKey) {
