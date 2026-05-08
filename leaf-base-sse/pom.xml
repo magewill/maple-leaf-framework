@@ -20,5 +20,11 @@
             <artifactId>leaf-base-framework</artifactId>
             <version>${project.parent.version}</version>
         </dependency>
+        <!--导入单元测试包-->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>
