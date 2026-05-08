@@ -14,14 +14,14 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 public class GXWebClientExceptionHandler {
     @ExceptionHandler(WebClientRequestException.class)
     public GXResultUtils<Dict> handleWebClientRequestException(WebClientRequestException e) {
-        log.error(e.getMessage(), e);
+        log.error("WebClient request error: exceptionType={}", e.getClass().getName(), e);
         return GXResultUtils.error(HttpStatus.HTTP_INTERNAL_ERROR, "WebClient网络请求异常");
     }
 
     @ExceptionHandler(WebClientResponseException.class)
     public GXResultUtils<Dict> handleWebClientResponseException(WebClientResponseException e) {
-        log.error("WebClient response error, statusCode={}, responseBody={}",
-                e.getStatusCode().value(), e.getResponseBodyAsString(), e);
+        log.error("WebClient response error: statusCode={}, responseBodyLength={}",
+                e.getStatusCode().value(), e.getResponseBodyAsString().length(), e);
         return GXResultUtils.error(e.getStatusCode().value(), "WebClient remote service response exception");
     }
 }
