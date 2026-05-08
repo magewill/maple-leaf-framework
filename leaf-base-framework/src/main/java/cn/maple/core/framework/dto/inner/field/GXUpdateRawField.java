@@ -1,6 +1,7 @@
 package cn.maple.core.framework.dto.inner.field;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 import lombok.extern.log4j.Log4j2;
@@ -13,17 +14,20 @@ public class GXUpdateRawField extends GXUpdateField<String> {
 
     @Override
     public String getFieldValue() {
+        if (value == null) {
+            throw new GXBusinessException("Raw update field value must not be null");
+        }
         String strValue = value.toString();
         if (GXDBStringEscapeUtils.check(strValue)) {
-            log.error("原始字段更新时检测到SQL注入风险: {}", strValue);
-            throw new GXSqlInjectionException("原始字段更新时检测到SQL注入风险");
+            log.error("SQL injection risk detected in raw update field: {}", strValue);
+            throw new GXSqlInjectionException("SQL injection risk detected in raw update field");
         }
         return strValue;
     }
 
     @Override
     public String updateString() {
-        log.warn("使用原始SQL值更新字段 {}.{}，请确保已进行SQL注入检查", tableNameAlias, fieldName);
+        log.warn("Raw SQL update field is used: {}.{}", tableNameAlias, fieldName);
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
             return CharSequenceUtil.format("{} = {}", fieldName, value);
         }

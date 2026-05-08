@@ -1,6 +1,7 @@
 package cn.maple.core.framework.dto.inner.condition;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
@@ -19,8 +20,11 @@ public class GXConditionLikeRight extends GXCondition<String> {
 
     @Override
     public String getFieldValue() {
+        if (value == null) {
+            throw new GXBusinessException("LIKE condition value must not be null");
+        }
         if (GXDBStringEscapeUtils.check(value.toString())) {
-            throw new GXSqlInjectionException("检测到SQL注入风险：右模糊匹配条件含可疑内容");
+            throw new GXSqlInjectionException("SQL injection risk detected in LIKE condition value");
         }
         this.paramMap.clear();
         this.paramMap.put(paramName, value + "%");
@@ -35,7 +39,7 @@ public class GXConditionLikeRight extends GXCondition<String> {
 
         String strValue = value.toString();
         if (GXDBStringEscapeUtils.check(strValue)) {
-            throw new GXSqlInjectionException("SQL注入异常");
+            throw new GXSqlInjectionException("SQL injection risk detected in LIKE condition value");
         }
 
         String escapedValue = GXDBStringEscapeUtils.escapeSqlForLike(strValue);
@@ -47,8 +51,11 @@ public class GXConditionLikeRight extends GXCondition<String> {
 
     @Override
     public GXConditionSegment toSegment() {
-        if (value == null || GXDBStringEscapeUtils.check(value.toString())) {
-            throw new GXSqlInjectionException("检测到SQL注入风险：右模糊匹配条件含可疑内容");
+        if (value == null) {
+            throw new GXBusinessException("LIKE condition value must not be null");
+        }
+        if (GXDBStringEscapeUtils.check(value.toString())) {
+            throw new GXSqlInjectionException("SQL injection risk detected in LIKE condition value");
         }
         String sql = CharSequenceUtil.isEmpty(tableNameAlias)
                 ? CharSequenceUtil.format("{} {} #{dbQueryParamInnerDto.paramMap.{}}", getFieldExpression(), getOp(), paramName)

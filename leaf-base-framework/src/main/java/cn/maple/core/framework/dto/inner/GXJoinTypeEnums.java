@@ -5,11 +5,11 @@ import lombok.Getter;
 
 @Getter
 public enum GXJoinTypeEnums {
-    LEFT(GXBuilderConstant.LEFT_JOIN_TYPE, "左连接"),
+    LEFT(GXBuilderConstant.LEFT_JOIN_TYPE, "LEFT JOIN"),
 
-    RIGHT(GXBuilderConstant.RIGHT_JOIN_TYPE, "右连接"),
+    RIGHT(GXBuilderConstant.RIGHT_JOIN_TYPE, "RIGHT JOIN"),
 
-    INNER(GXBuilderConstant.INNER_JOIN_TYPE, "内连接");
+    INNER(GXBuilderConstant.INNER_JOIN_TYPE, "INNER JOIN");
 
     private final String joinType;
 

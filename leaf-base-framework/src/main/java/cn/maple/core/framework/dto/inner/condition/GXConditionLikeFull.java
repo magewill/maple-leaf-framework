@@ -1,6 +1,7 @@
 package cn.maple.core.framework.dto.inner.condition;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
@@ -19,8 +20,11 @@ public class GXConditionLikeFull extends GXCondition<String> {
 
     @Override
     public String getFieldValue() {
+        if (value == null) {
+            throw new GXBusinessException("LIKE condition value must not be null");
+        }
         if (GXDBStringEscapeUtils.check(value.toString())) {
-            throw new GXSqlInjectionException("SQL注入异常");
+            throw new GXSqlInjectionException("SQL injection risk detected in LIKE condition value");
         }
         this.paramMap.clear();
         this.paramMap.put(paramName, "%" + value + "%");
@@ -34,7 +38,7 @@ public class GXConditionLikeFull extends GXCondition<String> {
         }
         String strValue = value.toString();
         if (GXDBStringEscapeUtils.check(strValue)) {
-            throw new GXSqlInjectionException("模糊匹配条件中检测到SQL注入风险: " + strValue);
+            throw new GXSqlInjectionException("SQL injection risk detected in LIKE condition value: " + strValue);
         }
         String escapedValue = GXDBStringEscapeUtils.escapeSqlForLike(strValue);
         if (CharSequenceUtil.contains(escapedValue, "''")) {
@@ -46,8 +50,11 @@ public class GXConditionLikeFull extends GXCondition<String> {
 
     @Override
     public GXConditionSegment toSegment() {
-        if (value == null || GXDBStringEscapeUtils.check(value.toString())) {
-            throw new GXSqlInjectionException("SQL注入异常");
+        if (value == null) {
+            throw new GXBusinessException("LIKE condition value must not be null");
+        }
+        if (GXDBStringEscapeUtils.check(value.toString())) {
+            throw new GXSqlInjectionException("SQL injection risk detected in LIKE condition value");
         }
         String sql = CharSequenceUtil.isEmpty(tableNameAlias)
                 ? CharSequenceUtil.format("{} {} #{dbQueryParamInnerDto.paramMap.{}}", getFieldExpression(), getOp(), paramName)

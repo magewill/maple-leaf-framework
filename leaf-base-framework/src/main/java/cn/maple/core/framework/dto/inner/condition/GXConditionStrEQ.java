@@ -1,6 +1,7 @@
 package cn.maple.core.framework.dto.inner.condition;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
@@ -16,8 +17,11 @@ public class GXConditionStrEQ extends GXCondition<String> {
 
     @Override
     public String getFieldValue() {
+        if (value == null) {
+            throw new GXBusinessException("String condition value must not be null");
+        }
         if (GXDBStringEscapeUtils.check(value.toString())) {
-            throw new GXSqlInjectionException("SQL注入异常");
+            throw new GXSqlInjectionException("SQL injection risk detected in string condition value");
         }
         this.paramMap.clear();
         this.paramMap.put(paramName, value);
@@ -32,7 +36,7 @@ public class GXConditionStrEQ extends GXCondition<String> {
 
         String strValue = value.toString();
         if (GXDBStringEscapeUtils.check(strValue)) {
-            throw new GXSqlInjectionException("字符串等值条件中检测到SQL注入风险: " + strValue);
+            throw new GXSqlInjectionException("SQL injection risk detected in string condition value: " + strValue);
         }
 
         String escapedValue = GXDBStringEscapeUtils.escapeSql(strValue);

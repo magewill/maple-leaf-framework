@@ -24,7 +24,7 @@ public class GXPaginationResDto<T> extends GXBaseResDto {
         this.total = totalCount;
         this.pageSize = pageSize;
         this.currentPage = currPage;
-        this.pages = (int) Math.ceil((double) totalCount / pageSize);
+        this.pages = pageSize <= 0 ? 0 : (long) Math.ceil((double) totalCount / pageSize);
     }
 
     public GXPaginationResDto(List<T> list, long totalCount, long pages, long pageSize, long currPage) {

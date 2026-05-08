@@ -2,6 +2,7 @@ package cn.maple.core.framework.dto.inner.condition;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.NumberUtil;
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 
@@ -27,7 +28,7 @@ public class GXConditionJsonEQ extends GXCondition<Object> {
     @Override
     public String getFieldValue() {
         if (value == null) {
-            return "NULL";
+            throw new GXBusinessException("JSON condition value must not be null");
         }
         String strValue = value.toString();
         if (GXDBStringEscapeUtils.check(strValue)) {
@@ -41,7 +42,10 @@ public class GXConditionJsonEQ extends GXCondition<Object> {
 
     @Override
     public String whereString() {
-        if (value == null || GXDBStringEscapeUtils.check(value.toString())) {
+        if (value == null) {
+            throw new GXBusinessException("JSON condition value must not be null");
+        }
+        if (GXDBStringEscapeUtils.check(value.toString())) {
             throw new GXSqlInjectionException("JSON condition has SQL injection risk");
         }
         String field = CharSequenceUtil.isEmpty(tableNameAlias)
@@ -54,7 +58,7 @@ public class GXConditionJsonEQ extends GXCondition<Object> {
     @Override
     public Object getFieldOriginalValue() {
         if (value == null) {
-            return "NULL";
+            throw new GXBusinessException("JSON condition value must not be null");
         }
         String strValue = value.toString();
         if (GXDBStringEscapeUtils.check(strValue)) {
@@ -73,7 +77,10 @@ public class GXConditionJsonEQ extends GXCondition<Object> {
 
     @Override
     public GXConditionSegment toSegment() {
-        if (value == null || GXDBStringEscapeUtils.check(value.toString())) {
+        if (value == null) {
+            throw new GXBusinessException("JSON condition value must not be null");
+        }
+        if (GXDBStringEscapeUtils.check(value.toString())) {
             throw new GXSqlInjectionException("JSON condition has SQL injection risk");
         }
         String sql = whereString();
