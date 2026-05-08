@@ -9,38 +9,24 @@ import java.util.List;
 
 @Data
 public class GXElasticsearchProperties {
-    /**
-     * Elasticsearch 服务地址列表
-     */
+    /** Elasticsearch endpoint list. */
     private List<String> uris = new ArrayList<>(Collections.singletonList("http://localhost:9200"));
 
-    /**
-     * 连接超时时间
-     */
+    /** Connection timeout. */
     private Duration connectionTimeout = Duration.ofSeconds(1L);
 
-    /**
-     * 读取超时时间
-     */
+    /** Socket read timeout. */
     private Duration socketTimeout = Duration.ofSeconds(30L);
 
-    /**
-     * 用户名
-     */
+    /** Basic auth username. */
     private String username;
 
-    /**
-     * 密码
-     */
+    /** Basic auth password. */
     private String password;
 
-    /**
-     * 路径前缀
-     */
+    /** API path prefix. */
     private String pathPrefix;
 
-    /**
-     * 是否为主要的连接
-     */
+    /** Whether this datasource is primary. */
     private boolean primary = false;
 }

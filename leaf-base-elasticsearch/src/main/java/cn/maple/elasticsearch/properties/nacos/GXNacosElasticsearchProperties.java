@@ -16,9 +16,7 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * 每个应用自定义的环境配置文件
- */
+/** Nacos-based Elasticsearch configuration source. */
 @Data
 @Slf4j
 @Component

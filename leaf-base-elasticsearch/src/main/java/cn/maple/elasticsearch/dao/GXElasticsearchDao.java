@@ -465,7 +465,6 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
     }
 
     default Q buildPageable(Q query, GXBaseQueryParamInnerDto queryParamInnerDto) {
-        // 处理分页
         int page = NumberUtil.max(Optional.ofNullable(queryParamInnerDto.getPage()).orElse(0) - 1, 0);
         int pageSize = Optional.ofNullable(queryParamInnerDto.getPageSize()).orElse(GXCommonConstant.DEFAULT_MAX_PAGE_SIZE);
         pageSize = NumberUtil.max(pageSize, 1);
@@ -479,7 +478,6 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
 
     default Q buildOrderBy(Q query, GXBaseQueryParamInnerDto queryParamInnerDto) {
         Map<String, String> orderByField = queryParamInnerDto.getOrderByField();
-        // 处理字段排序
         if (!CollUtil.isEmpty(orderByField)) {
             List<Sort.Order> orders = CollUtil.newArrayList();
             orderByField.keySet().forEach(column -> {
@@ -492,7 +490,6 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
                         orders.add(Sort.Order.asc(column));
                     }
                 } catch (IllegalArgumentException ignored) {
-                    // 忽略非法排序方向，避免单个无效字段影响整个查询。
                 }
             });
             if (CollUtil.isNotEmpty(orders)) {
@@ -566,7 +563,6 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
     }
 
     default ElasticsearchTemplate getElasticsearchTemplate(String beanName) {
-        // 如果beanName为空，使用默认名称
         if (CharSequenceUtil.isEmpty(beanName)) {
             String contextTemplateName = GXElasticsearchTemplateContext.getTemplateName();
             beanName = CharSequenceUtil.isBlank(contextTemplateName) ? getElasticsearchTemplateName() : contextTemplateName;
