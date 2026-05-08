@@ -29,22 +29,11 @@ public class GXSeataDynamicDataSourceConfig {
     private static final Logger log = LoggerFactory.getLogger(GXSeataDynamicDataSourceConfig.class);
 
     /**
-     * 通过 {@link SqlSessionFactoryBeanCustomizer} 将动态数据源注入 MyBatis-Plus。
-     *
-     * <p>此方式是官方推荐的非侵入式定制手段：仅替换数据源，
-     * 不干预 MyBatis-Plus 的分页插件、自动填充、乐观锁等其他自动配置逻辑，
-     * 降低配置耦合度，也无需重新声明完整的 {@code SqlSessionFactory} Bean。</p>
-     *
-     * <p>Customizer 由 {@link MybatisPlusAutoConfiguration} 在创建
-     * {@code SqlSessionFactory} 时统一收集并按序应用，
-     * 本类在配置类加载时注册该 Bean，确保 Factory 初始化时可以应用。</p>
+     * Injects the dynamic datasource into MyBatis-Plus.
      *
      * <p>不要在这里再次把 {@link GXDynamicDataSource} 包装成 Seata 的
      * {@code DataSourceProxy}。{@link GXDynamicDataSourceConfig} 已经在创建物理数据源时完成代理，
      * 这里重复代理路由数据源会导致双层代理和资源注册异常风险。</p>
-     *
-     * @param dynamicDataSource 动态数据源
-     * @return MyBatis-Plus SqlSessionFactory 定制器
      */
     @Bean
     public SqlSessionFactoryBeanCustomizer seataDynamicDataSourceCustomizer(GXDynamicDataSource dynamicDataSource) {
