@@ -26,7 +26,7 @@ import cn.maple.statemachine.impl.GXTransitionType;
  * {@code
  * // 在状态机构建过程中创建和配置转换
  * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder = GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 创建一个外部转换
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_PAYMENT)  // 设置源状态
@@ -37,7 +37,7 @@ import cn.maple.statemachine.impl.GXTransitionType;
  *         System.out.println("订单已支付：" + ctx.getOrderId());
  *         // 执行支付后的业务逻辑
  *     });                             // 设置转换动作
- * 
+ *
  * // 创建一个内部转换（不改变状态）
  * builder.internalTransition()
  *     .within(OrderStatus.PAID)        // 设置状态
@@ -53,7 +53,6 @@ import cn.maple.statemachine.impl.GXTransitionType;
  * @param <S> 状态类型，通常使用枚举或字符串
  * @param <E> 事件类型，通常使用枚举或字符串
  * @param <C> 用户自定义上下文类型，用于在状态转换过程中传递数据
- * 
  * @see GXState 状态接口
  * @see GXCondition 条件接口
  * @see GXAction 动作接口
@@ -113,7 +112,6 @@ public interface GXTransition<S, E, C> {
      * </p>
      *
      * @param type 转换类型
-     * 
      * @see cn.maple.statemachine.impl.GXTransitionType 转换类型枚举
      */
     void setType(GXTransitionType type);
@@ -147,7 +145,6 @@ public interface GXTransition<S, E, C> {
      * </p>
      *
      * @return 条件对象，如果没有设置条件则可能返回null
-     * 
      * @see GXCondition 条件接口
      */
     GXCondition<C> getCondition();
@@ -170,7 +167,6 @@ public interface GXTransition<S, E, C> {
      * </p>
      *
      * @return 动作对象，如果没有设置动作则可能返回null
-     * 
      * @see GXAction 动作接口
      */
     GXAction<S, E, C> getAction();
@@ -193,7 +189,7 @@ public interface GXTransition<S, E, C> {
      * 如果设置了动作，则在转换过程中会执行该动作。
      * </p>
      *
-     * @param ctx 上下文对象，包含转换可能需要的数据
+     * @param ctx            上下文对象，包含转换可能需要的数据
      * @param checkCondition 是否检查条件，如果为true则会检查条件是否满足
      * @return 转换后的目标状态，如果条件不满足则返回源状态
      */
@@ -205,7 +201,7 @@ public interface GXTransition<S, E, C> {
      * 检查转换配置是否正确，例如对于内部转换(INTERNAL)，
      * 源状态和目标状态必须相同。
      * </p>
-     * 
+     *
      * @throws cn.maple.statemachine.impl.GXStateMachineException 如果转换配置不正确
      */
     void verify();

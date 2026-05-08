@@ -20,10 +20,10 @@ import cn.maple.statemachine.GXStateMachine;
  * // 定义状态和事件枚举
  * enum States { STATE1, STATE2, STATE3 }
  * enum Events { EVENT1, EVENT2 }
- * 
+ *
  * // 创建状态机构建器
  * GXStateMachineBuilder<States, Events, Context> builder = GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 定义状态转换
  * builder.externalTransition()
  *     .from(States.STATE1)
@@ -33,10 +33,10 @@ import cn.maple.statemachine.GXStateMachine;
  *     .perform((from, to, event, ctx) -> {
  *         System.out.println("状态从 " + from + " 转换到 " + to);
  *     });
- * 
+ *
  * // 构建状态机
  * GXStateMachine<States, Events, Context> stateMachine = builder.build("示例状态机");
- * 
+ *
  * // 使用状态机
  * Context context = new Context();
  * context.setData("测试数据");

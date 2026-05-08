@@ -27,16 +27,16 @@ import java.util.Collection;
  * {@code
  * // 创建状态机
  * GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine = builder.build("订单状态机");
- * 
+ *
  * // 使用PlantUML访问者生成UML图
  * GXPlantUMLVisitor plantUMLVisitor = new GXPlantUMLVisitor();
  * String umlContent = stateMachine.accept(plantUMLVisitor);
- * 
+ *
  * // 将生成的内容保存到文件
  * try (PrintWriter writer = new PrintWriter(new FileWriter("order-state-machine.puml"))) {
  *     writer.write(umlContent);
  * }
- * 
+ *
  * // 也可以直接使用状态机的便捷方法
  * String uml = stateMachine.generatePlantUML();
  * }
@@ -52,7 +52,7 @@ import java.util.Collection;
  * @enduml
  * </pre>
  * </p>
- * 
+ *
  * @see GXVisitor 访问者接口
  * @see GXStateMachine#generatePlantUML() 状态机生成PlantUML的便捷方法
  */

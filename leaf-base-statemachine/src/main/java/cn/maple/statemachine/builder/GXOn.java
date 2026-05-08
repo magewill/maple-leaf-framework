@@ -20,7 +20,7 @@ import cn.maple.statemachine.GXCondition;
  * <pre>
  * // 创建状态机构建器
  * GXStateMachineBuilder<States, Events, Context> builder = GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 定义状态转换
  * builder.externalTransition()
  *     .from(States.PENDING)

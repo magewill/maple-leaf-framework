@@ -21,19 +21,19 @@ package cn.maple.statemachine;
  * // 定义状态、事件和上下文类型
  * public enum OrderStatus { WAIT_PAYMENT, PAID, DELIVERING, RECEIVED }
  * public enum OrderEvent { PAY, DELIVER, RECEIVE }
- * public class OrderContext { 
+ * public class OrderContext {
  *     private String orderId;
  *     private double amount;
  *     // getter and setter
  * }
- * 
+ *
  * // 实现支付成功动作
- * GXAction<OrderStatus, OrderEvent, OrderContext> paymentAction = 
+ * GXAction<OrderStatus, OrderEvent, OrderContext> paymentAction =
  *     (from, to, event, ctx) -> {
  *         System.out.println("订单已支付：" + ctx.getOrderId());
  *         // 执行支付成功后的业务逻辑，如更新订单状态、发送通知等
  *     };
- * 
+ *
  * // 在状态机构建器中使用该动作
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_PAYMENT)
@@ -44,11 +44,10 @@ package cn.maple.statemachine;
  * }
  * </pre>
  * </p>
- * 
+ *
  * @param <S> 状态类型，通常使用枚举或字符串
  * @param <E> 事件类型，通常使用枚举或字符串
  * @param <C> 上下文类型，用于在状态转换过程中传递数据
- * 
  * @see GXCondition 条件接口，用于决定是否执行状态转换
  * @see GXTransition 转换接口，表示状态之间的转换规则
  */

@@ -23,14 +23,14 @@ import java.util.List;
  * <pre>
  * // 创建事件转换管理器
  * GXEventTransitions<OrderStatus, OrderEvent, OrderContext> eventTransitions = new GXEventTransitions<>();
- * 
+ *
  * // 添加转换
  * GXTransition<OrderStatus, OrderEvent, OrderContext> transition1 = new GXTransitionImpl<>();
  * // 设置转换的源状态、目标状态等属性
  * eventTransitions.put(OrderEvent.PAYED, transition1);
- * 
+ *
  * // 获取事件对应的所有转换
- * List<GXTransition<OrderStatus, OrderEvent, OrderContext>> transitions = 
+ * List<GXTransition<OrderStatus, OrderEvent, OrderContext>> transitions =
  *     eventTransitions.get(OrderEvent.PAYED);
  * </pre>
  */
@@ -59,7 +59,7 @@ public class GXEventTransitions<S, E, C> {
      * 如果事件还没有关联的转换列表，会创建一个新的列表。
      * 添加前会验证是否已存在相同的转换（相同的源状态和目标状态）。
      *
-     * @param event 触发转换的事件
+     * @param event      触发转换的事件
      * @param transition 要添加的转换
      * @throws GXStateMachineException 如果已存在相同的转换
      */
@@ -82,7 +82,7 @@ public class GXEventTransitions<S, E, C> {
      * 此方法检查新的转换是否与已有的转换冲突。
      *
      * @param existingTransitions 已存在的转换列表
-     * @param newTransition 新的转换
+     * @param newTransition       新的转换
      * @throws GXStateMachineException 如果新转换与已有转换冲突
      */
     private void verify(List<GXTransition<S, E, C>> existingTransitions, GXTransition<S, E, C> newTransition) {

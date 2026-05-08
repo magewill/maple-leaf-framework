@@ -17,7 +17,7 @@ package cn.maple.statemachine.builder;
  * <pre>
  * // 创建状态机构建器
  * GXStateMachineBuilder<States, Events, Context> builder = GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 使用内部转换构建器定义一个在PROCESSING状态内的转换
  * builder.internalTransition()
  *     .within(States.PROCESSING)
@@ -27,7 +27,7 @@ package cn.maple.statemachine.builder;
  *         System.out.println("更新处理中的数据");
  *         ctx.updateProgress(10);
  *     });
- * 
+ *
  * // 构建状态机
  * GXStateMachine<States, Events, Context> stateMachine = builder.build("processStateMachine");
  * </pre>

@@ -1,6 +1,7 @@
 # AGENTS.md - leaf-base-statemachine
 
-本文档用于指导 `leaf-base-statemachine` 模块后续的迭代开发。修改本模块时，优先保持状态机构建 DSL、状态转换路由、条件判定、动作执行、工厂注册、并发复用能力以及 PlantUML 可视化能力的稳定，避免与当前模块职责无关的重构。
+本文档用于指导 `leaf-base-statemachine` 模块后续的迭代开发。修改本模块时，优先保持状态机构建
+DSL、状态转换路由、条件判定、动作执行、工厂注册、并发复用能力以及 PlantUML 可视化能力的稳定，避免与当前模块职责无关的重构。
 
 ## 1. 模块定位
 
@@ -67,7 +68,8 @@
 ## 5. 测试要求
 
 1. 任何功能改动都必须至少检查成功路径、失败路径、异常路径和边界条件是否被覆盖。
-2. 当前模块是纯 Java 状态机内核，现有核心能力以模块级单元测试为主即可；但如果后续引入 Spring Boot 自动装配、容器集成、Bean 注册、Starter 封装等能力，测试必须模拟真实 Spring Boot 应用启动后的运行形态，不能只写脱离容器的伪单测。
+2. 当前模块是纯 Java 状态机内核，现有核心能力以模块级单元测试为主即可；但如果后续引入 Spring Boot 自动装配、容器集成、Bean
+   注册、Starter 封装等能力，测试必须模拟真实 Spring Boot 应用启动后的运行形态，不能只写脱离容器的伪单测。
 3. 修改 `GXStateMachineImpl`、`GXTransitionImpl`、`GXEventTransitions`、`GXStateImpl` 时，至少覆盖：
    `fireEvent()` 正常迁移、无匹配迁移返回原状态、条件不满足返回原状态、源状态不存在异常、内部转换非法配置异常。
 4. 修改 `builder` 包时，至少覆盖：

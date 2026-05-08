@@ -16,9 +16,9 @@ package cn.maple.statemachine.builder;
  * 使用示例：
  * <pre>
  * // 创建状态机构建器
- * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder = 
+ * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder =
  *     GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 使用构建器定义状态转换
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_PAYMENT)
@@ -29,9 +29,9 @@ package cn.maple.statemachine.builder;
  *         System.out.println("订单支付完成，状态从 " + from + " 变更为 " + to);
  *         // 执行状态转换相关的业务逻辑
  *     });
- * 
+ *
  * // 构建状态机
- * GXStateMachine<OrderStatus, OrderEvent, OrderContext> orderStateMachine = 
+ * GXStateMachine<OrderStatus, OrderEvent, OrderContext> orderStateMachine =
  *     builder.build("订单状态机");
  * </pre>
  */

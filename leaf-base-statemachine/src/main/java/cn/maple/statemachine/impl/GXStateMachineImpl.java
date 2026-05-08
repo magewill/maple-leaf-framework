@@ -15,12 +15,12 @@ import java.util.Objects;
  * 出于性能考虑，状态机被设计为"无状态"的。
  * 一旦构建完成，它可以被多个线程共享使用。
  * </p>
- * 
+ *
  * <p>
  * 一个副作用是，由于状态机本身是无状态的，我们无法从状态机中获取当前状态。
  * 状态信息需要由调用者维护。
  * </p>
- * 
+ *
  * <p>
  * 线程安全性：
  * <ul>
@@ -30,7 +30,7 @@ import java.util.Objects;
  *   <li>如果在转换动作中有共享资源访问，需要调用者自行处理同步</li>
  * </ul>
  * </p>
- * 
+ *
  * <p>
  * 性能优化：
  * <ul>
@@ -40,7 +40,7 @@ import java.util.Objects;
  *   <li>无状态设计允许单个实例处理大量并发请求，减少内存占用</li>
  * </ul>
  * </p>
- * 
+ *
  * <p>
  * 主要功能：
  * <ul>
@@ -50,7 +50,7 @@ import java.util.Objects;
  *   <li>生成状态机的PlantUML图表</li>
  * </ul>
  * </p>
- * 
+ *
  * <p>
  * 应用场景：
  * <ul>
@@ -60,14 +60,14 @@ import java.util.Objects;
  *   <li>设备控制：管理设备的不同工作模式和状态转换</li>
  * </ul>
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
  * {@code
  * // 1. 创建状态机构建器
  * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder = GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 2. 配置状态转换
  * // 支付成功转换
  * builder.externalTransition()
@@ -80,7 +80,7 @@ import java.util.Objects;
  *         // 执行支付后的业务逻辑
  *         notifyPaymentSuccess(ctx.getOrderId());
  *     });
- * 
+ *
  * // 发货转换
  * builder.externalTransition()
  *     .from(OrderStatus.PAID)
@@ -91,31 +91,31 @@ import java.util.Objects;
  *         // 执行发货业务逻辑
  *         updateLogistics(ctx.getOrderId());
  *     });
- * 
+ *
  * // 3. 构建状态机
  * GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine = builder.build("订单状态机");
- * 
+ *
  * // 4. 使用状态机处理事件
  * // 创建上下文对象
  * OrderContext context = new OrderContext();
  * context.setOrderId("ORDER_123456");
  * context.setAmount(100);
- * 
+ *
  * // 触发支付事件
  * OrderStatus newStatus = stateMachine.fireEvent(OrderStatus.WAIT_PAYMENT, OrderEvent.PAY, context);
  * System.out.println("支付后状态：" + newStatus); // 输出：支付后状态：PAID
- * 
+ *
  * // 触发发货事件
  * newStatus = stateMachine.fireEvent(newStatus, OrderEvent.SHIP, context);
  * System.out.println("发货后状态：" + newStatus); // 输出：发货后状态：DELIVERED
- * 
+ *
  * // 5. 生成状态机图表（可选）
  * String plantUML = stateMachine.generatePlantUML();
  * saveToFile("order-state-machine.puml", plantUML);
  * }
  * </pre>
  * </p>
- * 
+ *
  * <p>
  * 注意事项：
  * <ul>
@@ -177,8 +177,8 @@ public class GXStateMachineImpl<S, E, C> implements GXStateMachine<S, E, C> {
      * </ol>
      *
      * @param sourceStateId 源状态ID
-     * @param event 触发事件
-     * @param ctx 上下文对象，包含转换所需的数据
+     * @param event         触发事件
+     * @param ctx           上下文对象，包含转换所需的数据
      * @return 转换后的状态ID，如果没有转换则返回源状态ID
      * @throws GXStateMachineException 如果状态机未就绪或状态不存在
      */
@@ -207,8 +207,8 @@ public class GXStateMachineImpl<S, E, C> implements GXStateMachine<S, E, C> {
      * </ol>
      *
      * @param sourceStateId 源状态ID
-     * @param event 触发事件
-     * @param ctx 上下文对象
+     * @param event         触发事件
+     * @param ctx           上下文对象
      * @return 匹配的转换，如果没有则返回null
      */
     private GXTransition<S, E, C> routeTransition(S sourceStateId, E event, C ctx) {
@@ -316,12 +316,12 @@ public class GXStateMachineImpl<S, E, C> implements GXStateMachine<S, E, C> {
      * {@code
      * // 生成PlantUML代码
      * String plantUML = stateMachine.generatePlantUML();
-     * 
+     *
      * // 将代码保存到文件
      * try (PrintWriter out = new PrintWriter("state-machine.puml")) {
      *     out.println(plantUML);
      * }
-     * 
+     *
      * // 然后可以使用PlantUML工具将其转换为图像
      * }
      * </pre>

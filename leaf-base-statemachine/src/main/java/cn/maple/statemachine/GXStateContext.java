@@ -19,32 +19,31 @@ package cn.maple.statemachine;
  * <pre>
  * {@code
  * // 定义一个使用状态上下文的动作
- * GXAction<OrderStatus, OrderEvent, OrderContext> complexAction = 
+ * GXAction<OrderStatus, OrderEvent, OrderContext> complexAction =
  *     (from, to, event, ctx) -> {
  *         // 在实际应用中，可以通过状态上下文获取更多信息
  *         // 例如，如果有一个状态上下文实现类：
  *         // GXStateContext<OrderStatus, OrderEvent, OrderContext> stateContext = ...;
- *         
+ *
  *         // 获取当前转换信息
- *         GXTransition<OrderStatus, OrderEvent, OrderContext> transition = 
+ *         GXTransition<OrderStatus, OrderEvent, OrderContext> transition =
  *             stateContext.getTransition();
  *         System.out.println("当前转换：" + transition);
- *         
+ *
  *         // 获取状态机实例，可用于触发其他事件
- *         GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine = 
+ *         GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine =
  *             stateContext.getStateMachine();
- *         
+ *
  *         // 执行业务逻辑
  *         System.out.println("订单状态从 " + from + " 变更为 " + to);
  *     };
  * }
  * </pre>
  * </p>
- * 
+ *
  * @param <S> 状态类型，通常使用枚举或字符串
  * @param <E> 事件类型，通常使用枚举或字符串
  * @param <C> 用户自定义上下文类型，用于在状态转换过程中传递数据
- * 
  * @see GXTransition 转换接口，表示状态之间的转换规则
  * @see GXStateMachine 状态机接口，定义状态机的核心功能
  */

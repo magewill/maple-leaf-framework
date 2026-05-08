@@ -23,13 +23,13 @@ import java.util.Map;
  * {@code
  * // 创建状态映射
  * Map<OrderStatus, GXState<OrderStatus, OrderEvent, OrderContext>> stateMap = new HashMap<>();
- * 
+ *
  * // 获取或创建状态
- * GXState<OrderStatus, OrderEvent, OrderContext> waitPaymentState = 
+ * GXState<OrderStatus, OrderEvent, OrderContext> waitPaymentState =
  *     GXStateHelper.getState(stateMap, OrderStatus.WAIT_PAYMENT);
- * 
+ *
  * // 此时如果再次获取相同ID的状态，将返回同一个实例
- * GXState<OrderStatus, OrderEvent, OrderContext> sameState = 
+ * GXState<OrderStatus, OrderEvent, OrderContext> sameState =
  *     GXStateHelper.getState(stateMap, OrderStatus.WAIT_PAYMENT);
  * // waitPaymentState == sameState 为true
  * }
@@ -52,10 +52,10 @@ public class GXStateHelper {
      * 这确保了每个状态ID只对应一个状态对象实例，避免重复创建。
      *
      * @param stateMap 状态映射，键为状态ID，值为状态对象
-     * @param stateId 要获取或创建的状态ID
-     * @param <S> 状态类型
-     * @param <E> 事件类型
-     * @param <C> 上下文类型
+     * @param stateId  要获取或创建的状态ID
+     * @param <S>      状态类型
+     * @param <E>      事件类型
+     * @param <C>      上下文类型
      * @return 对应状态ID的状态对象
      */
     public static <S, E, C> GXState<S, E, C> getState(Map<S, GXState<S, E, C>> stateMap, S stateId) {

@@ -40,9 +40,9 @@ import java.util.Map;
  * 使用示例：
  * <pre>
  * // 创建状态机构建器
- * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder = 
+ * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder =
  *     GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 定义多源状态转换
  * // 例如：待支付、待确认、待发货状态都可以通过取消事件转换到已取消状态
  * builder.externalTransitions()
@@ -57,7 +57,7 @@ import java.util.Map;
  *         ctx.getOrder().setCancelReason(ctx.getReason());
  *         ctx.getOrder().setCancelTime(new Date());
  *         ctx.getOrderService().updateOrder(ctx.getOrder());
- *         
+ *
  *         // 可以根据不同的源状态执行不同的逻辑
  *         if (from == OrderStatus.WAIT_PAYMENT) {
  *             // 待支付状态取消，无需退款
@@ -68,7 +68,7 @@ import java.util.Map;
  *             ctx.getOrderService().releaseInventory(ctx.getOrder().getId());
  *         }
  *     });
- * 
+ *
  * // 另一个示例：多个状态都可以转换到退款中状态
  * builder.externalTransitions()
  *     .fromAmong(OrderStatus.PAID, OrderStatus.WAIT_DELIVER, OrderStatus.DELIVERING)
@@ -84,17 +84,17 @@ import java.util.Map;
  *             ctx.getRefundReason()
  *         );
  *     });
- * 
+ *
  * // 构建状态机并使用
  * GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine = builder.build("订单状态机");
- * 
+ *
  * // 创建上下文并设置必要数据
  * OrderContext context = new OrderContext();
  * context.setOrder(order);
  * context.setOrderService(orderService);
  * context.setPaymentService(paymentService);
  * context.setReason("客户取消订单");
- * 
+ *
  * // 触发状态转换
  * OrderStatus newStatus = stateMachine.fireEvent(order.getStatus(), OrderEvent.CANCEL, context);
  * </pre>
@@ -151,7 +151,7 @@ public class GXTransitionsBuilderImpl<S, E, C> extends GXTransitionBuilderImpl<S
     /**
      * 构造函数
      *
-     * @param stateMap 状态映射表，存储状态机中的所有状态
+     * @param stateMap       状态映射表，存储状态机中的所有状态
      * @param transitionType 转换类型，如EXTERNAL或INTERNAL
      */
     public GXTransitionsBuilderImpl(Map<S, GXState<S, E, C>> stateMap, GXTransitionType transitionType) {

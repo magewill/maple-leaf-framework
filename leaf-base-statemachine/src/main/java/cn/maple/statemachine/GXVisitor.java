@@ -25,30 +25,30 @@ package cn.maple.statemachine;
  *     public String visitOnEntry(GXStateMachine<?, ?, ?> stateMachine) {
  *         return "开始访问状态机：" + stateMachine.getMachineId() + LF;
  *     }
- *     
+ *
  *     @Override
  *     public String visitOnExit(GXStateMachine<?, ?, ?> stateMachine) {
  *         return "结束访问状态机" + LF;
  *     }
- *     
+ *
  *     @Override
  *     public String visitOnEntry(GXState<?, ?, ?> state) {
  *         return "访问状态：" + state.getId() + LF;
  *     }
- *     
+ *
  *     @Override
  *     public String visitOnExit(GXState<?, ?, ?> state) {
  *         return "";
  *     }
  * }
- * 
+ *
  * // 使用自定义访问者
  * GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine = builder.build("订单状态机");
  * String result = stateMachine.accept(new CustomVisitor());
  * }
  * </pre>
  * </p>
- * 
+ *
  * @see GXVisitable 可访问接口
  * @see cn.maple.statemachine.impl.GXPlantUMLVisitor PlantUML访问者实现
  * @see cn.maple.statemachine.impl.GXSysOutVisitor 系统输出访问者实现

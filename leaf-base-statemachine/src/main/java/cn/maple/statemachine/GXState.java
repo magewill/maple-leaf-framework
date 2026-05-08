@@ -26,16 +26,16 @@ import java.util.List;
  * {@code
  * // 在状态机构建过程中使用状态
  * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder = GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 添加从WAIT_PAYMENT到PAID的转换
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_PAYMENT) // 源状态
  *     .to(OrderStatus.PAID)          // 目标状态
  *     .on(OrderEvent.PAY);           // 触发事件
- * 
+ *
  * // 构建状态机后，可以通过状态机获取状态对象
  * GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine = builder.build("订单状态机");
- * 
+ *
  * // 在访问者模式中使用状态
  * stateMachine.accept(new GXVisitor() {
  *     @Override
@@ -57,7 +57,6 @@ import java.util.List;
  * @param <S> 状态类型，通常使用枚举或字符串
  * @param <E> 事件类型，通常使用枚举或字符串
  * @param <C> 上下文类型，用于在状态转换过程中传递数据
- * 
  * @see GXStateMachine 状态机接口
  * @see GXTransition 转换接口
  * @see cn.maple.statemachine.impl.GXStateImpl 状态实现类
@@ -84,7 +83,6 @@ public interface GXState<S, E, C> extends GXVisitable {
      * @param target         转换的目标状态
      * @param transitionType 转换类型，如INTERNAL、LOCAL或EXTERNAL
      * @return 新创建的转换对象
-     * 
      * @see cn.maple.statemachine.impl.GXTransitionType 转换类型枚举
      */
     GXTransition<S, E, C> addTransition(E event, GXState<S, E, C> target, GXTransitionType transitionType);

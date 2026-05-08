@@ -25,9 +25,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * <pre>
  * {@code
  * // 创建状态机构建器
- * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder = 
+ * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder =
  *     GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 配置状态转换
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_PAYMENT)
@@ -37,15 +37,15 @@ import java.util.concurrent.ConcurrentHashMap;
  *     .perform((from, to, event, ctx) -> {
  *         System.out.println("订单已支付：" + ctx.getOrderId());
  *     });
- * 
+ *
  * // 构建并注册状态机（注册过程在build方法内部自动完成）
- * GXStateMachine<OrderStatus, OrderEvent, OrderContext> orderStateMachine = 
+ * GXStateMachine<OrderStatus, OrderEvent, OrderContext> orderStateMachine =
  *     builder.build("orderStateMachine");
- * 
+ *
  * // 在应用的其他部分获取状态机
- * GXStateMachine<OrderStatus, OrderEvent, OrderContext> machine = 
+ * GXStateMachine<OrderStatus, OrderEvent, OrderContext> machine =
  *     GXStateMachineFactory.get("orderStateMachine");
- * 
+ *
  * // 使用获取的状态机处理事件
  * OrderContext context = new OrderContext();
  * context.setOrderId("ORDER_123456");
@@ -54,7 +54,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * }
  * </pre>
  * </p>
- * 
+ *
  * @see GXStateMachine 状态机接口
  * @see cn.maple.statemachine.builder.GXStateMachineBuilder 状态机构建器接口
  */
@@ -91,9 +91,9 @@ public class GXStateMachineFactory {
      * </p>
      *
      * @param stateMachine 要注册的状态机实例
-     * @param <S> 状态类型
-     * @param <E> 事件类型
-     * @param <C> 上下文类型
+     * @param <S>          状态类型
+     * @param <E>          事件类型
+     * @param <C>          上下文类型
      * @throws GXStateMachineException 如果尝试注册已存在ID的状态机
      */
     public static <S, E, C> void register(GXStateMachine<S, E, C> stateMachine) {
@@ -117,9 +117,9 @@ public class GXStateMachineFactory {
      * </p>
      *
      * @param machineId 状态机ID
-     * @param <S> 状态类型
-     * @param <E> 事件类型
-     * @param <C> 上下文类型
+     * @param <S>       状态类型
+     * @param <E>       事件类型
+     * @param <C>       上下文类型
      * @return 状态机实例
      * @throws GXStateMachineException 如果指定ID的状态机不存在
      */

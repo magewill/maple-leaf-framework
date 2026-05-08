@@ -31,16 +31,16 @@ package cn.maple.statemachine;
  * // 定义状态、事件和上下文类型
  * public enum OrderStatus { WAIT_PAYMENT, PAID, DELIVERING, RECEIVED }
  * public enum OrderEvent { PAY, DELIVER, RECEIVE }
- * public class OrderContext { 
+ * public class OrderContext {
  *     private String orderId;
  *     private double amount;
  *     // getter and setter
  * }
- * 
+ *
  * // 创建状态机构建器
- * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder = 
+ * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder =
  *     GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 配置状态转换 - 支付流程
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_PAYMENT)
@@ -51,7 +51,7 @@ package cn.maple.statemachine;
  *         System.out.println("订单已支付：" + ctx.getOrderId());
  *         // 执行支付后的业务逻辑，如更新订单状态、发送通知等
  *     });
- * 
+ *
  * // 配置状态转换 - 发货流程
  * builder.externalTransition()
  *     .from(OrderStatus.PAID)
@@ -60,7 +60,7 @@ package cn.maple.statemachine;
  *     .perform((from, to, event, ctx) -> {
  *         System.out.println("订单已发货：" + ctx.getOrderId());
  *     });
- * 
+ *
  * // 配置状态转换 - 收货流程
  * builder.externalTransition()
  *     .from(OrderStatus.DELIVERING)
@@ -69,32 +69,32 @@ package cn.maple.statemachine;
  *     .perform((from, to, event, ctx) -> {
  *         System.out.println("订单已签收：" + ctx.getOrderId());
  *     });
- * 
+ *
  * // 构建状态机
- * GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine = 
+ * GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine =
  *     builder.build("订单状态机");
- * 
+ *
  * // 使用状态机处理事件
  * OrderContext context = new OrderContext();
  * context.setOrderId("ORDER_123456");
  * context.setAmount(100);
- * 
+ *
  * // 触发支付事件
  * OrderStatus newStatus = stateMachine.fireEvent(
  *     OrderStatus.WAIT_PAYMENT, OrderEvent.PAY, context);
  * System.out.println("支付后状态：" + newStatus); // 输出：支付后状态：PAID
- * 
+ *
  * // 触发发货事件
  * newStatus = stateMachine.fireEvent(newStatus, OrderEvent.DELIVER, context);
  * System.out.println("发货后状态：" + newStatus); // 输出：发货后状态：DELIVERING
- * 
+ *
  * // 触发收货事件
  * newStatus = stateMachine.fireEvent(newStatus, OrderEvent.RECEIVE, context);
  * System.out.println("收货后状态：" + newStatus); // 输出：收货后状态：RECEIVED
- * 
+ *
  * // 可视化状态机结构
  * stateMachine.showStateMachine();
- * 
+ *
  * // 生成PlantUML图表
  * String uml = stateMachine.generatePlantUML();
  * System.out.println(uml);
@@ -112,7 +112,7 @@ package cn.maple.statemachine;
  * // 定义多个条件
  * GXCondition<OrderContext> amountCondition = ctx -> ctx.getAmount() > 0;
  * GXCondition<OrderContext> vipCondition = ctx -> ctx.isVipUser();
- * 
+ *
  * // 普通用户支付流程
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_PAYMENT)
@@ -122,7 +122,7 @@ package cn.maple.statemachine;
  *     .perform((from, to, event, ctx) -> {
  *         System.out.println("普通用户订单支付完成");
  *     });
- * 
+ *
  * // VIP用户支付流程（可能有特殊处理）
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_PAYMENT)
@@ -139,7 +139,6 @@ package cn.maple.statemachine;
  * @param <S> 状态类型，通常使用枚举或字符串
  * @param <E> 事件类型，通常使用枚举或字符串
  * @param <C> 用户自定义上下文类型，用于在状态转换过程中传递数据
- * 
  * @see GXState 状态接口
  * @see GXTransition 转换接口
  * @see GXAction 动作接口
@@ -219,7 +218,7 @@ public interface GXStateMachine<S, E, C> extends GXVisitable {
      * <p>
      * 内部实现使用{@link cn.maple.statemachine.impl.GXSysOutVisitor}访问者。
      * </p>
-     * 
+     *
      * @see cn.maple.statemachine.impl.GXSysOutVisitor 系统输出访问者
      */
     void showStateMachine();
@@ -240,12 +239,12 @@ public interface GXStateMachine<S, E, C> extends GXVisitable {
      * {@code
      * // 生成PlantUML代码
      * String plantUML = stateMachine.generatePlantUML();
-     * 
+     *
      * // 将代码保存到文件
      * try (PrintWriter writer = new PrintWriter("state-machine.puml")) {
      *     writer.write(plantUML);
      * }
-     * 
+     *
      * // 然后可以使用PlantUML工具将其转换为图像
      * }
      * </pre>

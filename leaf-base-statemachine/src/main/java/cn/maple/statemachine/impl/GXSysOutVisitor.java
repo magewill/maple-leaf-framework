@@ -26,11 +26,11 @@ import lombok.extern.slf4j.Slf4j;
  * {@code
  * // 创建状态机
  * GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine = builder.build("订单状态机");
- * 
+ *
  * // 使用系统输出访问者查看状态机结构
  * GXSysOutVisitor sysOutVisitor = new GXSysOutVisitor();
  * String result = stateMachine.accept(sysOutVisitor);
- * 
+ *
  * // 也可以直接使用状态机的便捷方法
  * stateMachine.showStateMachine();
  * }
@@ -50,7 +50,7 @@ import lombok.extern.slf4j.Slf4j;
  * ------------------------
  * </pre>
  * </p>
- * 
+ *
  * @see GXVisitor 访问者接口
  * @see GXStateMachine#showStateMachine() 状态机显示结构的便捷方法
  */

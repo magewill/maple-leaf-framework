@@ -17,7 +17,7 @@ package cn.maple.statemachine.builder;
  * <pre>
  * // 创建状态机构建器
  * GXStateMachineBuilder<States, Events, Context> builder = GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 定义状态转换，从PENDING到APPROVED
  * builder.externalTransition()
  *     .from(States.PENDING)    // 指定源状态

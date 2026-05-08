@@ -14,10 +14,10 @@ import lombok.extern.slf4j.Slf4j;
  * {@code
  * // 开启调试模式
  * GXDebugger.enableDebug();
- * 
+ *
  * // 输出调试信息
  * GXDebugger.debug("状态转换：从待支付状态转换到已支付状态");
- * 
+ *
  * // 关闭调试模式
  * GXDebugger.disableDebug();
  * }
@@ -58,14 +58,14 @@ public class GXDebugger {
     public static void enableDebug() {
         isDebugOn = true;
     }
-    
+
     /**
      * 关闭调试模式
      */
     public static void disableDebug() {
         isDebugOn = false;
     }
-    
+
     /**
      * 获取当前调试模式状态
      *

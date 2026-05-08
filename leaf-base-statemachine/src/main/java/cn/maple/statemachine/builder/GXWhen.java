@@ -19,7 +19,7 @@ import cn.maple.statemachine.GXAction;
  * <pre>
  * // 创建状态机构建器
  * GXStateMachineBuilder<States, Events, Context> builder = GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 定义状态转换
  * builder.externalTransition()
  *     .from(States.PENDING)
@@ -32,7 +32,7 @@ import cn.maple.statemachine.GXAction;
  *         ctx.setApprovedTime(new Date());
  *         ctx.sendNotification("您的申请已被批准");
  *     });
- * 
+ *
  * // 也可以不添加条件，直接添加动作
  * builder.externalTransition()
  *     .from(States.APPROVED)

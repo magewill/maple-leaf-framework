@@ -36,9 +36,9 @@ import java.util.Map;
  * 使用示例：
  * <pre>
  * // 创建状态机构建器
- * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder = 
+ * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder =
  *     GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 定义外部转换（源状态和目标状态不同）
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_PAYMENT)      // 指定源状态
@@ -51,7 +51,7 @@ import java.util.Map;
  *         ctx.getOrder().setPayTime(new Date());
  *         ctx.getOrderService().updateOrderStatus(ctx.getOrder().getId(), to);
  *     });
- * 
+ *
  * // 定义内部转换（源状态和目标状态相同）
  * builder.internalTransition()
  *     .within(OrderStatus.WAIT_DELIVER)     // 指定状态
@@ -63,15 +63,15 @@ import java.util.Map;
  *         ctx.getOrder().setAddress(ctx.getAddress());
  *         ctx.getOrderService().updateOrderAddress(ctx.getOrder().getId(), ctx.getAddress());
  *     });
- * 
+ *
  * // 构建状态机并使用
  * GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine = builder.build("订单状态机");
- * 
+ *
  * // 创建上下文并设置必要数据
  * OrderContext context = new OrderContext();
  * context.setOrder(order);
  * context.setOrderService(orderService);
- * 
+ *
  * // 触发状态转换
  * OrderStatus newStatus = stateMachine.fireEvent(OrderStatus.WAIT_PAYMENT, OrderEvent.PAYED, context);
  * </pre>
@@ -160,7 +160,7 @@ class GXTransitionBuilderImpl<S, E, C> implements GXExternalTransitionBuilder<S,
     /**
      * 构造函数
      *
-     * @param stateMap 状态映射表，存储状态机中的所有状态
+     * @param stateMap       状态映射表，存储状态机中的所有状态
      * @param transitionType 转换类型，如EXTERNAL或INTERNAL
      */
     public GXTransitionBuilderImpl(Map<S, GXState<S, E, C>> stateMap, GXTransitionType transitionType) {

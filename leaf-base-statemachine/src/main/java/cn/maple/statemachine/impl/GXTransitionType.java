@@ -6,7 +6,7 @@ package cn.maple.statemachine.impl;
  * 定义了状态机中可能的转换类型，每种类型对应不同的状态转换行为。
  * 状态转换类型决定了在触发转换时，源状态和目标状态的进入/退出行为。
  * </p>
- * 
+ *
  * <p>
  * 状态转换类型的选择对状态机的行为有重要影响：
  * <ul>
@@ -15,7 +15,7 @@ package cn.maple.statemachine.impl;
  *   <li>外部转换(EXTERNAL)：完全退出源状态，进入目标状态</li>
  * </ul>
  * </p>
- * 
+ *
  * <p>
  * 在业务系统中的应用场景：
  * <ul>
@@ -24,14 +24,14 @@ package cn.maple.statemachine.impl;
  *   <li>游戏状态：使用本地转换处理角色在某个场景内的状态变化</li>
  * </ul>
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
  * {@code
  * // 创建状态机构建器
  * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder = GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 1. 创建一个内部转换（不改变状态）
  * builder.internalTransition()
  *     .within(OrderStatus.PAID)  // 在已支付状态内
@@ -40,7 +40,7 @@ package cn.maple.statemachine.impl;
  *         System.out.println("更新订单信息：" + ctx.getOrderId());
  *         ctx.setUpdateTime(new Date());
  *     });
- * 
+ *
  * // 2. 创建一个本地转换（在复合状态内转换）
  * // 注：此示例假设有复合状态的场景
  * builder.localTransition()
@@ -50,7 +50,7 @@ package cn.maple.statemachine.impl;
  *     .perform((from, to, event, ctx) -> {
  *         System.out.println("订单开始配送：" + ctx.getOrderId());
  *     });
- * 
+ *
  * // 3. 创建一个外部转换（完全退出源状态）
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_PAYMENT)  // 从等待支付状态
@@ -60,7 +60,7 @@ package cn.maple.statemachine.impl;
  *     .perform((from, to, event, ctx) -> {
  *         System.out.println("订单已支付：" + ctx.getOrderId() + ", 金额：" + ctx.getAmount());
  *     });
- * 
+ *
  * // 构建状态机
  * GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine = builder.build("订单状态机");
  * }

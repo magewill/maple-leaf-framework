@@ -17,7 +17,7 @@ package cn.maple.statemachine.builder;
  * <pre>
  * // 创建状态机构建器
  * GXStateMachineBuilder<States, Events, Context> builder = GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 使用外部转换构建器定义一个从PENDING状态到APPROVED状态的转换
  * builder.externalTransition()
  *     .from(States.PENDING)
@@ -28,7 +28,7 @@ package cn.maple.statemachine.builder;
  *         System.out.println("从 " + from + " 转换到 " + to);
  *         ctx.recordTransition();
  *     });
- * 
+ *
  * // 构建状态机
  * GXStateMachine<States, Events, Context> stateMachine = builder.build("orderStateMachine");
  * </pre>

@@ -13,16 +13,16 @@ package cn.maple.statemachine;
  * {@code
  * // 创建一个状态机实例
  * GXStateMachine<OrderStatus, OrderEvent, OrderContext> stateMachine = builder.build("订单状态机");
- * 
+ *
  * // 使用PlantUML访问者生成UML图
  * String plantUML = stateMachine.accept(new GXPlantUMLVisitor());
- * 
+ *
  * // 使用系统输出访问者打印状态机结构
  * stateMachine.accept(new GXSysOutVisitor());
  * }
  * </pre>
  * </p>
- * 
+ *
  * @see GXVisitor 访问者接口
  * @see cn.maple.statemachine.impl.GXPlantUMLVisitor PlantUML访问者实现
  * @see cn.maple.statemachine.impl.GXSysOutVisitor 系统输出访问者实现

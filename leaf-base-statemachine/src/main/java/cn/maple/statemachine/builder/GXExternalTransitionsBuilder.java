@@ -17,7 +17,7 @@ package cn.maple.statemachine.builder;
  * <pre>
  * // 创建状态机构建器
  * GXStateMachineBuilder<States, Events, Context> builder = GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 定义多个源状态到一个目标状态的转换
  * builder.externalTransitions()
  *     .fromAmong(States.STATE1, States.STATE2, States.STATE3) // 指定多个源状态
@@ -32,7 +32,7 @@ package cn.maple.statemachine.builder;
 public interface GXExternalTransitionsBuilder<S, E, C> {
     /**
      * 指定多个源状态
-     * 
+     *
      * @param stateIds 源状态ID集合，可以是多个状态
      * @return 源状态构建器接口，用于继续构建状态转换
      */

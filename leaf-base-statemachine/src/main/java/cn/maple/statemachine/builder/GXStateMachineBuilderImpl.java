@@ -45,7 +45,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *     DELIVERED,       // 已送达
  *     COMPLETED        // 已完成
  * }
- * 
+ *
  * enum OrderEvent {
  *     PAY,                    // 支付事件
  *     DELIVER,                // 发货事件
@@ -53,20 +53,20 @@ import java.util.concurrent.ConcurrentHashMap;
  *     CONFIRM,                // 确认收货事件
  *     UPDATE_DELIVERY_ADDRESS // 更新配送地址事件
  * }
- * 
+ *
  * // 订单上下文，包含订单相关信息
  * class OrderContext {
  *     private String orderId;
  *     private BigDecimal amount;
  *     private String deliveryAddress;
- *     
+ *
  *     // getter和setter方法
  * }
- * 
+ *
  * // 创建状态机构建器
- * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder = 
+ * GXStateMachineBuilder<OrderStatus, OrderEvent, OrderContext> builder =
  *     GXStateMachineBuilderFactory.create();
- * 
+ *
  * // 定义从等待支付到已支付的外部转换
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_PAYMENT)
@@ -77,7 +77,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *         System.out.println("订单[" + ctx.getOrderId() + "]支付完成，金额：" + ctx.getAmount());
  *         // 这里可以添加支付成功后的业务逻辑
  *     });
- * 
+ *
  * // 定义从已支付到等待发货的外部转换
  * builder.externalTransition()
  *     .from(OrderStatus.PAID)
@@ -87,7 +87,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *         System.out.println("订单[" + ctx.getOrderId() + "]已准备发货");
  *         // 这里可以添加准备发货的业务逻辑
  *     });
- * 
+ *
  * // 定义从等待发货到配送中的外部转换
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_DELIVER)
@@ -97,7 +97,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *         System.out.println("订单[" + ctx.getOrderId() + "]开始配送，配送地址：" + ctx.getDeliveryAddress());
  *         // 这里可以添加开始配送的业务逻辑
  *     });
- * 
+ *
  * // 定义更新配送地址的内部转换（状态不变）
  * builder.internalTransition()
  *     .within(OrderStatus.WAIT_DELIVER)
@@ -106,7 +106,7 @@ import java.util.concurrent.ConcurrentHashMap;
  *         System.out.println("订单[" + ctx.getOrderId() + "]更新配送地址为：" + ctx.getDeliveryAddress());
  *         // 这里可以添加更新地址的业务逻辑
  *     });
- * 
+ *
  * // 定义多个源状态到同一目标状态的转换
  * builder.externalTransitions()
  *     .fromAmong(OrderStatus.DELIVERING, OrderStatus.DELIVERED)
@@ -116,21 +116,21 @@ import java.util.concurrent.ConcurrentHashMap;
  *         System.out.println("订单[" + ctx.getOrderId() + "]已确认完成，原状态：" + from);
  *         // 这里可以添加订单完成的业务逻辑
  *     });
- * 
+ *
  * // 构建状态机
- * GXStateMachine<OrderStatus, OrderEvent, OrderContext> orderStateMachine = 
+ * GXStateMachine<OrderStatus, OrderEvent, OrderContext> orderStateMachine =
  *     builder.build("订单状态机");
- * 
+ *
  * // 使用状态机处理订单状态转换
  * OrderContext context = new OrderContext();
  * context.setOrderId("ORD20230001");
  * context.setAmount(new BigDecimal("100.00"));
  * context.setDeliveryAddress("北京市海淀区中关村大街1号");
- * 
+ *
  * // 触发支付事件，状态从WAIT_PAYMENT变为PAID
  * OrderStatus newStatus = orderStateMachine.fireEvent(OrderStatus.WAIT_PAYMENT, OrderEvent.PAY, context);
  * // 输出: 订单[ORD20230001]支付完成，金额：100.00
- * 
+ *
  * // 触发发货事件，状态从PAID变为WAIT_DELIVER
  * newStatus = orderStateMachine.fireEvent(newStatus, OrderEvent.DELIVER, context);
  * // 输出: 订单[ORD20230001]已准备发货
@@ -158,7 +158,7 @@ public class GXStateMachineBuilderImpl<S, E, C> implements GXStateMachineBuilder
      * </ul>
      */
     private final Map<S, GXState<S, E, C>> stateMap = new ConcurrentHashMap<>();
-    
+
     /**
      * 状态机实例
      * <p>

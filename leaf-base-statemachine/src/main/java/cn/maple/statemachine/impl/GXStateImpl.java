@@ -28,16 +28,16 @@ import java.util.List;
  * <pre>
  * {@code
  * // 创建状态
- * GXStateImpl<OrderStatus, OrderEvent, OrderContext> paidState = 
+ * GXStateImpl<OrderStatus, OrderEvent, OrderContext> paidState =
  *     new GXStateImpl<>(OrderStatus.PAID);
- * 
+ *
  * // 添加转换
- * GXState<OrderStatus, OrderEvent, OrderContext> deliveringState = 
+ * GXState<OrderStatus, OrderEvent, OrderContext> deliveringState =
  *     new GXStateImpl<>(OrderStatus.DELIVERING);
  * paidState.addTransition(OrderEvent.DELIVER, deliveringState, GXTransitionType.EXTERNAL);
- * 
+ *
  * // 获取特定事件的转换
- * List<GXTransition<OrderStatus, OrderEvent, OrderContext>> transitions = 
+ * List<GXTransition<OrderStatus, OrderEvent, OrderContext>> transitions =
  *     paidState.getEventTransitions(OrderEvent.DELIVER);
  * }
  * </pre>
@@ -75,8 +75,8 @@ public class GXStateImpl<S, E, C> implements GXState<S, E, C> {
      * 创建并配置一个新的转换，从当前状态到目标状态，由指定的事件触发。
      * 转换类型决定了状态转换的行为（内部、本地或外部）。
      *
-     * @param event 触发转换的事件
-     * @param target 转换的目标状态
+     * @param event          触发转换的事件
+     * @param target         转换的目标状态
      * @param transitionType 转换类型（INTERNAL、LOCAL或EXTERNAL）
      * @return 新创建的转换对象，可以进一步配置（如添加条件或动作）
      */

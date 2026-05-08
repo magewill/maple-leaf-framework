@@ -26,23 +26,23 @@ package cn.maple.statemachine;
  *     private boolean isPremiumUser;
  *     // getter and setter
  * }
- * 
+ *
  * // 实现支付金额检查条件
  * GXCondition<OrderContext> paymentAmountCondition = ctx -> ctx.getAmount() > 0;
- * 
+ *
  * // 实现VIP用户特殊条件
  * GXCondition<OrderContext> premiumUserCondition = new GXCondition<OrderContext>() {
  *     @Override
  *     public boolean isSatisfied(OrderContext context) {
  *         return context.isPremiumUser();
  *     }
- *     
+ *
  *     @Override
  *     public String name() {
  *         return "PremiumUserCondition";
  *     }
  * };
- * 
+ *
  * // 在状态机构建器中使用条件
  * builder.externalTransition()
  *     .from(OrderStatus.WAIT_PAYMENT)
@@ -53,9 +53,8 @@ package cn.maple.statemachine;
  * }
  * </pre>
  * </p>
- * 
+ *
  * @param <C> 上下文类型，用于在状态转换过程中传递数据和进行条件判断
- * 
  * @see GXAction 动作接口，定义状态转换时执行的操作
  * @see GXTransition 转换接口，表示状态之间的转换规则
  */
