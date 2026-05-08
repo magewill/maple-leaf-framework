@@ -19,7 +19,7 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 public @interface GXValidateCRS {
     Class<? extends GXCallRemoteValidateService> service();
 
-    String message() default "验证失败";
+    String message() default "Validation failed";
 
     Class<?>[] groups() default {};
 

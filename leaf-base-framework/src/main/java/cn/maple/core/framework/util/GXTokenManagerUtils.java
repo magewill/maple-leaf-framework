@@ -48,10 +48,12 @@ public class GXTokenManagerUtils {
         if (expires <= 0) {
             throw new GXBusinessException("Token expires must be greater than 0");
         }
-        param.putIfAbsent(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, userId);
-        param.putIfAbsent(GXTokenConstant.LOGIN_AT_FIELD_NAME, DateUtil.currentSeconds());
-        param.putIfAbsent("platform", GXTokenConstant.PLATFORM);
-        return GXAuthCodeUtils.authCodeEncode(JSONUtil.toJsonStr(param), secretKey, expires);
+        Dict tokenParam = Dict.create();
+        tokenParam.putAll(param);
+        tokenParam.putIfAbsent(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, userId);
+        tokenParam.putIfAbsent(GXTokenConstant.LOGIN_AT_FIELD_NAME, DateUtil.currentSeconds());
+        tokenParam.putIfAbsent("platform", GXTokenConstant.PLATFORM);
+        return GXAuthCodeUtils.authCodeEncode(JSONUtil.toJsonStr(tokenParam), secretKey, expires);
     }
 
     private static Dict decodeToken(String source, String secretKey) {
@@ -65,6 +67,9 @@ public class GXTokenManagerUtils {
             String s = GXAuthCodeUtils.authCodeDecode(source, secretKey);
             if (CharSequenceUtil.equalsIgnoreCase("{}", s)) {
                 throw new GXTokenInvalidException("Invalid token identity");
+            }
+            if (!JSONUtil.isTypeJSONObject(s)) {
+                throw new GXTokenInvalidException("Invalid token payload");
             }
             return JSONUtil.toBean(s, Dict.class);
         } catch (GXTokenInvalidException exception) {

@@ -7,7 +7,6 @@ import cn.maple.core.framework.exception.GXSqlInjectionException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -35,116 +34,92 @@ public class GXDBStringEscapeUtils {
     );
 
     private static final Pattern SQL_INJECTION_PATTERN = Pattern.compile(
-            "(?i)('\\s*or\\s*'\\s*=\\s*')|" +  // 'or'=''
-                    "(\\b(or|and)\\s+[\\w\\p{L}]+\\s*=\\s*[\\w\\p{L}]+)|" + // or column=value
-                    "(\\bexec\\s*\\()|" +  // exec(
-                    "(\\bunion\\s*(all|select))|" +  // union all/select
-                    "(\\binsert\\s+into\\s+)|" +  // insert into
-                    "(\\bdrop\\s+table\\s+)|" +  // drop table
-                    "(\\balter\\s+table\\s+)|" +  // alter table
-                    "(\\bdelete\\s+from\\s+)|" +  // delete from
-                    "(\\bupdate\\s+.+\\s+set\\s+)|" +  // update set
-                    "(;\\s*[\\w\\p{L}]+\\s*:)|" +  // ;label:
-                    "(;\\s*declare\\s+)|" +  // ;declare
-                    "(--[\\s\\r\\n])|" +  // SQL行注释
-                    "(/\\*.*?\\*/)|" +  // SQL块注释
-                    "(\\bwaitfor\\s+delay\\s+)|" +  // waitfor delay
-                    "(\\bsleep\\s*\\(\\s*\\d+\\s*\\))|" +  // sleep()
-                    "(\\bexecute\\s+immediate)|" +  // execute immediate
-                    "(\\bcall\\s+\\w+)|" +  // call procedure
-                    "(\\bbatch\\s+processing)|" +  // batch processing
-                    "(\\bbegin\\s+transaction)|" +  // transaction
-                    "(\\bcommit\\s*;)|" +  // commit
-                    "(\\brollback\\s*;)");  // rollback
-
+            "(?i)('\\s*or\\s*'\\s*=\\s*')|" +
+                    "(\\b(or|and)\\s+[\\w\\p{L}]+\\s*=\\s*[\\w\\p{L}]+)|" +
+                    "(\\bexec\\s*\\()|" +
+                    "(\\bunion\\s*(all|select))|" +
+                    "(\\binsert\\s+into\\s+)|" +
+                    "(\\bdrop\\s+table\\s+)|" +
+                    "(\\balter\\s+table\\s+)|" +
+                    "(\\bdelete\\s+from\\s+)|" +
+                    "(\\bupdate\\s+.+\\s+set\\s+)|" +
+                    "(;\\s*[\\w\\p{L}]+\\s*:)|" +
+                    "(;\\s*declare\\s+)|" +
+                    "(--[\\s\\r\\n])|" +
+                    "(/\\*.*?\\*/)|" +
+                    "(\\bwaitfor\\s+delay\\s+)|" +
+                    "(\\bsleep\\s*\\(\\s*\\d+\\s*\\))|" +
+                    "(\\bexecute\\s+immediate)|" +
+                    "(\\bcall\\s+\\w+)|" +
+                    "(\\bbatch\\s+processing)|" +
+                    "(\\bbegin\\s+transaction)|" +
+                    "(\\bcommit\\s*;)|" +
+                    "(\\brollback\\s*;)");
 
     private static final Pattern SQL_BLIND_INJECTION_PATTERN = Pattern.compile(
-            "(?i)(\\bsleep\\s*\\(\\s*\\d+\\s*\\))|" +  // sleep()
-                    "(\\bwaitfor\\s+delay\\s+'\\d+:\\d+:\\d+')|" +  // waitfor delay
-                    "(\\bbenchmark\\s*\\(\\s*\\d+\\s*,)|" +  // benchmark()
-                    "(\\bpg_sleep\\s*\\(\\s*\\d+\\s*\\))|" +  // pg_sleep()
-                    "(\\bdbms_pipe\\.receive_message\\s*\\()|" +  // Oracle sleep
-                    "(\\band\\s+\\d+=\\d+)|" +  // and 1=1
-                    "(\\band\\s+\\d+>\\d+)|" +  // and 1>0
-                    "(\\band\\s+\\d+<\\d+)|" +  // and 1<0
-                    "(\\bif\\s*\\(\\s*\\d+\\s*=\\s*\\d+\\s*\\))|" +  // if(1=1)
-                    "(\\bselect\\s+case\\s+when\\s+)|" +  // select case when
-                    "(\\bextractvalue\\s*\\()|" +  // extractvalue()
-                    "(\\bsys\\.\\w+\\s*\\()|" +  // sys.function()
-                    "(\\bsqlmap)|" +  // sqlmap signature
-                    "(\\btrue--)|" +  // true--
-                    "(\\b1=1--)");  // 1=1--
+            "(?i)(\\bsleep\\s*\\(\\s*\\d+\\s*\\))|" +
+                    "(\\bwaitfor\\s+delay\\s+'\\d+:\\d+:\\d+')|" +
+                    "(\\bbenchmark\\s*\\(\\s*\\d+\\s*,)|" +
+                    "(\\bpg_sleep\\s*\\(\\s*\\d+\\s*\\))|" +
+                    "(\\bdbms_pipe\\.receive_message\\s*\\()|" +
+                    "(\\band\\s+\\d+=\\d+)|" +
+                    "(\\band\\s+\\d+>\\d+)|" +
+                    "(\\band\\s+\\d+<\\d+)|" +
+                    "(\\bif\\s*\\(\\s*\\d+\\s*=\\s*\\d+\\s*\\))|" +
+                    "(\\bselect\\s+case\\s+when\\s+)|" +
+                    "(\\bextractvalue\\s*\\()|" +
+                    "(\\bsys\\.\\w+\\s*\\()|" +
+                    "(\\bsqlmap)|" +
+                    "(\\btrue--)|" +
+                    "(\\b1=1--)");
 
     private static final Pattern XSS_PATTERN = Pattern.compile(
-            "(?i)(<script[^>]*>)|" +  // <script>
-                    "(</script>)|" +  // </script>
-                    "(<[^>]*\\bon\\w+\\s*=)|" +  // 事件处理程序
-                    "(\\balert\\s*\\()|" +  // alert()
-                    "(\\bdocument\\.cookie)|" +  // document.cookie
-                    "(\\blocation\\.href)|" +  // location.href
-                    "(javascript:)");  // javascript:
+            "(?i)(<script[^>]*>)|" +
+                    "(</script>)|" +
+                    "(<[^>]*\\bon\\w+\\s*=)|" +
+                    "(\\balert\\s*\\()|" +
+                    "(\\bdocument\\.cookie)|" +
+                    "(\\blocation\\.href)|" +
+                    "(javascript:)");
 
     private static final Pattern JSON_INJECTION_PATTERN = Pattern.compile(
-            "(?i)(\"\\s*:\\s*\\{)|" +  // ":{
-                    "(\\}\\s*,\\s*\")|" +  // },"
-                    "(\\]\\s*,\\s*\\[)|" +  // ],[
-                    "(\\[\\s*\\]\\s*,\\s*\\[)|" +  // ,[]
-                    "(\\}\\s*\\]\\s*,\\s*\\[\\s*\\{)|" +  // }],[{
-                    "(\"\\s*:\\s*function\\s*\\()|" +  // ":function(
-                    "(\"\\s*:\\s*new\\s+)|" +  // ":new
-                    "(\\$where\\s*:)|" +  // $where: (MongoDB注入)
-                    "(\\$regex\\s*:)|" +  // $regex: (MongoDB注入)
-                    "(\\$ne\\s*:)|" +  // $ne: (MongoDB注入)
-                    "(\\$gt\\s*:)|" +  // $gt: (MongoDB注入)
-                    "(\\$exists\\s*:)|" +  // $exists: (MongoDB注入)
-                    "(\\$elemMatch\\s*:)|" +  // $elemMatch: (MongoDB注入)
-                    "(\\$text\\s*:)|" +  // $text: (MongoDB注入)
-                    "(\\$expr\\s*:)|" +  // $expr: (MongoDB注入)
-                    "(\\$jsonSchema\\s*:)|" +  // $jsonSchema: (MongoDB注入)
-                    "(\\$mod\\s*:)|" +  // $mod: (MongoDB注入)
-                    "(\\$type\\s*:)|" +  // $type: (MongoDB注入)
-                    "(\\$eval\\s*:)|" +  // $eval: (MongoDB注入，高危)
-                    "(\\$function\\s*:)");  // $function: (MongoDB注入，高危)
+            "(?i)(\"\\s*:\\s*\\{)|" +
+                    "(\\}\\s*,\\s*\")|" +
+                    "(\\]\\s*,\\s*\\[)|" +
+                    "(\\[\\s*\\]\\s*,\\s*\\[)|" +
+                    "(\\}\\s*\\]\\s*,\\s*\\[\\s*\\{)|" +
+                    "(\"\\s*:\\s*function\\s*\\()|" +
+                    "(\"\\s*:\\s*new\\s+)|" +
+                    "(\"?\\$where\"?\\s*:)|" +
+                    "(\"?\\$regex\"?\\s*:)|" +
+                    "(\"?\\$ne\"?\\s*:)|" +
+                    "(\"?\\$gt\"?\\s*:)|" +
+                    "(\"?\\$exists\"?\\s*:)|" +
+                    "(\"?\\$elemMatch\"?\\s*:)|" +
+                    "(\"?\\$text\"?\\s*:)|" +
+                    "(\"?\\$expr\"?\\s*:)|" +
+                    "(\"?\\$jsonSchema\"?\\s*:)|" +
+                    "(\"?\\$mod\"?\\s*:)|" +
+                    "(\"?\\$type\"?\\s*:)|" +
+                    "(\"?\\$eval\"?\\s*:)|" +
+                    "(\"?\\$function\"?\\s*:)");
 
     private static final Pattern SAFE_IDENTIFIER_PATTERN = Pattern.compile("^[a-zA-Z0-9_\\.]+$");
 
-    private static final ConcurrentHashMap<Pattern, ThreadLocal<Matcher>> MATCHER_CACHE = new ConcurrentHashMap<>();
+    private GXDBStringEscapeUtils() {
+        throw new AssertionError("GXDBStringEscapeUtils must not be instantiated");
+    }
 
     private static boolean isEscapeNeededForString(String str, int len) {
         boolean needsHexEscape = false;
         for (int i = 0; i < len; ++i) {
             char c = str.charAt(i);
             switch (c) {
-                /* Must be escaped for 'mysql' */
-                case 0:
-                    needsHexEscape = true;
-                    break;
-                /* Must be escaped for logs */
-                case '\n':
-                    needsHexEscape = true;
-                    break;
-                case '\r':
-                    needsHexEscape = true;
-                    break;
-                case '\\':
-                    needsHexEscape = true;
-                    break;
-                case '\'':
-                    needsHexEscape = true;
-                    break;
-                /* Better safe than sorry */
-                case '"':
-                    needsHexEscape = true;
-                    break;
-                /* This gives problems on Win32 */
-                case '\032':
-                    needsHexEscape = true;
-                    break;
-                default:
-                    break;
+                case 0, '\n', '\r', '\\', '\'', '"', '\032' -> needsHexEscape = true;
+                default -> {
+                }
             }
             if (needsHexEscape) {
-                // no need to scan more
                 break;
             }
         }
@@ -166,45 +141,20 @@ public class GXDBStringEscapeUtils {
         for (int i = 0; i < stringLength; ++i) {
             char c = input.charAt(i);
             switch (c) {
-                /* Must be escaped for 'mysql' */
-                case 0:
-                    buf.append('\\');
-                    buf.append('0');
-                    break;
-                /* Must be escaped for logs */
-                case '\n':
-                    buf.append('\\');
-                    buf.append('n');
-                    break;
-                case '\r':
-                    buf.append('\\');
-                    buf.append('r');
-                    break;
-                case '\\':
-                    buf.append('\\');
-                    buf.append('\\');
-                    break;
-                case '\'':
+                case 0 -> buf.append('\\').append('0');
+                case '\n' -> buf.append('\\').append('n');
+                case '\r' -> buf.append('\\').append('r');
+                case '\\' -> buf.append('\\').append('\\');
+                case '\'' -> {
                     if (useSqlStandardQuoteEscape) {
-                        buf.append('\'');
-                        buf.append('\'');
+                        buf.append('\'').append('\'');
                     } else {
-                        buf.append('\\');
-                        buf.append('\'');
+                        buf.append('\\').append('\'');
                     }
-                    break;
-                /* Better safe than sorry */
-                case '"':
-                    buf.append('\\');
-                    buf.append('"');
-                    break;
-                /* This gives problems on Win32 */
-                case '\032':
-                    buf.append('\\');
-                    buf.append('Z');
-                    break;
-                default:
-                    buf.append(c);
+                }
+                case '"' -> buf.append('\\').append('"');
+                case '\032' -> buf.append('\\').append('Z');
+                default -> buf.append(c);
             }
         }
         return buf.toString();
@@ -228,13 +178,7 @@ public class GXDBStringEscapeUtils {
     }
 
     private static Matcher getMatcher(Pattern pattern, String input) {
-        ThreadLocal<Matcher> threadLocal = MATCHER_CACHE.computeIfAbsent(pattern, p -> new ThreadLocal<>());
-        Matcher matcher = threadLocal.get();
-        if (matcher == null) {
-            matcher = pattern.matcher("");
-            threadLocal.set(matcher);
-        }
-        return matcher.reset(input);
+        return pattern.matcher(input);
     }
 
     public static boolean check(String value) {
@@ -288,6 +232,7 @@ public class GXDBStringEscapeUtils {
         }
         String escaped = escapeSql(input);
         String escStr = String.valueOf(escapeChar);
+        escaped = StrUtil.replace(escaped, escStr, escStr + escStr);
         escaped = StrUtil.replace(escaped, "%", escStr + "%");
         escaped = StrUtil.replace(escaped, "_", escStr + "_");
         return escaped;
@@ -305,31 +250,15 @@ public class GXDBStringEscapeUtils {
         for (int i = 0; i < jsonInput.length(); i++) {
             char c = jsonInput.charAt(i);
             switch (c) {
-                case '"':
-                    sb.append("\\\"");
-                    break;
-                case '\\':
-                    sb.append("\\\\");
-                    break;
-                case '/':
-                    sb.append("\\/");
-                    break;
-                case '\b':
-                    sb.append("\\b");
-                    break;
-                case '\f':
-                    sb.append("\\f");
-                    break;
-                case '\n':
-                    sb.append("\\n");
-                    break;
-                case '\r':
-                    sb.append("\\r");
-                    break;
-                case '\t':
-                    sb.append("\\t");
-                    break;
-                default:
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '/' -> sb.append("\\/");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
                     if (c < ' ') {
                         String hex = Integer.toHexString(c);
                         sb.append("\\u");
@@ -340,6 +269,7 @@ public class GXDBStringEscapeUtils {
                     } else {
                         sb.append(c);
                     }
+                }
             }
         }
         return sb.toString();
@@ -351,11 +281,11 @@ public class GXDBStringEscapeUtils {
         }
 
         if (check(jsonStr)) {
-            throw new GXSqlInjectionException("JSON字符串中包含SQL注入风险");
+            throw new GXSqlInjectionException("JSON string contains SQL injection risk");
         }
 
         if (checkJsonInjection(jsonStr)) {
-            throw new GXSqlInjectionException("JSON字符串中包含JSON注入风险");
+            throw new GXSqlInjectionException("JSON string contains JSON injection risk");
         }
 
         return escapeSql(jsonStr);
@@ -417,7 +347,7 @@ public class GXDBStringEscapeUtils {
         String trimmedInput = input.trim();
 
         if (check(trimmedInput)) {
-            String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: validateAndCleanInput)", trimmedInput);
+            String message = CharSequenceUtil.format("SQL injection risk detected: {} (source: validateAndCleanInput)", trimmedInput);
             throw new GXSqlInjectionException(message);
         }
 
@@ -426,34 +356,31 @@ public class GXDBStringEscapeUtils {
 
     public static String buildSafeLikeCondition(String column, String value, String matchType) {
         if (CharSequenceUtil.isBlank(column) || value == null) {
-            throw new IllegalArgumentException("列名和查询值不能为空");
+            throw new IllegalArgumentException("Column name and query value must not be blank");
         }
 
         if (!isValidIdentifier(column)) {
-            String message = CharSequenceUtil.format("列名包含不安全的字符: {} (来源: buildSafeLikeCondition)", column);
+            String message = CharSequenceUtil.format("Column name contains unsafe characters: {} (source: buildSafeLikeCondition)", column);
             throw new GXSqlInjectionException(message);
         }
 
         if (check(value)) {
-            String message = CharSequenceUtil.format("检测到潜在的SQL注入攻击: {} (来源: buildSafeLikeCondition)", value);
+            String message = CharSequenceUtil.format("SQL injection risk detected: {} (source: buildSafeLikeCondition)", value);
             throw new GXSqlInjectionException(message);
+        }
+
+        if (CharSequenceUtil.isBlank(matchType)) {
+            throw new IllegalArgumentException("Match type must not be blank");
         }
 
         String escapedValue = escapeSqlForLike(value);
         String likePattern;
 
         switch (matchType.toLowerCase()) {
-            case "start":
-                likePattern = escapedValue + "%";
-                break;
-            case "end":
-                likePattern = "%" + escapedValue;
-                break;
-            case "anywhere":
-                likePattern = "%" + escapedValue + "%";
-                break;
-            default:
-                throw new IllegalArgumentException("不支持的匹配类型: " + matchType);
+            case "start" -> likePattern = escapedValue + "%";
+            case "end" -> likePattern = "%" + escapedValue;
+            case "anywhere" -> likePattern = "%" + escapedValue + "%";
+            default -> throw new IllegalArgumentException("Unsupported match type: " + matchType);
         }
 
         return column + " LIKE '" + likePattern + "' ESCAPE '\\'";
@@ -472,11 +399,11 @@ public class GXDBStringEscapeUtils {
         }
 
         if (check(jsonPath)) {
-            throw new GXSqlInjectionException("JSON路径中包含SQL注入风险");
+            throw new GXSqlInjectionException("JSON path contains SQL injection risk");
         }
 
         if (getMatcher(JSON_INJECTION_PATTERN, jsonPath).find()) {
-            throw new GXSqlInjectionException("JSON路径中包含NoSQL注入风险");
+            throw new GXSqlInjectionException("JSON path contains NoSQL injection risk");
         }
         String escaped = escapeBasicChars(jsonPath, true);
 
@@ -490,32 +417,32 @@ public class GXDBStringEscapeUtils {
 
     public static void validateTableName(String tableName) {
         if (tableName == null || tableName.isEmpty()) {
-            throw new IllegalArgumentException("表名不能为空");
+            throw new IllegalArgumentException("Table name must not be empty");
         }
 
         if (!isValidIdentifier(tableName)) {
-            String message = CharSequenceUtil.format("表名包含不安全的字符: {} (来源: validateTableName)", tableName);
+            String message = CharSequenceUtil.format("Table name contains unsafe characters: {} (source: validateTableName)", tableName);
             throw new GXSqlInjectionException(message);
         }
 
         if (check(tableName)) {
-            String message = CharSequenceUtil.format("表名中检测到潜在的SQL注入攻击: {} (来源: validateTableName)", tableName);
+            String message = CharSequenceUtil.format("SQL injection risk detected in table name: {} (source: validateTableName)", tableName);
             throw new GXSqlInjectionException(message);
         }
     }
 
     public static void validateColumnName(String columnName) {
         if (columnName == null || columnName.isEmpty()) {
-            throw new IllegalArgumentException("列名不能为空");
+            throw new IllegalArgumentException("Column name must not be empty");
         }
 
         if (!isValidIdentifier(columnName)) {
-            String message = CharSequenceUtil.format("列名包含不安全的字符: {} (来源: validateColumnName)", columnName);
+            String message = CharSequenceUtil.format("Column name contains unsafe characters: {} (source: validateColumnName)", columnName);
             throw new GXSqlInjectionException(message);
         }
 
         if (check(columnName)) {
-            String message = CharSequenceUtil.format("列名中检测到潜在的SQL注入攻击: {} (来源: validateColumnName)", columnName);
+            String message = CharSequenceUtil.format("SQL injection risk detected in column name: {} (source: validateColumnName)", columnName);
             throw new GXSqlInjectionException(message);
         }
     }
@@ -528,8 +455,11 @@ public class GXDBStringEscapeUtils {
         List<String> safeStatements = new ArrayList<>(sqlStatements.size());
 
         for (String sql : sqlStatements) {
+            if (sql == null) {
+                throw new IllegalArgumentException("SQL statement must not be null");
+            }
             if (check(sql)) {
-                String message = CharSequenceUtil.format("批量SQL操作中检测到潜在的SQL注入攻击: {}", sql);
+                String message = CharSequenceUtil.format("SQL injection risk detected in batch SQL: {}", sql);
                 throw new GXSqlInjectionException(message);
             }
 
@@ -545,6 +475,9 @@ public class GXDBStringEscapeUtils {
         }
 
         List<Object> firstBatch = batchValues.get(0);
+        if (firstBatch == null) {
+            throw new IllegalArgumentException("First batch parameter list must not be null");
+        }
         int paramCount = firstBatch.size();
 
         StringBuilder placeholders = new StringBuilder(paramCount * 3);
@@ -559,12 +492,16 @@ public class GXDBStringEscapeUtils {
         placeholders.append(')');
 
         for (List<Object> batch : batchValues) {
+            if (batch == null) {
+                throw new IllegalArgumentException("Batch parameter list must not be null");
+            }
+            if (batch.size() != paramCount) {
+                throw new IllegalArgumentException("Batch parameter size must be consistent");
+            }
             for (Object value : batch) {
-                if (value instanceof String strValue) {
-                    if (check(strValue)) {
-                        String message = CharSequenceUtil.format("批量参数化查询中检测到潜在的SQL注入攻击: {}", strValue);
-                        throw new GXSqlInjectionException(message);
-                    }
+                if (value instanceof String strValue && check(strValue)) {
+                    String message = CharSequenceUtil.format("SQL injection risk detected in batch parameter: {}", strValue);
+                    throw new GXSqlInjectionException(message);
                 }
             }
         }

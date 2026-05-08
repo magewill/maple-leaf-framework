@@ -19,7 +19,7 @@ public class GXBusinessServiceImpl implements GXBusinessService {
     @Override
     public String encryptedPhoneNumber(String phoneNumber, String key) {
         if (CharSequenceUtil.isEmpty(key)) {
-            throw new GXBusinessException("手机号加密key不能为空");
+            throw new GXBusinessException("Phone encryption key must not be empty");
         }
         Dict data = Dict.create().set("phone", phoneNumber);
         return GXCommonUtils.encryptedData(data, key, 0);
@@ -28,7 +28,7 @@ public class GXBusinessServiceImpl implements GXBusinessService {
     @Override
     public String decryptedPhoneNumber(String encryptPhoneNumber, String key) {
         if (CharSequenceUtil.isEmpty(key)) {
-            throw new GXBusinessException("手机号解密key不能为空");
+            throw new GXBusinessException("Phone decryption key must not be empty");
         }
         Dict data = GXCommonUtils.decryptedData(encryptPhoneNumber, key);
         return data.getStr("phone");
@@ -46,31 +46,42 @@ public class GXBusinessServiceImpl implements GXBusinessService {
 
     @Override
     public <T, R> R getSingleFieldValueByEntity(T entity, String path, Class<R> type, R defaultValue) {
+        if (entity == null || CharSequenceUtil.isBlank(path) || type == null) {
+            return defaultValue;
+        }
+
         JSON json = JSONUtil.parse(JSONUtil.toJsonStr(entity));
+        if (json == null) {
+            return defaultValue;
+        }
+
         int index = CharSequenceUtil.indexOfIgnoreCase(path, "::");
         if (index == -1) {
-            if (null == json.getByPath(path)) {
+            Object value = json.getByPath(path);
+            if (value == null) {
                 return defaultValue;
             }
-            if (JSONUtil.isTypeJSON(json.getByPath(path).toString())) {
+            if (JSONUtil.isTypeJSON(value.toString())) {
                 Dict data = Dict.create();
-                Dict dict = JSONUtil.toBean(json.getByPath(path).toString(), Dict.class);
-                if (!dict.isEmpty()) {
+                Dict dict = JSONUtil.toBean(value.toString(), Dict.class);
+                if (dict != null && !dict.isEmpty()) {
                     for (Map.Entry<String, Object> entry : dict.entrySet()) {
                         data.set(entry.getKey(), entry.getValue());
                     }
                 }
-                return Convert.convert(type, data);
+                return Convert.convert(type, data, defaultValue);
             }
-            return Convert.convert(type, json.getByPath(path));
+            return Convert.convert(type, value, defaultValue);
         }
+
         String mainField = CharSequenceUtil.sub(path, 0, index);
-        if (null == json.getByPath(mainField)) {
-            throw new GXBusinessException(CharSequenceUtil.format("实体的主字段{}不存在!", mainField));
+        Object mainFieldValue = json.getByPath(mainField);
+        if (mainFieldValue == null) {
+            throw new GXBusinessException(CharSequenceUtil.format("Entity main field {} does not exist", mainField));
         }
         String subField = CharSequenceUtil.sub(path, index + 2, path.length());
-        JSON parse = JSONUtil.parse(json.getByPath(mainField));
-        if (null == parse) {
+        JSON parse = JSONUtil.parse(mainFieldValue);
+        if (parse == null) {
             return defaultValue;
         }
         return Convert.convert(type, parse.getByPath(subField), defaultValue);

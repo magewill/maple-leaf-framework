@@ -19,63 +19,62 @@ import cn.maple.core.framework.service.GXBusinessService;
 import cn.maple.core.framework.util.GXCommonUtils;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Table;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseServeApi {
+    private static final Logger LOG = LoggerFactory.getLogger(GXBaseServeApiImpl.class);
+
     protected static final Map<String, Class<?>> STATIC_SERVE_SERVICE_CLASS_MAP = new ConcurrentHashMap<>();
 
     protected static final ThreadLocal<Class<?>> DYNAMIC_SERVE_SERVICE_CLASS_THREAD_LOCAL = ThreadLocal.withInitial(() -> null);
 
     @Override
     public <R extends GXBaseApiResDto> List<R> findByCondition(Table<String, String, Object> condition, Class<R> targetClazz) {
-        List<R> rs = findByCondition(condition, targetClazz, Dict.create());
-        return GXCommonUtils.convertSourceListToTargetList(rs, targetClazz, null, null);
+        return findByCondition(condition, targetClazz, Dict.create());
     }
 
     @Override
     public <R extends GXBaseApiResDto> List<R> findByCondition(Table<String, String, Object> condition, Map<String, String> orderField, Class<R> targetClazz) {
-        List<GXCondition<?>> conditionList = convertTableConditionToConditionExp(getTableName(), condition);
-        Object rLst = callMethod("findByCondition", conditionList, orderField);
-        if (Objects.nonNull(rLst)) {
-            return GXCommonUtils.convertSourceListToTargetList((Collection<?>) rLst, targetClazz, null, null);
-        }
-        return Collections.emptyList();
+        return executeWithDynamicBindingCleanup(() -> {
+            assertTargetClassNotNull(targetClazz);
+            List<GXCondition<?>> conditionList = convertTableConditionToConditionExp(getTableName(), condition);
+            Object rLst = invokeServeServiceMethod("findByCondition", conditionList, orderField);
+            return convertCollectionResult(rLst, targetClazz, null);
+        });
     }
 
     @Override
     public <R extends GXBaseApiResDto> List<R> findByCondition(Table<String, String, Object> condition, Class<R> targetClazz, Object extraData) {
-        if (Objects.isNull(targetClazz)) {
-            throw new NullPointerException("目标类型不能为null");
-        }
-        Object rLst = callMethod("findByCondition", convertTableConditionToConditionExp(condition), extraData);
-        if (Objects.nonNull(rLst)) {
-            return GXCommonUtils.convertSourceListToTargetList((Collection<?>) rLst, targetClazz, null, null);
-        }
-        return Collections.emptyList();
+        return executeWithDynamicBindingCleanup(() -> {
+            assertTargetClassNotNull(targetClazz);
+            Object rLst = invokeServeServiceMethod("findByCondition", convertTableConditionWithDefaultTable(condition), extraData);
+            return convertCollectionResult(rLst, targetClazz, null);
+        });
     }
 
     @Override
     public <E> List<E> findFieldByCondition(Table<String, String, Object> condition, Set<String> columns, Class<E> targetClazz) {
-        if (Objects.isNull(targetClazz)) {
-            throw new NullPointerException("目标类型不能为null");
-        }
-        if (Objects.isNull(columns) || columns.isEmpty()) {
-            columns = CollUtil.newHashSet("*");
-        }
-        List<GXCondition<?>> conditions = convertTableConditionToConditionExp(condition);
-        Object o = callMethod("findMultiFieldByCondition", conditions, columns, targetClazz);
-        if (Objects.isNull(o)) {
-            return Collections.emptyList();
-        }
-        try {
-            return Convert.convert(new TypeReference<List<E>>() {
-            }, o);
-        } catch (ConvertException e) {
-            // 记录转换异常，但返回空列表而不是抛出异常，保持与原方法行为一致
-            return Collections.emptyList();
-        }
+        return executeWithDynamicBindingCleanup(() -> {
+            assertTargetClassNotNull(targetClazz);
+            Set<String> queryColumns = defaultColumns(columns);
+            List<GXCondition<?>> conditions = convertTableConditionWithDefaultTable(condition);
+            Object o = invokeServeServiceMethod("findMultiFieldByCondition", conditions, queryColumns, targetClazz);
+            if (Objects.isNull(o)) {
+                return Collections.emptyList();
+            }
+            try {
+                return Convert.convert(new TypeReference<List<E>>() {
+                }, o);
+            } catch (ConvertException e) {
+                LOG.warn("Failed to convert multi-field result: targetType={}, error={}", targetClazz.getName(), e.getMessage());
+                return Collections.emptyList();
+            }
+        });
     }
 
     @Override
@@ -85,39 +84,34 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
 
     @Override
     public <R extends GXBaseApiResDto> R findOneByCondition(Table<String, String, Object> condition, Set<String> columns, Class<R> targetClazz, Object extraData) {
-        if (Objects.isNull(targetClazz)) {
-            throw new NullPointerException("目标类型不能为null");
-        }
-        if (Objects.isNull(columns) || columns.isEmpty()) {
-            columns = CollUtil.newHashSet("*");
-        }
-        Object r = callMethod("findOneByCondition", convertTableConditionToConditionExp(condition), columns, extraData);
-        if (Objects.nonNull(r)) {
-            try {
-                return GXCommonUtils.convertSourceToTarget(r, targetClazz, null, CopyOptions.create());
-            } catch (Exception e) {
-                return null;
+        return executeWithDynamicBindingCleanup(() -> {
+            assertTargetClassNotNull(targetClazz);
+            Set<String> queryColumns = defaultColumns(columns);
+            Object r = invokeServeServiceMethod("findOneByCondition", convertTableConditionWithDefaultTable(condition), queryColumns, extraData);
+            if (Objects.nonNull(r)) {
+                try {
+                    return GXCommonUtils.convertSourceToTarget(r, targetClazz, null, CopyOptions.create());
+                } catch (Exception e) {
+                    LOG.warn("Failed to convert single result: targetType={}, error={}", targetClazz.getName(), e.getMessage());
+                    return null;
+                }
             }
-        }
-        return null;
+            return null;
+        });
     }
 
     @Override
     public <R extends GXBaseApiResDto> R findOneByCondition(Table<String, String, Object> condition, Class<R> targetClazz, Object extraData) {
-        if (Objects.isNull(targetClazz)) {
-            throw new NullPointerException("目标类型不能为null");
-        }
+        assertTargetClassNotNull(targetClazz);
         return findOneByCondition(condition, CollUtil.newHashSet("*"), targetClazz, extraData);
     }
 
     @Override
     public <R extends GXBaseApiResDto> R findById(Long id, Set<String> columns, Class<R> targetClazz) {
         if (Objects.isNull(id)) {
-            throw new NullPointerException("ID不能为null");
+            throw new NullPointerException("Id must not be null");
         }
-        if (Objects.isNull(targetClazz)) {
-            throw new NullPointerException("目标类型不能为null");
-        }
+        assertTargetClassNotNull(targetClazz);
         HashBasedTable<String, String, Object> conditionTable = HashBasedTable.create();
         conditionTable.put("id", GXBuilderConstant.EQ, id);
         return findOneByCondition(conditionTable, columns, targetClazz, Dict.create());
@@ -126,71 +120,69 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     @Override
     public <R extends GXBaseApiResDto> R findById(Long id, Class<R> targetClazz) {
         if (Objects.isNull(id)) {
-            throw new NullPointerException("ID不能为null");
+            throw new NullPointerException("Id must not be null");
         }
-        if (Objects.isNull(targetClazz)) {
-            throw new NullPointerException("目标类型不能为null");
-        }
+        assertTargetClassNotNull(targetClazz);
         return findById(id, CollUtil.newHashSet("*"), targetClazz);
     }
 
     @Override
     public <E> E findSingleFieldByCondition(Table<String, String, Object> condition, String column, Class<E> targetClazz) {
-        if (Objects.isNull(targetClazz)) {
-            throw new NullPointerException("目标类型不能为null");
-        }
-        if (Objects.isNull(column)) {
-            throw new NullPointerException("字段名不能为null");
-        }
-        if (CharSequenceUtil.isEmpty(column)) {
-            throw new IllegalArgumentException("字段名不能为空字符串");
-        }
-        Object r = callMethod("findSingleFieldByCondition", convertTableConditionToConditionExp(condition), column, targetClazz);
-        if (Objects.nonNull(r)) {
-            try {
-                return Convert.convert(targetClazz, r);
-            } catch (ConvertException e) {
-                // 记录转换异常，但返回null而不是抛出异常，保持与原方法行为一致
-                return null;
+        return executeWithDynamicBindingCleanup(() -> {
+            assertTargetClassNotNull(targetClazz);
+            if (Objects.isNull(column)) {
+                throw new NullPointerException("Column must not be null");
             }
-        }
-        return null;
+            if (CharSequenceUtil.isEmpty(column)) {
+                throw new IllegalArgumentException("Column must not be empty");
+            }
+            Object r = invokeServeServiceMethod("findSingleFieldByCondition", convertTableConditionWithDefaultTable(condition), column, targetClazz);
+            if (Objects.nonNull(r)) {
+                try {
+                    return Convert.convert(targetClazz, r);
+                } catch (ConvertException e) {
+                    LOG.warn("Failed to convert single-field result: targetType={}, error={}", targetClazz.getName(), e.getMessage());
+                    return null;
+                }
+            }
+            return null;
+        });
     }
 
     @Override
     public <ID, Q extends GXBaseApiReqDto> ID updateOrCreate(Q reqDto, Table<String, String, Object> condition, CopyOptions copyOptions) {
-        if (Objects.isNull(reqDto)) {
-            throw new NullPointerException("请求参数不能为null");
-        }
-        if (Objects.isNull(copyOptions)) {
-            throw new NullPointerException("复制选项不能为null");
-        }
-
-        List<GXCondition<?>> conditionList = null;
-        if (Objects.nonNull(condition)) {
-            conditionList = convertTableConditionToConditionExp(condition);
-        } else {
-            conditionList = Collections.emptyList();
-        }
-
-        Object id = callMethod("updateOrCreate", reqDto, conditionList, copyOptions);
-        if (Objects.nonNull(id)) {
-            try {
-                return (ID) id;
-            } catch (ClassCastException e) {
-                return null;
+        return executeWithDynamicBindingCleanup(() -> {
+            if (Objects.isNull(reqDto)) {
+                throw new NullPointerException("Request dto must not be null");
             }
-        }
-        return null;
+            if (Objects.isNull(copyOptions)) {
+                throw new NullPointerException("Copy options must not be null");
+            }
+
+            List<GXCondition<?>> conditionList = Objects.nonNull(condition)
+                    ? convertTableConditionWithDefaultTable(condition)
+                    : Collections.emptyList();
+
+            Object id = invokeServeServiceMethod("updateOrCreate", reqDto, conditionList, copyOptions);
+            if (Objects.nonNull(id)) {
+                try {
+                    return (ID) id;
+                } catch (ClassCastException e) {
+                    LOG.warn("Failed to cast update result id: resultType={}, error={}", id.getClass().getName(), e.getMessage());
+                    return null;
+                }
+            }
+            return null;
+        });
     }
 
     @Override
     public <ID, Q extends GXBaseApiReqDto> ID updateOrCreate(Q reqDto, CopyOptions copyOptions) {
         if (Objects.isNull(reqDto)) {
-            throw new NullPointerException("请求参数不能为null");
+            throw new NullPointerException("Request dto must not be null");
         }
         if (Objects.isNull(copyOptions)) {
-            throw new NullPointerException("复制选项不能为null");
+            throw new NullPointerException("Copy options must not be null");
         }
         return updateOrCreate(reqDto, HashBasedTable.create(), copyOptions);
     }
@@ -198,7 +190,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     @Override
     public <ID, Q extends GXBaseApiReqDto> ID updateOrCreate(Q reqDto) {
         if (Objects.isNull(reqDto)) {
-            throw new NullPointerException("请求参数不能为null");
+            throw new NullPointerException("Request dto must not be null");
         }
         return updateOrCreate(reqDto, CopyOptions.create());
     }
@@ -206,20 +198,26 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     @Override
     @SuppressWarnings("unchecked")
     public <R> GXPaginationResDto<R> paginate(GXQueryParamReqProtocol reqProtocol, Class<R> targetClazz, CopyOptions copyOptions) {
-        GXBaseQueryParamInnerDto baseQueryParamInnerDto = GXCommonUtils.convertSourceToTarget(reqProtocol, GXBaseQueryParamInnerDto.class, null, copyOptions);
-        if (CharSequenceUtil.isEmpty(baseQueryParamInnerDto.getTableName())) {
-            baseQueryParamInnerDto.setTableName(getTableName());
-        }
-        Object paginate = callMethod("paginate", baseQueryParamInnerDto);
-        if (Objects.nonNull(paginate)) {
-            GXPaginationResDto<R> retPaginate = (GXPaginationResDto<R>) paginate;
-            // XXXDBResDto
-            List<?> records = retPaginate.getRecords();
-            List<R> rs = GXCommonUtils.convertSourceListToTargetList(records, targetClazz, null, copyOptions);
-            retPaginate.setRecords(rs);
-            return retPaginate;
-        }
-        return null;
+        return executeWithDynamicBindingCleanup(() -> {
+            assertTargetClassNotNull(targetClazz);
+            CopyOptions safeCopyOptions = copyOptions == null ? CopyOptions.create() : copyOptions;
+            GXBaseQueryParamInnerDto baseQueryParamInnerDto = GXCommonUtils.convertSourceToTarget(reqProtocol, GXBaseQueryParamInnerDto.class, null, safeCopyOptions);
+            if (baseQueryParamInnerDto == null) {
+                return null;
+            }
+            if (CharSequenceUtil.isEmpty(baseQueryParamInnerDto.getTableName())) {
+                baseQueryParamInnerDto.setTableName(getTableName());
+            }
+            Object paginate = invokeServeServiceMethod("paginate", baseQueryParamInnerDto);
+            if (paginate instanceof GXPaginationResDto<?> retPaginate) {
+                List<?> records = retPaginate.getRecords();
+                List<R> rs = GXCommonUtils.convertSourceListToTargetList(records, targetClazz, null, safeCopyOptions);
+                GXPaginationResDto<R> result = (GXPaginationResDto<R>) retPaginate;
+                result.setRecords(rs);
+                return result;
+            }
+            return null;
+        });
     }
 
     @Override
@@ -229,47 +227,38 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
 
     @Override
     public Integer deleteCondition(Table<String, String, Object> condition) {
-        Object cnt = callMethod("deleteCondition", convertTableConditionToConditionExp(condition));
-        if (Objects.nonNull(cnt)) {
-            return (Integer) cnt;
-        }
-        return 0;
+        return executeWithDynamicBindingCleanup(() -> convertToInteger(invokeServeServiceMethod("deleteCondition", convertTableConditionWithDefaultTable(condition))));
     }
 
     @Override
     public Integer deleteSoftCondition(Table<String, String, Object> condition) {
-        Object cnt = callMethod("deleteSoftCondition", convertTableConditionToConditionExp(condition));
-        if (Objects.nonNull(cnt)) {
-            return (Integer) cnt;
-        }
-        return 0;
+        return executeWithDynamicBindingCleanup(() -> convertToInteger(invokeServeServiceMethod("deleteSoftCondition", convertTableConditionWithDefaultTable(condition))));
     }
 
     @Override
     public Integer updateFieldByCondition(List<GXUpdateField<?>> updateFields, Table<String, String, Object> condition) {
-        List<GXCondition<?>> conditionList = convertTableConditionToConditionExp(condition);
-        Object cnt = callMethod("updateFieldByCondition", updateFields, conditionList);
-        if (Objects.nonNull(cnt)) {
-            return (Integer) cnt;
-        }
-        return 0;
+        return executeWithDynamicBindingCleanup(() -> {
+            List<GXCondition<?>> conditionList = convertTableConditionWithDefaultTable(condition);
+            return convertToInteger(invokeServeServiceMethod("updateFieldByCondition", updateFields, conditionList));
+        });
     }
 
     @Override
     public boolean checkRecordIsExists(Table<String, String, Object> condition) {
-        Object exists = callMethod("checkRecordIsExists", convertTableConditionToConditionExp(condition));
-        return (Boolean) exists;
+        return executeWithDynamicBindingCleanup(() -> Boolean.TRUE.equals(invokeServeServiceMethod("checkRecordIsExists", convertTableConditionWithDefaultTable(condition))));
     }
 
     @Override
     public Long count(Table<String, String, Object> condition) {
-        Object cnt = callMethod("countByCondition", convertTableConditionToConditionExp(condition));
-        return (Long) cnt;
+        return executeWithDynamicBindingCleanup(() -> {
+            Object cnt = invokeServeServiceMethod("countByCondition", convertTableConditionWithDefaultTable(condition));
+            return cnt == null ? 0L : Convert.convert(Long.class, cnt);
+        });
     }
 
     @Override
     public <T, Q extends GXBaseApiReqDto> T sourceToTarget(Q reqDto, Class<T> targetClass, String methodName, CopyOptions copyOptions, Dict extraData) {
-        return GXCommonUtils.convertSourceToTarget(reqDto, targetClass, methodName, copyOptions, extraData);
+        return executeWithDynamicBindingCleanup(() -> GXCommonUtils.convertSourceToTarget(reqDto, targetClass, methodName, copyOptions, extraData));
     }
 
     @Override
@@ -285,7 +274,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     @Override
     public void staticBindServeServiceClass(Class<?> serveServiceClass) {
         if (Objects.isNull(serveServiceClass)) {
-            throw new IllegalArgumentException("服务类Class对象不能为null");
+            throw new IllegalArgumentException("Service class must not be null");
         }
         String apiClassName = getClass().getSimpleName();
         STATIC_SERVE_SERVICE_CLASS_MAP.put(apiClassName, serveServiceClass);
@@ -301,50 +290,34 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
 
     @Override
     public Object callMethod(String methodName, Object... params) {
-        if (CharSequenceUtil.isEmpty(methodName)) {
-            throw new IllegalArgumentException("方法名不能为空");
-        }
-
-        Class<?> serveServiceClass = getServeServiceClass();
-        if (Objects.nonNull(serveServiceClass)) {
-            try {
-                return GXCommonUtils.reflectCallObjectMethod(serveServiceClass, methodName, params);
-            } catch (Exception e) {
-                return null;
-            }
-        }
-        return null;
+        return executeWithDynamicBindingCleanup(() -> invokeServeServiceMethod(methodName, params));
     }
 
     @Override
     public Class<?> getServeServiceClass() {
-        try {
-            Class<?> serveServiceClass = DYNAMIC_SERVE_SERVICE_CLASS_THREAD_LOCAL.get();
-            if (Objects.nonNull(serveServiceClass)) {
-                return serveServiceClass;
-            }
-            String apiClassName = getClass().getSimpleName();
-            return STATIC_SERVE_SERVICE_CLASS_MAP.get(apiClassName);
-        } finally {
-            DYNAMIC_SERVE_SERVICE_CLASS_THREAD_LOCAL.remove();
+        Class<?> serveServiceClass = DYNAMIC_SERVE_SERVICE_CLASS_THREAD_LOCAL.get();
+        if (Objects.nonNull(serveServiceClass)) {
+            return serveServiceClass;
         }
+        String apiClassName = getClass().getSimpleName();
+        return STATIC_SERVE_SERVICE_CLASS_MAP.get(apiClassName);
     }
 
     @Override
     public List<GXCondition<?>> convertTableConditionToConditionExp(Table<String, String, Object> condition) {
-        return convertTableConditionToConditionExp(getTableName(), condition);
+        return executeWithDynamicBindingCleanup(() -> convertTableConditionWithDefaultTable(condition));
     }
 
     @Override
     public List<GXCondition<?>> convertTableConditionToConditionExp(String tableNameAlias, Table<String, String, Object> condition) {
         if (Objects.isNull(tableNameAlias)) {
-            throw new NullPointerException("表别名不能为null");
+            throw new NullPointerException("Table alias must not be null");
         }
         return GXCommonUtils.convertTableConditionToConditionExp(tableNameAlias, condition);
     }
 
     private String getTableName() {
-        Object tableName = callMethod("getTableName");
+        Object tableName = invokeServeServiceMethod("getTableName");
         if (Objects.nonNull(tableName)) {
             if (tableName instanceof String) {
                 return (String) tableName;
@@ -353,5 +326,67 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
             }
         }
         return null;
+    }
+
+    private List<GXCondition<?>> convertTableConditionWithDefaultTable(Table<String, String, Object> condition) {
+        return convertTableConditionToConditionExp(getTableName(), condition);
+    }
+
+    private <T> T executeWithDynamicBindingCleanup(Supplier<T> supplier) {
+        try {
+            return supplier.get();
+        } finally {
+            DYNAMIC_SERVE_SERVICE_CLASS_THREAD_LOCAL.remove();
+        }
+    }
+
+    private Object invokeServeServiceMethod(String methodName, Object... params) {
+        if (CharSequenceUtil.isEmpty(methodName)) {
+            throw new IllegalArgumentException("Method name must not be empty");
+        }
+
+        Class<?> serveServiceClass = getServeServiceClass();
+        if (Objects.isNull(serveServiceClass)) {
+            LOG.warn("No bound service class found: api={}", getClass().getName());
+            return null;
+        }
+        try {
+            return GXCommonUtils.reflectCallObjectMethod(serveServiceClass, methodName, params);
+        } catch (Exception e) {
+            LOG.warn("Service method invocation failed: service={}, method={}, error={}",
+                    serveServiceClass.getName(), methodName, e.getMessage());
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Service method invocation failure details", e);
+            }
+            return null;
+        }
+    }
+
+    private void assertTargetClassNotNull(Class<?> targetClazz) {
+        if (Objects.isNull(targetClazz)) {
+            throw new NullPointerException("Target type must not be null");
+        }
+    }
+
+    private Set<String> defaultColumns(Set<String> columns) {
+        return Objects.isNull(columns) || columns.isEmpty() ? CollUtil.newHashSet("*") : columns;
+    }
+
+    private <R> List<R> convertCollectionResult(Object result, Class<R> targetClazz, CopyOptions copyOptions) {
+        if (Objects.isNull(result)) {
+            return Collections.emptyList();
+        }
+        if (!(result instanceof Collection<?> collection)) {
+            LOG.warn("Service result is not a collection: resultType={}", result.getClass().getName());
+            return Collections.emptyList();
+        }
+        return GXCommonUtils.convertSourceListToTargetList(collection, targetClazz, null, copyOptions);
+    }
+
+    private Integer convertToInteger(Object value) {
+        if (value == null) {
+            return 0;
+        }
+        return Convert.convert(Integer.class, value);
     }
 }

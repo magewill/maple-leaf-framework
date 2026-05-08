@@ -18,7 +18,13 @@ import org.mockito.Mockito;
 import org.springframework.core.env.Environment;
 import tools.jackson.databind.ObjectMapper;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
@@ -222,6 +228,46 @@ class GXCommonUtilsTest {
         assertEquals("default", GXCommonUtils.reflectCallObjectMethod(target, null));
         assertNull(GXCommonUtils.reflectCallObjectMethod(target, "missing"));
         assertNull(GXCommonUtils.reflectCallObjectMethod((Object) null, "missing"));
+    }
+
+    @Test
+    void shouldReflectCallMethodsConcurrently() throws Exception {
+        ReflectionTarget target = new ReflectionTarget();
+        List<Callable<Object>> tasks = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            tasks.add(() -> GXCommonUtils.reflectCallObjectMethod(target, "accept", 7));
+            tasks.add(() -> GXCommonUtils.reflectCallObjectMethod(target, "accept", (Object) null));
+        }
+
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<Object>> futures = executor.invokeAll(tasks);
+            for (int i = 0; i < futures.size(); i += 2) {
+                assertEquals("int:7", futures.get(i).get());
+                assertEquals("text:null", futures.get(i + 1).get());
+            }
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldClearReflectionMethodCacheWithoutBlockingHotCacheHits() throws Exception {
+        Field cacheField = GXCommonUtils.class.getDeclaredField("METHOD_CACHE");
+        cacheField.setAccessible(true);
+        Map<GXMethodCacheKeyUtils.MethodCacheKey, Method> cache =
+                (Map<GXMethodCacheKeyUtils.MethodCacheKey, Method>) cacheField.get(null);
+        cache.clear();
+
+        Method method = ReflectionTarget.class.getDeclaredMethod("accept", int.class);
+        for (int i = 0; i < 4097; i++) {
+            cache.put(GXMethodCacheKeyUtils.getMethodCacheKey(ReflectionTarget.class, "accept" + i, new Class<?>[]{int.class}), method);
+        }
+
+        ReflectionTarget target = new ReflectionTarget();
+
+        assertEquals("int:7", GXCommonUtils.reflectCallObjectMethod(target, "accept", 7));
+        assertTrue(cache.size() <= 1);
+
+        cache.clear();
     }
 
     @Test

@@ -1,7 +1,6 @@
 package cn.maple.core.framework.validator;
 
 import cn.hutool.core.lang.Dict;
-import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.annotation.GXValidateCRS;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.service.GXCallRemoteValidateService;
@@ -10,27 +9,39 @@ import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.Objects;
-
 @Slf4j
 public class GXValidateCallRemoteServiceValidator implements ConstraintValidator<GXValidateCRS, Object> {
-    private GXCallRemoteValidateService service;
+    private volatile GXCallRemoteValidateService service;
 
     @Override
     public void initialize(GXValidateCRS annotation) {
+        if (annotation == null) {
+            throw new GXBusinessException("GXValidateCRS annotation must not be null");
+        }
         Class<? extends GXCallRemoteValidateService> clazz = annotation.service();
         service = GXSpringContextUtils.getBean(clazz);
+        if (service == null) {
+            throw new GXBusinessException("Remote validate service bean not found: " + clazz.getName());
+        }
     }
 
     @Override
-    public boolean isValid(Object o, ConstraintValidatorContext constraintValidatorContext) {
-        if (Objects.isNull(o)) {
-            throw new GXBusinessException(CharSequenceUtil.format("验证出错 , 值为<{}>", o));
+    public boolean isValid(Object value, ConstraintValidatorContext constraintValidatorContext) {
+        if (value == null) {
+            return true;
         }
-        if (null == service) {
-            throw new GXBusinessException(CharSequenceUtil.format("需要指定相应的Service进行验证...", o));
+        GXCallRemoteValidateService validateService = service;
+        if (validateService == null) {
+            throw new GXBusinessException("Remote validate service is not initialized");
         }
-        Dict param = Dict.create();
-        return service.callRemoteValidateService(o, constraintValidatorContext, param);
+        try {
+            return validateService.callRemoteValidateService(value, constraintValidatorContext, Dict.create());
+        } catch (GXBusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Remote validate service failed: valueType={}, error={}",
+                    value.getClass().getName(), e.getMessage(), e);
+            throw new GXBusinessException("Remote validate service failed: " + e.getMessage(), e);
+        }
     }
 }

@@ -5,7 +5,7 @@ import java.util.Objects;
 
 public final class GXMethodCacheKeyUtils {
     private GXMethodCacheKeyUtils() {
-        throw new UnsupportedOperationException("工具类不能被实例化");
+        throw new UnsupportedOperationException("Utility class must not be instantiated");
     }
 
     public static MethodCacheKey getMethodCacheKey(Class<?> clazz, String methodName, Class<?>[] paramTypes) {

@@ -17,8 +17,17 @@ import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 @Component
@@ -27,16 +36,25 @@ import java.util.stream.Collectors;
 public class GXApplicationStartedListener implements ApplicationListener<ApplicationStartedEvent> {
     private final ConcurrentHashMap<Class<?>, List<Method>> permissionMethodCache = new ConcurrentHashMap<>();
 
+    private final AtomicBoolean permissionCollected = new AtomicBoolean(false);
+
     @PreDestroy
     public void destroy() {
-        log.debug("GXApplicationStartedListener销毁，清理缓存数据");
+        log.debug("GXApplicationStartedListener destroyed, clear permission cache");
         permissionMethodCache.clear();
+        permissionCollected.set(false);
     }
 
     @Override
     public void onApplicationEvent(ApplicationStartedEvent applicationStartedEvent) {
+        if (!permissionCollected.compareAndSet(false, true)) {
+            log.debug("Permission collection already completed, skip duplicate application started event");
+            return;
+        }
+
+        boolean completed = false;
         try {
-            log.info("开始收集系统权限信息...");
+            log.info("Start collecting system permission metadata");
             Map<String, List<GXBasePermissionInnerDto>> permissionMap = new LinkedHashMap<>();
             Map<String, Object> beansWithAnnotation = applicationStartedEvent
                     .getApplicationContext()
@@ -46,20 +64,30 @@ public class GXApplicationStartedListener implements ApplicationListener<Applica
                 try {
                     processBean(beanName, bean, permissionMap);
                 } catch (Exception e) {
-                    log.error("处理Bean [{}] 的权限信息时发生异常: {}", beanName, e.getMessage(), e);
+                    log.error("Failed to process permission metadata for bean: beanName={}, error={}", beanName, e.getMessage(), e);
                 }
             });
             publishPermissionEvent(permissionMap);
+            completed = true;
         } catch (Exception e) {
-            log.error("收集系统权限信息时发生异常: {}", e.getMessage(), e);
+            log.error("Failed to collect system permission metadata: error={}", e.getMessage(), e);
+        } finally {
+            if (!completed) {
+                permissionCollected.set(false);
+            }
         }
     }
 
     private void processBean(String beanName, Object bean, Map<String, List<GXBasePermissionInnerDto>> permissionMap) {
+        if (bean == null) {
+            log.warn("Permission bean is null: beanName={}", beanName);
+            return;
+        }
+
         Class<?> targetClass = AopUtils.getTargetClass(bean);
         GXPermissionCtl permissionCtl = AnnotatedElementUtils.findMergedAnnotation(targetClass, GXPermissionCtl.class);
         if (permissionCtl == null) {
-            log.warn("Bean [{}] 类型为 [{}] 未找到GXPermissionCtl注解", beanName, targetClass.getName());
+            log.warn("GXPermissionCtl annotation not found: beanName={}, targetType={}", beanName, targetClass.getName());
             return;
         }
         String moduleCode = permissionCtl.moduleCode();
@@ -144,21 +172,22 @@ public class GXApplicationStartedListener implements ApplicationListener<Applica
                     .permissionCode(permissionAction.permissionCode())
                     .permissionName(permissionAction.permissionName())
                     .moduleName(permissionModuleName)
-                    .moduleCode(permissionModuleCode).build();
+                    .moduleCode(permissionModuleCode)
+                    .build();
         } catch (Exception e) {
-            log.error("创建权限DTO对象时发生异常: {} - {}", method.getName(), e.getMessage());
+            log.error("Failed to create permission dto: method={}, error={}", method.getName(), e.getMessage(), e);
             return null;
         }
     }
 
     private void publishPermissionEvent(Map<String, List<GXBasePermissionInnerDto>> permissionMap) {
         if (!permissionMap.isEmpty()) {
-            log.info("收集到 {} 个Bean的权限信息，准备发布权限事件", permissionMap.size());
+            log.info("Collected permission metadata, beanCount={}", permissionMap.size());
             GXPermissionEvent permissionEvent = new GXPermissionEvent(Collections.unmodifiableMap(permissionMap), Dict.create());
             GXEventPublisherUtils.publishEvent(permissionEvent);
-            log.info("权限事件发布完成");
+            log.info("Permission event published");
         } else {
-            log.info("未收集到任何权限信息");
+            log.info("No permission metadata collected");
         }
     }
 }

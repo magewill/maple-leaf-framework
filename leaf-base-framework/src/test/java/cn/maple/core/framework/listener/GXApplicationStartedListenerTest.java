@@ -175,6 +175,17 @@ class GXApplicationStartedListenerTest {
         assertTrue(cache.isEmpty());
     }
 
+    @Test
+    void shouldSkipDuplicateApplicationStartedEvent() {
+        when(mockBeanFactory.getBeansWithAnnotation(GXPermissionCtl.class))
+                .thenReturn(Map.of("testController", new TestController()));
+
+        listener.onApplicationEvent(mockEvent);
+        listener.onApplicationEvent(mockEvent);
+
+        mockedEventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), times(1));
+    }
+
     private Map<String, GXBasePermissionInnerDto> captureSinglePublishedPermissionMap(String beanName) {
         ArgumentCaptor<GXPermissionEvent> eventCaptor = ArgumentCaptor.forClass(GXPermissionEvent.class);
         mockedEventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(eventCaptor.capture()));

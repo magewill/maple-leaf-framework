@@ -8,7 +8,11 @@ import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.Map;
+import java.util.Set;
 
 @Configuration
 @Slf4j
@@ -26,7 +30,22 @@ public class GXWebMvcConfigurer implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        Map<String, GXAuthorizationInterceptor> authorizationInterceptor = GXSpringContextUtils.getBeans(GXAuthorizationInterceptor.class);
-        authorizationInterceptor.forEach((beanName, interceptor) -> registry.addInterceptor(interceptor));
+        Map<String, GXAuthorizationInterceptor> authorizationInterceptors =
+                GXSpringContextUtils.getBeans(GXAuthorizationInterceptor.class);
+        if (authorizationInterceptors.isEmpty()) {
+            log.debug("No GXAuthorizationInterceptor beans found");
+            return;
+        }
+
+        Set<GXAuthorizationInterceptor> registeredInterceptors =
+                Collections.newSetFromMap(new IdentityHashMap<>());
+        authorizationInterceptors.entrySet().stream()
+                .sorted(Comparator.comparing(Map.Entry::getKey))
+                .forEach(entry -> {
+                    GXAuthorizationInterceptor interceptor = entry.getValue();
+                    if (interceptor != null && registeredInterceptors.add(interceptor)) {
+                        registry.addInterceptor(interceptor);
+                    }
+                });
     }
 }

@@ -50,9 +50,9 @@ import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class GXCommonUtils {
     private static final Logger LOG = LoggerFactory.getLogger(GXCommonUtils.class);
@@ -68,6 +68,10 @@ public class GXCommonUtils {
     private static final Map<GXMethodCacheKeyUtils.MethodCacheKey, Method> METHOD_CACHE = new ConcurrentHashMap<>(64);
 
     private static final ConcurrentHashMap<String, Class<?>> UPDATE_FIELD_CLASS_CACHE = new ConcurrentHashMap<>(8);
+
+    private static final int MAX_METHOD_CACHE_SIZE = 4096;
+
+    private static final AtomicBoolean METHOD_CACHE_CLEANING = new AtomicBoolean(false);
 
     private static final Class<?>[] EMPTY_PARAM_TYPES = new Class<?>[0];
 
@@ -369,13 +373,6 @@ public class GXCommonUtils {
             throw new IllegalArgumentException("Target type must not be null");
         }
 
-        if (collection.size() > 1000) {
-            return collection.parallelStream()
-                    .map(source -> convertSourceToTarget(source, tClass, methodName, copyOptions, extraData))
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
-        }
-
         return collection.stream()
                 .map(source -> convertSourceToTarget(source, tClass, methodName, copyOptions, extraData))
                 .filter(Objects::nonNull)
@@ -438,10 +435,30 @@ public class GXCommonUtils {
         final GXMethodCacheKeyUtils.MethodCacheKey methodCacheKey =
                 GXMethodCacheKeyUtils.getMethodCacheKey(clazz, methodName, paramTypes);
 
-        return METHOD_CACHE.computeIfAbsent(methodCacheKey, key -> {
-            Method method = lookupMethod(clazz, methodName, paramTypes);
-            return method == null ? METHOD_NOT_FOUND : method;
+        Method cachedMethod = METHOD_CACHE.get(methodCacheKey);
+        if (cachedMethod != null) {
+            return cachedMethod;
+        }
+
+        clearMethodCacheIfNeeded();
+        Method method = METHOD_CACHE.computeIfAbsent(methodCacheKey, key -> {
+            Method resolvedMethod = lookupMethod(clazz, methodName, paramTypes);
+            return resolvedMethod == null ? METHOD_NOT_FOUND : resolvedMethod;
         });
+        return method;
+    }
+
+    private static void clearMethodCacheIfNeeded() {
+        if (METHOD_CACHE.size() > MAX_METHOD_CACHE_SIZE && METHOD_CACHE_CLEANING.compareAndSet(false, true)) {
+            try {
+                if (METHOD_CACHE.size() > MAX_METHOD_CACHE_SIZE) {
+                    METHOD_CACHE.clear();
+                    LOG.warn("Reflection method cache cleared: maxSize={}", MAX_METHOD_CACHE_SIZE);
+                }
+            } finally {
+                METHOD_CACHE_CLEANING.set(false);
+            }
+        }
     }
 
     private static Class<?>[] resolveParamTypes(Object[] params) {
@@ -894,10 +911,7 @@ public class GXCommonUtils {
 
         List<GXUpdateField<?>> updateFields = new ArrayList<>(updateLst.size());
 
-        Stream<GXUpdateFieldRequest> stream = updateLst.size() > 100 ?
-                updateLst.parallelStream() : updateLst.stream();
-
-        List<GXUpdateField<?>> result = stream.map(updateField -> {
+        List<GXUpdateField<?>> result = updateLst.stream().map(updateField -> {
             try {
                 if (updateField == null) {
                     throw new GXBusinessException("Update field request must not be null");

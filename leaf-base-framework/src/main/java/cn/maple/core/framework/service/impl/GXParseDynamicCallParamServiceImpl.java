@@ -14,54 +14,22 @@ import org.springframework.stereotype.Service;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
 public class GXParseDynamicCallParamServiceImpl implements GXParseDynamicCallParamService {
-    private Object getValueFromCallback(GXDynamicCallParamAttributeReqDto callParamDto) {
-        if (callParamDto == null || CharSequenceUtil.isBlank(callParamDto.getCallBackClassName())
-                || CharSequenceUtil.isBlank(callParamDto.getCallBackMethodName())) {
-            log.error("回调参数配置不完整，无法执行回调");
-            return null;
-        }
+    private static final Map<String, Class<?>> CALLBACK_CLASS_CACHE = new ConcurrentHashMap<>(64);
 
-        try {
-            final String callBackClassName = callParamDto.getCallBackClassName();
-            final Class<?> aClass = Class.forName(callBackClassName);
-            final String callBackMethodName = callParamDto.getCallBackMethodName();
-            final Object bean = GXSpringContextUtils.getBean(aClass);
-            if (Objects.isNull(bean)) {
-                log.error("callBackClassName = {}的bean不存在", callBackClassName);
-                return null;
-            }
-            final Method method = ReflectUtil.getMethodByName(aClass, callBackMethodName);
-            if (Objects.isNull(method)) {
-                log.error("callBackMethodName = {}在bean中不存在", aClass);
-                return null;
-            }
-            return method.invoke(bean);
-        } catch (Exception e) {
-            log.error("反射调用获取参数值失败 {}", JSONUtil.toJsonStr(e));
-        }
-        return null;
-    }
-
-    private Object getValueFromAssign(GXDynamicCallParamAttributeReqDto callParamDto) {
-        return callParamDto != null ? callParamDto.getFixedAssignedValue() : null;
-    }
+    private static final Map<String, Method> CALLBACK_METHOD_CACHE = new ConcurrentHashMap<>(128);
 
     @Override
     public Object getDynamicCallMethodParamValue(String jsonStr) {
-        if (JSONUtil.isNull(jsonStr) || !JSONUtil.isTypeJSON(jsonStr)) {
-            log.error("参数必须是有效的JSON格式");
-            return null;
-        }
-
         try {
-            final GXDynamicCallParamReqDto callParamDto = JSONUtil.toBean(jsonStr, GXDynamicCallParamReqDto.class);
+            final GXDynamicCallParamReqDto callParamDto = parseDynamicCallParam(jsonStr);
             if (callParamDto == null) {
-                log.error("JSON解析为GXDynamicCallParamReqDto失败");
                 return null;
             }
 
@@ -69,7 +37,7 @@ public class GXParseDynamicCallParamServiceImpl implements GXParseDynamicCallPar
             final List<GXDynamicCallParamAttributeReqDto> attributes = callParamDto.getAttributes();
 
             if (attributes == null || attributes.isEmpty()) {
-                log.warn("参数属性列表为空");
+                log.warn("Dynamic call parameter attribute list is empty");
                 return null;
             }
 
@@ -78,18 +46,58 @@ public class GXParseDynamicCallParamServiceImpl implements GXParseDynamicCallPar
             }
 
             final Dict paramValueObject = getParamValueObject(attributes);
-            Class<?> aClass;
             try {
-                aClass = Class.forName(javaType);
-                return JSONUtil.toBean(JSONUtil.toJsonStr(paramValueObject), aClass);
+                Class<?> targetClass = Class.forName(javaType);
+                return JSONUtil.toBean(JSONUtil.toJsonStr(paramValueObject), targetClass);
             } catch (Exception e) {
-                log.error("将参数值对象{}转换为{}类型失败: {}",
-                        JSONUtil.toJsonStr(paramValueObject), javaType, e.getMessage(), e);
+                log.error("Failed to convert dynamic parameter object: targetType={}, error={}",
+                        javaType, e.getMessage(), e);
             }
         } catch (Exception e) {
-            log.error("解析动态调用参数失败: {}", e.getMessage(), e);
+            log.error("Failed to parse dynamic call parameter: error={}", e.getMessage(), e);
         }
         return null;
+    }
+
+    @Override
+    public Map<String, Object> getDynamicCallMethodParamMap(String jsonStr) {
+        GXDynamicCallParamReqDto callParamDto = parseDynamicCallParam(jsonStr);
+        if (callParamDto == null || callParamDto.getAttributes() == null || callParamDto.getAttributes().isEmpty()) {
+            return Dict.create();
+        }
+        return getParamValueObject(callParamDto.getAttributes());
+    }
+
+    @Override
+    public <T> T getDynamicCallMethodParamValue(String jsonStr, Class<T> clazz) {
+        if (clazz == null) {
+            throw new IllegalArgumentException("Target type must not be null");
+        }
+        Object value = getDynamicCallMethodParamValue(jsonStr);
+        if (value == null) {
+            return null;
+        }
+        if (clazz.isInstance(value)) {
+            return clazz.cast(value);
+        }
+        return JSONUtil.toBean(JSONUtil.toJsonStr(value), clazz);
+    }
+
+    private GXDynamicCallParamReqDto parseDynamicCallParam(String jsonStr) {
+        if (CharSequenceUtil.isBlank(jsonStr) || !JSONUtil.isTypeJSON(jsonStr)) {
+            log.error("Dynamic call parameter must be valid JSON");
+            return null;
+        }
+        try {
+            GXDynamicCallParamReqDto callParamDto = JSONUtil.toBean(jsonStr, GXDynamicCallParamReqDto.class);
+            if (callParamDto == null) {
+                log.error("Failed to parse dynamic call parameter JSON");
+            }
+            return callParamDto;
+        } catch (Exception e) {
+            log.error("Failed to parse dynamic call parameter JSON: error={}", e.getMessage(), e);
+            return null;
+        }
     }
 
     private List<Object> getParamValueList(List<GXDynamicCallParamAttributeReqDto> callParamAttributes) {
@@ -102,25 +110,13 @@ public class GXParseDynamicCallParamServiceImpl implements GXParseDynamicCallPar
             }
 
             final String dataSource = attribute.getDataSource();
-            Object value = null;
-
             if (CharSequenceUtil.isBlank(dataSource)) {
-                log.warn("参数数据源类型为空");
+                log.warn("Dynamic call parameter data source is empty");
                 objects.add(null);
                 continue;
             }
 
-            if (CharSequenceUtil.equalsIgnoreCase(dataSource, "token")) {
-                value = getValueFromToken(attribute);
-            } else if (CharSequenceUtil.equalsIgnoreCase(dataSource, "assign")) {
-                value = getValueFromAssign(attribute);
-            } else if (CharSequenceUtil.equalsIgnoreCase(dataSource, "callback")) {
-                value = getValueFromCallback(attribute);
-            } else {
-                log.warn("未知的参数数据源类型: {}", dataSource);
-            }
-
-            objects.add(value);
+            objects.add(getValueByDataSource(attribute, dataSource, null));
         }
 
         return objects;
@@ -136,48 +132,97 @@ public class GXParseDynamicCallParamServiceImpl implements GXParseDynamicCallPar
 
             final String fieldName = attribute.getFieldName();
             if (CharSequenceUtil.isBlank(fieldName)) {
-                log.warn("字段名为空，无法设置参数对象属性");
+                log.warn("Dynamic call parameter field name is empty");
                 continue;
             }
 
             final String dataSource = attribute.getDataSource();
             if (CharSequenceUtil.isBlank(dataSource)) {
-                log.warn("字段[{}]的数据源类型为空", fieldName);
+                log.warn("Dynamic call parameter data source is empty: fieldName={}", fieldName);
                 dict.set(fieldName, null);
                 continue;
             }
 
-            Object value = null;
-            if (CharSequenceUtil.equalsIgnoreCase(dataSource, "token")) {
-                value = getValueFromToken(attribute);
-            } else if (CharSequenceUtil.equalsIgnoreCase(dataSource, "assign")) {
-                value = getValueFromAssign(attribute);
-            } else if (CharSequenceUtil.equalsIgnoreCase(dataSource, "callback")) {
-                value = getValueFromCallback(attribute);
-            } else {
-                log.warn("未知的数据源类型: {}, 字段: {}", dataSource, fieldName);
-            }
-
-            dict.set(fieldName, value);
+            dict.set(fieldName, getValueByDataSource(attribute, dataSource, fieldName));
         }
 
         return dict;
     }
 
-    private Object getValueFromToken(GXDynamicCallParamAttributeReqDto callParamDto) {
-        if (callParamDto == null || CharSequenceUtil.isBlank(callParamDto.getSourceFieldName())) {
-            log.warn("Token参数配置不完整，无法获取Token字段值");
+    private Object getValueByDataSource(GXDynamicCallParamAttributeReqDto attribute, String dataSource, String fieldName) {
+        if (CharSequenceUtil.equalsIgnoreCase(dataSource, "token")) {
+            return getValueFromToken(attribute);
+        }
+        if (CharSequenceUtil.equalsIgnoreCase(dataSource, "assign")) {
+            return getValueFromAssign(attribute);
+        }
+        if (CharSequenceUtil.equalsIgnoreCase(dataSource, "callback")) {
+            return getValueFromCallback(attribute);
+        }
+        if (fieldName == null) {
+            log.warn("Unknown dynamic call parameter data source: {}", dataSource);
+        } else {
+            log.warn("Unknown dynamic call parameter data source: dataSource={}, fieldName={}", dataSource, fieldName);
+        }
+        return null;
+    }
+
+    private Object getValueFromCallback(GXDynamicCallParamAttributeReqDto callParamDto) {
+        if (callParamDto == null || CharSequenceUtil.isBlank(callParamDto.getCallBackClassName())
+                || CharSequenceUtil.isBlank(callParamDto.getCallBackMethodName())) {
+            log.error("Callback parameter config is incomplete");
             return null;
         }
 
         try {
-            // TODO: 此处应该集成实际的认证框架，从请求上下文中获取Token数据
-            final Dict tokenData = Dict.create();
+            final String callBackClassName = callParamDto.getCallBackClassName();
+            final String callBackMethodName = callParamDto.getCallBackMethodName();
+            final Class<?> targetClass = CALLBACK_CLASS_CACHE.computeIfAbsent(callBackClassName, this::loadCallbackClass);
+            final Object bean = GXSpringContextUtils.getBean(targetClass);
+            if (Objects.isNull(bean)) {
+                log.error("Callback bean not found: className={}", callBackClassName);
+                return null;
+            }
 
-            final String sourceFieldName = callParamDto.getSourceFieldName();
-            return tokenData.getObj(sourceFieldName);
+            final Method method = CALLBACK_METHOD_CACHE.computeIfAbsent(callBackClassName + "#" + callBackMethodName,
+                    key -> ReflectUtil.getMethodByName(targetClass, callBackMethodName));
+            if (Objects.isNull(method)) {
+                log.error("Callback method not found: className={}, methodName={}", callBackClassName, callBackMethodName);
+                return null;
+            }
+            if (!method.canAccess(bean)) {
+                method.setAccessible(true);
+            }
+            return method.invoke(bean);
         } catch (Exception e) {
-            log.error("从Token获取字段[{}]值失败: {}",
+            log.error("Failed to invoke callback for dynamic parameter: error={}", e.getMessage(), e);
+            return null;
+        }
+    }
+
+    private Class<?> loadCallbackClass(String className) {
+        try {
+            return Class.forName(className);
+        } catch (ClassNotFoundException e) {
+            throw new IllegalArgumentException("Callback class not found: " + className, e);
+        }
+    }
+
+    private Object getValueFromAssign(GXDynamicCallParamAttributeReqDto callParamDto) {
+        return callParamDto != null ? callParamDto.getFixedAssignedValue() : null;
+    }
+
+    private Object getValueFromToken(GXDynamicCallParamAttributeReqDto callParamDto) {
+        if (callParamDto == null || CharSequenceUtil.isBlank(callParamDto.getSourceFieldName())) {
+            log.warn("Token parameter config is incomplete");
+            return null;
+        }
+
+        try {
+            final Dict tokenData = Dict.create();
+            return tokenData.getObj(callParamDto.getSourceFieldName());
+        } catch (Exception e) {
+            log.error("Failed to get token field value: fieldName={}, error={}",
                     callParamDto.getSourceFieldName(), e.getMessage(), e);
             return null;
         }

@@ -75,7 +75,6 @@ public class GXAuthCodeUtils {
         int j = 0;
         for (int i = 0; i < kLen; i++) {
             j = (j + ((mBox[i] + 256) % 256) + pass[i % pass.length]) % kLen;
-            // 交换S盒中的值
             byte temp = mBox[i];
             mBox[i] = mBox[j];
             mBox[j] = temp;
@@ -86,7 +85,7 @@ public class GXAuthCodeUtils {
     private static String randomString(int lens) {
         char[] chars = {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
         int cLens = chars.length;
-        StringBuilder sCode = new StringBuilder();
+        StringBuilder sCode = new StringBuilder(lens);
         for (int i = 0; i < lens; i++) {
             sCode.append(chars[RandomUtil.randomInt(cLens)]);
         }
@@ -95,7 +94,6 @@ public class GXAuthCodeUtils {
 
     public static String authCodeEncode(String source, String key, int expiry) {
         String authCodeStr = authCode(source, key, GXAuthCodeMode.ENCODE, expiry);
-        //return Base64Utils.encodeToUrlSafeString(authCodeStr.getBytes(StandardCharsets.UTF_8));
         return Base64Encoder.encodeUrlSafe(authCodeStr.getBytes(StandardCharsets.UTF_8));
     }
 
@@ -104,9 +102,15 @@ public class GXAuthCodeUtils {
     }
 
     public static String authCodeDecode(String source, String key) {
-        //String base64DecodeStr = new String(Base64Utils.decodeFromUrlSafeString(source));
-        String base64DecodeStr = Base64Decoder.decodeStr(source);
-        return authCode(base64DecodeStr, key, GXAuthCodeMode.DECODE, 0);
+        try {
+            if (CharSequenceUtil.isEmpty(source)) {
+                return "{}";
+            }
+            String base64DecodeStr = Base64Decoder.decodeStr(source);
+            return authCode(base64DecodeStr, key, GXAuthCodeMode.DECODE, 0);
+        } catch (Exception e) {
+            return "{}";
+        }
     }
 
     private static String authCode(String source, String key, GXAuthCodeMode operation, int expiry) {
@@ -128,17 +132,20 @@ public class GXAuthCodeUtils {
             cryptKey = keyA + md5(keyA + keyC);
 
             if (operation == GXAuthCodeMode.DECODE) {
+                if (source.length() <= cKeyLength) {
+                    return "{}";
+                }
                 byte[] temp;
                 temp = Base64.decode(cutString(source, cKeyLength).getBytes(StandardCharsets.UTF_8));
-                result = new String(rc4(temp, cryptKey));
-                if ((result.indexOf("0000000000") == 0 || Integer.parseInt(cutString(result, 0, 10)) - DateUtil.currentSeconds() > 0) &&
+                result = new String(rc4(temp, cryptKey), StandardCharsets.UTF_8);
+                if ((result.indexOf("0000000000") == 0 || Long.parseLong(cutString(result, 0, 10)) - DateUtil.currentSeconds() > 0) &&
                         cutString(result, 10, 16).equals(cutString(md5(cutString(result, 26) + keyB), 0, 16))) {
                     return cutString(result, 26);
                 }
                 return "{}";
             } else {
-                expiry = expiry > 0 ? (int) (DateUtil.currentSeconds() + expiry) : 0;
-                source = String.format("%010d", expiry) + cutString(md5(source + keyB), 0, 16) + source;
+                long expiryTime = expiry > 0 ? DateUtil.currentSeconds() + expiry : 0;
+                source = String.format("%010d", expiryTime) + cutString(md5(source + keyB), 0, 16) + source;
                 byte[] temp = rc4(source.getBytes(StandardCharsets.UTF_8), cryptKey);
                 return String.format("%s%s", keyC, Base64.encode(temp));
             }
@@ -152,7 +159,7 @@ public class GXAuthCodeUtils {
             return new byte[0];
         }
         byte[] output = new byte[input.length];
-        byte[] mBox = getKey(pass.getBytes(), 256);
+        byte[] mBox = getKey(pass.getBytes(StandardCharsets.UTF_8), 256);
         int i = 0;
         int j = 0;
         for (int offset = 0; offset < input.length; offset++) {
