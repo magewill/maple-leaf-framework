@@ -14,6 +14,7 @@ import feign.RequestInterceptor;
 import feign.RequestTemplate;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.annotation.AnnotationUtils;
 
 import java.lang.reflect.Method;
@@ -25,13 +26,30 @@ import java.util.List;
  */
 @Slf4j
 public class GXFeignRequestInterceptor implements RequestInterceptor {
+    private final ObjectProvider<GXFeignService> feignServiceProvider;
+
+    public GXFeignRequestInterceptor() {
+        this(null);
+    }
+
+    public GXFeignRequestInterceptor(ObjectProvider<GXFeignService> feignServiceProvider) {
+        this.feignServiceProvider = feignServiceProvider;
+    }
+
     @Override
     public void apply(RequestTemplate requestTemplate) {
-        GXFeignService feignService = GXSpringContextUtils.getBean(GXFeignService.class);
+        GXFeignService feignService = resolveFeignService();
         propagateAnnotatedHeaders(requestTemplate);
         propagateServiceHeaders(requestTemplate, feignService);
         propagateTraceId(requestTemplate, feignService);
         appendCommonHeaders(requestTemplate);
+    }
+
+    private GXFeignService resolveFeignService() {
+        if (feignServiceProvider != null) {
+            return feignServiceProvider.getIfAvailable();
+        }
+        return GXSpringContextUtils.getBean(GXFeignService.class);
     }
 
     private void propagateServiceHeaders(RequestTemplate requestTemplate, GXFeignService feignService) {
@@ -51,7 +69,7 @@ public class GXFeignRequestInterceptor implements RequestInterceptor {
         if (StrUtil.isNotBlank(platform)) {
             requestTemplate.removeHeader(GXTokenConstant.PLATFORM);
             requestTemplate.header(GXTokenConstant.PLATFORM, platform);
-            log.debug("Propagated platform identifier [{}] to Feign request", platform);
+            log.debug("Propagated platform identifier to Feign request");
         }
     }
 
@@ -66,26 +84,26 @@ public class GXFeignRequestInterceptor implements RequestInterceptor {
         if (StrUtil.isNotBlank(traceId)) {
             requestTemplate.removeHeader(GXTraceIdContextUtils.TRACE_ID_KEY);
             requestTemplate.header(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
-            log.debug("Propagated trace ID [{}] to Feign request", traceId);
+            log.debug("Propagated trace ID to Feign request");
         }
     }
 
     private void appendCommonHeaders(RequestTemplate requestTemplate) {
         String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class);
         if (CharSequenceUtil.isNotBlank(appName)) {
-            requestTemplate.header("X-Request-Source", appName);
+            replaceHeader(requestTemplate, "X-Request-Source", appName);
         }
 
-        requestTemplate.header("X-Request-Start-Time", String.valueOf(System.currentTimeMillis()));
-        requestTemplate.header("X-Content-Type-Options", "nosniff");
-        requestTemplate.header("X-Frame-Options", "DENY");
-        requestTemplate.header("X-XSS-Protection", "1; mode=block");
-        requestTemplate.header("Cache-Control", "no-cache, no-store, must-revalidate");
-        requestTemplate.header("Pragma", "no-cache");
-        requestTemplate.header("Expires", "0");
+        replaceHeader(requestTemplate, "X-Request-Start-Time", String.valueOf(System.currentTimeMillis()));
+        replaceHeader(requestTemplate, "X-Content-Type-Options", "nosniff");
+        replaceHeader(requestTemplate, "X-Frame-Options", "DENY");
+        replaceHeader(requestTemplate, "X-XSS-Protection", "1; mode=block");
+        replaceHeader(requestTemplate, "Cache-Control", "no-cache, no-store, must-revalidate");
+        replaceHeader(requestTemplate, "Pragma", "no-cache");
+        replaceHeader(requestTemplate, "Expires", "0");
 
         String userAgent = String.format("Maple-Leaf-Feign/1.0 (%s)", System.getProperty("os.name", "Unknown"));
-        requestTemplate.header("User-Agent", userAgent);
+        replaceHeader(requestTemplate, "User-Agent", userAgent);
     }
 
     private void propagateAnnotatedHeaders(RequestTemplate requestTemplate) {
@@ -112,8 +130,14 @@ public class GXFeignRequestInterceptor implements RequestInterceptor {
             if (headerValues.isEmpty()) {
                 continue;
             }
+            requestTemplate.removeHeader(headerName);
             requestTemplate.header(headerName, headerValues);
-            log.debug("Propagated annotated header [{}] to Feign request", headerName);
+            log.debug("Propagated annotated header to Feign request");
         }
+    }
+
+    private void replaceHeader(RequestTemplate requestTemplate, String headerName, String headerValue) {
+        requestTemplate.removeHeader(headerName);
+        requestTemplate.header(headerName, headerValue);
     }
 }
