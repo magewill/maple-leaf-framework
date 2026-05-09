@@ -72,6 +72,23 @@ class GXSpringContextUtilsTest {
         }
     }
 
+    @Test
+    void registerSingletonUsesBeanNameInsteadOfBeanType() {
+        GenericApplicationContext context = new GenericApplicationContext();
+        context.refresh();
+        replaceApplicationContext(context);
+
+        try {
+            GXSpringContextUtils.registerSingleton("firstString", "first");
+            GXSpringContextUtils.registerSingleton("secondString", "second");
+
+            assertEquals("first", GXSpringContextUtils.getBean("firstString"));
+            assertEquals("second", GXSpringContextUtils.getBean("secondString"));
+        } finally {
+            context.close();
+        }
+    }
+
     private static void replaceApplicationContext(ApplicationContext applicationContext) {
         ReflectionTestUtils.setField(GXApplicationContextSingleton.INSTANCE, "applicationContext", applicationContext);
     }

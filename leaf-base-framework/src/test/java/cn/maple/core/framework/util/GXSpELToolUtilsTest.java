@@ -32,7 +32,7 @@ class GXSpELToolUtilsTest {
         testContext.getBeanFactory().registerSingleton("sampleBean", new SampleBean());
         testContext.refresh();
         replaceApplicationContext(testContext);
-        GXSpELToolUtils.clearExpressionCache();
+        GXSpELToolUtils.clearCaches();
     }
 
     @AfterEach
@@ -41,7 +41,7 @@ class GXSpELToolUtilsTest {
         if (testContext != null) {
             testContext.close();
         }
-        GXSpELToolUtils.clearExpressionCache();
+        GXSpELToolUtils.clearCaches();
     }
 
     @Test
@@ -178,6 +178,45 @@ class GXSpELToolUtilsTest {
     }
 
     @Test
+    void missingTargetObjectMethodIsCached() {
+        GXSpELToolUtils.clearMethodCache();
+        SampleTarget target = new SampleTarget();
+
+        assertNull(GXSpELToolUtils.callTargetObjectMethodSpELExpression(
+                target,
+                "missing",
+                String.class,
+                new Class[0]
+        ));
+        long cacheSizeAfterFirstCall = GXSpELToolUtils.methodCacheEstimatedSize();
+
+        assertNull(GXSpELToolUtils.callTargetObjectMethodSpELExpression(
+                target,
+                "missing",
+                String.class,
+                new Class[0]
+        ));
+
+        assertEquals(1, cacheSizeAfterFirstCall);
+        assertEquals(cacheSizeAfterFirstCall, GXSpELToolUtils.methodCacheEstimatedSize());
+    }
+
+    @Test
+    void callTargetObjectMethodReturnsNullWhenArgumentCountMismatches() {
+        SampleTarget target = new SampleTarget();
+
+        String result = GXSpELToolUtils.callTargetObjectMethodSpELExpression(
+                target,
+                "join",
+                String.class,
+                new Class[]{String.class, String.class},
+                "left"
+        );
+
+        assertNull(result);
+    }
+
+    @Test
     void setObjectValueReturnsOldValueAndUpdatesTarget() {
         SampleTarget target = new SampleTarget();
         target.name = "old";
@@ -257,4 +296,5 @@ class GXSpELToolUtilsTest {
             return left + ":" + right;
         }
     }
+
 }

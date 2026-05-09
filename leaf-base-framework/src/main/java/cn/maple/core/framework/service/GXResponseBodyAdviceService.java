@@ -12,7 +12,7 @@ import java.util.List;
 
 public interface GXResponseBodyAdviceService {
     default boolean supports(MethodParameter returnType, Class<?> converterType) {
-        return returnType.getParameterType().isAssignableFrom(GXResultUtils.class);
+        return GXResultUtils.class.isAssignableFrom(returnType.getParameterType());
     }
 
     default Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType selectedContentType, Class<? extends HttpMessageConverter<?>> selectedConverterType, ServerHttpRequest request, ServerHttpResponse response) {

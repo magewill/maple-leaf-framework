@@ -5,10 +5,12 @@ import cn.maple.core.framework.code.GXDefaultResultStatusCode;
 import cn.maple.core.framework.exception.GXBusinessException;
 import lombok.Data;
 
+import java.io.Serial;
 import java.io.Serializable;
 
 @Data
 public class GXResultUtils<T> implements Serializable {
+    @Serial
     private static final long serialVersionUID = 1L;
 
     private static final String FAIL_MSG = "fail";

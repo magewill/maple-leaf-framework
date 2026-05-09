@@ -3,6 +3,11 @@ package cn.maple.core.framework.util;
 import cn.maple.core.framework.config.aware.GXApplicationContextSingleton;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.BeanCreationException;
+import org.springframework.beans.factory.NoSuchBeanDefinitionException;
+import org.springframework.beans.factory.NoUniqueBeanDefinitionException;
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.support.AbstractApplicationContext;
 import org.springframework.core.env.Environment;
@@ -27,7 +32,11 @@ public class GXSpringContextUtils {
         }
         try {
             return applicationContext.getBean(name);
-        } catch (Exception e) {
+        } catch (NoSuchBeanDefinitionException e) {
+            LOG.debug("Bean not found: name={}", name);
+        } catch (BeanCreationException e) {
+            LOG.error("Failed to create bean: name={}, error={}", name, e.getMessage(), e);
+        } catch (BeansException e) {
             LOG.warn("Failed to get bean: name={}, error={}", name, e.getMessage());
         }
         return null;
@@ -40,7 +49,13 @@ public class GXSpringContextUtils {
         }
         try {
             return applicationContext.getBean(clazz);
-        } catch (Exception e) {
+        } catch (NoUniqueBeanDefinitionException e) {
+            LOG.warn("Multiple beans found for type={}, count={}", clazz.getName(), e.getNumberOfBeansFound());
+        } catch (NoSuchBeanDefinitionException e) {
+            LOG.debug("Bean not found: type={}", clazz.getName());
+        } catch (BeanCreationException e) {
+            LOG.error("Failed to create bean: type={}, error={}", clazz.getName(), e.getMessage(), e);
+        } catch (BeansException e) {
             LOG.debug("Failed to get bean: type={}, error={}", clazz.getSimpleName(), e.getMessage());
         }
         return null;
@@ -53,7 +68,11 @@ public class GXSpringContextUtils {
         }
         try {
             return applicationContext.getBean(name, requiredType);
-        } catch (Exception e) {
+        } catch (NoSuchBeanDefinitionException e) {
+            LOG.debug("Bean not found: name={}, type={}", name, requiredType.getName());
+        } catch (BeanCreationException e) {
+            LOG.error("Failed to create bean: name={}, type={}, error={}", name, requiredType.getName(), e.getMessage(), e);
+        } catch (BeansException e) {
             LOG.debug("Failed to get bean: name={}, type={}, error={}", name, requiredType.getSimpleName(), e.getMessage());
         }
         return null;
@@ -138,15 +157,18 @@ public class GXSpringContextUtils {
         }
 
         try {
-            if (null == getBean(singletonObject.getClass())) {
-                if (applicationContext instanceof AbstractApplicationContext) {
-                    ((AbstractApplicationContext) applicationContext).getBeanFactory().registerSingleton(beanName, singletonObject);
+            if (applicationContext instanceof AbstractApplicationContext abstractApplicationContext) {
+                ConfigurableListableBeanFactory beanFactory = abstractApplicationContext.getBeanFactory();
+                synchronized (beanFactory) {
+                    if (beanFactory.containsBean(beanName)) {
+                        LOG.debug("Bean name already exists, skip register: name={}", beanName);
+                        return;
+                    }
+                    beanFactory.registerSingleton(beanName, singletonObject);
                     LOG.debug("Registered singleton bean: name={}, type={}", beanName, singletonObject.getClass().getName());
-                } else {
-                    LOG.debug("Cannot register bean: ApplicationContext is not AbstractApplicationContext");
                 }
             } else {
-                LOG.debug("Bean type already exists, skip register: type={}", singletonObject.getClass().getName());
+                LOG.debug("Cannot register bean: ApplicationContext is not AbstractApplicationContext");
             }
         } catch (Exception e) {
             LOG.error("Failed to register singleton bean: name={}, type={}, error={}", beanName, singletonObject.getClass().getName(), e.getMessage(), e);

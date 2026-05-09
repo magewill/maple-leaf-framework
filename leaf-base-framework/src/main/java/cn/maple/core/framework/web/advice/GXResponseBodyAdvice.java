@@ -6,9 +6,8 @@ import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.framework.service.GXResponseBodyAdviceService;
 import cn.maple.core.framework.util.GXAuthCodeUtils;
 import cn.maple.core.framework.util.GXCommonUtils;
-import cn.maple.core.framework.util.GXResultUtils;
-import cn.maple.core.framework.util.GXSpringContextUtils;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.web.server.Cookie;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpHeaders;
@@ -25,36 +24,37 @@ import java.util.List;
 @Log4j2
 @RestControllerAdvice
 public class GXResponseBodyAdvice implements ResponseBodyAdvice<Object> {
-    @Override
-    public boolean supports(MethodParameter returnType, Class converterType) {
-        GXResponseBodyAdviceService responseBodyAdviceService = GXSpringContextUtils.getBean(GXResponseBodyAdviceService.class);
-        if (ObjectUtil.isNotNull(responseBodyAdviceService)) {
-            return responseBodyAdviceService.supports(returnType, converterType);
-        }
-        return returnType.getParameterType().isAssignableFrom(GXResultUtils.class);
+    private static final GXResponseBodyAdviceService DEFAULT_SERVICE = new GXResponseBodyAdviceService() {
+    };
+
+    private final ObjectProvider<GXResponseBodyAdviceService> responseBodyAdviceServiceProvider;
+
+    public GXResponseBodyAdvice(ObjectProvider<GXResponseBodyAdviceService> responseBodyAdviceServiceProvider) {
+        this.responseBodyAdviceServiceProvider = responseBodyAdviceServiceProvider;
     }
 
     @Override
-    public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType selectedContentType, Class<? extends HttpMessageConverter<?>> selectedConverterType, ServerHttpRequest request, ServerHttpResponse response) {
-        log.debug("响应拦截成功!");
+    public boolean supports(MethodParameter returnType, Class<? extends HttpMessageConverter<?>> converterType) {
+        return getResponseBodyAdviceService().supports(returnType, converterType);
+    }
+
+    @Override
+    public Object beforeBodyWrite(Object body, MethodParameter returnType, MediaType selectedContentType,
+                                  Class<? extends HttpMessageConverter<?>> selectedConverterType,
+                                  ServerHttpRequest request, ServerHttpResponse response) {
+        log.debug("Response body advice applied");
         boolean allowCredentials = GXCommonUtils.getEnvironmentValue("cors.allow.credentials", boolean.class, false);
         if (allowCredentials) {
             List<String> cookies = buildCookies();
             cookies.forEach(cookie -> response.getHeaders().add(HttpHeaders.SET_COOKIE, cookie));
         }
-        GXResponseBodyAdviceService responseBodyAdviceService = GXSpringContextUtils.getBean(GXResponseBodyAdviceService.class);
-        if (ObjectUtil.isNotNull(responseBodyAdviceService)) {
-            return responseBodyAdviceService.beforeBodyWrite(body, returnType, selectedContentType, selectedConverterType, request, response);
-        }
-        return body;
+        return getResponseBodyAdviceService().beforeBodyWrite(body, returnType, selectedContentType,
+                selectedConverterType, request, response);
     }
 
     private List<String> buildCookies() {
-        GXResponseBodyAdviceService responseBodyAdviceService = GXSpringContextUtils.getBean(GXResponseBodyAdviceService.class);
-        if (ObjectUtil.isNotNull(responseBodyAdviceService)) {
-            return responseBodyAdviceService.buildCookies();
-        }
-        return defaultBuildCookies();
+        GXResponseBodyAdviceService responseBodyAdviceService = responseBodyAdviceServiceProvider.getIfUnique();
+        return ObjectUtil.isNotNull(responseBodyAdviceService) ? responseBodyAdviceService.buildCookies() : defaultBuildCookies();
     }
 
     private List<String> defaultBuildCookies() {
@@ -75,5 +75,10 @@ public class GXResponseBodyAdvice implements ResponseBodyAdvice<Object> {
             return CollUtil.newArrayList(cookie.toString());
         }
         return CollUtil.newArrayList();
+    }
+
+    private GXResponseBodyAdviceService getResponseBodyAdviceService() {
+        GXResponseBodyAdviceService responseBodyAdviceService = responseBodyAdviceServiceProvider.getIfUnique();
+        return ObjectUtil.defaultIfNull(responseBodyAdviceService, DEFAULT_SERVICE);
     }
 }

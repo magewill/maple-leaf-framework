@@ -23,12 +23,9 @@ public interface GXRequestBodyAdviceService {
     }
 
     default Object afterBodyRead(Object body, HttpInputMessage inputMessage, MethodParameter parameter, Type targetType, Class<? extends HttpMessageConverter<?>> converterType) {
-        try {
-            GXCommonUtils.reflectCallObjectMethod(body, BEFORE_REPAIR_METHOD);
-            GXCommonUtils.reflectCallObjectMethod(body, VERIFY_METHOD);
-            GXCommonUtils.reflectCallObjectMethod(body, AFTER_REPAIR_METHOD);
-        } catch (Exception ignored) {
-        }
+        GXCommonUtils.reflectCallObjectMethod(body, BEFORE_REPAIR_METHOD);
+        GXCommonUtils.reflectCallObjectMethod(body, VERIFY_METHOD);
+        GXCommonUtils.reflectCallObjectMethod(body, AFTER_REPAIR_METHOD);
         return body;
     }
 

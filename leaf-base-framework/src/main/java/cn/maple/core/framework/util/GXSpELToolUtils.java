@@ -4,6 +4,8 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.ReflectUtil;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.validation.constraints.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,7 +19,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -38,14 +39,32 @@ public class GXSpELToolUtils {
 
     private static final ExpressionParser PARSER = new SpelExpressionParser();
 
-    private static final Map<String, Expression> EXPRESSION_CACHE = new ConcurrentHashMap<>(256, 0.75f);
-
     private static final int MAX_CACHE_SIZE = 1024;
 
-    private static final ConcurrentHashMap<String, Method> METHOD_CACHE = new ConcurrentHashMap<>(256);
+    private static final Cache<String, Expression> EXPRESSION_CACHE = Caffeine.newBuilder()
+            .maximumSize(MAX_CACHE_SIZE)
+            .build();
+
+    private static final Method METHOD_NOT_FOUND = initMethodNotFound();
+
+    private static final Cache<String, Method> METHOD_CACHE = Caffeine.newBuilder()
+            .maximumSize(MAX_CACHE_SIZE)
+            .build();
 
     private GXSpELToolUtils() {
         throw new AssertionError("Utility class, cannot be instantiated");
+    }
+
+    private static Method initMethodNotFound() {
+        try {
+            return GXSpELToolUtils.class.getDeclaredMethod("__methodNotFound");
+        } catch (NoSuchMethodException e) {
+            throw new ExceptionInInitializerError(e);
+        }
+    }
+
+    @SuppressWarnings("unused")
+    private static void __methodNotFound() {
     }
 
     /**
@@ -110,12 +129,20 @@ public class GXSpELToolUtils {
         if (data.isEmpty()) {
             return GXCommonUtils.getClassDefaultValue(clazz);
         }
-        data.forEach((key, value) -> {
-            final Expression expression = getOrCreateExpression(key);
-            expression.setValue(context, value);
-        });
-        final Expression expression = getOrCreateExpression(targetKey);
-        return expression.getValue(context, clazz);
+        try {
+            data.forEach((key, value) -> {
+                final Expression expression = getOrCreateExpression(String.valueOf(key));
+                expression.setValue(context, value);
+            });
+            final Expression expression = getOrCreateExpression(targetKey);
+            return expression.getValue(context, clazz);
+        } catch (SpelEvaluationException e) {
+            LOG.error("Failed to assign SpEL expression: targetKey={}, error={}", targetKey, e.getMessage());
+        } catch (Exception e) {
+            LOG.error("Unexpected error while assigning SpEL expression: targetKey={}, type={}, error={}",
+                    targetKey, e.getClass().getName(), e.getMessage());
+        }
+        return GXCommonUtils.getClassDefaultValue(clazz);
     }
 
     /**
@@ -133,6 +160,9 @@ public class GXSpELToolUtils {
         }
         methodParamTypes = normalizeParameterTypes(methodParamTypes);
         params = normalizeParams(params);
+        if (invalidArgumentCount(methodName, methodParamTypes, params)) {
+            return null;
+        }
 
         if (methodNotExists(targetClass, methodName, methodParamTypes)) {
             return null;
@@ -144,7 +174,15 @@ public class GXSpELToolUtils {
                 .build();
         final String expressionString = CharSequenceUtil.format("#{}({})", methodName, parsePlaceholderParams(methodParamTypes, params));
         final Expression expression = getOrCreateExpression(expressionString);
-        return expression.getValue(context, clazz);
+        try {
+            return expression.getValue(context, clazz);
+        } catch (SpelEvaluationException e) {
+            LOG.error("Failed to invoke registered function: method={}, error={}", methodName, e.getMessage());
+        } catch (Exception e) {
+            LOG.error("Unexpected error while invoking registered function: method={}, type={}, error={}",
+                    methodName, e.getClass().getName(), e.getMessage());
+        }
+        return null;
     }
 
     /**
@@ -162,6 +200,9 @@ public class GXSpELToolUtils {
         }
         methodParamTypes = normalizeParameterTypes(methodParamTypes);
         params = normalizeParams(params);
+        if (invalidArgumentCount(methodName, methodParamTypes, params)) {
+            return null;
+        }
         final Object beanObj = GXSpringContextUtils.getBean(beanClazz);
         if (Objects.isNull(beanObj)) {
             LOG.warn("Spring bean not found: type={}", beanClazz.getName());
@@ -187,6 +228,9 @@ public class GXSpELToolUtils {
         }
         methodParamTypes = normalizeParameterTypes(methodParamTypes);
         params = normalizeParams(params);
+        if (invalidArgumentCount(methodName, methodParamTypes, params)) {
+            return null;
+        }
 
         final Method method = getMethodFromCache(targetObject.getClass(), methodName, methodParamTypes);
         if (Objects.isNull(method)) {
@@ -254,16 +298,32 @@ public class GXSpELToolUtils {
                 .addVariable("data", dict)
                 .build();
         final Expression expression = getOrCreateExpression(expressionString);
-        final T oldValue = expression.getValue(context, oldValueClazz);
-        expression.setValue(context, newValue);
-        return oldValue;
+        try {
+            final T oldValue = expression.getValue(context, oldValueClazz);
+            expression.setValue(context, newValue);
+            return oldValue;
+        } catch (SpelEvaluationException e) {
+            LOG.error("Failed to set dict value: expression={}, newValue={}, error={}", expressionString, newValue, e.getMessage());
+        } catch (Exception e) {
+            LOG.error("Unexpected error while setting dict value: expression={}, newValue={}, type={}, error={}",
+                    expressionString, newValue, e.getClass().getName(), e.getMessage());
+        }
+        return null;
     }
 
     public static void clearExpressionCache() {
-        synchronized (EXPRESSION_CACHE) {
-            EXPRESSION_CACHE.clear();
-            LOG.debug("SpEL expression cache cleared.");
-        }
+        EXPRESSION_CACHE.invalidateAll();
+        LOG.debug("SpEL expression cache cleared.");
+    }
+
+    public static void clearMethodCache() {
+        METHOD_CACHE.invalidateAll();
+        LOG.debug("SpEL method cache cleared.");
+    }
+
+    public static void clearCaches() {
+        clearExpressionCache();
+        clearMethodCache();
     }
 
     public static ContextBuilder contextBuilder(Object rootObject) {
@@ -288,7 +348,7 @@ public class GXSpELToolUtils {
     }
 
     private static boolean methodNotExists(Class<?> beanClazz, String methodName, Class<?>[] methodParamTypes) {
-        final Method method = ReflectUtil.getMethod(beanClazz, methodName, methodParamTypes);
+        final Method method = getMethodFromCache(beanClazz, methodName, methodParamTypes);
         if (Objects.isNull(method)) {
             LOG.error(METHOD_NOT_FOUND_TIPS_TEMPLATE, beanClazz.getSimpleName(), methodName, parameterTypesToString(methodParamTypes));
             return true;
@@ -359,6 +419,15 @@ public class GXSpELToolUtils {
         return params == null ? new Object[0] : params;
     }
 
+    private static boolean invalidArgumentCount(String methodName, Class<?>[] methodParamTypes, Object[] params) {
+        if (methodParamTypes.length == params.length) {
+            return false;
+        }
+        LOG.warn("Method argument count mismatch: method={}, expected={}, actual={}",
+                methodName, methodParamTypes.length, params.length);
+        return true;
+    }
+
     private static String parameterTypesToString(Class<?>[] parameterTypes) {
         if (parameterTypes == null || parameterTypes.length == 0) {
             return "";
@@ -369,35 +438,34 @@ public class GXSpELToolUtils {
     }
 
     private static Expression getOrCreateExpression(String expressionString) {
-        if (EXPRESSION_CACHE.size() > MAX_CACHE_SIZE) {
-            synchronized (EXPRESSION_CACHE) {
-                if (EXPRESSION_CACHE.size() > MAX_CACHE_SIZE) {
-                    LOG.debug("SpEL expression cache size exceeded threshold: size={}", EXPRESSION_CACHE.size());
-                    EXPRESSION_CACHE.keySet().stream()
-                            .skip(EXPRESSION_CACHE.size() / 2L)
-                            .toList()
-                            .forEach(EXPRESSION_CACHE::remove);
-                    LOG.debug("SpEL expression cache cleanup complete: size={}", EXPRESSION_CACHE.size());
-                }
-            }
-        }
-        return EXPRESSION_CACHE.computeIfAbsent(expressionString, PARSER::parseExpression);
+        return EXPRESSION_CACHE.get(expressionString, PARSER::parseExpression);
     }
 
     private static Method getMethodFromCache(Class<?> targetClass, String methodName, Class<?>[] parameterTypes) {
-        String cacheKey = generateMethodCacheKey(targetClass, methodName, normalizeParameterTypes(parameterTypes));
+        Class<?>[] actualParameterTypes = normalizeParameterTypes(parameterTypes);
+        String cacheKey = generateMethodCacheKey(targetClass, methodName, actualParameterTypes);
 
-        return METHOD_CACHE.computeIfAbsent(cacheKey, key -> {
+        Method method = METHOD_CACHE.get(cacheKey, key -> {
             try {
-                return ReflectUtil.getMethod(targetClass, methodName, parameterTypes);
+                Method resolvedMethod = ReflectUtil.getMethod(targetClass, methodName, actualParameterTypes);
+                if (resolvedMethod != null) {
+                    return resolvedMethod;
+                }
+                return targetClass.getDeclaredMethod(methodName, actualParameterTypes);
             } catch (Exception e) {
                 LOG.debug("Failed to resolve method: class={}, method={}, parameterTypes={}, error={}",
                         targetClass.getName(), methodName,
-                        parameterTypes == null ? "[]" : Arrays.toString(parameterTypes),
+                        Arrays.toString(actualParameterTypes),
                         e.getMessage());
-                return null;
+                return METHOD_NOT_FOUND;
             }
         });
+        return method == METHOD_NOT_FOUND ? null : method;
+    }
+
+    static long methodCacheEstimatedSize() {
+        METHOD_CACHE.cleanUp();
+        return METHOD_CACHE.estimatedSize();
     }
 
     private static String generateMethodCacheKey(Class<?> clazz, String methodName, Class<?>[] parameterTypes) {
@@ -454,16 +522,11 @@ public class GXSpELToolUtils {
             Class<?>[] actualParameterTypes = normalizeParameterTypes(parameterTypes);
             try {
                 Method method = getMethodFromCache(targetClass, methodName, actualParameterTypes);
-                if (method == null) {
-                    method = targetClass.getDeclaredMethod(methodName, actualParameterTypes);
-                    if (ObjectUtil.isNotNull(method)) {
-                        String cacheKey = generateMethodCacheKey(targetClass, methodName, actualParameterTypes);
-                        METHOD_CACHE.putIfAbsent(cacheKey, method);
-                    }
+                if (method != null) {
+                    context.registerFunction(name, method);
+                } else {
+                    LOG.warn("Failed to register SpEL function: class={}, method={}, error=method not found", targetClass.getName(), methodName);
                 }
-                context.registerFunction(name, method);
-            } catch (NoSuchMethodException e) {
-                LOG.warn("Failed to register SpEL function: class={}, method={}, error={}", targetClass.getName(), methodName, e.getMessage());
             } catch (Exception e) {
                 LOG.error("Unexpected error while registering SpEL function: class={}, method={}, type={}, error={}",
                         targetClass.getName(), methodName, e.getClass().getName(), e.getMessage());

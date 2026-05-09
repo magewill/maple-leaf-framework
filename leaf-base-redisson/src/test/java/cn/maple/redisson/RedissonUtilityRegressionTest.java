@@ -29,6 +29,7 @@ import org.redisson.api.stream.StreamMessageId;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
+import org.springframework.context.ApplicationContext;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
@@ -301,8 +302,7 @@ class RedissonUtilityRegressionTest {
 
     @Test
     void mqPostProcessorFailsFastWhenListenerRegistrationFails() {
-        RedissonClient redissonClient = mock(RedissonClient.class);
-        GXRedissonMQPostProcessor processor = new GXRedissonMQPostProcessor(redissonClient);
+        GXRedissonMQPostProcessor processor = new GXRedissonMQPostProcessor();
         GXRedissonMQListener listener = () -> {
             throw new IllegalStateException("boom");
         };
@@ -316,6 +316,10 @@ class RedissonUtilityRegressionTest {
     @Test
     void streamMqPostProcessorRegistersStreamListenerBeans() {
         GXRedissonStreamMQPostProcessor processor = new GXRedissonStreamMQPostProcessor();
+        ApplicationContext applicationContext = mock(ApplicationContext.class);
+        when(applicationContext.getBean("redissonStreamMessageQueueManager", GXRedissonStreamMQManager.class))
+                .thenReturn(mock(GXRedissonStreamMQManager.class));
+        processor.setApplicationContext(applicationContext);
         AtomicBoolean registered = new AtomicBoolean(false);
         GXRedissonStreamMQListener listener = () -> registered.set(true);
 
@@ -327,6 +331,10 @@ class RedissonUtilityRegressionTest {
     @Test
     void streamMqPostProcessorFailsFastWhenListenerRegistrationFails() {
         GXRedissonStreamMQPostProcessor processor = new GXRedissonStreamMQPostProcessor();
+        ApplicationContext applicationContext = mock(ApplicationContext.class);
+        when(applicationContext.getBean("redissonStreamMessageQueueManager", GXRedissonStreamMQManager.class))
+                .thenReturn(mock(GXRedissonStreamMQManager.class));
+        processor.setApplicationContext(applicationContext);
         GXRedissonStreamMQListener listener = () -> {
             throw new IllegalStateException("boom");
         };
@@ -340,7 +348,7 @@ class RedissonUtilityRegressionTest {
     @Test
     void delayPostProcessorFailsFastWhenAnnotatedBeanDoesNotImplementListener() {
         RedissonClient redissonClient = mock(RedissonClient.class);
-        GXRedissonDelayMQPostProcessor processor = new GXRedissonDelayMQPostProcessor(redissonClient);
+        GXRedissonDelayMQPostProcessor processor = delayPostProcessor(redissonClient);
 
         try {
             assertThrows(
@@ -360,7 +368,7 @@ class RedissonUtilityRegressionTest {
         when(redissonClient.<String>getBlockingQueue("delay-queue")).thenReturn(blockingQueue);
         when(redissonClient.getDelayedQueue(blockingQueue)).thenReturn(delayedQueue);
 
-        GXRedissonDelayMQPostProcessor processor = new GXRedissonDelayMQPostProcessor(redissonClient);
+        GXRedissonDelayMQPostProcessor processor = delayPostProcessor(redissonClient);
         processor.postProcessAfterInitialization(new ValidDelayListenerBean(), "validDelayListener");
 
         Map<String, Object> configs = delayListenerConfigs(processor);
@@ -400,6 +408,14 @@ class RedissonUtilityRegressionTest {
     @SuppressWarnings("unchecked")
     private static Map<String, Object> delayListenerConfigs(GXRedissonDelayMQPostProcessor processor) {
         return (Map<String, Object>) ReflectionTestUtils.getField(processor, "listenerConfigs");
+    }
+
+    private static GXRedissonDelayMQPostProcessor delayPostProcessor(RedissonClient redissonClient) {
+        GXRedissonDelayMQPostProcessor processor = new GXRedissonDelayMQPostProcessor();
+        ApplicationContext applicationContext = mock(ApplicationContext.class);
+        when(applicationContext.getBean("redissonMQClient", RedissonClient.class)).thenReturn(redissonClient);
+        processor.setApplicationContext(applicationContext);
+        return processor;
     }
 
     @GXRedissonDelayMQToTopic(delayQueueName = "delay-queue", topicName = "topic", timeout = 1)

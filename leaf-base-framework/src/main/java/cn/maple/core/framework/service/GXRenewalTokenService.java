@@ -6,8 +6,14 @@ import cn.maple.core.framework.exception.GXBusinessException;
 import java.util.Date;
 
 public interface GXRenewalTokenService {
+    String RENEWAL_TOKEN_MARKER = "renew";
+
     default boolean renewalToken() {
         throw new GXBusinessException("请自定义实现Token无感刷新的逻辑");
+    }
+
+    default String renewalTokenHeaderValue(Dict extraData) {
+        return RENEWAL_TOKEN_MARKER;
     }
 
     default String refreshToken(Dict extraData) {
