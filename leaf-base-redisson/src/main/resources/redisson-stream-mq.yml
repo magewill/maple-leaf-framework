@@ -1,0 +1,20 @@
+redisson:
+  mq:
+    stream:
+      stream-prefix: "mq:stream:"
+      delay-zset-prefix: "mq:delay:"
+      dlq-prefix: "mq:dlq:"
+      processed-message-prefix: "mq:stream:processed:"
+      delay-transfer-prefix: "mq:delay:transfer:"
+      consumer-group: "default-group"
+      consumer-name: "consumer-1"
+      append-instance-id-to-consumer-name: true
+      max-pending-millis: 30000
+      pending-recovery-interval: 10000
+      delay-scan-interval: 1000
+      delay-transfer-recovery-millis: 60000
+      processed-message-ttl-millis: 86400000
+      batch-size: 10
+      stream-max-len: 10000
+      blocking-timeout-millis: 2000
+      consumer-threads: 2

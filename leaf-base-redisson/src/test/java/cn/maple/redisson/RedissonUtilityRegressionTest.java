@@ -4,18 +4,31 @@ import cn.maple.redisson.services.impl.GXRedissonCacheServiceImpl;
 import cn.maple.redisson.annotation.GXRedissonDelayMQToTopic;
 import cn.maple.redisson.listener.GXRedissonDelayMQListener;
 import cn.maple.redisson.listener.GXRedissonMQListener;
+import cn.maple.redisson.listener.GXRedissonStreamMQListener;
 import cn.maple.redisson.processor.GXRedissonDelayMQPostProcessor;
 import cn.maple.redisson.processor.GXRedissonMQPostProcessor;
+import cn.maple.redisson.processor.GXRedissonStreamMQPostProcessor;
+import cn.maple.redisson.stream.GXRedissonStreamMQManager;
+import cn.maple.redisson.stream.dto.req.GXRedissonStreamMessageDto;
+import cn.maple.redisson.stream.queue.GXRedissonStreamImmediateMQ;
+import cn.maple.redisson.properties.local.GXLocalRedissonStreamMQProperties;
+import cn.maple.redisson.properties.nacos.GXNacosRedissonStreamMQProperties;
+import cn.maple.redisson.util.GXRedissonStreamMQUtils;
 import cn.maple.redisson.util.GXRedissonDelayMQUtils;
 import cn.maple.redisson.util.GXRedissonMQUtils;
 import cn.maple.redisson.util.GXRedissonUtils;
+import cn.maple.core.framework.util.GXSpringContextUtils;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RBlockingQueue;
 import org.redisson.api.RDelayedQueue;
 import org.redisson.api.RMapCache;
 import org.redisson.api.RReliableTopic;
+import org.redisson.api.RStream;
 import org.redisson.api.RedissonClient;
+import org.redisson.api.stream.StreamMessageId;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
@@ -24,6 +37,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -164,6 +178,128 @@ class RedissonUtilityRegressionTest {
     }
 
     @Test
+    void streamQueuePropertiesExposeLocalAndNacosDefaults() {
+        GXLocalRedissonStreamMQProperties local = new GXLocalRedissonStreamMQProperties();
+        GXNacosRedissonStreamMQProperties nacos = new GXNacosRedissonStreamMQProperties();
+
+        assertEquals("mq:stream:", local.getStreamPrefix());
+        assertEquals("mq:delay:", nacos.getDelayZsetPrefix());
+        assertEquals("mq:stream:processed:", local.getProcessedMessagePrefix());
+        assertEquals("mq:delay:transfer:", nacos.getDelayTransferPrefix());
+        assertTrue(local.isAppendInstanceIdToConsumerName());
+        assertEquals(10_000L, local.getStreamMaxLen());
+        assertEquals(2, nacos.getConsumerThreads());
+    }
+
+    @Test
+    void streamManagerValidatesPropertyPrefixes() {
+        RedissonClient redissonClient = mock(RedissonClient.class);
+        GXLocalRedissonStreamMQProperties props = new GXLocalRedissonStreamMQProperties();
+        props.setProcessedMessagePrefix(" ");
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new GXRedissonStreamMQManager(redissonClient, props)
+        );
+    }
+
+    @Test
+    void streamManagerRejectsBlankTopicAndNullPayload() {
+        RedissonClient redissonClient = mock(RedissonClient.class);
+        GXRedissonStreamMQManager manager = new GXRedissonStreamMQManager(redissonClient, new GXLocalRedissonStreamMQProperties());
+
+        assertThrows(IllegalArgumentException.class, () -> manager.sendImmediate(" ", "payload"));
+        assertThrows(IllegalArgumentException.class, () -> manager.sendDelayed("topic", null, 1, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void streamManagerUsesSpringLifecycleContract() {
+        RedissonClient redissonClient = mock(RedissonClient.class);
+        GXRedissonStreamMQManager manager = new GXRedissonStreamMQManager(redissonClient, new GXLocalRedissonStreamMQProperties());
+        AtomicBoolean callbackInvoked = new AtomicBoolean(false);
+
+        assertTrue(manager.isAutoStartup());
+        manager.stop(() -> callbackInvoked.set(true));
+
+        assertTrue(callbackInvoked.get());
+    }
+
+    @Test
+    void streamMessageDefaultsAndValidationBehavePredictably() {
+        GXRedissonStreamMessageDto message = GXRedissonStreamMessageDto.immediate("topic", "payload", String.class.getName());
+        assertTrue(message.getMessageId() != null && !message.getMessageId().isBlank());
+        assertThrows(IllegalArgumentException.class, () -> GXRedissonStreamMessageDto.delayed("topic", "payload", String.class.getName(), 0));
+    }
+
+    @Test
+    void streamManagerValidatesDirectMessagePublishing() {
+        RedissonClient redissonClient = mock(RedissonClient.class);
+        GXRedissonStreamMQManager manager = new GXRedissonStreamMQManager(redissonClient, new GXLocalRedissonStreamMQProperties());
+
+        assertThrows(IllegalArgumentException.class, () -> manager.sendImmediate(GXRedissonStreamMessageDto.builder().topic("topic").build()));
+    }
+
+    @Test
+    void streamMqUtilsDelegatesToSpringManagedManager() {
+        GXRedissonStreamMQManager manager = mock(GXRedissonStreamMQManager.class);
+        when(manager.sendImmediate("topic", "payload")).thenReturn("stream-id");
+
+        try (MockedStatic<GXSpringContextUtils> springContext = Mockito.mockStatic(GXSpringContextUtils.class)) {
+            springContext.when(() -> GXSpringContextUtils.getBean("redissonStreamMessageQueueManager", GXRedissonStreamMQManager.class))
+                    .thenReturn(manager);
+
+            assertEquals("stream-id", GXRedissonStreamMQUtils.sendImmediate("topic", "payload"));
+            verify(manager).sendImmediate("topic", "payload");
+        }
+    }
+
+    @Test
+    void streamImmediateQueueTracksActiveConsumerTopics() {
+        RedissonClient redissonClient = mock(RedissonClient.class);
+        GXRedissonStreamImmediateMQ queue = new GXRedissonStreamImmediateMQ(redissonClient, new GXLocalRedissonStreamMQProperties());
+
+        @SuppressWarnings("unchecked")
+        Set<String> activeConsumerTopics = (Set<String>) ReflectionTestUtils.getField(queue, "activeConsumerTopics");
+
+        assertTrue(activeConsumerTopics.isEmpty());
+    }
+
+    @Test
+    void streamFailedMessageDispatchIsMarkedByOriginalStreamId() {
+        RedissonClient redissonClient = mock(RedissonClient.class);
+        RStream<String, String> stream = mock(RStream.class);
+        RMapCache<String, String> cache = mock(RMapCache.class);
+        GXLocalRedissonStreamMQProperties props = new GXLocalRedissonStreamMQProperties();
+        GXRedissonStreamImmediateMQ queue = new GXRedissonStreamImmediateMQ(redissonClient, props);
+        GXRedissonStreamMessageDto message = GXRedissonStreamMessageDto.immediate("topic", "payload", String.class.getName());
+        String msgJson = new tools.jackson.databind.ObjectMapper().writeValueAsString(message);
+        StreamMessageId originalStreamId = new StreamMessageId(1, 1);
+
+        when(redissonClient.<String, String>getMapCache(any(String.class))).thenReturn(cache);
+        when(redissonClient.<String, String>getStream("mq:stream:topic")).thenReturn(stream);
+        when(cache.containsKey(any())).thenReturn(false);
+        when(stream.add(any())).thenReturn(new StreamMessageId(2, 1));
+
+        queue.registerHandler("topic", ignored -> {
+            throw new IllegalStateException("boom");
+        });
+
+        ReflectionTestUtils.invokeMethod(
+                queue,
+                "processMessage",
+                stream,
+                "mq:stream:topic",
+                "topic",
+                props.getConsumerGroup(),
+                originalStreamId,
+                msgJson
+        );
+
+        verify(cache).fastPut(eq("1-1"), any(), eq(props.getProcessedMessageTtlMillis()), eq(TimeUnit.MILLISECONDS));
+        verify(stream).ack(props.getConsumerGroup(), originalStreamId);
+    }
+
+    @Test
     void mqPostProcessorFailsFastWhenListenerRegistrationFails() {
         RedissonClient redissonClient = mock(RedissonClient.class);
         GXRedissonMQPostProcessor processor = new GXRedissonMQPostProcessor(redissonClient);
@@ -174,6 +310,30 @@ class RedissonUtilityRegressionTest {
         assertThrows(
                 IllegalStateException.class,
                 () -> processor.postProcessAfterInitialization(listener, "brokenListener")
+        );
+    }
+
+    @Test
+    void streamMqPostProcessorRegistersStreamListenerBeans() {
+        GXRedissonStreamMQPostProcessor processor = new GXRedissonStreamMQPostProcessor();
+        AtomicBoolean registered = new AtomicBoolean(false);
+        GXRedissonStreamMQListener listener = () -> registered.set(true);
+
+        processor.postProcessAfterInitialization(listener, "streamListener");
+
+        assertTrue(registered.get());
+    }
+
+    @Test
+    void streamMqPostProcessorFailsFastWhenListenerRegistrationFails() {
+        GXRedissonStreamMQPostProcessor processor = new GXRedissonStreamMQPostProcessor();
+        GXRedissonStreamMQListener listener = () -> {
+            throw new IllegalStateException("boom");
+        };
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> processor.postProcessAfterInitialization(listener, "brokenStreamListener")
         );
     }
 
