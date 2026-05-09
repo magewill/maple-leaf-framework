@@ -151,7 +151,7 @@ public class GXHutoolDataConvert {
             Object convertedValue = Convert.convertWithCheck(type, value, null, false);
             return convertedValue != null ? convertedValue : value;
         } catch (Exception e) {
-            LOG.warn("Type convert failed: {} -> {}, {}",
+            LOG.debug("Type convert failed: {} -> {}, {}",
                     value.getClass().getName(),
                     type.getTypeName(),
                     e.getMessage());
@@ -268,7 +268,7 @@ public class GXHutoolDataConvert {
             }
             return Convert.convertWithCheck(targetClass, value, null, false);
         } catch (Exception e) {
-            LOG.warn("Date/time convert failed: {} -> {}, {}", value.getClass().getName(), targetClass.getName(), e.getMessage());
+            LOG.debug("Date/time convert failed: {} -> {}, {}", value.getClass().getName(), targetClass.getName(), e.getMessage());
             return null;
         }
     }
@@ -307,7 +307,7 @@ public class GXHutoolDataConvert {
             }
             return convertToJavaBean(targetClass, value);
         } catch (Exception e) {
-            LOG.warn("JSON object convert failed: {} -> {}, {}", value, targetClass.getName(), e.getMessage());
+            LOG.debug("JSON object convert failed: {} -> {}, {}", value, targetClass.getName(), e.getMessage());
             return null;
         }
     }
@@ -436,7 +436,7 @@ public class GXHutoolDataConvert {
             }
             return BeanUtil.toBean(value, targetClass, CopyOptions.create().setIgnoreError(true));
         } catch (Exception e) {
-            LOG.warn("Dict convert to {} failed: {}", targetClass.getName(), e.getMessage());
+            LOG.debug("Dict convert to {} failed: {}", targetClass.getName(), e.getMessage());
             return null;
         }
     }
