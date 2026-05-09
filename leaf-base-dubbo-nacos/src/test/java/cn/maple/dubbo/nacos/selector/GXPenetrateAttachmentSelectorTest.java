@@ -37,6 +37,17 @@ class GXPenetrateAttachmentSelectorTest {
     }
 
     @Test
+    void selectFallsBackToClientBeforeServerAttachment() {
+        Invocation invocation = invocationWithTraceId(null);
+        RpcContextAttachment clientAttachment = attachmentWithTraceId("client-trace");
+        RpcContextAttachment serverAttachment = attachmentWithTraceId("server-trace");
+
+        Map<String, Object> selected = selector.select(invocation, clientAttachment, serverAttachment);
+
+        assertEquals("client-trace", selected.get(GXTraceIdContextUtils.TRACE_ID_KEY));
+    }
+
+    @Test
     void selectReverseFallsBackToServerThenClientThenThreadLocal() {
         Invocation invocation = invocationWithTraceId(null);
         RpcContextAttachment clientAttachment = attachmentWithTraceId("client-trace");
@@ -55,6 +66,15 @@ class GXPenetrateAttachmentSelectorTest {
         Map<String, Object> selected = selector.select(invocation, null, null);
 
         assertEquals("thread-trace", selected.get(GXTraceIdContextUtils.TRACE_ID_KEY));
+    }
+
+    @Test
+    void selectHandlesNullInvocation() {
+        RpcContextAttachment clientAttachment = attachmentWithTraceId("client-trace");
+
+        Map<String, Object> selected = selector.select(null, clientAttachment, null);
+
+        assertEquals("client-trace", selected.get(GXTraceIdContextUtils.TRACE_ID_KEY));
     }
 
     private Invocation invocationWithTraceId(String traceId) {

@@ -22,29 +22,43 @@ import java.util.Objects;
 public class GXPenetrateAttachmentSelector implements PenetrateAttachmentSelector {
     private static final Logger LOG = LoggerFactory.getLogger(GXPenetrateAttachmentSelector.class);
 
+    private static final String UNKNOWN_APP = "UnknownApp";
+    private static volatile String appName;
+
     @Override
     public Map<String, Object> select(Invocation invocation, RpcContextAttachment clientAttachment, RpcContextAttachment serverAttachment) {
-        String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "UnknownApp");
-        LOG.debug("[{} --->> Dubbo Client Selector] select attachments", appName);
+        logDebug("[{} --->> Dubbo Client Selector] select attachments");
 
-        String traceId = resolveTraceId(invocation, clientAttachment, serverAttachment);
+        String traceId = resolveRequestTraceId(invocation, clientAttachment, serverAttachment);
 
-        LOG.debug("[{} --->> Dubbo Client Selector] select TraceId: {}", appName, traceId);
+        logDebug("[{} --->> Dubbo Client Selector] select TraceId: {}", traceId);
         return Dict.create().set(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
     }
 
     @Override
     public Map<String, Object> selectReverse(Invocation invocation, RpcContextAttachment clientResponseContext, RpcContextAttachment serverResponseContext) {
-        String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "UnknownApp");
-        LOG.debug("[{} --->> Dubbo Server Selector] select reverse attachments", appName);
+        logDebug("[{} --->> Dubbo Server Selector] select reverse attachments");
 
-        String traceId = resolveTraceId(invocation, clientResponseContext, serverResponseContext);
+        String traceId = resolveResponseTraceId(invocation, clientResponseContext, serverResponseContext);
 
-        LOG.debug("[{} --->> Dubbo Server Selector] select reverse TraceId: {}", appName, traceId);
+        logDebug("[{} --->> Dubbo Server Selector] select reverse TraceId: {}", traceId);
         return Dict.create().set(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
     }
 
-    private String resolveTraceId(Invocation invocation, RpcContextAttachment clientAttachment, RpcContextAttachment serverAttachment) {
+    private String resolveRequestTraceId(Invocation invocation, RpcContextAttachment clientAttachment, RpcContextAttachment serverAttachment) {
+        String traceId = getInvocationAttachment(invocation);
+        if (CharSequenceUtil.isNotBlank(traceId)) {
+            return traceId;
+        }
+        traceId = getAttachment(clientAttachment);
+        if (CharSequenceUtil.isNotBlank(traceId)) {
+            return traceId;
+        }
+        traceId = getAttachment(serverAttachment);
+        return resolveTraceIdFallback(traceId);
+    }
+
+    private String resolveResponseTraceId(Invocation invocation, RpcContextAttachment clientAttachment, RpcContextAttachment serverAttachment) {
         String traceId = getInvocationAttachment(invocation);
         if (CharSequenceUtil.isNotBlank(traceId)) {
             return traceId;
@@ -54,6 +68,10 @@ public class GXPenetrateAttachmentSelector implements PenetrateAttachmentSelecto
             return traceId;
         }
         traceId = getAttachment(clientAttachment);
+        return resolveTraceIdFallback(traceId);
+    }
+
+    private String resolveTraceIdFallback(String traceId) {
         if (CharSequenceUtil.isNotBlank(traceId)) {
             return traceId;
         }
@@ -78,10 +96,34 @@ public class GXPenetrateAttachmentSelector implements PenetrateAttachmentSelecto
     }
 
     private String getInvocationAttachment(Invocation invocation) {
+        if (invocation == null) {
+            return null;
+        }
         Object traceId = invocation.getObjectAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
         if (Objects.isNull(traceId)) {
             traceId = invocation.getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
         }
         return Objects.toString(traceId, null);
+    }
+
+    private void logDebug(String message, Object... args) {
+        if (LOG.isDebugEnabled()) {
+            Object[] allArgs = new Object[args.length + 1];
+            allArgs[0] = getAppName();
+            System.arraycopy(args, 0, allArgs, 1, args.length);
+            LOG.debug(message, allArgs);
+        }
+    }
+
+    private String getAppName() {
+        String currentAppName = appName;
+        if (CharSequenceUtil.isNotBlank(currentAppName) && !UNKNOWN_APP.equals(currentAppName)) {
+            return currentAppName;
+        }
+        currentAppName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, UNKNOWN_APP);
+        if (CharSequenceUtil.isNotBlank(currentAppName) && !UNKNOWN_APP.equals(currentAppName)) {
+            appName = currentAppName;
+        }
+        return currentAppName;
     }
 }

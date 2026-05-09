@@ -6,6 +6,7 @@ import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.common.constants.CommonConstants;
 import org.apache.dubbo.common.extension.Activate;
+import org.apache.dubbo.rpc.AsyncRpcResult;
 import org.apache.dubbo.rpc.Filter;
 import org.apache.dubbo.rpc.Invocation;
 import org.apache.dubbo.rpc.Invoker;
@@ -35,7 +36,9 @@ public class GXDubboServerTraceIdFilter implements Filter {
             RpcContext.getClientAttachment().setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
             RpcContext.getServerAttachment().setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
 
-            return invoker.invoke(invocation);
+            Result result = invoker.invoke(invocation);
+            attachTraceId(result, traceId);
+            return result;
         } catch (Exception e) {
             log.error("Failed to process Dubbo server request", e);
             throw e;
@@ -72,5 +75,26 @@ public class GXDubboServerTraceIdFilter implements Filter {
             traceId = invocation.getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
         }
         return Objects.toString(traceId, null);
+    }
+
+    private void attachTraceId(Result result, String traceId) {
+        if (Objects.isNull(result) || CharSequenceUtil.isBlank(traceId)) {
+            return;
+        }
+        if (result instanceof AsyncRpcResult) {
+            result.whenCompleteWithContext((response, throwable) -> attachTraceIdWithContext(response, traceId));
+            return;
+        }
+        result.setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
+    }
+
+    private void attachTraceIdWithContext(Result result, String traceId) {
+        String originalTraceId = GXTraceIdContextUtils.getNullableTraceId();
+        try {
+            GXTraceIdContextUtils.putTraceId(traceId);
+            attachTraceId(result, traceId);
+        } finally {
+            GXTraceIdContextUtils.restoreTraceId(originalTraceId);
+        }
     }
 }

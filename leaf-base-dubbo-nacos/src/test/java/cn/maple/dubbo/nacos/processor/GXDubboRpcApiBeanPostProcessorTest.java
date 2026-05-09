@@ -5,12 +5,14 @@ import org.apache.dubbo.config.spring.ServiceBean;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
-import org.springframework.beans.factory.NoSuchBeanDefinitionException;
+import org.springframework.context.ApplicationContext;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class GXDubboRpcApiBeanPostProcessorTest {
@@ -20,14 +22,16 @@ class GXDubboRpcApiBeanPostProcessorTest {
     void bindsServiceBeanRefToItsGenericServiceClass() {
         TestRpcApi api = new TestRpcApi();
         ServiceBean<TestRpcApi> serviceBean = serviceBean(api);
+        ApplicationContext applicationContext = applicationContextWithBeanNames("testService");
 
         try (MockedStatic<GXSpringContextUtils> springContext = Mockito.mockStatic(GXSpringContextUtils.class)) {
-            springContext.when(() -> GXSpringContextUtils.getBean(TestService.class)).thenReturn(new TestService());
+            springContext.when(GXSpringContextUtils::getApplicationContext).thenReturn(applicationContext);
 
             Object result = processor.postProcessAfterInitialization(serviceBean, "testServiceBean");
 
             assertSame(serviceBean, result);
             assertEquals(TestService.class, api.getBoundServiceClass());
+            verify(applicationContext, never()).getBean(TestService.class);
         }
     }
 
@@ -35,15 +39,31 @@ class GXDubboRpcApiBeanPostProcessorTest {
     void skipsBindingWhenTargetSpringBeanIsMissing() {
         TestRpcApi api = new TestRpcApi();
         ServiceBean<TestRpcApi> serviceBean = serviceBean(api);
+        ApplicationContext applicationContext = applicationContextWithBeanNames();
 
         try (MockedStatic<GXSpringContextUtils> springContext = Mockito.mockStatic(GXSpringContextUtils.class)) {
-            springContext.when(() -> GXSpringContextUtils.getBean(TestService.class))
-                    .thenThrow(new NoSuchBeanDefinitionException(TestService.class));
+            springContext.when(GXSpringContextUtils::getApplicationContext).thenReturn(applicationContext);
 
             Object result = processor.postProcessAfterInitialization(serviceBean, "testServiceBean");
 
             assertSame(serviceBean, result);
             assertNull(api.getBoundServiceClass());
+        }
+    }
+
+    @Test
+    void bindsWhenTargetServiceHasMultipleBeanCandidates() {
+        TestRpcApi api = new TestRpcApi();
+        ServiceBean<TestRpcApi> serviceBean = serviceBean(api);
+        ApplicationContext applicationContext = applicationContextWithBeanNames("testServiceOne", "testServiceTwo");
+
+        try (MockedStatic<GXSpringContextUtils> springContext = Mockito.mockStatic(GXSpringContextUtils.class)) {
+            springContext.when(GXSpringContextUtils::getApplicationContext).thenReturn(applicationContext);
+
+            Object result = processor.postProcessAfterInitialization(serviceBean, "testServiceBean");
+
+            assertSame(serviceBean, result);
+            assertEquals(TestService.class, api.getBoundServiceClass());
         }
     }
 
@@ -60,6 +80,12 @@ class GXDubboRpcApiBeanPostProcessorTest {
         ServiceBean<TestRpcApi> serviceBean = mock(ServiceBean.class);
         when(serviceBean.getRef()).thenReturn(api);
         return serviceBean;
+    }
+
+    private ApplicationContext applicationContextWithBeanNames(String... beanNames) {
+        ApplicationContext applicationContext = mock(ApplicationContext.class);
+        when(applicationContext.getBeanNamesForType(TestService.class, false, false)).thenReturn(beanNames);
+        return applicationContext;
     }
 
     static class TestRpcApi extends BaseRpcApi<TestService> {

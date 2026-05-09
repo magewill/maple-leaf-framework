@@ -1,14 +1,13 @@
 package cn.maple.dubbo.nacos.filter;
 
-import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.http.HttpStatus;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSentinelFlowException;
+import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import org.apache.dubbo.common.constants.CommonConstants;
 import org.apache.dubbo.common.extension.Activate;
-import org.apache.dubbo.common.utils.ReflectUtils;
 import org.apache.dubbo.rpc.Invocation;
 import org.apache.dubbo.rpc.Invoker;
 import org.apache.dubbo.rpc.Result;
@@ -20,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.Objects;
 
 /**
@@ -31,8 +31,12 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
 
     @Override
     public void onResponse(Result appResponse, Invoker<?> invoker, Invocation invocation) {
-        if (appResponse.hasException() && GenericService.class != invoker.getInterface()) {
+        if (appResponse.hasException()) {
             try {
+                attachTraceId(appResponse);
+                if (GenericService.class == invoker.getInterface()) {
+                    return;
+                }
                 Throwable exception = appResponse.getException();
 
                 if (Objects.isNull(exception)) {
@@ -40,9 +44,7 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
                 }
 
                 if (isSentinelFlowException(exception)) {
-                    Dict data = Dict.create().set("methodName", invocation.getMethodName())
-                            .set("arguments", CollUtil.toList(invocation.getArguments()))
-                            .set("interfaceName", invoker.getInterface());
+                    Dict data = buildErrorData(invoker, invocation, "sentinelFlow");
                     exception = new GXSentinelFlowException("Service busy, please retry later.", HttpStatus.HTTP_NOT_ACCEPTABLE, data, exception);
                     appResponse.setException(exception);
                     return;
@@ -57,6 +59,7 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
                 }
 
                 if (exception instanceof GXBusinessException) {
+                    appResponse.setException(attachTraceId((GXBusinessException) exception));
                     return;
                 }
 
@@ -65,6 +68,7 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
                     Class<?>[] exceptionClasses = method.getExceptionTypes();
                     for (Class<?> exceptionClass : exceptionClasses) {
                         if (exceptionClass.isAssignableFrom(exception.getClass())) {
+                            attachTraceId(appResponse);
                             return;
                         }
                     }
@@ -76,12 +80,6 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
                         RpcContext.getServiceContext().getRemoteHost(), invoker.getInterface().getName(),
                         invocation.getMethodName(), exception.getClass().getName(), exception.getMessage(), exception);
 
-                String serviceFile = ReflectUtils.getCodeBase(invoker.getInterface());
-                String exceptionFile = ReflectUtils.getCodeBase(exception.getClass());
-                if (serviceFile == null || exceptionFile == null || serviceFile.equals(exceptionFile)) {
-                    return;
-                }
-
                 String className = exception.getClass().getName();
                 if (className.startsWith("java.") || className.startsWith("jakarta.")) {
                     return;
@@ -92,7 +90,8 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
                 }
 
                 if (exception instanceof RuntimeException) {
-                    exception = new GXBusinessException("Provider error, please contact provider.", exception);
+                    Dict data = buildErrorData(invoker, invocation, "providerRuntime");
+                    exception = new GXBusinessException("Provider error, please contact provider.", HttpStatus.HTTP_INTERNAL_ERROR, data, exception);
                 }
                 appResponse.setException(exception);
             } catch (Throwable e) {
@@ -117,5 +116,40 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
             current = current.getCause();
         }
         return false;
+    }
+
+    private Dict buildErrorData(Invoker<?> invoker, Invocation invocation, String errorType) {
+        Class<?>[] parameterTypes = invocation.getParameterTypes();
+        Object[] arguments = invocation.getArguments();
+        return Dict.create()
+                .set(GXTraceIdContextUtils.TRACE_ID_KEY, GXTraceIdContextUtils.getTraceId())
+                .set("errorType", errorType)
+                .set("interfaceName", invoker.getInterface().getName())
+                .set("methodName", invocation.getMethodName())
+                .set("argumentCount", arguments == null ? 0 : arguments.length)
+                .set("parameterTypes", Arrays.stream(parameterTypes == null ? new Class<?>[0] : parameterTypes)
+                        .map(Class::getName)
+                        .toList());
+    }
+
+    private void attachTraceId(Result result) {
+        String traceId = GXTraceIdContextUtils.getTraceId();
+        if (CharSequenceUtil.isNotBlank(traceId)) {
+            result.setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
+        }
+    }
+
+    private GXBusinessException attachTraceId(GXBusinessException exception) {
+        String traceId = GXTraceIdContextUtils.getTraceId();
+        if (CharSequenceUtil.isBlank(traceId)) {
+            return exception;
+        }
+        Dict data = exception.getData();
+        if (Objects.nonNull(data)) {
+            data.set(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
+            return exception;
+        }
+        data = Dict.create().set(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
+        return new GXBusinessException(exception.getMsg(), exception.getCode(), data, exception);
     }
 }
