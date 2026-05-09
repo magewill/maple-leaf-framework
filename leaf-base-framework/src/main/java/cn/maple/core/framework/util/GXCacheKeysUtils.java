@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 @Slf4j
 public class GXCacheKeysUtils {
-    private static final String DEFAULT_PREFIX = "geoxus:default";
+    private static final String DEFAULT_PREFIX = "maple:default";
 
     private static final String CACHE_KEY_SEPARATOR = ":";
 

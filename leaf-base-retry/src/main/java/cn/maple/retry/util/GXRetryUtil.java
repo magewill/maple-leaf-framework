@@ -26,7 +26,6 @@ import java.util.function.Supplier;
  */
 @Slf4j
 public final class GXRetryUtil {
-
     private static final int DEFAULT_MAX_ATTEMPTS = 3;
     private static final long DEFAULT_INITIAL_INTERVAL = 1000L;
     private static final double DEFAULT_MULTIPLIER = 2.0;

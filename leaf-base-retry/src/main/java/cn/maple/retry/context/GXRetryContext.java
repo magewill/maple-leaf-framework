@@ -14,7 +14,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * Retry context exposed by the maple retry callbacks.
  */
 public class GXRetryContext {
-
     public static final String NAME = "context.name";
 
     private static final AttributeKey NULL_ATTRIBUTE_KEY = new AttributeKey(null);

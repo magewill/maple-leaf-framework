@@ -2,7 +2,7 @@ dynamic:
   datasource:
     framework:
       #driver-class-name: com.p6spy.engine.spy.P6SpyDriver
-      #url: jdbc:p6spy:mysql://192.168.56.101:3306/geoxus?useSSL=false&useUnicode=true&characterEncoding=utf8&tinyInt1isBit=false&allowMultiQueries=true&rewriteBatchedStatements=true
+      #url: jdbc:p6spy:mysql://192.168.56.101:3306/maple?useSSL=false&useUnicode=true&characterEncoding=utf8&tinyInt1isBit=false&allowMultiQueries=true&rewriteBatchedStatements=true
       driver-class-name: com.mysql.cj.jdbc.Driver
       url: jdbc:mysql://xxxx:3306/xxx?useSSL=false&useUnicode=true&characterEncoding=utf8&tinyInt1isBit=false&allowMultiQueries=true&rewriteBatchedStatements=true
       username: britton
@@ -10,7 +10,7 @@ dynamic:
       filters: stat,wall,slf4j
     slave1:
       #driver-class-name: com.p6spy.engine.spy.P6SpyDriver
-      #url: jdbc:p6spy:mysql://192.168.56.101:3306/geoxus?useSSL=false&useUnicode=true&characterEncoding=utf8&tinyInt1isBit=false&allowMultiQueries=true&rewriteBatchedStatements=true
+      #url: jdbc:p6spy:mysql://192.168.56.101:3306/maple?useSSL=false&useUnicode=true&characterEncoding=utf8&tinyInt1isBit=false&allowMultiQueries=true&rewriteBatchedStatements=true
       driver-class-name: com.mysql.cj.jdbc.Driver
       url: jdbc:mysql://xx.xx.xx.xx:3306/xx?useSSL=false&useUnicode=true&characterEncoding=utf8&tinyInt1isBit=false
       username: britton

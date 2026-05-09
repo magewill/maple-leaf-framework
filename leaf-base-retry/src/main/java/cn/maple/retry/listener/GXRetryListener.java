@@ -20,7 +20,6 @@ import java.util.function.Supplier;
 @Slf4j
 @Component
 public class GXRetryListener implements RetryListener {
-
     private static final int MAX_CACHE_SIZE = 1000;
 
     private static final Map<Class<?>, String> RETRYABLE_TYPE_CACHE = new ConcurrentHashMap<>();

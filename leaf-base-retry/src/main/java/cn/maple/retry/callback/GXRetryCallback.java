@@ -10,7 +10,6 @@ import cn.maple.retry.context.GXRetryContext;
  */
 @FunctionalInterface
 public interface GXRetryCallback<T, E extends Throwable> {
-
     /**
      * Execute the operation for the current retry attempt.
      *

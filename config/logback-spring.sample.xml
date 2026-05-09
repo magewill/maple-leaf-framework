@@ -219,7 +219,7 @@
     <!--由于这个logger自动继承了root的appender，root中已经有stdout的appender了，自己这边又引入了stdout的appender-->
     <!--如果没有设置 additivity="false" ,就会导致一条日志在控制台输出两次的情况-->
     <!--additivity表示要不要使用rootLogger配置的appender进行输出-->
-    <logger name="geoxusLog" level="INFO" additivity="false">
+    <logger name="mapleLog" level="INFO" additivity="false">
         <appender-ref ref="CONSOLE"/>
     </logger>
 

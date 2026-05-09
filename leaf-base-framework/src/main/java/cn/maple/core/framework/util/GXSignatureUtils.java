@@ -37,7 +37,7 @@ public class GXSignatureUtils {
                 sb.append(k).append("=").append(value.trim()).append("&");
             }
         }
-        sb.append("geoxus_sign_key=").append(key);
+        sb.append("maple_sign_key=").append(key);
         logger.debug("待签名数据: {}", sb);
         return md5(sb.toString()).toUpperCase();
     }

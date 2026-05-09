@@ -333,7 +333,7 @@ String configCacheKey = cacheKeysUtils.getSysConfigKey("siteName"); // 生成: m
 String userInfoKey = cacheKeysUtils.getCacheKey("user.info", userId.toString()); // 生成: maple:biz:user:info:123
 
 // 如果配置名未在 cache-key.yml 中找到，会使用默认前缀
-String defaultKey = cacheKeysUtils.getCacheKey("unknown.config", "someValue"); // 生成: geoxus:default:someValue (如果 unknown.config 未配置)
+String defaultKey = cacheKeysUtils.getCacheKey("unknown.config", "someValue"); // 生成: maple:default:someValue (如果 unknown.config 未配置)
 ```
 
 **GXCaffeineCacheUtils 示例 (通常与 `@GXCacheable` 等注解配合使用，直接使用场景较少)：**

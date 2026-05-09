@@ -9,7 +9,6 @@ import cn.maple.retry.context.GXRetryContext;
  */
 @FunctionalInterface
 public interface GXRecoveryCallback<T> {
-
     /**
      * Recover from retry exhaustion.
      *

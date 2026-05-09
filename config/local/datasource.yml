@@ -2,9 +2,9 @@ dynamic:
   datasource:
     slave1:
       #driver-class-name: com.p6spy.engine.spy.P6SpyDriver
-      #url: jdbc:p6spy:mysql://192.168.0.125:3306/ito-jiaoyu?useSSL=false&useUnicode=true&characterEncoding=utf8&tinyInt1isBit=false&allowMultiQueries=true&rewriteBatchedStatements=true
+      #url: jdbc:p6spy:mysql://192.168.0.125:3306/maple?useSSL=false&useUnicode=true&characterEncoding=utf8&tinyInt1isBit=false&allowMultiQueries=true&rewriteBatchedStatements=true
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://192.168.0.125:3306/ito-jiaoyu?useSSL=false&useUnicode=true&characterEncoding=utf8&tinyInt1isBit=false&allowMultiQueries=true&rewriteBatchedStatements=true
-      username: geoxus
-      password: geoxus
+      url: jdbc:mysql://192.168.0.125:3306/maple?useSSL=false&useUnicode=true&characterEncoding=utf8&tinyInt1isBit=false&allowMultiQueries=true&rewriteBatchedStatements=true
+      username: maple
+      password: maple
       filters: stat,wall,slf4j
