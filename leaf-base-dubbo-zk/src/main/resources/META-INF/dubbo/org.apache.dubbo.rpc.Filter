@@ -1,1 +1,3 @@
-dubboExceptionFilter=cn.maple.framework.filter.GXDubboExceptionFilter
+dubboExceptionFilter=cn.maple.dubbo.zk.filter.GXDubboExceptionFilter
+dubboClientTraceIdFilter=cn.maple.dubbo.zk.filter.GXDubboClientTraceIdFilter
+dubboServerTraceIdFilter=cn.maple.dubbo.zk.filter.GXDubboServerTraceIdFilter
