@@ -3,13 +3,12 @@ package cn.maple.redisson.processor;
 import cn.maple.redisson.listener.GXRedissonMQListener;
 import cn.maple.redisson.util.GXRedissonMQUtils;
 import lombok.extern.log4j.Log4j2;
-import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopProxyUtils;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.Ordered;
 import org.springframework.core.PriorityOrdered;
 import org.springframework.stereotype.Component;
@@ -26,6 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Component
 @Log4j2
 @ConditionalOnExpression("${maple.framework.mq.redisson.enable:false}")
+@ConditionalOnBean(name = "redissonMQClient")
 public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableBean, PriorityOrdered {
     private static final Class<?> TARGET_INTERFACE = GXRedissonMQListener.class;
 
@@ -33,12 +33,6 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
     private final Map<String, String> registeredListeners = new ConcurrentHashMap<>();
     private final Set<String> registeredBeans = ConcurrentHashMap.newKeySet();
     private final AtomicInteger successCount = new AtomicInteger(0);
-
-    public GXRedissonMQPostProcessor(@Qualifier("redissonMQClient") RedissonClient redissonMQClient) {
-        if (redissonMQClient == null) {
-            throw new IllegalArgumentException("redissonMQClient must not be null");
-        }
-    }
 
     @Override
     public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {

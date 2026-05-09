@@ -11,10 +11,12 @@ import org.redisson.api.RDelayedQueue;
 import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopProxyUtils;
 import org.springframework.beans.BeansException;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.ApplicationContextAware;
 import org.springframework.core.PriorityOrdered;
 import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.stereotype.Component;
@@ -41,7 +43,9 @@ import java.util.concurrent.TimeUnit;
 @Component
 @Log4j2
 @ConditionalOnExpression("${maple.framework.mq.redisson.enable:false}")
-public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, DisposableBean, PriorityOrdered {
+@ConditionalOnBean(name = "redissonMQClient")
+public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, DisposableBean, PriorityOrdered, ApplicationContextAware {
+    private static final String REDISSON_MQ_CLIENT_BEAN_NAME = "redissonMQClient";
     private static final int WORKER_CORE_POOL_SIZE = Math.max(4, Runtime.getRuntime().availableProcessors());
     private static final int LOCAL_QUEUE_CAPACITY = 5000;
     private static final int TASK_EXECUTION_TIMEOUT = 30;
@@ -52,21 +56,17 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
     private static final int MAX_RETRY_TIMES = 3;
     private static final long RETRY_DELAY = 1000L;
 
-    private final RedissonClient redissonMQClient;
     private final ExecutorService fetchExecutor;
     private final ExecutorService workerExecutor;
     private final ScheduledExecutorService retryScheduler;
     private final Map<String, QueueListenerConfig> listenerConfigs = new ConcurrentHashMap<>();
 
+    private ApplicationContext applicationContext;
     private volatile boolean running = true;
     private volatile boolean shuttingDown = false;
     private volatile boolean redissonShutdown = false;
 
-    public GXRedissonDelayMQPostProcessor(@Qualifier("redissonMQClient") RedissonClient redissonMQClient) {
-        if (redissonMQClient == null) {
-            throw new IllegalArgumentException("redissonMQClient must not be null");
-        }
-        this.redissonMQClient = redissonMQClient;
+    public GXRedissonDelayMQPostProcessor() {
         this.fetchExecutor = Executors.newThreadPerTaskExecutor(createVirtualThreadFactory("redisson-delay-fetch"));
         this.workerExecutor = Executors.newThreadPerTaskExecutor(createVirtualThreadFactory("redisson-delay-worker"));
         this.retryScheduler = Executors.newScheduledThreadPool(
@@ -468,12 +468,20 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
     }
 
     private RedissonClient getRedissonClient() {
-        return redissonMQClient;
+        if (applicationContext == null) {
+            throw new IllegalStateException("ApplicationContext has not been injected");
+        }
+        return applicationContext.getBean(REDISSON_MQ_CLIENT_BEAN_NAME, RedissonClient.class);
     }
 
     @Override
     public int getOrder() {
         return LOWEST_PRECEDENCE - 1000;
+    }
+
+    @Override
+    public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
+        this.applicationContext = applicationContext;
     }
 
     private record QueueListenerConfig(
