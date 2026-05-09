@@ -12,7 +12,6 @@ import org.springframework.stereotype.Component;
 
 @Data
 @Slf4j
-@SuppressWarnings("all")
 @EqualsAndHashCode(callSuper = true)
 @Component
 @ConditionalOnClass(name = {"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
@@ -26,6 +25,6 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "redisson")
 public class GXNacosRedissonCacheManagerProperties extends GXRedissonCacheManagerProperties {
     public GXNacosRedissonCacheManagerProperties() {
-        log.info("Redisson数据源的配置使用的是NACOS配置");
+        log.info("Redisson cache manager config uses Nacos configuration");
     }
 }

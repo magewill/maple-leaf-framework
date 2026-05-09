@@ -1,10 +1,16 @@
 package cn.maple.redisson;
 
 import cn.maple.redisson.services.impl.GXRedissonCacheServiceImpl;
+import cn.maple.redisson.annotation.GXRedissonDelayMQToTopic;
+import cn.maple.redisson.listener.GXRedissonDelayMQListener;
+import cn.maple.redisson.listener.GXRedissonMQListener;
+import cn.maple.redisson.processor.GXRedissonDelayMQPostProcessor;
+import cn.maple.redisson.processor.GXRedissonMQPostProcessor;
 import cn.maple.redisson.util.GXRedissonDelayMQUtils;
 import cn.maple.redisson.util.GXRedissonMQUtils;
 import cn.maple.redisson.util.GXRedissonUtils;
 import org.junit.jupiter.api.Test;
+import org.redisson.api.RBlockingQueue;
 import org.redisson.api.RDelayedQueue;
 import org.redisson.api.RMapCache;
 import org.redisson.api.RReliableTopic;
@@ -157,6 +163,59 @@ class RedissonUtilityRegressionTest {
         );
     }
 
+    @Test
+    void mqPostProcessorFailsFastWhenListenerRegistrationFails() {
+        RedissonClient redissonClient = mock(RedissonClient.class);
+        GXRedissonMQPostProcessor processor = new GXRedissonMQPostProcessor(redissonClient);
+        GXRedissonMQListener listener = () -> {
+            throw new IllegalStateException("boom");
+        };
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> processor.postProcessAfterInitialization(listener, "brokenListener")
+        );
+    }
+
+    @Test
+    void delayPostProcessorFailsFastWhenAnnotatedBeanDoesNotImplementListener() {
+        RedissonClient redissonClient = mock(RedissonClient.class);
+        GXRedissonDelayMQPostProcessor processor = new GXRedissonDelayMQPostProcessor(redissonClient);
+
+        try {
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> processor.postProcessAfterInitialization(new InvalidDelayListenerBean(), "invalidDelayListener")
+            );
+        } finally {
+            processor.destroy();
+        }
+    }
+
+    @Test
+    void delayPostProcessorRequeuesInFlightMessagesOnDestroy() throws Exception {
+        RedissonClient redissonClient = mock(RedissonClient.class);
+        RBlockingQueue<String> blockingQueue = mock(RBlockingQueue.class);
+        RDelayedQueue<String> delayedQueue = mock(RDelayedQueue.class);
+        when(redissonClient.<String>getBlockingQueue("delay-queue")).thenReturn(blockingQueue);
+        when(redissonClient.getDelayedQueue(blockingQueue)).thenReturn(delayedQueue);
+
+        GXRedissonDelayMQPostProcessor processor = new GXRedissonDelayMQPostProcessor(redissonClient);
+        processor.postProcessAfterInitialization(new ValidDelayListenerBean(), "validDelayListener");
+
+        Map<String, Object> configs = delayListenerConfigs(processor);
+        Object config = configs.get("delay-queue");
+        @SuppressWarnings("unchecked")
+        Map<String, String> inFlightMessages = (Map<String, String>) ReflectionTestUtils.getField(config, "inFlightMessages");
+        inFlightMessages.put("message-id", "payload");
+
+        processor.destroy();
+
+        verify(blockingQueue).offer("payload");
+        verify(delayedQueue).destroy();
+        assertTrue(inFlightMessages.isEmpty());
+    }
+
     @SuppressWarnings("unchecked")
     private static ConcurrentHashMap<String, RDelayedQueue<String>> delayedQueueCache() throws Exception {
         Field field = GXRedissonDelayMQUtils.class.getDeclaredField("DELAYED_QUEUE_CACHE");
@@ -176,5 +235,18 @@ class RedissonUtilityRegressionTest {
         Field field = GXRedissonMQUtils.class.getDeclaredField("LISTENER_REGISTRATION_CACHE");
         field.setAccessible(true);
         return (ConcurrentHashMap<String, Object>) field.get(null);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> delayListenerConfigs(GXRedissonDelayMQPostProcessor processor) {
+        return (Map<String, Object>) ReflectionTestUtils.getField(processor, "listenerConfigs");
+    }
+
+    @GXRedissonDelayMQToTopic(delayQueueName = "delay-queue", topicName = "topic", timeout = 1)
+    private static final class InvalidDelayListenerBean {
+    }
+
+    @GXRedissonDelayMQToTopic(delayQueueName = "delay-queue", topicName = "topic", timeout = 1)
+    private static final class ValidDelayListenerBean implements GXRedissonDelayMQListener {
     }
 }

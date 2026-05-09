@@ -1,8 +1,6 @@
 package cn.maple.redisson.processor;
 
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.maple.core.framework.exception.GXBusinessException;
-import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.redisson.annotation.GXRedissonDelayMQToTopic;
 import cn.maple.redisson.listener.GXRedissonDelayMQListener;
 import cn.maple.redisson.util.GXRedissonDelayMQUtils;
@@ -13,6 +11,7 @@ import org.redisson.api.RDelayedQueue;
 import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopProxyUtils;
 import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
@@ -24,6 +23,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,9 +32,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Bean post processor that forwards expired Redisson delayed-queue messages to
@@ -45,10 +43,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @ConditionalOnExpression("${maple.framework.mq.redisson.enable:false}")
 public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, DisposableBean, PriorityOrdered {
     private static final int WORKER_CORE_POOL_SIZE = Math.max(4, Runtime.getRuntime().availableProcessors());
-    private static final int WORKER_MAX_POOL_SIZE = WORKER_CORE_POOL_SIZE * 2;
-    private static final long KEEP_ALIVE_TIME = 60L;
     private static final int LOCAL_QUEUE_CAPACITY = 5000;
-    private static final int WORKER_QUEUE_CAPACITY = 10000;
     private static final int TASK_EXECUTION_TIMEOUT = 30;
     private static final int SHUTDOWN_TIMEOUT = 30;
     private static final int BATCH_POLL_SIZE = 20;
@@ -57,6 +52,7 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
     private static final int MAX_RETRY_TIMES = 3;
     private static final long RETRY_DELAY = 1000L;
 
+    private final RedissonClient redissonMQClient;
     private final ExecutorService fetchExecutor;
     private final ExecutorService workerExecutor;
     private final ScheduledExecutorService retryScheduler;
@@ -66,9 +62,13 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
     private volatile boolean shuttingDown = false;
     private volatile boolean redissonShutdown = false;
 
-    public GXRedissonDelayMQPostProcessor() {
-        this.fetchExecutor = Executors.newCachedThreadPool(createThreadFactory("redisson-delay-fetch"));
-        this.workerExecutor = createWorkerThreadPool();
+    public GXRedissonDelayMQPostProcessor(@Qualifier("redissonMQClient") RedissonClient redissonMQClient) {
+        if (redissonMQClient == null) {
+            throw new IllegalArgumentException("redissonMQClient must not be null");
+        }
+        this.redissonMQClient = redissonMQClient;
+        this.fetchExecutor = Executors.newThreadPerTaskExecutor(createVirtualThreadFactory("redisson-delay-fetch"));
+        this.workerExecutor = Executors.newThreadPerTaskExecutor(createVirtualThreadFactory("redisson-delay-worker"));
         this.retryScheduler = Executors.newScheduledThreadPool(
                 2,
                 new ThreadFactoryBuilder()
@@ -76,8 +76,7 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
                         .setDaemon(true)
                         .build()
         );
-        log.info("Redisson delayed MQ post processor initialized, workerPool={}/{}",
-                WORKER_CORE_POOL_SIZE, WORKER_MAX_POOL_SIZE);
+        log.info("Redisson delayed MQ post processor initialized, workerVirtualThreads=true, maxConsumersPerQueue=4");
     }
 
     @Override
@@ -89,19 +88,21 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
         }
 
         if (!(bean instanceof GXRedissonDelayMQListener listener)) {
-            log.error("Bean [{}] is annotated with @GXRedissonDelayMQToTopic but does not implement GXRedissonDelayMQListener", beanName);
-            return bean;
+            throw new IllegalStateException("Bean [" + beanName + "] is annotated with @GXRedissonDelayMQToTopic but does not implement GXRedissonDelayMQListener");
         }
 
         String queueName = annotation.delayQueueName();
         String topicName = annotation.topicName();
         if (CharSequenceUtil.isBlank(queueName) || CharSequenceUtil.isBlank(topicName)) {
-            log.error("Bean [{}] has blank delayQueueName or topicName", beanName);
-            return bean;
+            throw new IllegalStateException("Bean [" + beanName + "] has blank delayQueueName or topicName");
         }
 
         int timeoutSeconds = annotation.timeout() > 0 ? annotation.timeout() : DEFAULT_POLL_TIMEOUT_SECONDS;
-        startListenerTask(listener, queueName, topicName, timeoutSeconds);
+        try {
+            startListenerTask(listener, queueName, topicName, timeoutSeconds);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to start delayed queue listener for bean [" + beanName + "]", e);
+        }
         return bean;
     }
 
@@ -124,7 +125,8 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
                     listener,
                     blockingQueue,
                     delayedQueue,
-                    new LinkedBlockingQueue<>(LOCAL_QUEUE_CAPACITY)
+                    new LinkedBlockingQueue<>(LOCAL_QUEUE_CAPACITY),
+                    new ConcurrentHashMap<>()
             );
 
             QueueListenerConfig previous = listenerConfigs.putIfAbsent(queueName, config);
@@ -138,7 +140,7 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
             log.info("Started delayed queue listener, queue={}, topic={}, pollTimeoutSeconds={}",
                     queueName, topicName, timeoutSeconds);
         } catch (Exception e) {
-            log.error("Failed to start delayed queue listener, queue={}", queueName, e);
+            throw new IllegalStateException("Failed to start delayed queue listener, queue=" + queueName, e);
         }
     }
 
@@ -166,7 +168,8 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
                             requeueToBlockingQueue(config, messages.subList(i, messages.size()));
                             break;
                         }
-                        if (!config.localQueue().offer(message, 5, TimeUnit.SECONDS)) {
+                        PendingMessage pendingMessage = new PendingMessage(UUID.randomUUID().toString(), message);
+                        if (!config.localQueue().offer(pendingMessage, 5, TimeUnit.SECONDS)) {
                             log.warn("[{}] local queue is full, message will be returned to Redis queue", threadName);
                             requeueToBlockingQueue(config, message);
                         }
@@ -236,15 +239,16 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
 
         while (running && !shuttingDown) {
             try {
-                String message = config.localQueue().poll(1, TimeUnit.SECONDS);
-                if (message == null) {
+                PendingMessage pendingMessage = config.localQueue().poll(1, TimeUnit.SECONDS);
+                if (pendingMessage == null) {
                     continue;
                 }
+                config.inFlightMessages().put(pendingMessage.id(), pendingMessage.message());
                 if (shuttingDown) {
-                    requeueToBlockingQueue(config, message);
+                    requeuePendingMessage(config, pendingMessage);
                     break;
                 }
-                processMessageAsync(config, message, threadName, 1);
+                processMessageAsync(config, pendingMessage, threadName, 1);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
@@ -258,56 +262,57 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
         log.info("[{}] delayed message consumer stopped", threadName);
     }
 
-    private void processMessageAsync(QueueListenerConfig config, String message, String threadName, int attempt) {
+    private void processMessageAsync(QueueListenerConfig config, PendingMessage pendingMessage, String threadName, int attempt) {
         if (shuttingDown) {
-            requeueToBlockingQueue(config, message);
+            requeuePendingMessage(config, pendingMessage);
             return;
         }
         if (attempt > MAX_RETRY_TIMES) {
-            requeueToDelayedQueue(config, message, threadName);
+            requeueToDelayedQueue(config, pendingMessage, threadName);
             return;
         }
 
         long startTime = System.currentTimeMillis();
         try {
-            CompletableFuture<Boolean> result = config.listener().execute(config.topicName(), message);
+            CompletableFuture<Boolean> result = config.listener().execute(config.topicName(), pendingMessage.message());
             if (result == null) {
-                scheduleRetry(config, message, threadName, attempt);
+                scheduleRetry(config, pendingMessage, threadName, attempt);
                 return;
             }
 
             result.orTimeout(TASK_EXECUTION_TIMEOUT, TimeUnit.SECONDS)
                     .whenComplete((success, ex) -> {
                         if (shuttingDown) {
-                            requeueToBlockingQueue(config, message);
+                            requeuePendingMessage(config, pendingMessage);
                             return;
                         }
                         if (ex != null) {
                             log.error("[{}] failed to forward delayed message, attempt={}", threadName, attempt, ex);
-                            scheduleRetry(config, message, threadName, attempt);
+                            scheduleRetry(config, pendingMessage, threadName, attempt);
                         } else if (Boolean.TRUE.equals(success)) {
+                            completePendingMessage(config, pendingMessage);
                             log.debug("[{}] forwarded delayed message, queue={}, topic={}, cost={}ms",
                                     threadName, config.queueName(), config.topicName(), System.currentTimeMillis() - startTime);
                         } else {
                             log.warn("[{}] delayed message forwarding returned false, attempt={}", threadName, attempt);
-                            scheduleRetry(config, message, threadName, attempt);
+                            scheduleRetry(config, pendingMessage, threadName, attempt);
                         }
                     });
         } catch (Exception e) {
             if (!shuttingDown) {
                 log.error("[{}] failed to submit delayed message forwarding, attempt={}", threadName, attempt, e);
             }
-            scheduleRetry(config, message, threadName, attempt);
+            scheduleRetry(config, pendingMessage, threadName, attempt);
         }
     }
 
-    private void scheduleRetry(QueueListenerConfig config, String message, String threadName, int attempt) {
+    private void scheduleRetry(QueueListenerConfig config, PendingMessage pendingMessage, String threadName, int attempt) {
         if (shuttingDown) {
-            requeueToBlockingQueue(config, message);
+            requeuePendingMessage(config, pendingMessage);
             return;
         }
         if (attempt >= MAX_RETRY_TIMES) {
-            requeueToDelayedQueue(config, message, threadName);
+            requeueToDelayedQueue(config, pendingMessage, threadName);
             return;
         }
 
@@ -315,13 +320,13 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
         long delay = RETRY_DELAY * attempt;
         try {
             retryScheduler.schedule(
-                    () -> processMessageAsync(config, message, threadName, nextAttempt),
+                    () -> processMessageAsync(config, pendingMessage, threadName, nextAttempt),
                     delay,
                     TimeUnit.MILLISECONDS
             );
         } catch (Exception e) {
             log.error("[{}] failed to schedule retry, message will be returned to Redis queue", threadName, e);
-            requeueToBlockingQueue(config, message);
+            requeuePendingMessage(config, pendingMessage);
         }
     }
 
@@ -341,18 +346,19 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
         }
     }
 
-    private void requeueToDelayedQueue(QueueListenerConfig config, String message, String threadName) {
+    private void requeueToDelayedQueue(QueueListenerConfig config, PendingMessage pendingMessage, String threadName) {
         if (shuttingDown || redissonShutdown) {
-            requeueToBlockingQueue(config, message);
+            requeuePendingMessage(config, pendingMessage);
             return;
         }
         try {
-            config.delayedQueue().offer(message, RETRY_DELAY * MAX_RETRY_TIMES, TimeUnit.MILLISECONDS);
+            config.delayedQueue().offer(pendingMessage.message(), RETRY_DELAY * MAX_RETRY_TIMES, TimeUnit.MILLISECONDS);
+            completePendingMessage(config, pendingMessage);
             log.error("[{}] delayed message forwarding failed after {} attempts, message requeued with delay, queue={}",
                     threadName, MAX_RETRY_TIMES, config.queueName());
         } catch (Exception e) {
             log.error("[{}] failed to requeue delayed message, trying blocking queue, queue={}", threadName, config.queueName(), e);
-            requeueToBlockingQueue(config, message);
+            requeuePendingMessage(config, pendingMessage);
         }
     }
 
@@ -363,10 +369,11 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
         running = false;
 
         for (QueueListenerConfig config : listenerConfigs.values()) {
-            String message;
-            while ((message = config.localQueue().poll()) != null) {
-                requeueToBlockingQueue(config, message);
+            PendingMessage pendingMessage;
+            while ((pendingMessage = config.localQueue().poll()) != null) {
+                requeueToBlockingQueue(config, pendingMessage.message());
             }
+            requeueInFlightMessages(config);
         }
 
         shutdownThreadPools();
@@ -413,31 +420,28 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
         }
     }
 
-    private ExecutorService createWorkerThreadPool() {
-        return new ThreadPoolExecutor(
-                WORKER_CORE_POOL_SIZE,
-                WORKER_MAX_POOL_SIZE,
-                KEEP_ALIVE_TIME,
-                TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(WORKER_QUEUE_CAPACITY),
-                createThreadFactory("redisson-delay-worker"),
-                new ThreadPoolExecutor.CallerRunsPolicy()
-        );
+    private ThreadFactory createVirtualThreadFactory(String prefix) {
+        return Thread.ofVirtual().name(prefix + "-", 1).factory();
     }
 
-    private ThreadFactory createThreadFactory(String prefix) {
-        return new ThreadFactory() {
-            private final AtomicInteger threadNumber = new AtomicInteger(1);
-            private final ThreadGroup group = Thread.currentThread().getThreadGroup();
+    private void completePendingMessage(QueueListenerConfig config, PendingMessage pendingMessage) {
+        config.inFlightMessages().remove(pendingMessage.id());
+    }
 
-            @Override
-            public Thread newThread(Runnable r) {
-                Thread thread = new Thread(group, r, prefix + "-" + threadNumber.getAndIncrement());
-                thread.setDaemon(false);
-                thread.setPriority(Thread.NORM_PRIORITY);
-                return thread;
+    private void requeuePendingMessage(QueueListenerConfig config, PendingMessage pendingMessage) {
+        String message = config.inFlightMessages().remove(pendingMessage.id());
+        if (message == null) {
+            return;
+        }
+        requeueToBlockingQueue(config, message);
+    }
+
+    private void requeueInFlightMessages(QueueListenerConfig config) {
+        config.inFlightMessages().forEach((id, message) -> {
+            if (config.inFlightMessages().remove(id, message)) {
+                requeueToBlockingQueue(config, message);
             }
-        };
+        });
     }
 
     private void sleepQuietly(Duration duration) {
@@ -464,10 +468,6 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
     }
 
     private RedissonClient getRedissonClient() {
-        RedissonClient redissonMQClient = GXSpringContextUtils.getBean("redissonMQClient", RedissonClient.class);
-        if (redissonMQClient == null) {
-            throw new GXBusinessException("Unable to get redissonMQClient bean");
-        }
         return redissonMQClient;
     }
 
@@ -483,6 +483,10 @@ public class GXRedissonDelayMQPostProcessor implements BeanPostProcessor, Dispos
             GXRedissonDelayMQListener listener,
             RBlockingQueue<String> blockingQueue,
             RDelayedQueue<String> delayedQueue,
-            BlockingQueue<String> localQueue) {
+            BlockingQueue<PendingMessage> localQueue,
+            Map<String, String> inFlightMessages) {
+    }
+
+    private record PendingMessage(String id, String message) {
     }
 }

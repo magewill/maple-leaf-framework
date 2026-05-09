@@ -3,11 +3,13 @@ package cn.maple.redisson.processor;
 import cn.maple.redisson.listener.GXRedissonMQListener;
 import cn.maple.redisson.util.GXRedissonMQUtils;
 import lombok.extern.log4j.Log4j2;
+import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopProxyUtils;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.Ordered;
 import org.springframework.core.PriorityOrdered;
 import org.springframework.stereotype.Component;
@@ -32,20 +34,22 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
     private final Set<String> registeredBeans = ConcurrentHashMap.newKeySet();
     private final AtomicInteger successCount = new AtomicInteger(0);
 
+    public GXRedissonMQPostProcessor(@Qualifier("redissonMQClient") RedissonClient redissonMQClient) {
+        if (redissonMQClient == null) {
+            throw new IllegalArgumentException("redissonMQClient must not be null");
+        }
+    }
+
     @Override
     public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
-        try {
-            if (!isListenerBean(bean)) {
-                return bean;
-            }
-            if (!registeredBeans.add(beanName)) {
-                log.warn("Redisson MQ listener bean [{}] has already been processed, skip duplicate registration", beanName);
-                return bean;
-            }
-            registerListener((GXRedissonMQListener) bean, beanName);
-        } catch (Exception e) {
-            log.error("Failed to process Redisson MQ listener bean [{}]", beanName, e);
+        if (!isListenerBean(bean)) {
+            return bean;
         }
+        if (!registeredBeans.add(beanName)) {
+            log.warn("Redisson MQ listener bean [{}] has already been processed, skip duplicate registration", beanName);
+            return bean;
+        }
+        registerListener((GXRedissonMQListener) bean, beanName);
         return bean;
     }
 
@@ -73,8 +77,7 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
             listener.registerRedissonListener();
         } catch (Exception e) {
             registeredBeans.remove(beanName);
-            log.error("Failed to register Redisson MQ listener bean [{}]", beanName, e);
-            return;
+            throw new IllegalStateException("Failed to register Redisson MQ listener bean [" + beanName + "]", e);
         }
 
         Map<String, String> afterListeners = GXRedissonMQUtils.getAllLocalListeners();

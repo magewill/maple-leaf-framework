@@ -184,10 +184,7 @@ public class GXRedissonDebeziumReliableTopic<T> {
     private static RedissonClient getRedissonMQClient() {
         RedissonClient redissonClient = GXSpringContextUtils.getBean("redissonMQClient", RedissonClient.class);
         if (redissonClient == null) {
-            redissonClient = GXSpringContextUtils.getBean(RedissonClient.class);
-        }
-        if (redissonClient == null) {
-            throw new GXBusinessException("Unable to get RedissonClient bean");
+            throw new GXBusinessException("Unable to get redissonMQClient bean");
         }
         return redissonClient;
     }

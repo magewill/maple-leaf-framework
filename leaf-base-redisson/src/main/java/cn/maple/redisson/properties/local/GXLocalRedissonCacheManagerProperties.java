@@ -19,6 +19,6 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "redisson")
 public class GXLocalRedissonCacheManagerProperties extends GXRedissonCacheManagerProperties {
     public GXLocalRedissonCacheManagerProperties() {
-        log.info("Redisson数据源的配置使用的是本地配置");
+        log.info("Redisson cache manager config uses local configuration");
     }
 }

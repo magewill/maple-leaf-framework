@@ -17,7 +17,6 @@ import java.util.Map;
 @Data
 @Slf4j
 @Component
-@SuppressWarnings("all")
 @EqualsAndHashCode(callSuper = true)
 @ConditionalOnClass(name = {"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
 @NacosConfigurationProperties(dataId = "redisson-mq.yml",
@@ -32,7 +31,7 @@ public class GXNacosRedissonMQProperties extends GXRedissonMQProperties {
     private Map<String, GXRedissonConnectProperties> config = new LinkedHashMap<>();
 
     public GXNacosRedissonMQProperties() {
-        log.info("Redisson数据源的配置使用的是NACOS配置");
+        log.info("Redisson MQ datasource config uses Nacos configuration");
     }
 
     @Override
