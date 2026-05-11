@@ -1,8 +1,11 @@
 package cn.maple.core.framework.dto.inner.condition.func;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.dto.inner.condition.GXConditionSegment;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+
+import java.util.Map;
 
 public class GXConditionFuncConcat extends GXConditionFunc<String> {
     public GXConditionFuncConcat(String tableNameAlias, String op, String value, Object... fieldNames) {
@@ -20,7 +23,6 @@ public class GXConditionFuncConcat extends GXConditionFunc<String> {
         if (GXDBStringEscapeUtils.check(raw)) {
             throw new GXSqlInjectionException("SQL injection risk detected in CONCAT condition value");
         }
-        this.paramMap.put(paramName, raw + "%");
         return raw + "%";
     }
 
@@ -31,10 +33,15 @@ public class GXConditionFuncConcat extends GXConditionFunc<String> {
 
     @Override
     public String whereString() {
-        this.paramMap.clear();
-        getFieldValue();
-        return CharSequenceUtil.format("{}({}) LIKE #{dbQueryParamInnerDto.paramMap.{}}",
-                getFunctionName(), getFieldExpression(), paramName);
+        return toSegment().sql();
+    }
+
+    @Override
+    public GXConditionSegment toSegment() {
+        return new GXConditionSegment(
+                CharSequenceUtil.format("{}({}) LIKE #{dbQueryParamInnerDto.paramMap.{}}",
+                        getFunctionName(), getFieldExpression(), paramName),
+                Map.of(paramName, getFieldValue()));
     }
 
     @Override

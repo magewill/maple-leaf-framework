@@ -2,9 +2,13 @@ package cn.maple.core.framework.dto.inner.condition.func;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.constant.GXBuilderConstant;
+import cn.maple.core.framework.dto.inner.condition.GXConditionSegment;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+
+import java.util.HashMap;
+import java.util.Map;
 
 public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
     private final String jsonField;
@@ -37,12 +41,17 @@ public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
 
     @Override
     public String getFieldExpression() {
-        return CharSequenceUtil.format("`{}`.`{}`", tableNameAlias, jsonField);
+        return GXConditionFuncDialectSupport.safeColumn(jsonField);
     }
 
     @Override
     public String getFieldValue() {
-        this.paramMap.put(paramName, value);
+        if (value == null) {
+            throw new GXBusinessException("JSON_SEARCH value must not be null");
+        }
+        if (GXDBStringEscapeUtils.check(value)) {
+            throw new GXSqlInjectionException("SQL injection risk detected in JSON_SEARCH condition value");
+        }
         return value;
     }
 
@@ -53,11 +62,19 @@ public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
 
     @Override
     public String whereString() {
-        this.paramMap.clear();
-        this.paramMap.put(paramName + "_oneOrAll", oneOrAll);
-        this.paramMap.put(paramName, value);
-        return CharSequenceUtil.format("{}({}, #{dbQueryParamInnerDto.paramMap.{}_oneOrAll}, #{dbQueryParamInnerDto.paramMap.{}})",
-                getFunctionName(), getFieldExpression(), paramName, paramName);
+        return toSegment().sql();
+    }
+
+    @Override
+    public GXConditionSegment toSegment() {
+        String oneOrAllParamName = paramName + "_oneOrAll";
+        String field = GXConditionFuncDialectSupport.qualifiedColumn(tableNameAlias, jsonField);
+        Map<String, Object> params = new HashMap<>();
+        params.put(oneOrAllParamName, oneOrAll);
+        params.put(paramName, getFieldValue());
+        return new GXConditionSegment(
+                GXConditionFuncDialectSupport.renderJsonSearch(field, oneOrAllParamName, paramName),
+                params);
     }
 
     @Override

@@ -53,6 +53,12 @@ public class GuavaEventBusConfigTest {
                         eq(Boolean.class),
                         anyBoolean())
         ).thenReturn(true);
+        mockedCommonUtils.when(() ->
+                cn.maple.core.framework.util.GXCommonUtils.getEnvironmentValue(
+                        eq("maple.event.guava.virtual-threads.concurrency-limit"),
+                        eq(Integer.class),
+                        anyInt())
+        ).thenReturn(16);
     }
 
     @AfterEach

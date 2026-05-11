@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.io.Serial;
+import java.util.ArrayList;
 import java.util.List;
 
 @EqualsAndHashCode(callSuper = true)
@@ -21,10 +22,10 @@ public class GXPaginationResProtocol<T> extends GXBaseResProtocol {
 
     private long currentPage;
 
-    private transient List<T> records;
+    private List<T> records;
 
     public GXPaginationResProtocol(List<T> list, long totalCount, long pages, long pageSize, long currPage) {
-        this.records = list;
+        setRecords(list);
         this.total = totalCount;
         this.pageSize = pageSize;
         this.currentPage = currPage;
@@ -32,7 +33,7 @@ public class GXPaginationResProtocol<T> extends GXBaseResProtocol {
     }
 
     public GXPaginationResProtocol(GXPaginationResDto<T> page) {
-        this.records = page.getRecords();
+        setRecords(page.getRecords());
         this.total = page.getTotal();
         this.pageSize = page.getPageSize();
         this.currentPage = page.getCurrentPage();
@@ -40,6 +41,17 @@ public class GXPaginationResProtocol<T> extends GXBaseResProtocol {
     }
 
     public GXPaginationResProtocol(List<T> list) {
-        this.records = list;
+        setRecords(list);
+    }
+
+    public List<T> getRecords() {
+        if (records == null) {
+            records = new ArrayList<>();
+        }
+        return records;
+    }
+
+    public void setRecords(List<T> records) {
+        this.records = records == null ? new ArrayList<>() : new ArrayList<>(records);
     }
 }

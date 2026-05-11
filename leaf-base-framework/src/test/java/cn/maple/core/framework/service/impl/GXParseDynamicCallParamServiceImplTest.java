@@ -67,6 +67,32 @@ class GXParseDynamicCallParamServiceImplTest {
         assertNull(service.getDynamicCallMethodParamValue("not-json"));
     }
 
+    @Test
+    void getDynamicCallMethodParamValueRejectsDisallowedTargetType() {
+        GXDynamicCallParamReqDto req = new GXDynamicCallParamReqDto();
+        req.setJavaType("java.lang.Runtime");
+        req.setAttributes(List.of(assignAttr("name", "maple")));
+
+        assertNull(service.getDynamicCallMethodParamValue(JSONUtil.toJsonStr(req)));
+    }
+
+    @Test
+    void callbackRejectsObjectMethods() {
+        GXDynamicCallParamReqDto req = new GXDynamicCallParamReqDto();
+        GXDynamicCallParamAttributeReqDto callbackAttr = new GXDynamicCallParamAttributeReqDto();
+        callbackAttr.setDataSource("callback");
+        callbackAttr.setCallBackClassName(CallbackBean.class.getName());
+        callbackAttr.setCallBackMethodName("getClass");
+        req.setAttributes(List.of(callbackAttr));
+
+        Object result = service.getDynamicCallMethodParamValue(JSONUtil.toJsonStr(req));
+
+        assertInstanceOf(List.class, result);
+        List<?> values = (List<?>) result;
+        assertEquals(1, values.size());
+        assertNull(values.getFirst());
+    }
+
     private GXDynamicCallParamAttributeReqDto assignAttr(String fieldName, Object value) {
         GXDynamicCallParamAttributeReqDto attr = new GXDynamicCallParamAttributeReqDto();
         attr.setFieldName(fieldName);

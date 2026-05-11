@@ -20,12 +20,6 @@ public class GXUpdateJsonRemoveField extends GXUpdateField<String> {
         String pathParamName = paramName + "_path";
         String jsonPath = CharSequenceUtil.isEmpty(path) ? "$" : "$." + path;
         this.paramMap.put(pathParamName, jsonPath);
-
-        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{} = JSON_REMOVE({}, #{dbQueryParamInnerDto.paramMap.{}})",
-                    fieldName, fieldName, pathParamName);
-        }
-        return CharSequenceUtil.format("{}.{} = JSON_REMOVE({}.{}, #{dbQueryParamInnerDto.paramMap.{}})",
-                tableNameAlias, fieldName, tableNameAlias, fieldName, pathParamName);
+        return GXUpdateJsonDialectSupport.renderJsonRemove(tableNameAlias, fieldName, pathParamName);
     }
 }

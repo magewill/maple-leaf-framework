@@ -4,9 +4,9 @@ import cn.hutool.core.text.CharSequenceUtil;
 import lombok.Getter;
 
 import java.io.Serializable;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ConcurrentHashMap;
 
 public abstract class GXUpdateField<T> implements Serializable {
     private static final AtomicLong PARAM_COUNTER = new AtomicLong(0);
@@ -23,7 +23,7 @@ public abstract class GXUpdateField<T> implements Serializable {
     protected String paramName;
 
     @Getter
-    protected Map<String, Object> paramMap = new HashMap<>();
+    protected Map<String, Object> paramMap = new ConcurrentHashMap<>();
 
     protected GXUpdateField(String tableNameAlias, String fieldName, Object value) {
         this.tableNameAlias = tableNameAlias;

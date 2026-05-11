@@ -4,23 +4,38 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ReflectUtil;
 import cn.hutool.json.JSONUtil;
+import cn.maple.core.framework.constant.GXTokenConstant;
 import cn.maple.core.framework.dto.req.GXDynamicCallParamAttributeReqDto;
 import cn.maple.core.framework.dto.req.GXDynamicCallParamReqDto;
+import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.service.GXParseDynamicCallParamService;
+import cn.maple.core.framework.util.GXCommonUtils;
+import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
 public class GXParseDynamicCallParamServiceImpl implements GXParseDynamicCallParamService {
+    private static final String ALLOWED_CLASS_PREFIXES_KEY = "maple.framework.dynamic-call.allowed-class-prefixes";
+
+    private static final String DEFAULT_ALLOWED_CLASS_PREFIXES = "cn.maple.";
+
+    private static final Pattern CLASS_NAME_PATTERN = Pattern.compile("^[A-Za-z_$][A-Za-z0-9_$]*(\\.[A-Za-z_$][A-Za-z0-9_$]*)*$");
+
+    private static final Pattern METHOD_NAME_PATTERN = Pattern.compile("^[A-Za-z_$][A-Za-z0-9_$]*$");
+
     private static final Map<String, Class<?>> CALLBACK_CLASS_CACHE = new ConcurrentHashMap<>(64);
 
     private static final Map<String, Method> CALLBACK_METHOD_CACHE = new ConcurrentHashMap<>(128);
@@ -47,6 +62,7 @@ public class GXParseDynamicCallParamServiceImpl implements GXParseDynamicCallPar
 
             final Dict paramValueObject = getParamValueObject(attributes);
             try {
+                validateAllowedClassName(javaType, "dynamic parameter target type");
                 Class<?> targetClass = Class.forName(javaType);
                 return JSONUtil.toBean(JSONUtil.toJsonStr(paramValueObject), targetClass);
             } catch (Exception e) {
@@ -177,6 +193,8 @@ public class GXParseDynamicCallParamServiceImpl implements GXParseDynamicCallPar
         try {
             final String callBackClassName = callParamDto.getCallBackClassName();
             final String callBackMethodName = callParamDto.getCallBackMethodName();
+            validateAllowedClassName(callBackClassName, "dynamic parameter callback class");
+            validateCallbackMethodName(callBackMethodName);
             final Class<?> targetClass = CALLBACK_CLASS_CACHE.computeIfAbsent(callBackClassName, this::loadCallbackClass);
             final Object bean = GXSpringContextUtils.getBean(targetClass);
             if (Objects.isNull(bean)) {
@@ -190,8 +208,9 @@ public class GXParseDynamicCallParamServiceImpl implements GXParseDynamicCallPar
                 log.error("Callback method not found: className={}, methodName={}", callBackClassName, callBackMethodName);
                 return null;
             }
-            if (!method.canAccess(bean)) {
-                method.setAccessible(true);
+            if (!Modifier.isPublic(method.getModifiers()) || method.getParameterCount() != 0) {
+                log.error("Callback method must be public and parameterless: className={}, methodName={}", callBackClassName, callBackMethodName);
+                return null;
             }
             return method.invoke(bean);
         } catch (Exception e) {
@@ -219,12 +238,41 @@ public class GXParseDynamicCallParamServiceImpl implements GXParseDynamicCallPar
         }
 
         try {
-            final Dict tokenData = Dict.create();
-            return tokenData.getObj(callParamDto.getSourceFieldName());
+            return GXCurrentRequestContextUtils.getLoginFieldFromToken(
+                    GXTokenConstant.TOKEN_NAME, callParamDto.getSourceFieldName(), Object.class, GXTokenConstant.USER_TOKEN_SECRET_KEY);
         } catch (Exception e) {
             log.error("Failed to get token field value: fieldName={}, error={}",
                     callParamDto.getSourceFieldName(), e.getMessage(), e);
             return null;
         }
+    }
+
+    private void validateAllowedClassName(String className, String source) {
+        if (CharSequenceUtil.isBlank(className) || !CLASS_NAME_PATTERN.matcher(className).matches()) {
+            throw new GXBusinessException(source + " is invalid: " + className);
+        }
+        boolean allowed = allowedClassPrefixes().stream().anyMatch(className::startsWith);
+        if (!allowed) {
+            throw new GXBusinessException(source + " is not allowed: " + className);
+        }
+    }
+
+    private void validateCallbackMethodName(String methodName) {
+        if (CharSequenceUtil.isBlank(methodName) || !METHOD_NAME_PATTERN.matcher(methodName).matches()) {
+            throw new GXBusinessException("Dynamic parameter callback method is invalid: " + methodName);
+        }
+        if ("getClass".equals(methodName) || "wait".equals(methodName) || "notify".equals(methodName)
+                || "notifyAll".equals(methodName)) {
+            throw new GXBusinessException("Dynamic parameter callback method is not allowed: " + methodName);
+        }
+    }
+
+    private List<String> allowedClassPrefixes() {
+        String configured = GXCommonUtils.getEnvironmentValue(
+                ALLOWED_CLASS_PREFIXES_KEY, String.class, DEFAULT_ALLOWED_CLASS_PREFIXES);
+        return Arrays.stream(configured.split(","))
+                .map(CharSequenceUtil::trim)
+                .filter(CharSequenceUtil::isNotBlank)
+                .toList();
     }
 }

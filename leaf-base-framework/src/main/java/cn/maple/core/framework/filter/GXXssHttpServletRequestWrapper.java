@@ -1,6 +1,8 @@
 package cn.maple.core.framework.filter;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.util.GXCommonUtils;
+import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
@@ -19,11 +21,28 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
-    private static final GXHTMLFilter htmlFilter = new GXHTMLFilter();
-
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    private static final int MAX_REQUEST_SIZE = 50 * 1024 * 1024;
+    private static final int MAX_REQUEST_SIZE = GXCommonUtils.getEnvironmentValue(
+            "maple.framework.web.filter.xss-filter.max-request-size",
+            Integer.class,
+            50 * 1024 * 1024
+    );
+
+    private static final ThreadLocal<GXHTMLFilter> HTML_FILTER = ThreadLocal.withInitial(GXHTMLFilter::new);
+
+    private static final Set<String> SKIPPED_HEADERS = Set.of(
+            HttpHeaders.AUTHORIZATION.toLowerCase(Locale.ROOT),
+            HttpHeaders.CONTENT_TYPE.toLowerCase(Locale.ROOT),
+            HttpHeaders.ACCEPT.toLowerCase(Locale.ROOT),
+            HttpHeaders.ACCEPT_CHARSET.toLowerCase(Locale.ROOT),
+            HttpHeaders.ACCEPT_ENCODING.toLowerCase(Locale.ROOT),
+            HttpHeaders.ACCEPT_LANGUAGE.toLowerCase(Locale.ROOT),
+            HttpHeaders.CONTENT_LENGTH.toLowerCase(Locale.ROOT),
+            HttpHeaders.HOST.toLowerCase(Locale.ROOT),
+            GXTraceIdContextUtils.TRACE_ID_KEY.toLowerCase(Locale.ROOT),
+            "x-request-start-time"
+    );
 
     @Getter
     private final HttpServletRequest orgRequest;
@@ -237,7 +256,7 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
     @Override
     public String getHeader(String name) {
         String value = super.getHeader(name);
-        if (CharSequenceUtil.isNotBlank(value)) {
+        if (CharSequenceUtil.isNotBlank(value) && shouldFilterHeader(name)) {
             value = xssEncode(value);
         }
         return value;
@@ -250,7 +269,7 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
             return Collections.emptyEnumeration();
         }
         return Collections.enumeration(Collections.list(headers).stream()
-                .map(this::xssEncode)
+                .map(value -> shouldFilterHeader(name) ? xssEncode(value) : value)
                 .toList());
     }
 
@@ -274,7 +293,11 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
         if (input == null) {
             return null;
         }
-        return htmlFilter.filter(input);
+        return HTML_FILTER.get().filter(input);
+    }
+
+    private boolean shouldFilterHeader(String name) {
+        return name != null && !SKIPPED_HEADERS.contains(name.toLowerCase(Locale.ROOT));
     }
 
     private static class CachedBodyServletInputStream extends ServletInputStream {
@@ -296,6 +319,17 @@ public class GXXssHttpServletRequestWrapper extends HttpServletRequestWrapper {
 
         @Override
         public void setReadListener(ReadListener readListener) {
+            if (readListener == null) {
+                return;
+            }
+            try {
+                readListener.onDataAvailable();
+                if (isFinished()) {
+                    readListener.onAllDataRead();
+                }
+            } catch (IOException e) {
+                readListener.onError(e);
+            }
         }
 
         @Override

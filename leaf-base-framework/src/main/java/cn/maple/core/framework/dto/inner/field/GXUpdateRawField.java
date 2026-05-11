@@ -28,9 +28,10 @@ public class GXUpdateRawField extends GXUpdateField<String> {
     @Override
     public String updateString() {
         log.warn("Raw SQL update field is used: {}.{}", tableNameAlias, fieldName);
+        String checkedValue = getFieldValue();
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{} = {}", fieldName, value);
+            return CharSequenceUtil.format("{} = {}", fieldName, checkedValue);
         }
-        return CharSequenceUtil.format("{}.{} = {}", tableNameAlias, fieldName, value);
+        return CharSequenceUtil.format("{}.{} = {}", tableNameAlias, fieldName, checkedValue);
     }
 }

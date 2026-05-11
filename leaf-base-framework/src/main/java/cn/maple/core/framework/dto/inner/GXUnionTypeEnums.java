@@ -4,9 +4,9 @@ import lombok.Getter;
 
 @Getter
 public enum GXUnionTypeEnums {
-    UNION_ALL("union all", "UNION ALL"),
+    UNION_ALL("UNION ALL", "UNION ALL"),
 
-    UNION("union", "UNION");
+    UNION("UNION", "UNION");
 
     private final String unionType;
 

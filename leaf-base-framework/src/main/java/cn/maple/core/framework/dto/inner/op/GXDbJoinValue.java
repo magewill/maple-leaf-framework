@@ -30,8 +30,8 @@ public abstract class GXDbJoinValue extends GXDbJoinOp {
     public GXConditionSegment toSegment(String paramName) {
         GXDBStringEscapeUtils.validateColumnName(tableNameAlias);
         GXDBStringEscapeUtils.validateColumnName(fieldName);
-        String sql = CharSequenceUtil.format("{}.{}{}#{{dbQueryParamInnerDto.paramMap.{}}}",
-                tableNameAlias, fieldName, getOp(), paramName);
+        String sql = CharSequenceUtil.format("{}.{}{}", tableNameAlias, fieldName, getOp())
+                + "#{dbQueryParamInnerDto.paramMap." + paramName + "}";
         Map<String, Object> params = new HashMap<>();
         params.put(paramName, fieldValue);
         return new GXConditionSegment(sql, params);

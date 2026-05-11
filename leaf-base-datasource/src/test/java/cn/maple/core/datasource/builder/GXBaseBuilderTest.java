@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -51,6 +52,35 @@ class GXBaseBuilderTest {
         String sql = GXBaseBuilder.deleteCondition(query);
 
         assertTrue(sql.contains("DELETE FROM tenant_a.user_table"));
+    }
+
+    @Test
+    void copyQueryParamUsesIndependentCollectionAndParamMapContainers() {
+        GXBaseQueryParamInnerDto query = GXBaseQueryParamInnerDto.builder()
+                .tableName("user")
+                .condition(CollUtil.newArrayList(new GXConditionEQ("u", "id", 1)))
+                .joins(CollUtil.newArrayList(GXJoinDto.builder()
+                        .joinTableName("order")
+                        .joinTableNameAlias("o")
+                        .masterTableName("order")
+                        .masterTableNameAlias("o")
+                        .joinType(GXJoinTypeEnums.LEFT)
+                        .and(CollUtil.newArrayList(new GXDbJoinEQ("id", "user_id")))
+                        .build()))
+                .paramMap(Map.of("existing", 1))
+                .build();
+
+        GXBaseQueryParamInnerDto copied = cn.maple.core.datasource.util.GXQueryParamUtils.copy(query);
+
+        assertNotSame(query.getCondition(), copied.getCondition());
+        assertNotSame(query.getJoins(), copied.getJoins());
+        assertNotSame(query.getParamMap(), copied.getParamMap());
+        copied.getCondition().clear();
+        copied.getJoins().clear();
+        copied.getParamMap().put("copied", 2);
+        assertEquals(1, query.getCondition().size());
+        assertEquals(1, query.getJoins().size());
+        assertFalse(query.getParamMap().containsKey("copied"));
     }
 
     @Test
@@ -207,6 +237,20 @@ class GXBaseBuilderTest {
                 .masterTableName("order where 1=1")
                 .masterTableNameAlias("o")
                 .joinType(GXJoinTypeEnums.LEFT)
+                .and(CollUtil.newArrayList(new GXDbJoinEQ("id", "user_id")))
+                .build();
+
+        assertThrows(GXDBConditionException.class, () -> GXBaseBuilder.handleSQLJoin(sql, CollUtil.newArrayList(join)));
+    }
+
+    @Test
+    void handleSQLJoinRejectsMissingJoinType() {
+        SQL sql = new SQL().SELECT("u.*").FROM("user u");
+        GXJoinDto join = GXJoinDto.builder()
+                .joinTableName("order")
+                .joinTableNameAlias("o")
+                .masterTableName("order")
+                .masterTableNameAlias("o")
                 .and(CollUtil.newArrayList(new GXDbJoinEQ("id", "user_id")))
                 .build();
 

@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @EqualsAndHashCode(callSuper = true)
 @SuppressWarnings("all")
@@ -52,5 +53,5 @@ public class GXBaseQueryParamInnerDto extends GXBaseDto {
     private boolean paginateCount = Boolean.TRUE;
 
     @Builder.Default
-    private Map<String, Object> paramMap = new HashMap<>();
+    private Map<String, Object> paramMap = new ConcurrentHashMap<>();
 }

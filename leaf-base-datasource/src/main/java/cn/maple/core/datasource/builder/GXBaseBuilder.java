@@ -101,6 +101,9 @@ public interface GXBaseBuilder {
     }
 
     static String checkRecordIsExists(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
+        if (dbQueryParamInnerDto == null) {
+            throw new GXBusinessException("Query parameter object must not be null");
+        }
         GXBaseQueryParamInnerDto existsQuery = copyQueryParam(dbQueryParamInnerDto);
         existsQuery.setColumns(CollUtil.newLinkedHashSet("1"));
         String innerSql = findByCondition(existsQuery);
@@ -109,6 +112,9 @@ public interface GXBaseBuilder {
     }
 
     static String findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
+        if (dbQueryParamInnerDto == null) {
+            throw new GXBusinessException("Query parameter object must not be null");
+        }
         return findByCondition(dbQueryParamInnerDto, null);
     }
 
@@ -238,12 +244,17 @@ public interface GXBaseBuilder {
                 throw new GXDBConditionException(CharSequenceUtil.format("JOIN [{}] must include at least one ON condition", tableName));
             }
             String assemblySql = CharSequenceUtil.format("{} ON ({})", joinTableWithAlias, onClause);
+            if (Objects.isNull(joinType)) {
+                throw new GXDBConditionException(CharSequenceUtil.format("JOIN [{}] type must not be null", tableName));
+            }
             if (CharSequenceUtil.equalsIgnoreCase(GXBuilderConstant.LEFT_JOIN_TYPE, joinType.getJoinType())) {
                 sql.LEFT_OUTER_JOIN(assemblySql);
             } else if (CharSequenceUtil.equalsIgnoreCase(GXBuilderConstant.RIGHT_JOIN_TYPE, joinType.getJoinType())) {
                 sql.RIGHT_OUTER_JOIN(assemblySql);
             } else if (CharSequenceUtil.equalsIgnoreCase(GXBuilderConstant.INNER_JOIN_TYPE, joinType.getJoinType())) {
                 sql.INNER_JOIN(assemblySql);
+            } else {
+                throw new GXDBConditionException(CharSequenceUtil.format("JOIN [{}] type is not supported: {}", tableName, joinType));
             }
         });
         return paramMap;
@@ -333,6 +344,9 @@ public interface GXBaseBuilder {
     }
 
     static String deleteSoftCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXUpdateField<?>> updateFieldList) {
+        if (dbQueryParamInnerDto == null) {
+            throw new GXBusinessException("Query parameter object must not be null");
+        }
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
         String tableName = GXSqlTableMetadataSupport.validateMutableTableName(dbQueryParamInnerDto.getTableName());
         GXSqlBuildContext context = new GXSqlBuildContext();
@@ -371,6 +385,9 @@ public interface GXBaseBuilder {
     }
 
     static String deleteCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
+        if (dbQueryParamInnerDto == null) {
+            throw new GXBusinessException("Query parameter object must not be null");
+        }
         List<GXCondition<?>> condition = dbQueryParamInnerDto.getCondition();
         String tableName = GXSqlTableMetadataSupport.validateMutableTableName(dbQueryParamInnerDto.getTableName());
         GXSqlBuildContext context = new GXSqlBuildContext();
@@ -388,6 +405,9 @@ public interface GXBaseBuilder {
     }
 
     static String unionFindByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, List<GXBaseQueryParamInnerDto> unionQueryParamInnerDtoLst, GXUnionTypeEnums unionTypeEnums) {
+        if (dbQueryParamInnerDto == null) {
+            throw new GXBusinessException("Query parameter object must not be null");
+        }
         if (CollUtil.isEmpty(unionQueryParamInnerDtoLst)) {
             throw new GXDBConditionException("UNION query list must not be empty");
         }

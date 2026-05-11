@@ -1,7 +1,10 @@
 package cn.maple.core.framework.dto;
 
+import cn.hutool.core.lang.Dict;
+import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.dto.inner.GXJoinDto;
 import cn.maple.core.framework.dto.inner.GXJoinTypeEnums;
+import cn.maple.core.framework.dto.inner.GXUnionTypeEnums;
 import cn.maple.core.framework.dto.inner.condition.GXConditionJsonEQ;
 import cn.maple.core.framework.dto.inner.condition.GXConditionLikeFull;
 import cn.maple.core.framework.dto.inner.condition.GXConditionLikeLeft;
@@ -11,15 +14,23 @@ import cn.maple.core.framework.dto.inner.condition.GXConditionStrNE;
 import cn.maple.core.framework.dto.inner.field.GXUpdateRawField;
 import cn.maple.core.framework.dto.inner.op.GXDbJoinEQ;
 import cn.maple.core.framework.dto.inner.op.GXDbJoinOp;
+import cn.maple.core.framework.dto.protocol.req.GXQueryParamReqProtocol;
+import cn.maple.core.framework.dto.protocol.res.GXPaginationResProtocol;
 import cn.maple.core.framework.dto.res.GXPaginationResDto;
+import cn.maple.core.framework.event.GXBaseEvent;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -34,7 +45,63 @@ class DtoBehaviorTest {
     }
 
     @Test
-    void joinDtoFillsMissingAliasesAndKeepsNullCollectionSafe() {
+    void paginationCopiesRecordsAndExposesReadOnlyView() {
+        List<String> source = new ArrayList<>(List.of("a"));
+        GXPaginationResDto<String> page = new GXPaginationResDto<>(source, 1, 10, 1);
+
+        source.add("b");
+
+        assertEquals(List.of("a"), page.getRecords());
+        assertThrows(UnsupportedOperationException.class, () -> page.getRecords().add("c"));
+    }
+
+    @Test
+    void paginationProtocolCopiesRecordsAndKeepsGetterMutable() {
+        List<String> source = new ArrayList<>(List.of("a"));
+        GXPaginationResProtocol<String> protocol = new GXPaginationResProtocol<>(source, 1, 1, 10, 1);
+
+        source.add("b");
+        protocol.getRecords().add("c");
+
+        assertEquals(List.of("a", "c"), protocol.getRecords());
+    }
+
+    @Test
+    void baseEventKeepsSourceIdentityAndCopiesConstructorParam() {
+        Object source = new Object();
+        Dict param = Dict.create().set("name", "before");
+        GXBaseEvent<Object> event = new GXBaseEvent<>(source, "type", param, "name");
+
+        param.set("name", "after");
+
+        assertSame(source, event.getSource());
+        assertEquals("before", event.getParam().getStr("name"));
+    }
+
+    @Test
+    void queryParamReqProtocolCopiesCollectionsAndNormalizesPageValues() {
+        GXQueryParamReqProtocol protocol = new GXQueryParamReqProtocol();
+        Map<String, String> orderBy = new LinkedHashMap<>();
+        orderBy.put("name", "ASC");
+        Set<String> columns = new LinkedHashSet<>();
+        columns.add("id");
+
+        protocol.setPage(0);
+        protocol.setPageSize(-1);
+        protocol.setOrderByField(orderBy);
+        protocol.setColumns(columns);
+        orderBy.put("created_at", "DESC");
+        columns.add("name");
+
+        assertEquals(GXCommonConstant.DEFAULT_CURRENT_PAGE, protocol.getPage());
+        assertEquals(GXCommonConstant.DEFAULT_PAGE_SIZE, protocol.getPageSize());
+        assertEquals(Map.of("name", "ASC"), protocol.getOrderByField());
+        assertEquals(Set.of("id"), protocol.getColumns());
+        assertThrows(UnsupportedOperationException.class, () -> protocol.getColumns().add("name"));
+    }
+
+    @Test
+    void joinDtoDoesNotMutateJoinOpsWhenSettingCollections() {
         GXDbJoinEQ op = new GXDbJoinEQ("id", "userId");
         List<GXDbJoinOp> ops = new ArrayList<>();
         ops.add(null);
@@ -48,8 +115,8 @@ class DtoBehaviorTest {
         joinDto.setAnd(ops);
         joinDto.setOr(null);
 
-        assertEquals("m", op.getMasterTableNameAlias());
-        assertEquals("j", op.getJoinTableNameAlias());
+        assertNull(op.getMasterTableNameAlias());
+        assertNull(op.getJoinTableNameAlias());
         assertEquals(ops, joinDto.getAnd());
         assertNull(joinDto.getOr());
     }
@@ -62,6 +129,8 @@ class DtoBehaviorTest {
         assertEquals("u.score = score + 1", rawField.updateString());
         assertThrows(GXSqlInjectionException.class,
                 () -> new GXUpdateRawField("u", "score", "1;drop table user").getFieldValue());
+        assertThrows(GXSqlInjectionException.class,
+                () -> new GXUpdateRawField("u", "score", "1;drop table user").updateString());
     }
 
     @Test
@@ -93,5 +162,11 @@ class DtoBehaviorTest {
         assertEquals("LEFT JOIN", GXJoinTypeEnums.LEFT.getDesc());
         assertEquals("RIGHT JOIN", GXJoinTypeEnums.RIGHT.getDesc());
         assertEquals("INNER JOIN", GXJoinTypeEnums.INNER.getDesc());
+    }
+
+    @Test
+    void unionTypesUseUppercaseSqlKeywords() {
+        assertEquals("UNION", GXUnionTypeEnums.UNION.getUnionType());
+        assertEquals("UNION ALL", GXUnionTypeEnums.UNION_ALL.getUnionType());
     }
 }

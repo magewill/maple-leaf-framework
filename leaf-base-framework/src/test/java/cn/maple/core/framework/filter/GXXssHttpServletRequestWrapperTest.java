@@ -95,6 +95,19 @@ class GXXssHttpServletRequestWrapperTest {
     }
 
     @Test
+    @DisplayName("does not filter protocol and auth headers")
+    void testProtocolHeadersAreNotFiltered() throws IOException {
+        HttpServletRequest request = jsonRequest("");
+        when(request.getHeader(HttpHeaders.AUTHORIZATION)).thenReturn("Bearer <token>");
+        when(request.getHeader(HttpHeaders.CONTENT_TYPE)).thenReturn(MediaType.APPLICATION_JSON_VALUE);
+
+        GXXssHttpServletRequestWrapper wrapper = new GXXssHttpServletRequestWrapper(request);
+
+        assertEquals("Bearer <token>", wrapper.getHeader(HttpHeaders.AUTHORIZATION));
+        assertEquals(MediaType.APPLICATION_JSON_VALUE, wrapper.getHeader(HttpHeaders.CONTENT_TYPE));
+    }
+
+    @Test
     @DisplayName("does not encode header names before lookup")
     void testHeaderNameIsNotEncodedBeforeLookup() throws IOException {
         HttpServletRequest request = jsonRequest("");

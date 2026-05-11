@@ -3,6 +3,8 @@ package cn.maple.core.framework.dto.res;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @EqualsAndHashCode(callSuper = true)
@@ -20,7 +22,7 @@ public class GXPaginationResDto<T> extends GXBaseResDto {
     private List<T> records;
 
     public GXPaginationResDto(List<T> list, long totalCount, long pageSize, long currPage) {
-        this.records = list;
+        setRecords(list);
         this.total = totalCount;
         this.pageSize = pageSize;
         this.currentPage = currPage;
@@ -28,7 +30,7 @@ public class GXPaginationResDto<T> extends GXBaseResDto {
     }
 
     public GXPaginationResDto(List<T> list, long totalCount, long pages, long pageSize, long currPage) {
-        this.records = list;
+        setRecords(list);
         this.total = totalCount;
         this.pageSize = pageSize;
         this.currentPage = currPage;
@@ -36,6 +38,14 @@ public class GXPaginationResDto<T> extends GXBaseResDto {
     }
 
     public GXPaginationResDto(List<T> list) {
-        this.records = list;
+        setRecords(list);
+    }
+
+    public List<T> getRecords() {
+        return records == null ? Collections.emptyList() : Collections.unmodifiableList(records);
+    }
+
+    public void setRecords(List<T> records) {
+        this.records = records == null ? new ArrayList<>() : new ArrayList<>(records);
     }
 }

@@ -7,6 +7,7 @@ import com.google.common.eventbus.EventBus;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.BeansException;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.annotation.Bean;
@@ -37,6 +38,7 @@ public class GuavaEventBusConfig implements ApplicationContextAware {
     private volatile Executor asyncEventBusExecutor;
 
     @Bean("eventBus")
+    @ConditionalOnMissingBean(name = "eventBus")
     public EventBus eventBus() {
         log.info("初始化Guava EventBus的同步事件对象");
         String identifier = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "maple-event-bus");
@@ -44,6 +46,7 @@ public class GuavaEventBusConfig implements ApplicationContextAware {
     }
 
     @Bean("asyncEventBus")
+    @ConditionalOnMissingBean(name = "asyncEventBus")
     public AsyncEventBus asyncEventBus() {
         log.info("初始化Guava EventBus的异步事件对象");
         String identifier = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "maple-async-event-bus");
@@ -74,9 +77,14 @@ public class GuavaEventBusConfig implements ApplicationContextAware {
     private SimpleAsyncTaskExecutor createVirtualAsyncEventBusExecutor(String identifier) {
         SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor("async-" + identifier + "-event-vt-");
         executor.setVirtualThreads(true);
+        executor.setConcurrencyLimit(GXCommonUtils.getEnvironmentValue(
+                "maple.event.guava.virtual-threads.concurrency-limit",
+                Integer.class,
+                Runtime.getRuntime().availableProcessors() * 2
+        ));
         executor.setTaskTerminationTimeout(TimeUnit.SECONDS.toMillis(ASYNC_EVENT_AWAIT_TERMINATION_SECONDS));
         executor.setCancelRemainingTasksOnClose(true);
-        executor.setRejectTasksWhenLimitReached(true);
+        executor.setRejectTasksWhenLimitReached(false);
         return executor;
     }
 

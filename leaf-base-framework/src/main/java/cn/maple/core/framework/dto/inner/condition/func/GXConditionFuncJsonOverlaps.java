@@ -1,14 +1,11 @@
 package cn.maple.core.framework.dto.inner.condition.func;
 
 import cn.hutool.core.lang.Dict;
-import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.json.JSONUtil;
-import cn.maple.core.framework.exception.GXBusinessException;
-import cn.maple.core.framework.util.GXSpringContextUtils;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.ObjectMapper;
+import cn.maple.core.framework.dto.inner.condition.GXConditionSegment;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class GXConditionFuncJsonOverlaps extends GXConditionFunc<String> {
     private final Object values;
@@ -37,23 +34,6 @@ public class GXConditionFuncJsonOverlaps extends GXConditionFunc<String> {
         this.rawJsonPath = jsonPath;
     }
 
-    private static String normalizeJsonPath(String jsonPath) {
-        if (CharSequenceUtil.isBlank(jsonPath)) {
-            return "$";
-        }
-        String trimmed = CharSequenceUtil.trim(jsonPath);
-        if ("$".equals(trimmed) || trimmed.startsWith("$.") || trimmed.startsWith("$[")) {
-            return trimmed;
-        }
-        if (trimmed.startsWith(".")) {
-            return "$" + trimmed;
-        }
-        if (trimmed.startsWith("$")) {
-            return "$." + trimmed.substring(1);
-        }
-        return "$." + trimmed;
-    }
-
     @Override
     public String getOp() {
         return jsonField;
@@ -61,31 +41,12 @@ public class GXConditionFuncJsonOverlaps extends GXConditionFunc<String> {
 
     @Override
     public String getFieldExpression() {
-        this.paramMap.put(paramName + "_path", normalizeJsonPath(rawJsonPath));
-        String format = "`{}`.`{}`->#{dbQueryParamInnerDto.paramMap.{}_path}, CAST(#{dbQueryParamInnerDto.paramMap.{}} AS JSON)";
-        return CharSequenceUtil.format(format, tableNameAlias, jsonField, paramName, paramName);
+        return GXConditionFuncDialectSupport.safeColumn(jsonField);
     }
 
     @Override
     public String getFieldValue() {
-        if (values == null) {
-            throw new GXBusinessException("JSON_OVERLAPS value must not be null");
-        }
-        if (values instanceof Dict) {
-            return JSONUtil.toJsonStr(values);
-        }
-        if (values instanceof List<?>) {
-            ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
-            if (objectMapper == null) {
-                throw new GXBusinessException("ObjectMapper bean is required for JSON_OVERLAPS");
-            }
-            try {
-                return objectMapper.writeValueAsString(values);
-            } catch (JacksonException e) {
-                throw new GXBusinessException(e.getMessage(), e);
-            }
-        }
-        return values.toString();
+        return GXConditionFuncDialectSupport.toJsonString(values, getFunctionName());
     }
 
     @Override
@@ -95,13 +56,21 @@ public class GXConditionFuncJsonOverlaps extends GXConditionFunc<String> {
 
     @Override
     public String whereString() {
-        this.paramMap.clear();
-        this.paramMap.put(paramName, getFieldValue());
-        return CharSequenceUtil.format("{}({})", getFunctionName(), getFieldExpression());
+        return toSegment().sql();
+    }
+
+    @Override
+    public GXConditionSegment toSegment() {
+        String pathParamName = paramName + "_path";
+        String field = GXConditionFuncDialectSupport.qualifiedColumn(tableNameAlias, jsonField);
+        Map<String, Object> params = new HashMap<>();
+        params.put(paramName, getFieldValue());
+        params.put(pathParamName, GXConditionFuncDialectSupport.normalizeJsonPath(rawJsonPath));
+        return new GXConditionSegment(GXConditionFuncDialectSupport.renderJsonOverlaps(field, pathParamName, paramName), params);
     }
 
     @Override
     public String getFieldOriginalValue() {
-        return "";
+        return getFieldValue();
     }
 }

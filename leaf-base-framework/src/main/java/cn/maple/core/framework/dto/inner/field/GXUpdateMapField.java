@@ -18,15 +18,8 @@ public class GXUpdateMapField<T extends Map<String, Object>> extends GXUpdateFie
     @Override
     public String updateString() {
         if (value == null) {
-            if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-                return CharSequenceUtil.format("{} = NULL", fieldName);
-            }
-            return CharSequenceUtil.format("{}.{} = NULL", tableNameAlias, fieldName);
+            return CharSequenceUtil.format("{} = NULL", GXUpdateJsonDialectSupport.qualifiedField(tableNameAlias, fieldName));
         }
-
-        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{} = CAST(#{dbQueryParamInnerDto.paramMap.{}, javaType=java.util.Map,typeHandler=com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler} AS JSON)", fieldName, paramName);
-        }
-        return CharSequenceUtil.format("{}.{} =  CAST(#{dbQueryParamInnerDto.paramMap.{}, javaType=java.util.Map,typeHandler=com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler} AS JSON)", tableNameAlias, fieldName, paramName);
+        return GXUpdateJsonDialectSupport.renderMapSet(tableNameAlias, fieldName, paramName);
     }
 }

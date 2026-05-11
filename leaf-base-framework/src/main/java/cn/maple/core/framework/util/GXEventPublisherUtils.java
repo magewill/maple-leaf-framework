@@ -1,6 +1,5 @@
 package cn.maple.core.framework.util;
 
-import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.event.GXBaseEvent;
 import cn.maple.core.framework.event.center.AsyncEventBusCenter;
 import cn.maple.core.framework.event.center.SyncEventBusCenter;
@@ -15,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @SuppressWarnings("all")
 public class GXEventPublisherUtils {
-    private static final ConcurrentHashMap<String, String> EVENT_BUS_REGISTER_CACHE = new ConcurrentHashMap<>(1024);
+    private static final ConcurrentHashMap<String, Boolean> EVENT_BUS_REGISTER_CACHE = new ConcurrentHashMap<>(1024);
 
     private GXEventPublisherUtils() {
     }
@@ -39,39 +38,37 @@ public class GXEventPublisherUtils {
     }
 
     public static <T> void publishGuavaAsyncEvent(GXBaseEvent<T> event, Class<?> listenerClazz) {
-        AsyncEventBus asyncEventBus = AsyncEventBusCenter.getInstance();
+        AsyncEventBus asyncEventBus = getAsyncEventBus();
         Object listener = GXSpringContextUtils.getBean(listenerClazz);
         if (Objects.isNull(listener)) {
-            throw new GXBusinessException("指定的监听类型不存在");
+            throw new GXBusinessException("Event listener bean does not exist");
         }
-        registerAndPostEvent(asyncEventBus, listener, listenerClazz.getName(), event);
+        registerAndPostEvent(asyncEventBus, listener, event);
     }
 
     public static <T> void publishGuavaSyncEvent(GXBaseEvent<T> event, Class<?> listenerClazz) {
-        EventBus eventBus = SyncEventBusCenter.getInstance();
+        EventBus eventBus = getSyncEventBus();
         Object listener = GXSpringContextUtils.getBean(listenerClazz);
         if (Objects.isNull(listener)) {
-            throw new GXBusinessException("指定的监听类型不存在");
+            throw new GXBusinessException("Event listener bean does not exist");
         }
-        registerAndPostEvent(eventBus, listener, listenerClazz.getName(), event);
+        registerAndPostEvent(eventBus, listener, event);
     }
 
     public static <T> void publishGuavaAsyncEvent(GXBaseEvent<T> event, Object listener) {
-        AsyncEventBus asyncEventBus = AsyncEventBusCenter.getInstance();
-        registerAndPostEvent(asyncEventBus, listener, listener.getClass().getName(), event);
+        registerAndPostEvent(getAsyncEventBus(), listener, event);
     }
 
     public static <T> void publishGuavaSyncEvent(GXBaseEvent<T> event, Object listener) {
-        EventBus eventBus = SyncEventBusCenter.getInstance();
-        registerAndPostEvent(eventBus, listener, listener.getClass().getName(), event);
+        registerAndPostEvent(getSyncEventBus(), listener, event);
     }
 
     public static void unregisterGuavaAsyncEventObserver(Object listener) {
-        unregisterEventObserver(AsyncEventBusCenter.getInstance(), listener);
+        unregisterEventObserver(getAsyncEventBus(), listener);
     }
 
     public static void unregisterGuavaSyncEventObserver(Object listener) {
-        unregisterEventObserver(SyncEventBusCenter.getInstance(), listener);
+        unregisterEventObserver(getSyncEventBus(), listener);
     }
 
     public static void unregisterGuavaAsyncEventObserver(Class<?> listenerClazz) {
@@ -79,7 +76,7 @@ public class GXEventPublisherUtils {
         if (Objects.isNull(listener)) {
             return;
         }
-        unregisterEventObserver(AsyncEventBusCenter.getInstance(), listener);
+        unregisterEventObserver(getAsyncEventBus(), listener);
     }
 
     public static void unregisterGuavaSyncEventObserver(Class<?> listenerClazz) {
@@ -87,24 +84,43 @@ public class GXEventPublisherUtils {
         if (Objects.isNull(listener)) {
             return;
         }
-        unregisterEventObserver(SyncEventBusCenter.getInstance(), listener);
+        unregisterEventObserver(getSyncEventBus(), listener);
     }
 
-    private static <T> void registerAndPostEvent(EventBus eventBus, Object listener, String key, GXBaseEvent<T> event) {
-        String s = EVENT_BUS_REGISTER_CACHE.get(key);
-        if (CharSequenceUtil.isEmpty(s)) {
+    private static EventBus getSyncEventBus() {
+        EventBus eventBus = GXSpringContextUtils.getBean("eventBus", EventBus.class);
+        return eventBus == null ? SyncEventBusCenter.getInstance() : eventBus;
+    }
+
+    private static AsyncEventBus getAsyncEventBus() {
+        AsyncEventBus asyncEventBus = GXSpringContextUtils.getBean("asyncEventBus", AsyncEventBus.class);
+        return asyncEventBus == null ? AsyncEventBusCenter.getInstance() : asyncEventBus;
+    }
+
+    private static <T> void registerAndPostEvent(EventBus eventBus, Object listener, GXBaseEvent<T> event) {
+        if (listener == null) {
+            throw new GXBusinessException("Event listener does not exist");
+        }
+        String key = buildRegisterCacheKey(eventBus, listener);
+        if (!Boolean.TRUE.equals(EVENT_BUS_REGISTER_CACHE.get(key))) {
             eventBus.register(listener);
-            EVENT_BUS_REGISTER_CACHE.put(key, listener.getClass().getSimpleName());
+            EVENT_BUS_REGISTER_CACHE.put(key, Boolean.TRUE);
         }
         eventBus.post(event);
     }
 
     private static void unregisterEventObserver(EventBus eventBus, Object listener) {
-        String key = listener.getClass().getName();
-        String s = EVENT_BUS_REGISTER_CACHE.get(key);
-        if (CharSequenceUtil.isNotEmpty(s)) {
+        if (listener == null) {
+            return;
+        }
+        String key = buildRegisterCacheKey(eventBus, listener);
+        if (Boolean.TRUE.equals(EVENT_BUS_REGISTER_CACHE.get(key))) {
             eventBus.unregister(listener);
             EVENT_BUS_REGISTER_CACHE.remove(key);
         }
+    }
+
+    private static String buildRegisterCacheKey(EventBus eventBus, Object listener) {
+        return System.identityHashCode(eventBus) + ":" + System.identityHashCode(listener) + ":" + listener.getClass().getName();
     }
 }

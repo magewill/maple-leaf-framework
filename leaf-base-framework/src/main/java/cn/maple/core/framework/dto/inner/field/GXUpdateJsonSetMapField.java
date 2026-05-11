@@ -26,22 +26,11 @@ public class GXUpdateJsonSetMapField<T extends Map<String, Object>> extends GXUp
         this.paramMap.put(pathParamName, jsonPath);
 
         if (value == null) {
-            if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-                return CharSequenceUtil.format("{} = JSON_SET({}, #{dbQueryParamInnerDto.paramMap.{}}, NULL)",
-                        fieldName, fieldName, pathParamName);
-            }
-            return CharSequenceUtil.format("{}.{} = JSON_SET({}.{}, #{dbQueryParamInnerDto.paramMap.{}}, NULL)",
-                    tableNameAlias, fieldName, tableNameAlias, fieldName, pathParamName);
+            return GXUpdateJsonDialectSupport.renderJsonSet(tableNameAlias, fieldName, pathParamName, null, true);
         }
 
         String jsonValue = JSONUtil.toJsonStr(this.value);
         this.paramMap.put(paramName, jsonValue);
-
-        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{} = JSON_SET({}, #{dbQueryParamInnerDto.paramMap.{}}, CAST(#{dbQueryParamInnerDto.paramMap.{}} as JSON))",
-                    fieldName, fieldName, pathParamName, paramName);
-        }
-        return CharSequenceUtil.format("{}.{} = JSON_SET({}.{}, #{dbQueryParamInnerDto.paramMap.{}}, CAST(#{dbQueryParamInnerDto.paramMap.{}} as JSON))",
-                tableNameAlias, fieldName, tableNameAlias, fieldName, pathParamName, paramName);
+        return GXUpdateJsonDialectSupport.renderJsonSet(tableNameAlias, fieldName, pathParamName, paramName, true);
     }
 }

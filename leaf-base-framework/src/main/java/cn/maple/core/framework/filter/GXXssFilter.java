@@ -6,6 +6,7 @@ import jakarta.servlet.FilterConfig;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 
 import java.io.IOException;
@@ -25,7 +26,15 @@ public class GXXssFilter implements Filter {
             chain.doFilter(request, response);
             return;
         }
-        chain.doFilter(new GXXssHttpServletRequestWrapper(httpServletRequest), response);
+        try {
+            chain.doFilter(new GXXssHttpServletRequestWrapper(httpServletRequest), response);
+        } catch (IllegalArgumentException e) {
+            if (response instanceof HttpServletResponse httpServletResponse) {
+                httpServletResponse.sendError(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE, e.getMessage());
+                return;
+            }
+            throw e;
+        }
     }
 
     @Override
