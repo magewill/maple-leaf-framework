@@ -2,12 +2,17 @@ package cn.maple.redisson;
 
 import cn.maple.redisson.services.impl.GXRedissonCacheServiceImpl;
 import cn.maple.redisson.annotation.GXRedissonDelayMQToTopic;
+import cn.maple.redisson.config.GXRedissonMQConfig;
+import cn.maple.redisson.config.GXRedissonSpringDataConfig;
 import cn.maple.redisson.listener.GXRedissonDelayMQListener;
 import cn.maple.redisson.listener.GXRedissonMQListener;
 import cn.maple.redisson.listener.GXRedissonStreamMQListener;
 import cn.maple.redisson.processor.GXRedissonDelayMQPostProcessor;
 import cn.maple.redisson.processor.GXRedissonMQPostProcessor;
 import cn.maple.redisson.processor.GXRedissonStreamMQPostProcessor;
+import cn.maple.redisson.properties.GXRedissonConnectProperties;
+import cn.maple.redisson.properties.local.GXLocalRedissonMQProperties;
+import cn.maple.redisson.properties.local.GXLocalRedissonProperties;
 import cn.maple.redisson.stream.GXRedissonStreamMQManager;
 import cn.maple.redisson.stream.dto.req.GXRedissonStreamMessageDto;
 import cn.maple.redisson.stream.queue.GXRedissonStreamImmediateMQ;
@@ -26,6 +31,7 @@ import org.redisson.api.RReliableTopic;
 import org.redisson.api.RStream;
 import org.redisson.api.RedissonClient;
 import org.redisson.api.stream.StreamMessageId;
+import org.redisson.config.Config;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
@@ -190,6 +196,32 @@ class RedissonUtilityRegressionTest {
         assertTrue(local.isAppendInstanceIdToConsumerName());
         assertEquals(10_000L, local.getStreamMaxLen());
         assertEquals(2, nacos.getConsumerThreads());
+    }
+
+    @Test
+    void springDataRedissonConfigStoresAuthOnRootConfig() {
+        GXLocalRedissonProperties properties = new GXLocalRedissonProperties();
+        properties.setConfig(Map.of("single", connectionProperties("redis://127.0.0.1:6379")));
+        GXRedissonSpringDataConfig springDataConfig = new GXRedissonSpringDataConfig();
+        ReflectionTestUtils.setField(springDataConfig, "redissonConfig", properties);
+
+        Config config = springDataConfig.config();
+
+        assertEquals("secret", config.getPassword());
+        assertEquals("default", config.getUsername());
+    }
+
+    @Test
+    void mqRedissonConfigStoresAuthOnRootConfig() {
+        GXLocalRedissonMQProperties properties = new GXLocalRedissonMQProperties();
+        properties.setConfig(Map.of("cluster", connectionProperties("redis://127.0.0.1:6379,redis://127.0.0.1:6380")));
+        GXRedissonMQConfig mqConfig = new GXRedissonMQConfig();
+        ReflectionTestUtils.setField(mqConfig, "redissonMQConfig", properties);
+
+        Config config = mqConfig.mqConfig();
+
+        assertEquals("secret", config.getPassword());
+        assertEquals("default", config.getUsername());
     }
 
     @Test
@@ -408,6 +440,14 @@ class RedissonUtilityRegressionTest {
     @SuppressWarnings("unchecked")
     private static Map<String, Object> delayListenerConfigs(GXRedissonDelayMQPostProcessor processor) {
         return (Map<String, Object>) ReflectionTestUtils.getField(processor, "listenerConfigs");
+    }
+
+    private static GXRedissonConnectProperties connectionProperties(String address) {
+        GXRedissonConnectProperties properties = new GXRedissonConnectProperties();
+        properties.setAddress(address);
+        properties.setUsername("default");
+        properties.setPassword("secret");
+        return properties;
     }
 
     private static GXRedissonDelayMQPostProcessor delayPostProcessor(RedissonClient redissonClient) {

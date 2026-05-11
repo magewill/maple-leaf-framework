@@ -89,7 +89,7 @@ public class GXRedissonMQConfig {
             }
             clusterConfig.setSlaveConnectionMinimumIdleSize(
                     Objects.requireNonNullElse(properties.getSlaveConnectionMinimumIdleSize(), 2));
-            applyClusterAuth(clusterConfig, properties);
+            applyAuth(config, properties);
             return true;
         }
 
@@ -97,7 +97,7 @@ public class GXRedissonMQConfig {
                 .setAddress(addresses[0])
                 .setDatabase(Objects.requireNonNullElse(properties.getDatabase(), 0))
                 .setConnectionMinimumIdleSize(Objects.requireNonNullElse(properties.getConnectionMinimumIdleSize(), 2));
-        applySingleAuth(singleConfig, properties);
+        applyAuth(config, properties);
         return true;
     }
 
@@ -118,18 +118,7 @@ public class GXRedissonMQConfig {
         config.setNettyThreads(nettyThreads);
     }
 
-    private static void applySingleAuth(SingleServerConfig config, GXRedissonConnectProperties properties) {
-        String password = decode(properties.getPassword());
-        if (CharSequenceUtil.isNotBlank(password)) {
-            config.setPassword(password);
-        }
-        String username = decode(properties.getUsername());
-        if (CharSequenceUtil.isNotBlank(username)) {
-            config.setUsername(username);
-        }
-    }
-
-    private static void applyClusterAuth(ClusterServersConfig config, GXRedissonConnectProperties properties) {
+    private static void applyAuth(Config config, GXRedissonConnectProperties properties) {
         String password = decode(properties.getPassword());
         if (CharSequenceUtil.isNotBlank(password)) {
             config.setPassword(password);
