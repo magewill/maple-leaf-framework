@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-    本地开发环境（local）
-    策略：以控制台为主，方便实时调试。文件日志轻量，只保留 info.log 和 druid-sql.log。
-    SQL 日志同时输出到控制台 + 文件，便于本地联调时直接观察。
--->
+
 <Configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                xmlns="https://logging.apache.org/xml/ns"
                xsi:schemaLocation="https://logging.apache.org/xml/ns https://logging.apache.org/xml/ns/log4j-config-2.xsd"
@@ -17,17 +13,17 @@
     </properties>
 
     <Appenders>
-        <!--*********************控制台日志***********************-->
-        <!--本地环境：控制台输出 DEBUG 及以上，方便实时联调-->
+
+
         <Console name="consoleAppender" target="SYSTEM_OUT">
             <Filters>
-                <ThresholdFilter level="DEBUG" onMatch="ACCEPT" onMismatch="DENY"/>
+                <ThresholdFilter level="INFO" onMatch="ACCEPT" onMismatch="DENY"/>
             </Filters>
             <PatternLayout pattern="${LOG_PATTERN}" disableAnsi="false" noConsoleNoAnsi="false"/>
         </Console>
 
-        <!--*********************文件日志***********************-->
-        <!--本地环境只保留 info.log，减少磁盘占用-->
+
+
         <RollingFile name="infoFileAppender"
                      fileName="${LOG_HOME}/info.log"
                      filePattern="${LOG_HOME}/$${date:yyyy-MM}/info-%d{yyyy-MM-dd}-%i.log.gz">
@@ -48,11 +44,7 @@
             </DefaultRolloverStrategy>
         </RollingFile>
 
-        <!--
-            Druid SQL 专用追加器
-            注意：仅接受 DEBUG 级别，只应被 druid.sql.* 的 Logger 引用。
-            不要挂载到 Root Logger，否则所有模块的 DEBUG 日志都会写入此文件。
-        -->
+
         <RollingFile name="druidSqlRollingFile"
                      fileName="${LOG_HOME}/druid-sql.log"
                      filePattern="${LOG_HOME}/$${date:yyyy-MM}/druid-sql-%d{yyyy-MM-dd}-%i.log.gz">
@@ -72,107 +64,104 @@
                 </Delete>
             </DefaultRolloverStrategy>
         </RollingFile>
+
+
+        <Async name="asyncInfoFileAppender" bufferSize="8192" blocking="true" includeLocation="true">
+            <AppenderRef ref="infoFileAppender"/>
+        </Async>
+        <Async name="asyncDruidSqlRollingFile" bufferSize="8192" blocking="true" includeLocation="true">
+            <AppenderRef ref="druidSqlRollingFile"/>
+        </Async>
     </Appenders>
 
     <Loggers>
-        <!--
-            根日志设置（本地环境）
-            移除 druidSqlRollingFile 引用，druid SQL 由专用 Logger 独立处理。
-            本地 Root level="DEBUG"，业务代码的 DEBUG 日志可以在控制台看到。
-        -->
-        <Root level="DEBUG">
+
+        <Root level="INFO">
             <AppenderRef ref="consoleAppender"/>
-            <AppenderRef ref="infoFileAppender"/>
+            <AppenderRef ref="asyncInfoFileAppender"/>
         </Root>
 
-        <!--
-            Druid SQL 日志（核心配置）
-            druid 打印 SQL 必须是 DEBUG 级别。
-            本地环境：同时输出到控制台和文件，联调时控制台可直接看到 SQL。
-            additivity="false"：不向上传播到 Root，避免 SQL 在控制台重复打印两次。
-        -->
+
         <Logger name="druid.sql.Statement" level="DEBUG" additivity="false">
             <AppenderRef ref="consoleAppender"/>
-            <AppenderRef ref="druidSqlRollingFile"/>
-        </Logger>
-        <!--druid 结果集参数打印（可选，开启后可看到绑定参数值）-->
-        <!--<Logger name="druid.sql.ResultSet" level="DEBUG" additivity="false">-->
-        <!--    <AppenderRef ref="consoleAppender"/>-->
-        <!--    <AppenderRef ref="druidSqlRollingFile"/>-->
-        <!--</Logger>-->
-
-        <!--ES 日志-->
-        <Logger name="org.elasticsearch.client.RequestLogger" level="INFO" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-        <Logger name="org.elasticsearch" level="INFO" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
+            <AppenderRef ref="asyncDruidSqlRollingFile"/>
         </Logger>
 
-        <!--Spring 日志-->
-        <Logger name="org.springframework" level="WARN" additivity="false">
+
+
+
+
+
+
+        <Logger name="org.elasticsearch.client.RequestLogger" level="ERROR" additivity="false">
+            <AppenderRef ref="consoleAppender"/>
+        </Logger>
+        <Logger name="org.elasticsearch" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
 
-        <!--
-            com.alibaba 日志设置为 WARN。
-            说明：druid 的 SQL logger 名为 druid.sql.*（非 com.alibaba.druid.*），
-            此 WARN 限制不影响上方 druid.sql.Statement 的 DEBUG 日志输出。
-        -->
-        <Logger name="com.alibaba" level="WARN" additivity="false">
+
+        <Logger name="org.springframework" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
 
-        <!--Apache 日志-->
-        <Logger name="org.apache" level="WARN" additivity="false">
+
+        <Logger name="com.alibaba" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
 
-        <!--Redisson 日志-->
-        <Logger name="org.redisson" level="WARN" additivity="false">
+
+        <Logger name="org.apache" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
 
-        <!--Netty 日志-->
-        <Logger name="io.netty" level="WARN" additivity="false">
+
+        <Logger name="org.redisson" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
 
-        <!--net.sf-->
-        <Logger name="net.sf" level="FATAL" additivity="false"/>
 
-        <Logger name="java.util.logging" level="WARN" additivity="false"/>
-        <Logger name="javax.management" level="WARN" additivity="false"/>
-        <Logger name="sun.util" level="WARN" additivity="false"/>
-        <Logger name="sun.rmi" level="WARN" additivity="false"/>
-        <Logger name="org.jboss.logging" level="WARN" additivity="false">
+        <Logger name="io.netty" level="ERROR" additivity="false">
+            <AppenderRef ref="consoleAppender"/>
+        </Logger>
+
+
+        <Logger name="net.sf" level="ERROR" additivity="false"/>
+
+        <Logger name="java.util.logging" level="ERROR" additivity="false"/>
+        <Logger name="javax.management" level="ERROR" additivity="false"/>
+        <Logger name="sun.util" level="ERROR" additivity="false"/>
+        <Logger name="sun.rmi" level="ERROR" additivity="false"/>
+        <Logger name="org.jboss.logging" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
         <Logger name="org.mybatis" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
 
-        <!--MyBatis / p6spy-->
-        <Logger name="com.p6spy" level="WARN" additivity="false">
+
+        <Logger name="com.p6spy" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
-        <Logger name="com.baomidou" level="WARN" additivity="false">
+        <Logger name="com.baomidou" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
-        <Logger name="org.hibernate" level="WARN" additivity="false">
+        <Logger name="org.hibernate" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
 
-        <!--maple 框架：本地 DEBUG 级别，方便框架层调试-->
-        <Logger name="cn.maple" level="DEBUG" additivity="false">
+
+        <Logger name="org.springframework.web.servlet.handler.AbstractHandlerMethodMapping" level="ERROR"/>
+        <Logger name="sun.util.logging.internal.LoggingProviderImpl$JULWrapper" level="ERROR"/>
+        <Logger name="cn.maple" level="INFO" additivity="false">
             <AppenderRef ref="consoleAppender"/>
-            <AppenderRef ref="infoFileAppender"/>
+            <AppenderRef ref="asyncInfoFileAppender"/>
         </Logger>
 
-        <!--业务项目：本地 DEBUG 级别，方便业务逻辑调试-->
-        <Logger name="cn.gaple" level="DEBUG" additivity="false">
+
+        <Logger name="cn.gaple" level="INFO" additivity="false">
             <AppenderRef ref="consoleAppender"/>
-            <AppenderRef ref="infoFileAppender"/>
+            <AppenderRef ref="asyncInfoFileAppender"/>
         </Logger>
     </Loggers>
 </Configuration>

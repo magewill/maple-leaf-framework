@@ -70,16 +70,28 @@ spring:
             truncate-allow: false
             drop-table-allow: false
         slf4j:
-          enable: true
+          enabled: true
+          statement-log-enabled: false
+          connection-log-error-enabled: true
           statement-log-error-enabled: true
           statement-create-after-log-enabled: false
+          statement-executable-sql-log-enable: false
+          result-set-log-enabled: false
+          connection-log-enabled: false
+          data-source-log-enabled: false
+          result-set-close-after-log-enabled: false
+          connection-close-after-log-enabled: false
           statement-close-after-log-enabled: false
           result-set-open-after-log-enabled: false
-          result-set-close-after-log-enabled: false
+          statement-sql-pretty-format: true
   profiles:
     active: dev
   cache:
     type: none
+
+logging:
+  level:
+    druid.sql.Statement: debug
 
 #mybatis
 mybatis-plus:

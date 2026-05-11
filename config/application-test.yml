@@ -14,7 +14,7 @@ server:
 
 # Log4j2日志文件配置
 logging:
-  config: classpath:log4j2-${spring.profiles.active}.xml
+  config: classpath:log4j2-test.xml
   level:
     root: info
     druid.sql.Statement: debug

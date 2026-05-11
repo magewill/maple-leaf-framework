@@ -1878,6 +1878,15 @@ spring:
             multi-statement-allow: true
 ```
 
+Merge rule for Druid datasource options:
+
+- `dynamic.datasource.<name>.*` has the highest priority for each datasource.
+- Missing `dynamic.datasource.<name>.*` options inherit from `spring.datasource.druid.*`.
+- Framework defaults are used only when neither of the above is configured.
+- Use `connection-properties: ""` under a dynamic datasource to explicitly disable inheritance from `spring.datasource.druid.connection-properties`.
+- `filter.stat.*`, `filter.wall.*`, and `filter.slf4j.*` follow the same priority rule; explicit filter options override values read from Druid `connection-properties`.
+- To print Druid SQL statements, keep `logging.level.druid.sql.Statement: debug` and set `filter.slf4j.statement-log-enabled: true`; keep it `false` by default for production performance.
+
 ### 4.2 多数据源配置
 
 ```yaml
