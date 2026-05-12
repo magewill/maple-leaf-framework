@@ -130,7 +130,7 @@ public class GXCommonUtils {
 
             ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
             if (objectMapper == null) {
-                LOG.warn("ObjectMapper bean is unavailable, cannot convert property: key={}, type={}", key, clazzType.getName());
+                LOG.debug("ObjectMapper bean is unavailable, cannot convert property: key={}, type={}", key, clazzType.getName());
                 return getClassDefaultValue(clazzType);
             }
 
@@ -178,13 +178,13 @@ public class GXCommonUtils {
 
             ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
             if (objectMapper == null) {
-                LOG.warn("ObjectMapper bean is unavailable, use default property value: key={}, type={}", key, clazzType.getName());
+                LOG.debug("ObjectMapper bean is unavailable, use default property value: key={}, type={}", key, clazzType.getName());
                 return defaultValue;
             }
 
             return objectMapper.readValue(rawValue, clazzType);
         } catch (Exception e) {
-            LOG.warn("Failed to get property, use default value: key={}, error={}", key, e.getMessage());
+            LOG.debug("Failed to get property, use default value: key={}, error={}", key, e.getMessage());
             return defaultValue;
         }
     }
@@ -205,7 +205,7 @@ public class GXCommonUtils {
             }
             return "default";
         } catch (Exception e) {
-            LOG.warn("Failed to get active profile: {}", e.getMessage());
+            LOG.debug("Failed to get active profile: {}", e.getMessage());
             return "default";
         }
     }
@@ -220,7 +220,7 @@ public class GXCommonUtils {
             }
             return ReflectUtil.newInstanceIfPossible(clazzType);
         } catch (Exception e) {
-            LOG.warn("Failed to create default value for type: type={}, error={}", clazzType.getName(), e.getMessage());
+            LOG.debug("Failed to create default value for type: type={}, error={}", clazzType.getName(), e.getMessage());
             return null;
         }
     }
@@ -231,7 +231,7 @@ public class GXCommonUtils {
         }
 
         if (startInclude < 0 || endExclude > phoneNumber.length() || startInclude >= endExclude) {
-            LOG.warn("Invalid phone mask arguments: startInclude={}, endExclude={}, phoneLength={}",
+            LOG.debug("Invalid phone mask arguments: startInclude={}, endExclude={}, phoneLength={}",
                     startInclude, endExclude, phoneNumber.length());
             return phoneNumber.toString();
         }
@@ -263,7 +263,7 @@ public class GXCommonUtils {
             throw new GXBusinessException("Decrypt key must not be empty");
         }
         if (CharSequenceUtil.isEmpty(encryptedStr)) {
-            LOG.warn("Encrypted string is empty");
+            LOG.debug("Encrypted string is empty");
             return Dict.create();
         }
 
@@ -386,7 +386,7 @@ public class GXCommonUtils {
         }
         Object target = GXSpringContextUtils.getBean(serviceClass);
         if (target == null) {
-            LOG.warn("Spring bean not found: type={}", serviceClass.getName());
+            LOG.debug("Spring bean not found: type={}", serviceClass.getName());
             return null;
         }
         return reflectCallObjectMethod(target, methodName, params);
@@ -394,7 +394,7 @@ public class GXCommonUtils {
 
     public static @Nullable Object reflectCallObjectMethod(@Nullable Object object, @Nullable String methodName, Object... params) {
         if (Objects.isNull(object)) {
-            LOG.warn("Reflection target object is null");
+            LOG.debug("Reflection target object is null");
             return null;
         }
 
@@ -413,7 +413,7 @@ public class GXCommonUtils {
             Method method = findMethod(object.getClass(), methodName, paramTypes);
 
             if (method == METHOD_NOT_FOUND) {
-                LOG.warn("Method not found, reflection call skipped: target={}.{}, params={}",
+                LOG.debug("Method not found, reflection call skipped: target={}.{}, params={}",
                         object.getClass().getSimpleName(), methodName, Arrays.toString(params));
                 return null;
             }
@@ -454,7 +454,7 @@ public class GXCommonUtils {
             try {
                 if (METHOD_CACHE.size() > MAX_METHOD_CACHE_SIZE) {
                     METHOD_CACHE.clear();
-                    LOG.warn("Reflection method cache cleared: maxSize={}", MAX_METHOD_CACHE_SIZE);
+                    LOG.debug("Reflection method cache cleared: maxSize={}", MAX_METHOD_CACHE_SIZE);
                 }
             } finally {
                 METHOD_CACHE_CLEANING.set(false);
@@ -757,7 +757,7 @@ public class GXCommonUtils {
             return null;
         }
         if (targetClazz == null) {
-            LOG.warn("Target type is null, skip string conversion");
+            LOG.debug("Target type is null, skip string conversion");
             return null;
         }
         if (ReUtil.isMatch(MAP_STR_FORMAT_REGULAR, str)) {
@@ -823,7 +823,7 @@ public class GXCommonUtils {
 
     public static Integer checkURLReachable(String urlString) {
         if (CharSequenceUtil.isEmpty(urlString)) {
-            LOG.warn("URL must not be empty");
+            LOG.debug("URL must not be empty");
             return -1;
         }
 
@@ -834,10 +834,10 @@ public class GXCommonUtils {
                 int responseCode = response.getStatus();
 
                 if (responseCode == HttpStatus.HTTP_OK) {
-                    LOG.info("URL reachable: {}", urlString);
+                    LOG.debug("URL reachable: {}", urlString);
                     return HttpStatus.HTTP_OK;
                 }
-                LOG.info("URL unreachable: statusCode={}, url={}", responseCode, urlString);
+                LOG.debug("URL unreachable: statusCode={}, url={}", responseCode, urlString);
                 return responseCode;
             }
         } catch (Exception e) {
@@ -968,7 +968,7 @@ public class GXCommonUtils {
             }
             int processors = osBean.getAvailableProcessors();
             if (processors <= 0) {
-                LOG.warn("Invalid processor count: {}", processors);
+                LOG.debug("Invalid processor count: {}", processors);
                 return loadAverage;
             }
 

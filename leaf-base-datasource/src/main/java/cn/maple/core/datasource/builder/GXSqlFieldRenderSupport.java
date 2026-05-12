@@ -5,12 +5,16 @@ import cn.maple.core.framework.exception.GXDBConditionException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXDBStringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
 
 final class GXSqlFieldRenderSupport {
+    private static final Logger LOGGER = LoggerFactory.getLogger(GXSqlFieldRenderSupport.class);
+
     private GXSqlFieldRenderSupport() {
     }
 
@@ -201,7 +205,7 @@ final class GXSqlFieldRenderSupport {
                 throw new GXDBConditionException(CharSequenceUtil.format("{} field does not support wildcard: {}", clauseName, column));
             }
             if ("*".equals(expressionPart)) {
-                GXBaseBuilder.LOGGER.error("SELECT field '*' is allowed for compatibility, please prefer explicit columns when possible.");
+                LOGGER.debug("SELECT field '*' is allowed for compatibility, please prefer explicit columns when possible.");
             }
             return trimmed;
         }
