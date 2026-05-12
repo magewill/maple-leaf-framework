@@ -4,6 +4,7 @@ import cn.maple.core.framework.service.GXBotNotificationExceptionService;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
@@ -23,7 +24,7 @@ public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
     }
 
     @Override
-    public void handleUncaughtException(Throwable throwable, Method method, Object... params) {
+    public void handleUncaughtException(Throwable throwable, Method method, Object @Nullable [] params) {
         StringBuilder errorMsg = new StringBuilder(512)
                 .append("--------------Maple Leaf Framework async exception--------------\n")
                 .append("Exception message: ").append(throwable.getMessage()).append("\n")
@@ -38,7 +39,7 @@ public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
         notifyException(throwable);
     }
 
-    private void appendParams(StringBuilder errorMsg, Object[] params) {
+    private void appendParams(StringBuilder errorMsg, Object @Nullable [] params) {
         if (params == null || params.length == 0) {
             return;
         }
@@ -48,7 +49,7 @@ public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
         }
     }
 
-    private String safeToString(Object param) {
+    private String safeToString(@Nullable Object param) {
         try {
             return param == null ? "null" : param.toString();
         } catch (Exception e) {

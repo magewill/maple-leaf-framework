@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cglib.beans.BeanCopier;
 import org.springframework.cglib.core.Converter;
+import org.jspecify.annotations.Nullable;
 
 import java.lang.reflect.*;
 import java.time.temporal.Temporal;
@@ -100,7 +101,7 @@ public class GXCGLibDataConvert implements Converter {
         return wrapperClass != targetClass && wrapperClass.isInstance(value);
     }
 
-    private static boolean canReturnDirectly(Class<?> targetClass, Object value, String propertyName) {
+    private static boolean canReturnDirectly(Class<?> targetClass, Object value, @Nullable String propertyName) {
         if (propertyName != null && targetClass == Optional.class && value instanceof Optional<?>) {
             return false;
         }
@@ -128,7 +129,7 @@ public class GXCGLibDataConvert implements Converter {
 
     @Override
     @SuppressWarnings({"rawtypes", "unchecked"})
-    public Object convert(Object sourceValue, Class targetClass, Object context) {
+    public @Nullable Object convert(@Nullable Object sourceValue, Class targetClass, @Nullable Object context) {
         if (targetClass == null) {
             return null;
         }
@@ -196,7 +197,7 @@ public class GXCGLibDataConvert implements Converter {
         }
     }
 
-    private String getPropertyName(String setterName) {
+    private @Nullable String getPropertyName(@Nullable String setterName) {
         if (setterName == null) {
             return "";
         }
@@ -229,7 +230,7 @@ public class GXCGLibDataConvert implements Converter {
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private Object handleEnumConversion(Class<?> targetEnumClass, Object sourceValue) {
+    private @Nullable Object handleEnumConversion(Class<?> targetEnumClass, Object sourceValue) {
         if (targetEnumClass.isInstance(sourceValue)) {
             return sourceValue;
         }
@@ -266,7 +267,7 @@ public class GXCGLibDataConvert implements Converter {
         return null;
     }
 
-    private Object handleOptionalConversion(String propertyName, Object sourceValue) {
+    private @Nullable Object handleOptionalConversion(@Nullable String propertyName, Object sourceValue) {
         Type valueType = getGenericTypeArgumentForTarget(propertyName, Optional.class, 0);
         Class<?> valueClass = resolveClass(valueType, Object.class);
         if (sourceValue instanceof Optional<?> optional) {
@@ -276,7 +277,7 @@ public class GXCGLibDataConvert implements Converter {
         return Optional.ofNullable(convertedValue);
     }
 
-    private Object handleStringSourceConversion(Class<?> targetClass, String propertyName, String sourceValueStr) {
+    private @Nullable Object handleStringSourceConversion(Class<?> targetClass, @Nullable String propertyName, String sourceValueStr) {
         if (String.class.equals(targetClass)) {
             return sourceValueStr;
         }
@@ -289,7 +290,7 @@ public class GXCGLibDataConvert implements Converter {
         return Convert.convertWithCheck(targetClass, sourceValueStr, null, false);
     }
 
-    private Object handleJsonObjectStringConversion(Class<?> targetClass, String jsonObjectStr, String propertyName) {
+    private @Nullable Object handleJsonObjectStringConversion(Class<?> targetClass, String jsonObjectStr, @Nullable String propertyName) {
         try {
             if (Map.class.isAssignableFrom(targetClass)) {
                 Map<?, ?> intermediateMap = JSONUtil.toBean(jsonObjectStr, Map.class);
@@ -305,7 +306,7 @@ public class GXCGLibDataConvert implements Converter {
         }
     }
 
-    private Object handleJsonArrayStringConversion(Class<?> targetClass, String jsonArrayStr, String propertyName) {
+    private @Nullable Object handleJsonArrayStringConversion(Class<?> targetClass, String jsonArrayStr, @Nullable String propertyName) {
         if (!Collection.class.isAssignableFrom(targetClass) && !targetClass.isArray()) {
             return null;
         }
@@ -324,7 +325,7 @@ public class GXCGLibDataConvert implements Converter {
         }
     }
 
-    private Object handleCollectionSourceConversion(Class<?> targetClass, String propertyName, Collection<?> sourceCollection) {
+    private @Nullable Object handleCollectionSourceConversion(Class<?> targetClass, @Nullable String propertyName, Collection<?> sourceCollection) {
         if (!Collection.class.isAssignableFrom(targetClass) && !targetClass.isArray()) {
             return Convert.convertWithCheck(targetClass, sourceCollection, null, false);
         }
@@ -335,7 +336,7 @@ public class GXCGLibDataConvert implements Converter {
         return convertElementsToTarget(targetClass, targetComponentClass, sourceCollection);
     }
 
-    private Object handleArraySourceConversion(Class<?> targetClass, String propertyName, Object sourceArray) {
+    private @Nullable Object handleArraySourceConversion(Class<?> targetClass, @Nullable String propertyName, Object sourceArray) {
         int length = Array.getLength(sourceArray);
         List<Object> sourceList = new ArrayList<>(length);
         for (int i = 0; i < length; i++) {
@@ -344,7 +345,7 @@ public class GXCGLibDataConvert implements Converter {
         return handleCollectionSourceConversion(targetClass, propertyName, sourceList);
     }
 
-    private Object convertElementsToTarget(Class<?> targetClass, Class<?> targetComponentClass, Collection<?> sourceCollection) {
+    private @Nullable Object convertElementsToTarget(Class<?> targetClass, Class<?> targetComponentClass, Collection<?> sourceCollection) {
         if (targetClass.isArray()) {
             Object resultArray = Array.newInstance(targetComponentClass, sourceCollection.size());
             int i = 0;
@@ -381,7 +382,7 @@ public class GXCGLibDataConvert implements Converter {
     }
 
     @SuppressWarnings("unchecked")
-    private Object handleMapSourceConversion(Class<?> targetClass, String propertyName, Map<?, ?> sourceMap) {
+    private @Nullable Object handleMapSourceConversion(Class<?> targetClass, @Nullable String propertyName, Map<?, ?> sourceMap) {
         if (isComplexBean(targetClass)) {
             return GXHutoolDataConvert.staticConvert(targetClass, sourceMap);
         }
@@ -432,7 +433,7 @@ public class GXCGLibDataConvert implements Converter {
         return map instanceof ConcurrentHashMap<?, ?> || map instanceof Hashtable<?, ?>;
     }
 
-    private Type getGenericTypeArgumentForTarget(String propertyName, Class<?> targetType, int index) {
+    private @Nullable Type getGenericTypeArgumentForTarget(@Nullable String propertyName, Class<?> targetType, int index) {
         if (propertyName == null) {
             return null;
         }
@@ -446,7 +447,7 @@ public class GXCGLibDataConvert implements Converter {
         return field == null ? null : resolveParameterizedType(field.getGenericType(), targetType, index);
     }
 
-    private Type resolveParameterizedType(Type genericType, Class<?> targetType, int index) {
+    private @Nullable Type resolveParameterizedType(@Nullable Type genericType, Class<?> targetType, int index) {
         if (!(genericType instanceof ParameterizedType pType)) {
             return null;
         }
@@ -458,7 +459,7 @@ public class GXCGLibDataConvert implements Converter {
         return index < typeArguments.length ? typeArguments[index] : null;
     }
 
-    private Class<?> resolveClass(Type type, Class<?> defaultClass) {
+    private Class<?> resolveClass(@Nullable Type type, Class<?> defaultClass) {
         Class<?> resolvedClass = type == null ? null : TypeUtil.getClass(type);
         return Objects.requireNonNullElse(resolvedClass, defaultClass);
     }

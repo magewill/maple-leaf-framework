@@ -4,6 +4,7 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.constant.GXDataSourceConstant;
 import lombok.Getter;
 import lombok.Setter;
+import org.jspecify.annotations.Nullable;
 
 import java.io.Serializable;
 import java.util.HashMap;
@@ -18,17 +19,17 @@ public abstract class GXCondition<T> implements Serializable {
     protected String tableNameAlias;
     @SuppressWarnings("all")
     @Getter
-    protected Object value;
+    protected @Nullable Object value;
     @Getter
     protected String paramName;
     @Getter
     protected Map<String, Object> paramMap = new HashMap<>();
 
-    protected GXCondition(String fieldExpression, Object value) {
+    protected GXCondition(String fieldExpression, @Nullable Object value) {
         this("", fieldExpression, value);
     }
 
-    protected GXCondition(String tableNameAlias, String fieldExpression, Object value) {
+    protected GXCondition(String tableNameAlias, String fieldExpression, @Nullable Object value) {
         this.tableNameAlias = tableNameAlias;
         this.fieldExpression = fieldExpression;
         this.value = value;
@@ -73,7 +74,7 @@ public abstract class GXCondition<T> implements Serializable {
         return new GXConditionSegment(whereString(), new HashMap<>(paramMap));
     }
 
-    public abstract T getFieldValue();
+    public abstract @Nullable T getFieldValue();
 
-    public abstract T getFieldOriginalValue();
+    public abstract @Nullable T getFieldOriginalValue();
 }

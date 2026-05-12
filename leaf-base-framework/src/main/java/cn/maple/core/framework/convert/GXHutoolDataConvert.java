@@ -17,6 +17,7 @@ import com.google.common.reflect.TypeToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.ObjectMapper;
+import org.jspecify.annotations.Nullable;
 
 import java.lang.reflect.Array;
 import java.lang.reflect.Type;
@@ -85,18 +86,18 @@ public class GXHutoolDataConvert {
         return null;
     }
 
-    private static Class<?> resolveClass(Type type) {
+    private static @Nullable Class<?> resolveClass(@Nullable Type type) {
         if (type instanceof Class<?> clazz) {
             return clazz;
         }
         return type == null ? null : TypeUtil.getClass(type);
     }
 
-    private static Type getTypeArgument(Type type) {
+    private static @Nullable Type getTypeArgument(@Nullable Type type) {
         return TypeUtil.getTypeArgument(type, 0);
     }
 
-    public Object convert(Type type, Object value) {
+    public @Nullable Object convert(@Nullable Type type, @Nullable Object value) {
         Class<?> targetClass = resolveClass(type);
         if (value == null) {
             if (targetClass == Optional.class) {
@@ -162,14 +163,14 @@ public class GXHutoolDataConvert {
         }
     }
 
-    private Object handleOptionalConversion(Type type, Object value) {
+    private @Nullable Object handleOptionalConversion(@Nullable Type type, Object value) {
         if (value instanceof Optional<?> optional) {
             return optional.map(item -> convertOptionalValue(type, item));
         }
         return Optional.ofNullable(convertOptionalValue(type, value));
     }
 
-    private Object convertOptionalValue(Type optionalType, Object value) {
+    private @Nullable Object convertOptionalValue(@Nullable Type optionalType, Object value) {
         Type valueType = TypeUtil.getTypeArgument(optionalType, 0);
         if (valueType == null || valueType == Object.class) {
             return value;
@@ -178,7 +179,7 @@ public class GXHutoolDataConvert {
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private Object handleEnumConversion(Class<?> targetClass, Object value) {
+    private @Nullable Object handleEnumConversion(Class<?> targetClass, Object value) {
         if (targetClass.isInstance(value)) {
             return value;
         }
@@ -216,7 +217,7 @@ public class GXHutoolDataConvert {
         return null;
     }
 
-    private Object handleDateTimeConversion(Class<?> targetClass, Object value) {
+    private @Nullable Object handleDateTimeConversion(Class<?> targetClass, Object value) {
         try {
             if (value instanceof Date dateValue) {
                 if (targetClass == Date.class) {
@@ -273,7 +274,7 @@ public class GXHutoolDataConvert {
         }
     }
 
-    private Object handleStringConversion(Type type, Class<?> targetClass, String value) {
+    private @Nullable Object handleStringConversion(@Nullable Type type, Class<?> targetClass, String value) {
         if (CharSequenceUtil.isBlank(value)) {
             return targetClass.isPrimitive() ? primitiveDefaultValue(targetClass) : null;
         }
@@ -291,7 +292,7 @@ public class GXHutoolDataConvert {
         return convertedValue != null ? convertedValue : value;
     }
 
-    private Object handleJsonObjectConversion(Type type, Class<?> targetClass, String value) {
+    private @Nullable Object handleJsonObjectConversion(@Nullable Type type, Class<?> targetClass, String value) {
         try {
             if (isGXBaseDataType(targetClass)) {
                 return JSONUtil.toBean(value, targetClass);
@@ -312,7 +313,7 @@ public class GXHutoolDataConvert {
         }
     }
 
-    private Object convertToJavaBean(Class<?> targetClass, String value) {
+    private @Nullable Object convertToJavaBean(Class<?> targetClass, String value) {
         try {
             return JSONUtil.toBean(value, targetClass);
         } catch (Exception e) {
@@ -328,7 +329,7 @@ public class GXHutoolDataConvert {
         }
     }
 
-    private Object handleJsonArrayConversion(Type type, Class<?> targetClass, String value) {
+    private @Nullable Object handleJsonArrayConversion(@Nullable Type type, Class<?> targetClass, String value) {
         if (!Collection.class.isAssignableFrom(targetClass) && !targetClass.isArray()) {
             return null;
         }
@@ -340,7 +341,7 @@ public class GXHutoolDataConvert {
         return convertCollectionToTarget(targetClass, parsedList, componentType);
     }
 
-    private Object handleCollectionConversion(Type type, Class<?> targetClass, Collection<?> sourceCollection) {
+    private @Nullable Object handleCollectionConversion(@Nullable Type type, Class<?> targetClass, Collection<?> sourceCollection) {
         if (!Collection.class.isAssignableFrom(targetClass) && !targetClass.isArray()) {
             return null;
         }
@@ -351,7 +352,7 @@ public class GXHutoolDataConvert {
         return convertCollectionToTarget(targetClass, sourceCollection, componentType);
     }
 
-    private Object handleArrayConversion(Type type, Class<?> targetClass, Object sourceArray) {
+    private @Nullable Object handleArrayConversion(@Nullable Type type, Class<?> targetClass, Object sourceArray) {
         if (!Collection.class.isAssignableFrom(targetClass) && !targetClass.isArray()) {
             return null;
         }
@@ -363,7 +364,7 @@ public class GXHutoolDataConvert {
         return handleCollectionConversion(type, targetClass, sourceList);
     }
 
-    private Object convertCollectionToTarget(Class<?> targetClass, Collection<?> sourceCollection, Type componentType) {
+    private @Nullable Object convertCollectionToTarget(Class<?> targetClass, Collection<?> sourceCollection, @Nullable Type componentType) {
         Class<?> componentClass = resolveClass(componentType);
         if (componentClass == null) {
             componentClass = Object.class;
@@ -420,7 +421,7 @@ public class GXHutoolDataConvert {
         }
     }
 
-    public <T> T convert(Class<T> targetClass, Dict value) {
+    public <T> @Nullable T convert(Class<T> targetClass, @Nullable Dict value) {
         if (targetClass == null) {
             throw new IllegalArgumentException("Target type must not be null");
         }
@@ -441,7 +442,7 @@ public class GXHutoolDataConvert {
         }
     }
 
-    private Object handleMapConversion(Type type, Class<?> targetClass, Map<?, ?> sourceMap) {
+    private @Nullable Object handleMapConversion(@Nullable Type type, Class<?> targetClass, Map<?, ?> sourceMap) {
         if (Dict.class.isAssignableFrom(targetClass)) {
             Dict dict = Dict.create();
             sourceMap.forEach((k, v) -> {

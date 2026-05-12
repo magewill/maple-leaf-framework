@@ -36,6 +36,7 @@ import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
+import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -209,7 +210,7 @@ public class GXCommonUtils {
         }
     }
 
-    public static <R> R getClassDefaultValue(Class<R> clazzType) {
+    public static <R> @Nullable R getClassDefaultValue(Class<R> clazzType) {
         if (clazzType == null) {
             throw new IllegalArgumentException("Class must not be null");
         }
@@ -283,7 +284,7 @@ public class GXCommonUtils {
     }
 
     @SuppressWarnings("unchecked")
-    public static <S, T> T convertSourceToTarget(S source, Class<T> tClass, String methodName, CopyOptions copyOptions, Object extraData) {
+    public static <S, T> @Nullable T convertSourceToTarget(@Nullable S source, Class<T> tClass, @Nullable String methodName, @Nullable CopyOptions copyOptions, @Nullable Object extraData) {
         if (Objects.isNull(source)) {
             return null;
         }
@@ -353,7 +354,7 @@ public class GXCommonUtils {
         }
     }
 
-    public static <S, T> T convertSourceToTarget(S source, Class<T> tClass, String methodName, CopyOptions copyOptions) {
+    public static <S, T> @Nullable T convertSourceToTarget(@Nullable S source, Class<T> tClass, @Nullable String methodName, @Nullable CopyOptions copyOptions) {
         return convertSourceToTarget(source, tClass, methodName, copyOptions, Dict.create());
     }
 
@@ -361,11 +362,11 @@ public class GXCommonUtils {
         return convertSourceListToTargetList(collection, tClass, GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME, null);
     }
 
-    public static <R> List<R> convertSourceListToTargetList(Collection<?> collection, Class<R> tClass, String methodName, CopyOptions copyOptions) {
+    public static <R> List<R> convertSourceListToTargetList(Collection<?> collection, Class<R> tClass, @Nullable String methodName, @Nullable CopyOptions copyOptions) {
         return convertSourceListToTargetList(collection, tClass, methodName, copyOptions, Dict.create());
     }
 
-    public static <R> List<R> convertSourceListToTargetList(Collection<?> collection, Class<R> tClass, String methodName, CopyOptions copyOptions, Object extraData) {
+    public static <R> List<R> convertSourceListToTargetList(Collection<?> collection, Class<R> tClass, @Nullable String methodName, @Nullable CopyOptions copyOptions, @Nullable Object extraData) {
         if (CollUtil.isEmpty(collection)) {
             return Collections.emptyList();
         }
@@ -379,7 +380,7 @@ public class GXCommonUtils {
                 .collect(Collectors.toList());
     }
 
-    public static Object reflectCallObjectMethod(Class<?> serviceClass, String methodName, Object... params) {
+    public static @Nullable Object reflectCallObjectMethod(Class<?> serviceClass, String methodName, Object... params) {
         if (serviceClass == null) {
             throw new IllegalArgumentException("Target type must not be null");
         }
@@ -391,7 +392,7 @@ public class GXCommonUtils {
         return reflectCallObjectMethod(target, methodName, params);
     }
 
-    public static <R> Object reflectCallObjectMethod(R object, String methodName, Object... params) {
+    public static @Nullable Object reflectCallObjectMethod(@Nullable Object object, @Nullable String methodName, Object... params) {
         if (Objects.isNull(object)) {
             LOG.warn("Reflection target object is null");
             return null;
@@ -472,7 +473,7 @@ public class GXCommonUtils {
         return paramTypes;
     }
 
-    private static Method lookupMethod(Class<?> clazz, String methodName, Class<?>[] paramTypes) {
+    private static @Nullable Method lookupMethod(Class<?> clazz, String methodName, Class<?>[] paramTypes) {
         Method method = ReflectUtil.getMethod(clazz, methodName, paramTypes);
         if (method != null) {
             return method;
@@ -515,7 +516,7 @@ public class GXCommonUtils {
         return score;
     }
 
-    private static int getParamMatchScore(Class<?> declaredType, Class<?> actualType) {
+    private static int getParamMatchScore(Class<?> declaredType, @Nullable Class<?> actualType) {
         if (actualType == NULL_PARAM_TYPE) {
             return declaredType.isPrimitive() ? Integer.MAX_VALUE : 16;
         }
@@ -674,7 +675,7 @@ public class GXCommonUtils {
         }
     }
 
-    public static <R> R decodeConnectStr(String connectEncodeStr, Class<R> targetClazz) {
+    public static <R> @Nullable R decodeConnectStr(String connectEncodeStr, Class<R> targetClazz) {
         if (targetClazz == null) {
             throw new IllegalArgumentException("Target type must not be null");
         }
@@ -751,7 +752,7 @@ public class GXCommonUtils {
         return conditions;
     }
 
-    public static <T> T convertStrToTarget(String str, Class<T> targetClazz) {
+    public static <T> @Nullable T convertStrToTarget(String str, Class<T> targetClazz) {
         if (CharSequenceUtil.isEmpty(str)) {
             return null;
         }

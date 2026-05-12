@@ -14,6 +14,7 @@ import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.ClassUtils;
@@ -35,23 +36,26 @@ public interface GXBusinessService {
 
     <T, R> R getSingleFieldValueByEntity(T entity, String path, Class<R> type, R defaultValue);
 
-    <S, T> T convertSourceToTarget(S source, Class<T> tClass);
+    <S, T> @Nullable T convertSourceToTarget(S source, Class<T> tClass);
 
-    <S, T> T convertSourceToTarget(S source, Class<T> tClass, String methodName, CopyOptions copyOptions, Dict extraData);
+    <S, T> @Nullable T convertSourceToTarget(S source, Class<T> tClass, @Nullable String methodName, @Nullable CopyOptions copyOptions, Dict extraData);
 
-    <S, T> T convertSourceToTarget(S source, Class<T> tClass, String methodName, CopyOptions copyOptions);
+    <S, T> @Nullable T convertSourceToTarget(S source, Class<T> tClass, @Nullable String methodName, @Nullable CopyOptions copyOptions);
 
-    <R> List<R> convertSourceListToTargetList(Collection<?> collection, Class<R> tClass, String methodName, CopyOptions copyOptions, Dict extraData);
+    <R> List<R> convertSourceListToTargetList(Collection<?> collection, Class<R> tClass, @Nullable String methodName, @Nullable CopyOptions copyOptions, Dict extraData);
 
-    default Object callMethod(Class<?> serveClass, String methodName, Object... params) {
+    default @Nullable Object callMethod(Class<?> serveClass, String methodName, Object... params) {
         return GXCommonUtils.reflectCallObjectMethod(serveClass, methodName, params);
     }
 
-    default Object callMethod(Object targetObject, String methodName, Object... params) {
+    default @Nullable Object callMethod(Object targetObject, String methodName, Object... params) {
         return GXCommonUtils.reflectCallObjectMethod(targetObject, methodName, params);
     }
 
-    default <S extends GXBaseDBResDto, T extends GXBaseResDto> GXPaginationResDto<T> convertPaginationDBResDtoToResDto(GXPaginationResDto<S> pagination, Class<T> targetClazz, String methodName, CopyOptions copyOptions, Dict extraData) {
+    default <S extends GXBaseDBResDto, T extends GXBaseResDto> GXPaginationResDto<T> convertPaginationDBResDtoToResDto(@Nullable GXPaginationResDto<S> pagination, Class<T> targetClazz, @Nullable String methodName, @Nullable CopyOptions copyOptions, Dict extraData) {
+        if (pagination == null) {
+            return new GXPaginationResDto<>(List.of(), 0, 0, 0, 0);
+        }
         List<S> records = pagination.getRecords();
         long total = pagination.getTotal();
         long pages = pagination.getPages();
@@ -61,37 +65,37 @@ public interface GXBusinessService {
         return new GXPaginationResDto<>(list, total, pages, pageSize, currentPage);
     }
 
-    default <S extends GXBaseDBResDto, T extends GXBaseResDto> GXPaginationResDto<T> convertPaginationDBResDtoToResDto(GXPaginationResDto<S> pagination, Class<T> targetClazz, Dict extraData) {
+    default <S extends GXBaseDBResDto, T extends GXBaseResDto> GXPaginationResDto<T> convertPaginationDBResDtoToResDto(@Nullable GXPaginationResDto<S> pagination, Class<T> targetClazz, Dict extraData) {
         return convertPaginationDBResDtoToResDto(pagination, targetClazz, null, new CopyOptions(), extraData);
     }
 
-    default <S extends GXBaseDBResDto, T extends GXBaseResDto> GXPaginationResDto<T> convertPaginationDBResDtoToResDto(GXPaginationResDto<S> pagination, Class<T> targetClazz) {
+    default <S extends GXBaseDBResDto, T extends GXBaseResDto> GXPaginationResDto<T> convertPaginationDBResDtoToResDto(@Nullable GXPaginationResDto<S> pagination, Class<T> targetClazz) {
         return convertPaginationDBResDtoToResDto(pagination, targetClazz, Dict.create());
     }
 
-    default <R> R getFrontEndUserId(String tokenName, String tokenSecretKey, Class<R> targetClass) {
+    default <R> @Nullable R getFrontEndUserId(String tokenName, String tokenSecretKey, Class<R> targetClass) {
         if (Objects.isNull(tokenSecretKey)) {
             throw new GXBusinessException("请传递token密钥!");
         }
         return getLoginFieldFromToken(tokenName, GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, targetClass, tokenSecretKey);
     }
 
-    default <R> R getFrontEndUserId(String tokenSecretKey, Class<R> targetClass) {
+    default <R> @Nullable R getFrontEndUserId(String tokenSecretKey, Class<R> targetClass) {
         return getFrontEndUserId(GXTokenConstant.TOKEN_NAME, tokenSecretKey, targetClass);
     }
 
-    default <R> R getManagerUserId(String tokenName, String tokenSecretKey, Class<R> targetClass) {
+    default <R> @Nullable R getManagerUserId(String tokenName, String tokenSecretKey, Class<R> targetClass) {
         if (Objects.isNull(tokenSecretKey)) {
             throw new GXBusinessException("请传递token密钥!");
         }
         return getLoginFieldFromToken(tokenName, GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, targetClass, tokenSecretKey);
     }
 
-    default <R> R getManagerUserId(String tokenSecretKey, Class<R> targetClass) {
+    default <R> @Nullable R getManagerUserId(String tokenSecretKey, Class<R> targetClass) {
         return getManagerUserId(GXTokenConstant.TOKEN_NAME, tokenSecretKey, targetClass);
     }
 
-    default <R> R getLoginFieldFromToken(String tokenName, String tokenFieldName, Class<R> clazz, String secretKey) {
+    default <R> @Nullable R getLoginFieldFromToken(String tokenName, String tokenFieldName, Class<R> clazz, String secretKey) {
         R fieldFromToken = GXCurrentRequestContextUtils.getLoginFieldFromToken(tokenName, tokenFieldName, clazz, secretKey);
         if (Objects.isNull(fieldFromToken)) {
             LOG.error("token中不存在键为{}的值", tokenFieldName);
@@ -99,7 +103,7 @@ public interface GXBusinessService {
         return fieldFromToken;
     }
 
-    default Object getDataFromCache(String cacheKey, Object... params) {
+    default @Nullable Object getDataFromCache(String cacheKey, Object... params) {
         GXBaseCacheService cacheService = getCacheService();
         if (Objects.nonNull(cacheService)) {
             return cacheService.getCache(getCacheBucketName(), cacheKey);
@@ -130,7 +134,7 @@ public interface GXBusinessService {
         }
     }
 
-    default GXBaseCacheService getCacheService() {
+    default @Nullable GXBaseCacheService getCacheService() {
         GXBaseCacheService cacheService = GXSpringContextUtils.getBean(GXBaseCacheService.class);
         if (Objects.nonNull(cacheService)) {
             return cacheService;

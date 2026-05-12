@@ -4,27 +4,28 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.dto.inner.condition.GXConditionSegment;
 import lombok.Getter;
 import lombok.Setter;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Collections;
 
 public abstract class GXDbJoinOp {
     @Getter
     @Setter
-    protected String masterTableNameAlias;
+    protected @Nullable String masterTableNameAlias;
 
-    protected String masterFieldName;
+    protected @Nullable String masterFieldName;
 
     @Setter
     @Getter
-    protected String joinTableNameAlias;
+    protected @Nullable String joinTableNameAlias;
 
-    protected String joinFieldName;
+    protected @Nullable String joinFieldName;
 
     protected GXDbJoinOp() {
 
     }
 
-    protected GXDbJoinOp(String masterFieldName, String subFieldName) {
+    protected GXDbJoinOp(@Nullable String masterFieldName, @Nullable String subFieldName) {
         this.masterFieldName = masterFieldName;
         this.joinFieldName = subFieldName;
     }

@@ -6,6 +6,7 @@ import cn.maple.core.framework.exception.GXBusinessException;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayInputStream;
@@ -23,12 +24,12 @@ import java.util.regex.Pattern;
 public class GXBase64DecodedMultipartFile implements MultipartFile {
     private static final Pattern BASE64_PAYLOAD_PATTERN = Pattern.compile("^[A-Za-z0-9+/]*={0,2}$");
 
-    private byte[] imageBytes;
+    private byte @Nullable [] imageBytes;
 
     @Getter
-    private String base64;
+    private @Nullable String base64;
 
-    private String contentType;
+    private @Nullable String contentType;
 
     public GXBase64DecodedMultipartFile(String file) {
         setBase64(file);
@@ -48,12 +49,12 @@ public class GXBase64DecodedMultipartFile implements MultipartFile {
     }
 
     @Override
-    public String getOriginalFilename() {
+    public @Nullable String getOriginalFilename() {
         return getName();
     }
 
     @Override
-    public String getContentType() {
+    public @Nullable String getContentType() {
         return contentType;
     }
 

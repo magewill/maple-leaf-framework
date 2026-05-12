@@ -1,5 +1,6 @@
 package cn.maple.core.framework.config.support;
 
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -41,7 +42,7 @@ public class GXCachingConfigurerSupport implements CachingConfigurer {
         }
 
         @Override
-        public void handleCachePutError(RuntimeException exception, Cache cache, Object key, Object value) {
+        public void handleCachePutError(RuntimeException exception, Cache cache, Object key, @Nullable Object value) {
             log.error("Cache put failed: cacheName={}, key={}", getCacheName(cache), key, exception);
         }
 

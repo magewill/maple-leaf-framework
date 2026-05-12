@@ -22,7 +22,7 @@ public class GXPaginationResProtocol<T> extends GXBaseResProtocol {
 
     private long currentPage;
 
-    private List<T> records;
+    private List<T> records = new ArrayList<>();
 
     public GXPaginationResProtocol(List<T> list, long totalCount, long pages, long pageSize, long currPage) {
         setRecords(list);

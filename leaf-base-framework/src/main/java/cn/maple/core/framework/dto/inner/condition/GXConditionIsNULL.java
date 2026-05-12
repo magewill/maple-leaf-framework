@@ -1,11 +1,12 @@
 package cn.maple.core.framework.dto.inner.condition;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Collections;
 
 public class GXConditionIsNULL extends GXCondition<Object> {
-    public GXConditionIsNULL(String tableNameAlias, String fieldName, Object value) {
+    public GXConditionIsNULL(String tableNameAlias, String fieldName, @Nullable Object value) {
         super(tableNameAlias, fieldName, value);
     }
 
@@ -19,12 +20,12 @@ public class GXConditionIsNULL extends GXCondition<Object> {
     }
 
     @Override
-    public Object getFieldValue() {
+    public @Nullable Object getFieldValue() {
         return null;
     }
 
     @Override
-    public Object getFieldOriginalValue() {
+    public @Nullable Object getFieldOriginalValue() {
         return null;
     }
 

@@ -9,6 +9,7 @@ import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.dto.protocol.req.GXQueryParamReqProtocol;
 import cn.maple.core.framework.dto.res.GXPaginationResDto;
 import com.google.common.collect.Table;
+import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 import java.util.Map;
@@ -24,25 +25,25 @@ public interface GXBaseServeApi {
 
     <E> List<E> findFieldByCondition(Table<String, String, Object> condition, Set<String> columns, Class<E> targetClazz);
 
-    <R extends GXBaseApiResDto> R findOneByCondition(Table<String, String, Object> condition, Class<R> targetClazz);
+    <R extends GXBaseApiResDto> @Nullable R findOneByCondition(Table<String, String, Object> condition, Class<R> targetClazz);
 
-    <R extends GXBaseApiResDto> R findOneByCondition(Table<String, String, Object> condition, Class<R> targetClazz, Object extraData);
+    <R extends GXBaseApiResDto> @Nullable R findOneByCondition(Table<String, String, Object> condition, Class<R> targetClazz, Object extraData);
 
-    <R extends GXBaseApiResDto> R findOneByCondition(Table<String, String, Object> condition, Set<String> columns, Class<R> targetClazz, Object extraData);
+    <R extends GXBaseApiResDto> @Nullable R findOneByCondition(Table<String, String, Object> condition, Set<String> columns, Class<R> targetClazz, Object extraData);
 
     <R extends GXBaseApiResDto> R findById(Long id, Set<String> columns, Class<R> targetClazz);
 
     <R extends GXBaseApiResDto> R findById(Long id, Class<R> targetClazz);
 
-    <E> E findSingleFieldByCondition(Table<String, String, Object> condition, String column, Class<E> targetClazz);
+    <E> @Nullable E findSingleFieldByCondition(Table<String, String, Object> condition, String column, Class<E> targetClazz);
 
-    <ID, Q extends GXBaseApiReqDto> ID updateOrCreate(Q reqDto, Table<String, String, Object> condition, CopyOptions copyOptions);
+    <ID, Q extends GXBaseApiReqDto> @Nullable ID updateOrCreate(Q reqDto, Table<String, String, Object> condition, CopyOptions copyOptions);
 
-    <ID, Q extends GXBaseApiReqDto> ID updateOrCreate(Q reqDto, CopyOptions copyOptions);
+    <ID, Q extends GXBaseApiReqDto> @Nullable ID updateOrCreate(Q reqDto, CopyOptions copyOptions);
 
-    <ID, Q extends GXBaseApiReqDto> ID updateOrCreate(Q reqDto);
+    <ID, Q extends GXBaseApiReqDto> @Nullable ID updateOrCreate(Q reqDto);
 
-    <R> GXPaginationResDto<R> paginate(GXQueryParamReqProtocol reqProtocol, Class<R> targetClazz, CopyOptions copyOptions);
+    <R> @Nullable GXPaginationResDto<R> paginate(GXQueryParamReqProtocol reqProtocol, Class<R> targetClazz, @Nullable CopyOptions copyOptions);
 
     <R> GXPaginationResDto<R> paginate(GXQueryParamReqProtocol reqProtocol, Class<R> targetClazz);
 
@@ -56,9 +57,9 @@ public interface GXBaseServeApi {
 
     Long count(Table<String, String, Object> condition);
 
-    <T, Q extends GXBaseApiReqDto> T sourceToTarget(Q reqDto, Class<T> targetClass, String methodName, CopyOptions copyOptions, Dict extraData);
+    <T, Q extends GXBaseApiReqDto> @Nullable T sourceToTarget(Q reqDto, Class<T> targetClass, @Nullable String methodName, @Nullable CopyOptions copyOptions, Dict extraData);
 
-    <T, Q extends GXBaseApiReqDto> T sourceToTarget(Q reqDto, Class<T> targetClass, String methodName, CopyOptions copyOptions);
+    <T, Q extends GXBaseApiReqDto> @Nullable T sourceToTarget(Q reqDto, Class<T> targetClass, @Nullable String methodName, @Nullable CopyOptions copyOptions);
 
     <T, Q extends GXBaseApiReqDto> T sourceToTarget(Q reqDto, Class<T> targetClass);
 
@@ -66,9 +67,9 @@ public interface GXBaseServeApi {
 
     GXBaseServeApi callBindTargetServeSericeClass(Class<?> targetServeServiceClass);
 
-    Object callMethod(String methodName, Object... params);
+    @Nullable Object callMethod(String methodName, Object... params);
 
-    Class<?> getServeServiceClass();
+    @Nullable Class<?> getServeServiceClass();
 
     List<GXCondition<?>> convertTableConditionToConditionExp(Table<String, String, Object> condition);
 

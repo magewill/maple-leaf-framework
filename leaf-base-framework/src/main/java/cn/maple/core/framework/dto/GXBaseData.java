@@ -4,6 +4,7 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.convert.GXCGLibDataConvert;
 import cn.maple.core.framework.util.GXCommonUtils;
+import org.jspecify.annotations.Nullable;
 import org.springframework.util.ClassUtils;
 
 import java.io.Serializable;
@@ -41,7 +42,7 @@ public abstract class GXBaseData implements Serializable {
         return Collections.emptyList();
     }
 
-    protected <E> E convertJsonObjectToTarget(String jsonObject, Class<E> targetClass) {
+    protected <E> @Nullable E convertJsonObjectToTarget(String jsonObject, Class<E> targetClass) {
         if (targetClass == null) {
             return null;
         }

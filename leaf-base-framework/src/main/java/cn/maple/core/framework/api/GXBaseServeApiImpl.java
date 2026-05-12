@@ -19,6 +19,7 @@ import cn.maple.core.framework.service.GXBusinessService;
 import cn.maple.core.framework.util.GXCommonUtils;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Table;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -78,12 +79,12 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     }
 
     @Override
-    public <R extends GXBaseApiResDto> R findOneByCondition(Table<String, String, Object> condition, Class<R> targetClazz) {
+    public <R extends GXBaseApiResDto> @Nullable R findOneByCondition(Table<String, String, Object> condition, Class<R> targetClazz) {
         return findOneByCondition(condition, targetClazz, Dict.create());
     }
 
     @Override
-    public <R extends GXBaseApiResDto> R findOneByCondition(Table<String, String, Object> condition, Set<String> columns, Class<R> targetClazz, Object extraData) {
+    public <R extends GXBaseApiResDto> @Nullable R findOneByCondition(Table<String, String, Object> condition, Set<String> columns, Class<R> targetClazz, Object extraData) {
         return executeWithDynamicBindingCleanup(() -> {
             assertTargetClassNotNull(targetClazz);
             Set<String> queryColumns = defaultColumns(columns);
@@ -101,7 +102,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     }
 
     @Override
-    public <R extends GXBaseApiResDto> R findOneByCondition(Table<String, String, Object> condition, Class<R> targetClazz, Object extraData) {
+    public <R extends GXBaseApiResDto> @Nullable R findOneByCondition(Table<String, String, Object> condition, Class<R> targetClazz, Object extraData) {
         assertTargetClassNotNull(targetClazz);
         return findOneByCondition(condition, CollUtil.newHashSet("*"), targetClazz, extraData);
     }
@@ -127,7 +128,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     }
 
     @Override
-    public <E> E findSingleFieldByCondition(Table<String, String, Object> condition, String column, Class<E> targetClazz) {
+    public <E> @Nullable E findSingleFieldByCondition(Table<String, String, Object> condition, String column, Class<E> targetClazz) {
         return executeWithDynamicBindingCleanup(() -> {
             assertTargetClassNotNull(targetClazz);
             if (Objects.isNull(column)) {
@@ -150,7 +151,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     }
 
     @Override
-    public <ID, Q extends GXBaseApiReqDto> ID updateOrCreate(Q reqDto, Table<String, String, Object> condition, CopyOptions copyOptions) {
+    public <ID, Q extends GXBaseApiReqDto> @Nullable ID updateOrCreate(Q reqDto, Table<String, String, Object> condition, CopyOptions copyOptions) {
         return executeWithDynamicBindingCleanup(() -> {
             if (Objects.isNull(reqDto)) {
                 throw new NullPointerException("Request dto must not be null");
@@ -177,7 +178,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     }
 
     @Override
-    public <ID, Q extends GXBaseApiReqDto> ID updateOrCreate(Q reqDto, CopyOptions copyOptions) {
+    public <ID, Q extends GXBaseApiReqDto> @Nullable ID updateOrCreate(Q reqDto, CopyOptions copyOptions) {
         if (Objects.isNull(reqDto)) {
             throw new NullPointerException("Request dto must not be null");
         }
@@ -188,7 +189,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     }
 
     @Override
-    public <ID, Q extends GXBaseApiReqDto> ID updateOrCreate(Q reqDto) {
+    public <ID, Q extends GXBaseApiReqDto> @Nullable ID updateOrCreate(Q reqDto) {
         if (Objects.isNull(reqDto)) {
             throw new NullPointerException("Request dto must not be null");
         }
@@ -197,7 +198,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
 
     @Override
     @SuppressWarnings("unchecked")
-    public <R> GXPaginationResDto<R> paginate(GXQueryParamReqProtocol reqProtocol, Class<R> targetClazz, CopyOptions copyOptions) {
+    public <R> @Nullable GXPaginationResDto<R> paginate(GXQueryParamReqProtocol reqProtocol, Class<R> targetClazz, @Nullable CopyOptions copyOptions) {
         return executeWithDynamicBindingCleanup(() -> {
             assertTargetClassNotNull(targetClazz);
             CopyOptions safeCopyOptions = copyOptions == null ? CopyOptions.create() : copyOptions;
@@ -257,12 +258,12 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     }
 
     @Override
-    public <T, Q extends GXBaseApiReqDto> T sourceToTarget(Q reqDto, Class<T> targetClass, String methodName, CopyOptions copyOptions, Dict extraData) {
+    public <T, Q extends GXBaseApiReqDto> @Nullable T sourceToTarget(Q reqDto, Class<T> targetClass, @Nullable String methodName, @Nullable CopyOptions copyOptions, Dict extraData) {
         return executeWithDynamicBindingCleanup(() -> GXCommonUtils.convertSourceToTarget(reqDto, targetClass, methodName, copyOptions, extraData));
     }
 
     @Override
-    public <T, Q extends GXBaseApiReqDto> T sourceToTarget(Q reqDto, Class<T> targetClass, String methodName, CopyOptions copyOptions) {
+    public <T, Q extends GXBaseApiReqDto> @Nullable T sourceToTarget(Q reqDto, Class<T> targetClass, @Nullable String methodName, @Nullable CopyOptions copyOptions) {
         return sourceToTarget(reqDto, targetClass, methodName, copyOptions, Dict.create());
     }
 
@@ -289,12 +290,12 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
     }
 
     @Override
-    public Object callMethod(String methodName, Object... params) {
+    public @Nullable Object callMethod(String methodName, Object... params) {
         return executeWithDynamicBindingCleanup(() -> invokeServeServiceMethod(methodName, params));
     }
 
     @Override
-    public Class<?> getServeServiceClass() {
+    public @Nullable Class<?> getServeServiceClass() {
         Class<?> serveServiceClass = DYNAMIC_SERVE_SERVICE_CLASS_THREAD_LOCAL.get();
         if (Objects.nonNull(serveServiceClass)) {
             return serveServiceClass;
@@ -316,7 +317,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
         return GXCommonUtils.convertTableConditionToConditionExp(tableNameAlias, condition);
     }
 
-    private String getTableName() {
+    private @Nullable String getTableName() {
         Object tableName = invokeServeServiceMethod("getTableName");
         if (Objects.nonNull(tableName)) {
             if (tableName instanceof String) {
@@ -340,7 +341,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
         }
     }
 
-    private Object invokeServeServiceMethod(String methodName, Object... params) {
+    private @Nullable Object invokeServeServiceMethod(String methodName, Object... params) {
         if (CharSequenceUtil.isEmpty(methodName)) {
             throw new IllegalArgumentException("Method name must not be empty");
         }
@@ -372,7 +373,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
         return Objects.isNull(columns) || columns.isEmpty() ? CollUtil.newHashSet("*") : columns;
     }
 
-    private <R> List<R> convertCollectionResult(Object result, Class<R> targetClazz, CopyOptions copyOptions) {
+    private <R> List<R> convertCollectionResult(@Nullable Object result, Class<R> targetClazz, @Nullable CopyOptions copyOptions) {
         if (Objects.isNull(result)) {
             return Collections.emptyList();
         }
@@ -383,7 +384,7 @@ public class GXBaseServeApiImpl<S extends GXBusinessService> implements GXBaseSe
         return GXCommonUtils.convertSourceListToTargetList(collection, targetClazz, null, copyOptions);
     }
 
-    private Integer convertToInteger(Object value) {
+    private Integer convertToInteger(@Nullable Object value) {
         if (value == null) {
             return 0;
         }

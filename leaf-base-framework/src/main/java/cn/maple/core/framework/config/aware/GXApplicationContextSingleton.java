@@ -1,5 +1,6 @@
 package cn.maple.core.framework.config.aware;
 
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
@@ -10,12 +11,12 @@ public enum GXApplicationContextSingleton {
 
     private static final Logger LOG = LoggerFactory.getLogger(GXApplicationContextSingleton.class);
 
-    private volatile ApplicationContext applicationContext;
+    private volatile @Nullable ApplicationContext applicationContext;
 
     GXApplicationContextSingleton() {
     }
 
-    public ApplicationContext getApplicationContext() {
+    public @Nullable ApplicationContext getApplicationContext() {
         return applicationContext;
     }
 

@@ -3,21 +3,22 @@ package cn.maple.core.framework.properties;
 import cn.maple.core.framework.dto.GXBaseData;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.jspecify.annotations.Nullable;
 
 @EqualsAndHashCode(callSuper = true)
 @Data
 public class GXCaffeineCacheProperties extends GXBaseData {
-    private Integer initialCapacity;
+    private @Nullable Integer initialCapacity;
 
-    private Long maximumSize;
+    private @Nullable Long maximumSize;
 
-    private Long maximumWeight;
+    private @Nullable Long maximumWeight;
 
-    private Integer expireAfterAccess;
+    private @Nullable Integer expireAfterAccess;
 
-    private Integer expireAfterWrite;
+    private @Nullable Integer expireAfterWrite;
 
-    private Integer refreshAfterWrite;
+    private @Nullable Integer refreshAfterWrite;
 
     private Boolean weakKeys = Boolean.FALSE;
 

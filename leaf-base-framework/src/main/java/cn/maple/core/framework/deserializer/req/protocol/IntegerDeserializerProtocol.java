@@ -1,6 +1,7 @@
 package cn.maple.core.framework.deserializer.req.protocol;
 
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
 import tools.jackson.databind.DeserializationContext;
@@ -40,7 +41,7 @@ public class IntegerDeserializerProtocol extends StdDeserializer<Integer> {
     }
 
     @Override
-    public Integer deserialize(JsonParser p, DeserializationContext ct) throws JacksonException {
+    public @Nullable Integer deserialize(@Nullable JsonParser p, DeserializationContext ct) throws JacksonException {
         if (p == null) {
             return null;
         }
