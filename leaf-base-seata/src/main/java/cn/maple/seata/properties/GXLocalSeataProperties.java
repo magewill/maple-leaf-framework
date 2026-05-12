@@ -2,7 +2,6 @@ package cn.maple.seata.properties;
 
 import cn.maple.core.framework.factory.GXYamlPropertySourceFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.PropertySource;
 
@@ -17,6 +16,6 @@ import org.springframework.context.annotation.PropertySource;
         encoding = "utf-8",
         ignoreResourceNotFound = false
 )
-@ConfigurationProperties(prefix = "")
+//@ConfigurationProperties(prefix = "")
 public class GXLocalSeataProperties {
 }

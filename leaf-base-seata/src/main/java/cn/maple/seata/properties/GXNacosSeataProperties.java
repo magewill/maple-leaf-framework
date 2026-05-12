@@ -4,7 +4,6 @@ import com.alibaba.nacos.api.annotation.NacosProperties;
 import com.alibaba.nacos.api.config.ConfigType;
 import com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
 /**
@@ -26,6 +25,6 @@ import org.springframework.context.annotation.Configuration;
                 password = "${spring.cloud.nacos.password:${nacos.config.password:}}"),
         autoRefreshed = true
 )
-@ConfigurationProperties(prefix = "")
+//@ConfigurationProperties(prefix = "")
 public class GXNacosSeataProperties {
 }
