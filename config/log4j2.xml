@@ -7,14 +7,20 @@
         <property name="LOG_HOME" value="${LOG_PATH:-./logs/}"/>
         <Property name="LOG_PATTERN"
                   value="[%style{%d{ISO8601}}{bright,green}] [traceId=%style{%X{X-B3-TraceId}}{red}] [%t] %style{%p}{bright,green} %style{%C{}.%M}{bright,yellow}:%L - %msg%n%style{%xEx}{bright,red}"/>
-        <Property name="LOG_PATTERN_WITHOUT_TRACE_ID"
-                  value="[%style{%d{ISO8601}}{bright,green}] [%t] %style{%p}{bright,green} %style{%C{}.%M}{bright,yellow}:%L - %msg%n%style{%xEx}{bright,red}"/>
     </properties>
 
     <Appenders>
         <Console name="consoleAppender" target="SYSTEM_OUT">
             <Filters>
                 <ThresholdFilter level="INFO" onMatch="ACCEPT" onMismatch="DENY"/>
+            </Filters>
+            <PatternLayout pattern="${LOG_PATTERN}" disableAnsi="false" noConsoleNoAnsi="false"/>
+        </Console>
+
+        <Console name="sqlConsoleAppender" target="SYSTEM_OUT">
+            <Filters>
+                <ThresholdFilter level="DEBUG"/>
+                <ThresholdFilter level="INFO" onMatch="DENY" onMismatch="NEUTRAL"/>
             </Filters>
             <PatternLayout pattern="${LOG_PATTERN}" disableAnsi="false" noConsoleNoAnsi="false"/>
         </Console>
@@ -143,7 +149,7 @@
                 <ThresholdFilter level="DEBUG"/>
                 <ThresholdFilter level="INFO" onMatch="DENY" onMismatch="NEUTRAL"/>
             </Filters>
-            <PatternLayout pattern="${LOG_PATTERN_WITHOUT_TRACE_ID}"/>
+            <PatternLayout pattern="${LOG_PATTERN}"/>
             <Policies>
                 <SizeBasedTriggeringPolicy size="500 MB"/>
                 <TimeBasedTriggeringPolicy interval="2" modulate="true"/>
@@ -186,6 +192,7 @@
         </Root>
 
         <Logger name="druid.sql.Statement" level="DEBUG" additivity="false">
+            <AppenderRef ref="sqlConsoleAppender"/>
             <AppenderRef ref="asyncDruidSqlRollingFile"/>
         </Logger>
 

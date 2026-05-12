@@ -71,9 +71,10 @@ spring:
             drop-table-allow: false
         slf4j:
           enabled: true
-          statement-log-enabled: false
-          connection-log-error-enabled: true
+          statement-log-enabled: true
+          statement-sql-pretty-format: true
           statement-log-error-enabled: true
+          connection-log-error-enabled: false
           statement-create-after-log-enabled: false
           statement-executable-sql-log-enable: false
           result-set-log-enabled: false
@@ -83,7 +84,8 @@ spring:
           connection-close-after-log-enabled: false
           statement-close-after-log-enabled: false
           result-set-open-after-log-enabled: false
-          statement-sql-pretty-format: true
+          statement-parameter-clear-log-enable: false
+          statement-execute-batch-after-log-enabled: false
   profiles:
     active: dev
   cache:
