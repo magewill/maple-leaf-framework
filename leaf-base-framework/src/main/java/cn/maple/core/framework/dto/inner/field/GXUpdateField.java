@@ -1,6 +1,7 @@
 package cn.maple.core.framework.dto.inner.field;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 import lombok.Getter;
 
 import java.io.Serializable;
@@ -41,10 +42,16 @@ public abstract class GXUpdateField<T> implements Serializable {
     }
 
     public String updateString() {
+        return CharSequenceUtil.format("{} = #{dbQueryParamInnerDto.paramMap.{}}", qualifiedFieldName(), paramName);
+    }
+
+    protected String qualifiedFieldName() {
+        String safeFieldName = GXDBStringEscapeUtils.validateSqlIdentifier(fieldName, "Update field name");
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{} = #{dbQueryParamInnerDto.paramMap.{}}", fieldName, paramName);
+            return safeFieldName;
         }
-        return CharSequenceUtil.format("{}.{} = #{dbQueryParamInnerDto.paramMap.{}}", tableNameAlias, fieldName, paramName);
+        String safeAlias = GXDBStringEscapeUtils.validateSqlAlias(tableNameAlias, "Update table alias");
+        return CharSequenceUtil.format("{}.{}", safeAlias, safeFieldName);
     }
 
     public abstract T getFieldValue();

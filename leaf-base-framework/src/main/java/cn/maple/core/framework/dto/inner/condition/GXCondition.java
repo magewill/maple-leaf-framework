@@ -2,8 +2,8 @@ package cn.maple.core.framework.dto.inner.condition;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.constant.GXDataSourceConstant;
+import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 import lombok.Getter;
-import lombok.Setter;
 import org.jspecify.annotations.Nullable;
 
 import java.io.Serializable;
@@ -14,7 +14,6 @@ import java.util.concurrent.atomic.AtomicLong;
 public abstract class GXCondition<T> implements Serializable {
     private static final AtomicLong PARAM_COUNTER = new AtomicLong(0);
     protected final String fieldExpression;
-    @Setter
     @Getter
     protected String tableNameAlias;
     @SuppressWarnings("all")
@@ -30,7 +29,7 @@ public abstract class GXCondition<T> implements Serializable {
     }
 
     protected GXCondition(String tableNameAlias, String fieldExpression, @Nullable Object value) {
-        this.tableNameAlias = tableNameAlias;
+        setTableNameAlias(tableNameAlias);
         this.fieldExpression = fieldExpression;
         this.value = value;
         this.paramName = generateParamName(fieldExpression);
@@ -55,6 +54,12 @@ public abstract class GXCondition<T> implements Serializable {
 
     public abstract String getOp();
 
+    public void setTableNameAlias(String tableNameAlias) {
+        this.tableNameAlias = CharSequenceUtil.isBlank(tableNameAlias)
+                ? tableNameAlias
+                : GXDBStringEscapeUtils.validateSqlAlias(tableNameAlias, "Condition table alias");
+    }
+
     public String whereString() {
         String opStr = getOp();
         if (CharSequenceUtil.isEmpty(opStr) || CharSequenceUtil.equals(opStr, GXDataSourceConstant.IGNORE_DATA_FILTER_CONDITION_OP_VALUE)) {
@@ -67,7 +72,7 @@ public abstract class GXCondition<T> implements Serializable {
     }
 
     public String getFieldExpression() {
-        return CharSequenceUtil.toUnderlineCase(fieldExpression);
+        return GXDBStringEscapeUtils.validateSqlIdentifier(CharSequenceUtil.toUnderlineCase(fieldExpression), "Condition field");
     }
 
     public GXConditionSegment toSegment() {

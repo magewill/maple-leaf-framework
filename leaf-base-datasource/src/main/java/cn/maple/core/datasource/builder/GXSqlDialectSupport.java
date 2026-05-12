@@ -2,7 +2,6 @@ package cn.maple.core.datasource.builder;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.datasource.properties.GXDataSourceProperties;
-import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 
@@ -47,24 +46,7 @@ final class GXSqlDialectSupport {
     }
 
     static String validateRawSqlStrict(String rawSQL) {
-        if (CharSequenceUtil.isBlank(rawSQL)) {
-            throw new GXSqlInjectionException("Raw SQL must not be blank");
-        }
-        String normalized = rawSQL.trim();
-        if (GXDBStringEscapeUtils.check(normalized)) {
-            throw new GXSqlInjectionException("SQL injection risk detected, raw SQL is blocked");
-        }
-        String lower = normalized.toLowerCase(Locale.ROOT);
-        if (lower.contains(";") || lower.contains("--") || lower.contains("/*") || lower.contains("*/")) {
-            throw new GXSqlInjectionException("Raw SQL contains illegal control symbols");
-        }
-        if (!(lower.startsWith("select") || lower.startsWith("with"))) {
-            throw new GXSqlInjectionException("Raw SQL only allows SELECT/WITH queries");
-        }
-        if (GXBaseBuilder.DANGEROUS_SQL_TOKEN_PATTERN.matcher(normalized).find()) {
-            throw new GXSqlInjectionException("Raw SQL contains dangerous keywords");
-        }
-        return normalized;
+        return GXDBStringEscapeUtils.normalizeAndValidateRawSqlQuery(rawSQL);
     }
 
     static String resolveDbTypeFromContext() {

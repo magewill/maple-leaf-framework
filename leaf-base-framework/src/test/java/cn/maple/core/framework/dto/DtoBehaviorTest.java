@@ -11,9 +11,12 @@ import cn.maple.core.framework.dto.inner.condition.GXConditionLikeLeft;
 import cn.maple.core.framework.dto.inner.condition.GXConditionLikeRight;
 import cn.maple.core.framework.dto.inner.condition.GXConditionStrEQ;
 import cn.maple.core.framework.dto.inner.condition.GXConditionStrNE;
+import cn.maple.core.framework.dto.inner.field.GXUpdateJsonSetStrField;
 import cn.maple.core.framework.dto.inner.field.GXUpdateRawField;
+import cn.maple.core.framework.dto.inner.field.GXUpdateStrField;
 import cn.maple.core.framework.dto.inner.op.GXDbJoinEQ;
 import cn.maple.core.framework.dto.inner.op.GXDbJoinOp;
+import cn.maple.core.framework.dto.inner.op.GXDbJoinValueEQ;
 import cn.maple.core.framework.dto.protocol.req.GXQueryParamReqProtocol;
 import cn.maple.core.framework.dto.protocol.res.GXPaginationResProtocol;
 import cn.maple.core.framework.dto.res.GXPaginationResDto;
@@ -33,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DtoBehaviorTest {
     @Test
@@ -122,15 +126,49 @@ class DtoBehaviorTest {
     }
 
     @Test
+    void joinOpsRejectUnsafeIdentifiersAndEscapeLiteralValues() {
+        GXDbJoinEQ op = new GXDbJoinEQ("user.id", "role.userId");
+        op.setMasterTableNameAlias("u");
+        op.setJoinTableNameAlias("r");
+        assertEquals("u.id=r.userId", op.opString());
+
+        assertThrows(GXSqlInjectionException.class, () -> new GXDbJoinEQ("id;drop", "userId").opString());
+        assertThrows(GXSqlInjectionException.class, () -> {
+            GXDbJoinEQ unsafeAlias = new GXDbJoinEQ("id", "userId");
+            unsafeAlias.setMasterTableNameAlias("u;drop");
+            unsafeAlias.opString();
+        });
+
+        GXDbJoinValueEQ valueOp = new GXDbJoinValueEQ("u", "name", "O'Reilly");
+        assertEquals("u.name='O''Reilly'", valueOp.opString());
+        assertThrows(GXSqlInjectionException.class,
+                () -> new GXDbJoinValueEQ("u", "name", "x' or '1'='1").opString());
+    }
+
+    @Test
     void rawUpdateFieldBuildsSqlAndRejectsInjectionValue() {
         GXUpdateRawField rawField = new GXUpdateRawField("u", "score", "score + 1");
 
         assertEquals("score + 1", rawField.getFieldValue());
         assertEquals("u.score = score + 1", rawField.updateString());
+        assertEquals("u.score = case when status = 1 or status = 2 then score else 0 end",
+                new GXUpdateRawField("u", "score", "case when status = 1 or status = 2 then score else 0 end").updateString());
         assertThrows(GXSqlInjectionException.class,
                 () -> new GXUpdateRawField("u", "score", "1;drop table user").getFieldValue());
         assertThrows(GXSqlInjectionException.class,
                 () -> new GXUpdateRawField("u", "score", "1;drop table user").updateString());
+        assertThrows(GXSqlInjectionException.class,
+                () -> new GXUpdateRawField("u;drop", "score", "score + 1").updateString());
+        assertThrows(GXSqlInjectionException.class,
+                () -> new GXUpdateRawField("u", "score;drop", "score + 1").updateString());
+    }
+
+    @Test
+    void jsonUpdateFieldRejectsUnsafeIdentifiers() {
+        GXUpdateJsonSetStrField field = new GXUpdateJsonSetStrField("u", "extraData", "status", "active");
+        assertTrue(field.updateString().startsWith("u.extra_data = JSON_SET(u.extra_data, "));
+        assertThrows(GXSqlInjectionException.class,
+                () -> new GXUpdateJsonSetStrField("u;drop", "extraData", "status", "active").updateString());
     }
 
     @Test
@@ -140,6 +178,16 @@ class DtoBehaviorTest {
         assertThrows(GXBusinessException.class, () -> new GXConditionLikeFull("u", "name", null).getFieldValue());
         assertThrows(GXBusinessException.class, () -> new GXConditionLikeLeft("u", "name", null).getFieldValue());
         assertThrows(GXBusinessException.class, () -> new GXConditionLikeRight("u", "name", null).getFieldValue());
+    }
+
+    @Test
+    void conditionsRejectUnsafeIdentifiers() {
+        assertThrows(GXSqlInjectionException.class,
+                () -> new GXConditionStrEQ("u;drop", "name", "maple").whereString());
+        assertThrows(GXSqlInjectionException.class,
+                () -> new GXConditionStrEQ("u", "name;drop", "maple").whereString());
+        GXConditionStrEQ condition = new GXConditionStrEQ("u", "name", "maple");
+        assertThrows(GXSqlInjectionException.class, () -> condition.setTableNameAlias("x;drop"));
     }
 
     @Test
@@ -155,6 +203,16 @@ class DtoBehaviorTest {
     @Test
     void rawUpdateFieldRejectsNullValueExplicitly() {
         assertThrows(GXBusinessException.class, () -> new GXUpdateRawField("u", "score", null).getFieldValue());
+    }
+
+    @Test
+    void regularUpdateFieldsRejectUnsafeIdentifiers() {
+        assertThrows(GXSqlInjectionException.class,
+                () -> new GXUpdateStrField("u;drop", "name", "maple").updateString());
+        assertThrows(GXSqlInjectionException.class,
+                () -> new GXUpdateStrField("u", "name;drop", "maple").updateString());
+        assertThrows(GXSqlInjectionException.class,
+                () -> new GXUpdateStrField("u;drop", "name", null).updateString());
     }
 
     @Test

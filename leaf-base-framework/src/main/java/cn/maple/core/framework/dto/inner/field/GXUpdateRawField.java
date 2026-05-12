@@ -18,20 +18,18 @@ public class GXUpdateRawField extends GXUpdateField<String> {
             throw new GXBusinessException("Raw update field value must not be null");
         }
         String strValue = value.toString();
-        if (GXDBStringEscapeUtils.check(strValue)) {
+        try {
+            return GXDBStringEscapeUtils.normalizeAndValidateRawSqlExpression(strValue);
+        } catch (GXSqlInjectionException ex) {
             log.error("SQL injection risk detected in raw update field: {}", strValue);
             throw new GXSqlInjectionException("SQL injection risk detected in raw update field");
         }
-        return strValue;
     }
 
     @Override
     public String updateString() {
         log.warn("Raw SQL update field is used: {}.{}", tableNameAlias, fieldName);
         String checkedValue = getFieldValue();
-        if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-            return CharSequenceUtil.format("{} = {}", fieldName, checkedValue);
-        }
-        return CharSequenceUtil.format("{}.{} = {}", tableNameAlias, fieldName, checkedValue);
+        return CharSequenceUtil.format("{} = {}", qualifiedFieldName(), checkedValue);
     }
 }

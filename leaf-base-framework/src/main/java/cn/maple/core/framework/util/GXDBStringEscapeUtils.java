@@ -6,6 +6,7 @@ import cn.maple.core.framework.exception.GXSqlInjectionException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -104,7 +105,27 @@ public class GXDBStringEscapeUtils {
                     "(\"?\\$eval\"?\\s*:)|" +
                     "(\"?\\$function\"?\\s*:)");
 
-    private static final Pattern SAFE_IDENTIFIER_PATTERN = Pattern.compile("^[a-zA-Z0-9_\\.]+$");
+    private static final Pattern SAFE_SQL_IDENTIFIER_PATTERN = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$");
+
+    private static final Pattern SAFE_SQL_ALIAS_PATTERN = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*$");
+
+    private static final Pattern RAW_SQL_DANGEROUS_PATTERN = Pattern.compile("(?i)\\b(update|delete|insert|alter|drop|truncate|create|grant|revoke|call|exec|execute|merge|declare|rename)\\b");
+
+    private static final Pattern RAW_SQL_DANGEROUS_FUNCTION_PATTERN = Pattern.compile(
+            "(?i)(\\b(?:sleep|pg_sleep|benchmark|load_file)\\s*\\()|"
+                    + "(\\bwaitfor\\s+delay\\b)|"
+                    + "(\\bdbms_pipe\\.receive_message\\s*\\()|"
+                    + "(\\binto\\s+(?:outfile|dumpfile)\\b)|"
+                    + "(\\bxp_cmdshell\\b)|"
+                    + "(\\bsp_executesql\\b)|"
+                    + "(\\bexecute\\s+immediate\\b)"
+    );
+
+    private static final Pattern RAW_SQL_UNION_PATTERN = Pattern.compile("(?i)\\bunion\\b\\s*(?:all\\s*)?\\bselect\\b");
+
+    private static final Pattern RAW_SQL_TAUTOLOGY_PATTERN = Pattern.compile(
+            "(?i)\\b(?:and|or)\\s+(?:\\d+\\s*=\\s*\\d+|'[^']+'\\s*=\\s*'[^']+')\\b"
+    );
 
     private GXDBStringEscapeUtils() {
         throw new AssertionError("GXDBStringEscapeUtils must not be instantiated");
@@ -187,6 +208,58 @@ public class GXDBStringEscapeUtils {
                 getMatcher(SQL_SYNTAX_PATTERN, value).find() ||
                 getMatcher(SQL_INJECTION_PATTERN, value).find() ||
                 getMatcher(SQL_BLIND_INJECTION_PATTERN, value).find();
+    }
+
+    public static String normalizeAndValidateRawSqlCondition(String rawSql) {
+        return normalizeAndValidateRawSqlFragment(rawSql, "Raw SQL condition");
+    }
+
+    public static String normalizeAndValidateRawSqlExpression(String rawSql) {
+        return normalizeAndValidateRawSqlFragment(rawSql, "Raw SQL expression");
+    }
+
+    public static String normalizeAndValidateRawSqlQuery(String rawSql) {
+        if (CharSequenceUtil.isBlank(rawSql)) {
+            throw new GXSqlInjectionException("Raw SQL must not be blank");
+        }
+
+        String normalized = rawSql.trim();
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (lower.contains(";") || lower.contains("--") || lower.contains("#") || lower.contains("/*") || lower.contains("*/")) {
+            throw new GXSqlInjectionException("Raw SQL contains illegal control symbols");
+        }
+        if (!(lower.startsWith("select") || lower.startsWith("with"))) {
+            throw new GXSqlInjectionException("Raw SQL only allows SELECT/WITH queries");
+        }
+        if (RAW_SQL_DANGEROUS_PATTERN.matcher(normalized).find()) {
+            throw new GXSqlInjectionException("Raw SQL contains dangerous keywords");
+        }
+        if (RAW_SQL_DANGEROUS_FUNCTION_PATTERN.matcher(normalized).find()) {
+            throw new GXSqlInjectionException("Raw SQL contains dangerous functions");
+        }
+        return normalized;
+    }
+
+    private static String normalizeAndValidateRawSqlFragment(String rawSql, String kindLabel) {
+        if (CharSequenceUtil.isBlank(rawSql)) {
+            throw new GXSqlInjectionException(kindLabel + " must not be blank");
+        }
+
+        String normalized = rawSql.trim();
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (lower.contains(";") || lower.contains("--") || lower.contains("#") || lower.contains("/*") || lower.contains("*/")) {
+            throw new GXSqlInjectionException(kindLabel + " contains illegal SQL control symbols");
+        }
+        if (RAW_SQL_DANGEROUS_PATTERN.matcher(normalized).find()) {
+            throw new GXSqlInjectionException(kindLabel + " contains dangerous SQL keywords");
+        }
+        if (RAW_SQL_DANGEROUS_FUNCTION_PATTERN.matcher(normalized).find()) {
+            throw new GXSqlInjectionException(kindLabel + " contains dangerous SQL functions");
+        }
+        if (RAW_SQL_UNION_PATTERN.matcher(normalized).find() || RAW_SQL_TAUTOLOGY_PATTERN.matcher(normalized).find()) {
+            throw new GXSqlInjectionException("SQL injection risk detected in " + kindLabel.toLowerCase(Locale.ROOT));
+        }
+        return normalized;
     }
 
     public static boolean checkComprehensive(String value) {
@@ -390,7 +463,21 @@ public class GXDBStringEscapeUtils {
         if (identifier == null || identifier.isEmpty()) {
             return false;
         }
-        return getMatcher(SAFE_IDENTIFIER_PATTERN, identifier).matches();
+        return getMatcher(SAFE_SQL_IDENTIFIER_PATTERN, identifier).matches();
+    }
+
+    public static String validateSqlIdentifier(String identifier, String label) {
+        if (CharSequenceUtil.isBlank(identifier) || !SAFE_SQL_IDENTIFIER_PATTERN.matcher(identifier).matches()) {
+            throw new GXSqlInjectionException(label + " is not a safe SQL identifier: " + identifier);
+        }
+        return identifier;
+    }
+
+    public static String validateSqlAlias(String alias, String label) {
+        if (CharSequenceUtil.isBlank(alias) || !SAFE_SQL_ALIAS_PATTERN.matcher(alias).matches()) {
+            throw new GXSqlInjectionException(label + " is not a safe SQL alias: " + alias);
+        }
+        return alias;
     }
 
     public static String escapeJsonPath(String jsonPath) {
@@ -419,12 +506,7 @@ public class GXDBStringEscapeUtils {
         if (tableName == null || tableName.isEmpty()) {
             throw new IllegalArgumentException("Table name must not be empty");
         }
-
-        if (!isValidIdentifier(tableName)) {
-            String message = CharSequenceUtil.format("Table name contains unsafe characters: {} (source: validateTableName)", tableName);
-            throw new GXSqlInjectionException(message);
-        }
-
+        validateSqlIdentifier(tableName, "Table name");
         if (check(tableName)) {
             String message = CharSequenceUtil.format("SQL injection risk detected in table name: {} (source: validateTableName)", tableName);
             throw new GXSqlInjectionException(message);
@@ -435,12 +517,7 @@ public class GXDBStringEscapeUtils {
         if (columnName == null || columnName.isEmpty()) {
             throw new IllegalArgumentException("Column name must not be empty");
         }
-
-        if (!isValidIdentifier(columnName)) {
-            String message = CharSequenceUtil.format("Column name contains unsafe characters: {} (source: validateColumnName)", columnName);
-            throw new GXSqlInjectionException(message);
-        }
-
+        validateSqlIdentifier(columnName, "Column name");
         if (check(columnName)) {
             String message = CharSequenceUtil.format("SQL injection risk detected in column name: {} (source: validateColumnName)", columnName);
             throw new GXSqlInjectionException(message);

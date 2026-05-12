@@ -15,10 +15,7 @@ public class GXUpdateStrField extends GXUpdateField<String> {
     @Override
     public String updateString() {
         if (value == null) {
-            if (CharSequenceUtil.isEmpty(tableNameAlias)) {
-                return CharSequenceUtil.format("{} = null", fieldName);
-            }
-            return CharSequenceUtil.format("{}.{} = null", tableNameAlias, fieldName);
+            return CharSequenceUtil.format("{} = null", qualifiedFieldName());
         }
 
         return super.updateString();

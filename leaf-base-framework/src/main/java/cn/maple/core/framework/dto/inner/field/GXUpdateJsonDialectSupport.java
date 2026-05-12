@@ -2,6 +2,7 @@ package cn.maple.core.framework.dto.inner.field;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.util.GXCommonUtils;
+import cn.maple.core.framework.util.GXDBStringEscapeUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 
 import java.lang.reflect.Method;
@@ -83,9 +84,11 @@ final class GXUpdateJsonDialectSupport {
     }
 
     static String qualifiedField(String tableNameAlias, String fieldName) {
+        GXDBStringEscapeUtils.validateSqlIdentifier(fieldName, "JSON update field name");
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
             return fieldName;
         }
+        GXDBStringEscapeUtils.validateSqlAlias(tableNameAlias, "JSON update table alias");
         return tableNameAlias + "." + fieldName;
     }
 

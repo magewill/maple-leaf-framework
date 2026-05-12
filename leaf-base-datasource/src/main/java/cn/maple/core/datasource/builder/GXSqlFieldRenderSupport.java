@@ -99,7 +99,9 @@ final class GXSqlFieldRenderSupport {
         if (allowedColumns.isEmpty()) {
             throw new GXDBConditionException("HAVING column whitelist is unavailable");
         }
-        if (GXDBStringEscapeUtils.check(trimmed) || trimmed.contains(";") || trimmed.contains("--") || trimmed.contains("/*")) {
+        try {
+            GXDBStringEscapeUtils.normalizeAndValidateRawSqlExpression(trimmed);
+        } catch (GXSqlInjectionException ex) {
             throw new GXSqlInjectionException(CharSequenceUtil.format("HAVING clause has SQL injection risk: {}", clause));
         }
         if (GXBaseBuilder.DANGEROUS_SQL_TOKEN_PATTERN.matcher(trimmed).find()) {
