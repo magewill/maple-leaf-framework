@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
-
 <Configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                xmlns="https://logging.apache.org/xml/ns"
                xsi:schemaLocation="https://logging.apache.org/xml/ns https://logging.apache.org/xml/ns/log4j-config-2.xsd"
@@ -13,16 +12,12 @@
     </properties>
 
     <Appenders>
-
-
         <Console name="consoleAppender" target="SYSTEM_OUT">
             <Filters>
                 <ThresholdFilter level="INFO" onMatch="ACCEPT" onMismatch="DENY"/>
             </Filters>
             <PatternLayout pattern="${LOG_PATTERN}" disableAnsi="false" noConsoleNoAnsi="false"/>
         </Console>
-
-
 
         <RollingFile name="infoFileAppender"
                      fileName="${LOG_HOME}/info.log"
@@ -44,7 +39,6 @@
             </DefaultRolloverStrategy>
         </RollingFile>
 
-
         <RollingFile name="warnFileAppender"
                      fileName="${LOG_HOME}/warn.log"
                      filePattern="${LOG_HOME}/$${date:yyyy-MM}/warn-%d{yyyy-MM-dd}-%i.log.gz">
@@ -65,7 +59,6 @@
             </DefaultRolloverStrategy>
         </RollingFile>
 
-
         <RollingFile name="errorFileAppender"
                      fileName="${LOG_HOME}/error.log"
                      filePattern="${LOG_HOME}/$${date:yyyy-MM}/error-%d{yyyy-MM-dd}-%i.log.gz">
@@ -84,7 +77,6 @@
                 </Delete>
             </DefaultRolloverStrategy>
         </RollingFile>
-
 
         <RollingFile name="druidSqlRollingFile"
                      fileName="${LOG_HOME}/druid-sql.log"
@@ -106,7 +98,6 @@
             </DefaultRolloverStrategy>
         </RollingFile>
 
-
         <Async name="asyncInfoFileAppender" bufferSize="8192" blocking="true" includeLocation="true">
             <AppenderRef ref="infoFileAppender"/>
         </Async>
@@ -122,7 +113,6 @@
     </Appenders>
 
     <Loggers>
-
         <Root level="INFO">
             <AppenderRef ref="consoleAppender"/>
             <AppenderRef ref="asyncInfoFileAppender"/>
@@ -130,15 +120,9 @@
             <AppenderRef ref="asyncErrorFileAppender"/>
         </Root>
 
-
         <Logger name="druid.sql.Statement" level="DEBUG" additivity="false">
             <AppenderRef ref="asyncDruidSqlRollingFile"/>
         </Logger>
-
-
-
-
-
 
         <Logger name="org.elasticsearch.client.RequestLogger" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
@@ -147,36 +131,29 @@
             <AppenderRef ref="consoleAppender"/>
         </Logger>
 
-
         <Logger name="org.springframework" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
             <AppenderRef ref="asyncWarnFileAppender"/>
             <AppenderRef ref="asyncErrorFileAppender"/>
         </Logger>
 
-
         <Logger name="com.alibaba" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
-
 
         <Logger name="org.apache" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
 
-
         <Logger name="org.redisson" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
-
 
         <Logger name="io.netty" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
 
-
         <Logger name="net.sf" level="ERROR" additivity="false"/>
-
         <Logger name="java.util.logging" level="ERROR" additivity="false"/>
         <Logger name="javax.management" level="ERROR" additivity="false"/>
         <Logger name="sun.util" level="ERROR" additivity="false"/>
@@ -188,7 +165,6 @@
             <AppenderRef ref="consoleAppender"/>
         </Logger>
 
-
         <Logger name="com.p6spy" level="ERROR" additivity="false">
             <AppenderRef ref="consoleAppender"/>
         </Logger>
@@ -199,8 +175,6 @@
             <AppenderRef ref="consoleAppender"/>
         </Logger>
 
-
-
         <Logger name="org.springframework.web.servlet.handler.AbstractHandlerMethodMapping" level="ERROR"/>
         <Logger name="sun.util.logging.internal.LoggingProviderImpl$JULWrapper" level="ERROR"/>
         <Logger name="cn.maple" level="INFO" additivity="false">
@@ -209,7 +183,6 @@
             <AppenderRef ref="asyncWarnFileAppender"/>
             <AppenderRef ref="asyncErrorFileAppender"/>
         </Logger>
-
 
         <Logger name="cn.gaple" level="INFO" additivity="false">
             <AppenderRef ref="consoleAppender"/>
