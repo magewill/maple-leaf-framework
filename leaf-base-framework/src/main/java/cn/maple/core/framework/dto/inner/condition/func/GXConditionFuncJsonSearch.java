@@ -5,7 +5,7 @@ import cn.maple.core.framework.constant.GXBuilderConstant;
 import cn.maple.core.framework.dto.inner.condition.GXConditionSegment;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -49,7 +49,7 @@ public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
         if (value == null) {
             throw new GXBusinessException("JSON_SEARCH value must not be null");
         }
-        if (GXDBStringEscapeUtils.check(value)) {
+        if (GXDBStringUtils.check(value)) {
             throw new GXSqlInjectionException("SQL injection risk detected in JSON_SEARCH condition value");
         }
         return value;
@@ -82,9 +82,9 @@ public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
         if (value == null) {
             return "NULL";
         }
-        if (GXDBStringEscapeUtils.check(value)) {
+        if (GXDBStringUtils.check(value)) {
             throw new GXSqlInjectionException("SQL injection risk detected in JSON_SEARCH condition value");
         }
-        return CharSequenceUtil.format("'{}'", GXDBStringEscapeUtils.escapeSql(value));
+        return CharSequenceUtil.format("'{}'", GXDBStringUtils.escapeSql(value));
     }
 }

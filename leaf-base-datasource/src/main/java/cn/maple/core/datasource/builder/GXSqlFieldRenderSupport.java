@@ -4,7 +4,7 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXDBConditionException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXCommonUtils;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 
 import java.util.Locale;
 import java.util.Set;
@@ -100,7 +100,7 @@ final class GXSqlFieldRenderSupport {
             throw new GXDBConditionException("HAVING column whitelist is unavailable");
         }
         try {
-            GXDBStringEscapeUtils.normalizeAndValidateRawSqlExpression(trimmed);
+            GXDBStringUtils.normalizeAndValidateRawSqlExpression(trimmed);
         } catch (GXSqlInjectionException ex) {
             throw new GXSqlInjectionException(CharSequenceUtil.format("HAVING clause has SQL injection risk: {}", clause));
         }
@@ -206,7 +206,7 @@ final class GXSqlFieldRenderSupport {
             return trimmed;
         }
         if (isComplexExpression(trimmed)) {
-            if (GXDBStringEscapeUtils.check(trimmed)) {
+            if (GXDBStringUtils.check(trimmed)) {
                 throw new GXSqlInjectionException(
                         CharSequenceUtil.format("{} field has SQL injection risk: {}", clauseName, column));
             }
@@ -222,7 +222,7 @@ final class GXSqlFieldRenderSupport {
                 throw new GXDBConditionException(
                         CharSequenceUtil.format("{} field is invalid: {}", clauseName, column));
             }
-            if (GXDBStringEscapeUtils.check(trimmed)) {
+            if (GXDBStringUtils.check(trimmed)) {
                 throw new GXSqlInjectionException(
                         CharSequenceUtil.format("{} field has SQL injection risk: {}", clauseName, column));
             }

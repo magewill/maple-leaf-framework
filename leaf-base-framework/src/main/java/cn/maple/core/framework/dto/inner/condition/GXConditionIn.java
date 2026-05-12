@@ -6,7 +6,7 @@ import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXCommonUtils;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -26,7 +26,7 @@ public class GXConditionIn extends GXCondition<String> {
             throw new GXBusinessException("IN condition value item must not be null");
         }
         String numStr = String.valueOf(number);
-        if (GXDBStringEscapeUtils.check(numStr)) {
+        if (GXDBStringUtils.check(numStr)) {
             throw new GXSqlInjectionException(CharSequenceUtil.format("SQL injection risk detected in IN condition numeric value: {}", numStr));
         }
     }

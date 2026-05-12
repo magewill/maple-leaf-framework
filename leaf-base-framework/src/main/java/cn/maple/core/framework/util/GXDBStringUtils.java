@@ -11,7 +11,7 @@ import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class GXDBStringEscapeUtils {
+public class GXDBStringUtils {
     private static final Pattern SQL_SYNTAX_PATTERN = Pattern.compile(
             "(?i)" +
                     "(" +
@@ -127,7 +127,7 @@ public class GXDBStringEscapeUtils {
             "(?i)\\b(?:and|or)\\s+(?:\\d+\\s*=\\s*\\d+|'[^']+'\\s*=\\s*'[^']+')\\b"
     );
 
-    private GXDBStringEscapeUtils() {
+    private GXDBStringUtils() {
         throw new AssertionError("GXDBStringEscapeUtils must not be instantiated");
     }
 

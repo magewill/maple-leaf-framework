@@ -3,7 +3,7 @@ package cn.maple.core.framework.dto.inner.condition.func;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.exception.GXBusinessException;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 
 import java.util.Arrays;
 import java.util.stream.Collectors;
@@ -46,15 +46,15 @@ public abstract class GXConditionFunc<T> extends GXCondition<T> {
             throw new GXBusinessException("Function expression field item must not be blank");
         }
         if (column.contains(".")) {
-            GXDBStringEscapeUtils.validateColumnName(column);
+            GXDBStringUtils.validateColumnName(column);
             return column;
         }
         if (CharSequenceUtil.isBlank(tableNameAlias)) {
-            GXDBStringEscapeUtils.validateColumnName(column);
+            GXDBStringUtils.validateColumnName(column);
             return column;
         }
-        GXDBStringEscapeUtils.validateColumnName(tableNameAlias);
-        GXDBStringEscapeUtils.validateColumnName(column);
+        GXDBStringUtils.validateColumnName(tableNameAlias);
+        GXDBStringUtils.validateColumnName(column);
         return CharSequenceUtil.format("{}.{}", tableNameAlias, column);
     }
 }

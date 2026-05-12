@@ -5,7 +5,7 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.dto.inner.GXJoinDto;
 import cn.maple.core.framework.exception.GXDBConditionException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 import com.baomidou.mybatisplus.core.metadata.TableInfo;
 
 import java.util.HashSet;
@@ -27,7 +27,7 @@ final class GXSqlTableMetadataSupport {
         if (!GXBaseBuilder.SAFE_IDENTIFIER_PATTERN.matcher(trimmed).matches()) {
             throw new GXDBConditionException(CharSequenceUtil.format("Mutable SQL table name is invalid: {}", tableName));
         }
-        if (GXDBStringEscapeUtils.check(trimmed)) {
+        if (GXDBStringUtils.check(trimmed)) {
             throw new GXSqlInjectionException(CharSequenceUtil.format("Mutable SQL table name has SQL injection risk: {}", tableName));
         }
         return trimmed;
@@ -44,7 +44,7 @@ final class GXSqlTableMetadataSupport {
         if (!GXBaseBuilder.SAFE_IDENTIFIER_PATTERN.matcher(trimmed).matches()) {
             throw new GXDBConditionException(CharSequenceUtil.format("{} table name is invalid: {}", scope, tableName));
         }
-        if (GXDBStringEscapeUtils.check(trimmed)) {
+        if (GXDBStringUtils.check(trimmed)) {
             throw new GXSqlInjectionException(CharSequenceUtil.format("{} table name has SQL injection risk: {}", scope, tableName));
         }
         return trimmed;
@@ -77,7 +77,7 @@ final class GXSqlTableMetadataSupport {
         if (!GXBaseBuilder.SAFE_ALIAS_PATTERN.matcher(trimmed).matches()) {
             throw new GXDBConditionException(CharSequenceUtil.format("{} table alias is invalid: {}", scope, tableAlias));
         }
-        if (GXDBStringEscapeUtils.check(trimmed)) {
+        if (GXDBStringUtils.check(trimmed)) {
             throw new GXSqlInjectionException(CharSequenceUtil.format("{} table alias has SQL injection risk: {}", scope, tableAlias));
         }
         return trimmed;

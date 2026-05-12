@@ -17,7 +17,7 @@ import cn.maple.core.framework.dto.res.GXPaginationResDto;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXCommonUtils;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.metadata.TableInfo;
@@ -85,13 +85,13 @@ public final class GXDBCommonUtils {
             return requestParam;
         }
 
-        if (CharSequenceUtil.isNotEmpty(key) && GXDBStringEscapeUtils.check(key)) {
+        if (CharSequenceUtil.isNotEmpty(key) && GXDBStringUtils.check(key)) {
             String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: addSearchCondition.key)", key);
             LOG.error(message);
             throw new GXSqlInjectionException(message);
         }
 
-        if (value instanceof String && GXDBStringEscapeUtils.check((String) value)) {
+        if (value instanceof String && GXDBStringUtils.check((String) value)) {
             String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: addSearchCondition.value)", value);
             LOG.error(message);
             throw new GXSqlInjectionException(message);
@@ -117,13 +117,13 @@ public final class GXDBCommonUtils {
 
         if (Objects.nonNull(sourceData)) {
             sourceData.forEach((k, v) -> {
-                if (CharSequenceUtil.isNotEmpty(k) && GXDBStringEscapeUtils.check(k)) {
+                if (CharSequenceUtil.isNotEmpty(k) && GXDBStringUtils.check(k)) {
                     String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: addSearchCondition.sourceData.key)", k);
                     LOG.error(message);
                     throw new GXSqlInjectionException(message);
                 }
 
-                if (v instanceof String && GXDBStringEscapeUtils.check((String) v)) {
+                if (v instanceof String && GXDBStringUtils.check((String) v)) {
                     String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: addSearchCondition.sourceData.value)", v);
                     LOG.error(message);
                     throw new GXSqlInjectionException(message);
@@ -183,23 +183,23 @@ public final class GXDBCommonUtils {
             throw new GXBusinessException("Search value must not be empty");
         }
 
-        if (GXDBStringEscapeUtils.check(searchField)) {
+        if (GXDBStringUtils.check(searchField)) {
             String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: generateJSONSearchExpression.searchField)", searchField);
             LOG.error(message);
             throw new GXSqlInjectionException(message);
         }
 
-        String safeSearchField = GXDBStringEscapeUtils.escapeJsonPath(searchField);
+        String safeSearchField = GXDBStringUtils.escapeJsonPath(searchField);
 
         if (CharSequenceUtil.isEmpty(searchExpression)) {
             searchExpression = "$";
         } else {
-            if (GXDBStringEscapeUtils.check(searchExpression)) {
+            if (GXDBStringUtils.check(searchExpression)) {
                 String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: generateJSONSearchExpression.searchExpression)", searchExpression);
                 LOG.error(message);
                 throw new GXSqlInjectionException(message);
             }
-            searchExpression = CharSequenceUtil.format("$.{}", GXDBStringEscapeUtils.escapeJsonPath(searchExpression));
+            searchExpression = CharSequenceUtil.format("$.{}", GXDBStringUtils.escapeJsonPath(searchExpression));
         }
 
         String expressionTemplate = GXBuilderConstant.JSON_SEARCH_EXPRESSION_TEMPLATE;
@@ -211,12 +211,12 @@ public final class GXDBCommonUtils {
                 return CharSequenceUtil.format("{}", o.toString());
             }
             String strValue = o.toString();
-            if (GXDBStringEscapeUtils.check(strValue)) {
+            if (GXDBStringUtils.check(strValue)) {
                 String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: generateJSONSearchExpression.searchValue)", strValue);
                 LOG.error(message);
                 throw new GXSqlInjectionException(message);
             }
-            return CharSequenceUtil.format("\"{}\"", GXDBStringEscapeUtils.escapeJson(strValue));
+            return CharSequenceUtil.format("\"{}\"", GXDBStringUtils.escapeJson(strValue));
         }).collect(Collectors.joining(","));
 
         return CharSequenceUtil.format(expressionTemplate, safeSearchField, searchExpression, searchStr);
@@ -303,7 +303,7 @@ public final class GXDBCommonUtils {
         }
 
         condition.forEach((column, val) -> {
-            if (CharSequenceUtil.isNotEmpty(column) && GXDBStringEscapeUtils.check(column)) {
+            if (CharSequenceUtil.isNotEmpty(column) && GXDBStringUtils.check(column)) {
                 String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: assemblySqlObjectCondition.column)", column);
                 LOG.error(message);
                 throw new GXSqlInjectionException(message);
@@ -318,7 +318,7 @@ public final class GXDBCommonUtils {
 
             final String value = Convert.toStr(val);
 
-            if (CharSequenceUtil.isNotEmpty(value) && GXDBStringEscapeUtils.check(value)) {
+            if (CharSequenceUtil.isNotEmpty(value) && GXDBStringUtils.check(value)) {
                 String message = CharSequenceUtil.format("Potential SQL injection detected: {} (source: assemblySqlObjectCondition.value)", value);
                 LOG.error(message);
                 throw new GXSqlInjectionException(message);
@@ -332,7 +332,7 @@ public final class GXDBCommonUtils {
                 safeValue = value;
             } else {
                 template = "{} = '{}'";
-                safeValue = GXDBStringEscapeUtils.escapeSql(value);
+                safeValue = GXDBStringUtils.escapeSql(value);
             }
 
             sql.WHERE(CharSequenceUtil.format(template, safeColumn, safeValue));
@@ -363,7 +363,7 @@ public final class GXDBCommonUtils {
         }
 
         try {
-            if (GXDBStringEscapeUtils.check(input)) {
+            if (GXDBStringUtils.check(input)) {
                 String message = CharSequenceUtil.format("Potential SQL injection detected by fallback check: {} (source: {})", input, source);
                 LOG.error(message);
                 throw new GXSqlInjectionException(message);

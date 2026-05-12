@@ -3,7 +3,7 @@ package cn.maple.core.framework.dto.inner.condition;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -23,7 +23,7 @@ public class GXConditionLikeRight extends GXCondition<String> {
         if (value == null) {
             throw new GXBusinessException("LIKE condition value must not be null");
         }
-        if (GXDBStringEscapeUtils.check(value.toString())) {
+        if (GXDBStringUtils.check(value.toString())) {
             throw new GXSqlInjectionException("SQL injection risk detected in LIKE condition value");
         }
         this.paramMap.clear();
@@ -38,11 +38,11 @@ public class GXConditionLikeRight extends GXCondition<String> {
         }
 
         String strValue = value.toString();
-        if (GXDBStringEscapeUtils.check(strValue)) {
+        if (GXDBStringUtils.check(strValue)) {
             throw new GXSqlInjectionException("SQL injection risk detected in LIKE condition value");
         }
 
-        String escapedValue = GXDBStringEscapeUtils.escapeSqlForLike(strValue);
+        String escapedValue = GXDBStringUtils.escapeSqlForLike(strValue);
         if (CharSequenceUtil.contains(escapedValue, "''")) {
             return CharSequenceUtil.format("\"{}%\"", escapedValue);
         }
@@ -54,7 +54,7 @@ public class GXConditionLikeRight extends GXCondition<String> {
         if (value == null) {
             throw new GXBusinessException("LIKE condition value must not be null");
         }
-        if (GXDBStringEscapeUtils.check(value.toString())) {
+        if (GXDBStringUtils.check(value.toString())) {
             throw new GXSqlInjectionException("SQL injection risk detected in LIKE condition value");
         }
         String sql = CharSequenceUtil.isEmpty(tableNameAlias)

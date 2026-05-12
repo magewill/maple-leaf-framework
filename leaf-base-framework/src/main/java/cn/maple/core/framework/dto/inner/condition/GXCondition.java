@@ -2,7 +2,7 @@ package cn.maple.core.framework.dto.inner.condition;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.constant.GXDataSourceConstant;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 import lombok.Getter;
 import org.jspecify.annotations.Nullable;
 
@@ -57,7 +57,7 @@ public abstract class GXCondition<T> implements Serializable {
     public void setTableNameAlias(String tableNameAlias) {
         this.tableNameAlias = CharSequenceUtil.isBlank(tableNameAlias)
                 ? tableNameAlias
-                : GXDBStringEscapeUtils.validateSqlAlias(tableNameAlias, "Condition table alias");
+                : GXDBStringUtils.validateSqlAlias(tableNameAlias, "Condition table alias");
     }
 
     public String whereString() {
@@ -72,7 +72,7 @@ public abstract class GXCondition<T> implements Serializable {
     }
 
     public String getFieldExpression() {
-        return GXDBStringEscapeUtils.validateSqlIdentifier(CharSequenceUtil.toUnderlineCase(fieldExpression), "Condition field");
+        return GXDBStringUtils.validateSqlIdentifier(CharSequenceUtil.toUnderlineCase(fieldExpression), "Condition field");
     }
 
     public GXConditionSegment toSegment() {

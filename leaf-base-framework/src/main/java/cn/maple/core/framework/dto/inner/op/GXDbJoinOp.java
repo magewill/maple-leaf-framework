@@ -2,7 +2,7 @@ package cn.maple.core.framework.dto.inner.op;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.dto.inner.condition.GXConditionSegment;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 import lombok.Getter;
 import lombok.Setter;
 import org.jspecify.annotations.Nullable;
@@ -51,13 +51,13 @@ public abstract class GXDbJoinOp {
 
     protected static String normalizeFieldName(@Nullable String fieldName, String label) {
         String trimmed = CharSequenceUtil.trim(fieldName);
-        GXDBStringEscapeUtils.validateSqlIdentifier(trimmed, label);
+        GXDBStringUtils.validateSqlIdentifier(trimmed, label);
         int dotIndex = trimmed.lastIndexOf('.');
         String bareField = dotIndex >= 0 ? trimmed.substring(dotIndex + 1) : trimmed;
-        return GXDBStringEscapeUtils.validateSqlAlias(bareField, label);
+        return GXDBStringUtils.validateSqlAlias(bareField, label);
     }
 
     protected static String validateAlias(@Nullable String alias, String label) {
-        return GXDBStringEscapeUtils.validateSqlAlias(CharSequenceUtil.trim(alias), label);
+        return GXDBStringUtils.validateSqlAlias(CharSequenceUtil.trim(alias), label);
     }
 }

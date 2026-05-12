@@ -5,12 +5,11 @@ import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXCommonUtils;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 
 import java.lang.reflect.Method;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 final class GXConditionFuncDialectSupport {
@@ -28,11 +27,11 @@ final class GXConditionFuncDialectSupport {
         if (CharSequenceUtil.isBlank(column)) {
             throw new GXBusinessException("JSON function field must not be blank");
         }
-        GXDBStringEscapeUtils.validateColumnName(column);
+        GXDBStringUtils.validateColumnName(column);
         if (column.contains(".") || CharSequenceUtil.isBlank(tableNameAlias)) {
             return column;
         }
-        GXDBStringEscapeUtils.validateColumnName(tableNameAlias);
+        GXDBStringUtils.validateColumnName(tableNameAlias);
         return tableNameAlias + "." + column;
     }
 
@@ -41,7 +40,7 @@ final class GXConditionFuncDialectSupport {
         if (CharSequenceUtil.isBlank(column)) {
             throw new GXBusinessException("JSON function field must not be blank");
         }
-        GXDBStringEscapeUtils.validateColumnName(column);
+        GXDBStringUtils.validateColumnName(column);
         return column;
     }
 
@@ -50,7 +49,7 @@ final class GXConditionFuncDialectSupport {
             return "$";
         }
         String trimmed = CharSequenceUtil.trim(jsonPath);
-        if (GXDBStringEscapeUtils.check(trimmed)) {
+        if (GXDBStringUtils.check(trimmed)) {
             throw new GXSqlInjectionException("JSON path contains SQL injection risk");
         }
         if ("$".equals(trimmed) || trimmed.startsWith("$.") || trimmed.startsWith("$[")) {

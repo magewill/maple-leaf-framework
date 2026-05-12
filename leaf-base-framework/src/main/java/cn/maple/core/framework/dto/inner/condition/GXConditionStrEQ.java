@@ -3,7 +3,7 @@ package cn.maple.core.framework.dto.inner.condition;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 
 public class GXConditionStrEQ extends GXCondition<String> {
     public GXConditionStrEQ(String tableNameAlias, String fieldName, String value) {
@@ -20,7 +20,7 @@ public class GXConditionStrEQ extends GXCondition<String> {
         if (value == null) {
             throw new GXBusinessException("String condition value must not be null");
         }
-        if (GXDBStringEscapeUtils.check(value.toString())) {
+        if (GXDBStringUtils.check(value.toString())) {
             throw new GXSqlInjectionException("SQL injection risk detected in string condition value");
         }
         this.paramMap.clear();
@@ -35,11 +35,11 @@ public class GXConditionStrEQ extends GXCondition<String> {
         }
 
         String strValue = value.toString();
-        if (GXDBStringEscapeUtils.check(strValue)) {
+        if (GXDBStringUtils.check(strValue)) {
             throw new GXSqlInjectionException("SQL injection risk detected in string condition value: " + strValue);
         }
 
-        String escapedValue = GXDBStringEscapeUtils.escapeSql(strValue);
+        String escapedValue = GXDBStringUtils.escapeSql(strValue);
 
         if (CharSequenceUtil.contains(escapedValue, "''")) {
             return CharSequenceUtil.format("\"{}\"", escapedValue);

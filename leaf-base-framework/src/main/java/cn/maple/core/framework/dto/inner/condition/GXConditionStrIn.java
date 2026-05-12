@@ -6,7 +6,7 @@ import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXCommonUtils;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -25,7 +25,7 @@ public class GXConditionStrIn extends GXCondition<String> {
         if (value == null) {
             throw new GXBusinessException("IN condition value item must not be null");
         }
-        if (GXDBStringEscapeUtils.check(value)) {
+        if (GXDBStringUtils.check(value)) {
             throw new GXSqlInjectionException("SQL injection risk detected in IN condition value");
         }
     }
@@ -57,7 +57,7 @@ public class GXConditionStrIn extends GXCondition<String> {
         validateSize();
         String serialized = values.stream().map(v -> {
             validateStringValue(v);
-            return CharSequenceUtil.format("'{}'", GXDBStringEscapeUtils.escapeSql(v));
+            return CharSequenceUtil.format("'{}'", GXDBStringUtils.escapeSql(v));
         }).collect(Collectors.joining(","));
         return CharSequenceUtil.format("({})", serialized);
     }

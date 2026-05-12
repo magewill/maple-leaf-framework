@@ -3,7 +3,7 @@ package cn.maple.core.framework.dto.inner.condition.func;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.dto.inner.condition.GXConditionSegment;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 
 import java.util.Map;
 
@@ -20,7 +20,7 @@ public class GXConditionFuncConcat extends GXConditionFunc<String> {
     @Override
     public String getFieldValue() {
         String raw = value == null ? "" : value.toString();
-        if (GXDBStringEscapeUtils.check(raw)) {
+        if (GXDBStringUtils.check(raw)) {
             throw new GXSqlInjectionException("SQL injection risk detected in CONCAT condition value");
         }
         return raw + "%";
@@ -50,10 +50,10 @@ public class GXConditionFuncConcat extends GXConditionFunc<String> {
             return "'%'";
         }
         String strValue = value.toString();
-        if (GXDBStringEscapeUtils.check(strValue)) {
+        if (GXDBStringUtils.check(strValue)) {
             throw new GXSqlInjectionException("SQL injection risk detected in CONCAT condition value");
         }
-        String escapedValue = GXDBStringEscapeUtils.escapeSql(strValue);
+        String escapedValue = GXDBStringUtils.escapeSql(strValue);
         return CharSequenceUtil.format("'{}%'", escapedValue);
     }
 }

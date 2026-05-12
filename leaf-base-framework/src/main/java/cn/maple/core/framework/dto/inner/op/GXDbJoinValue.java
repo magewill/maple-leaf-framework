@@ -3,7 +3,7 @@ package cn.maple.core.framework.dto.inner.op;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.dto.inner.condition.GXConditionSegment;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -48,9 +48,9 @@ public abstract class GXDbJoinValue extends GXDbJoinOp {
             return value.toString();
         }
         String strValue = value.toString();
-        if (GXDBStringEscapeUtils.check(strValue)) {
+        if (GXDBStringUtils.check(strValue)) {
             throw new GXSqlInjectionException("SQL injection risk detected in JOIN value");
         }
-        return CharSequenceUtil.format("'{}'", GXDBStringEscapeUtils.escapeSql(strValue));
+        return CharSequenceUtil.format("'{}'", GXDBStringUtils.escapeSql(strValue));
     }
 }

@@ -2,7 +2,7 @@ package cn.maple.core.datasource.builder;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.datasource.properties.GXDataSourceProperties;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 
 import java.util.Locale;
@@ -46,7 +46,7 @@ final class GXSqlDialectSupport {
     }
 
     static String validateRawSqlStrict(String rawSQL) {
-        return GXDBStringEscapeUtils.normalizeAndValidateRawSqlQuery(rawSQL);
+        return GXDBStringUtils.normalizeAndValidateRawSqlQuery(rawSQL);
     }
 
     static String resolveDbTypeFromContext() {

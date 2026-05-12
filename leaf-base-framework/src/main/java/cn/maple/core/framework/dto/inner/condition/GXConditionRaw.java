@@ -1,6 +1,6 @@
 package cn.maple.core.framework.dto.inner.condition;
 
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 
 import java.util.Collections;
 
@@ -16,21 +16,21 @@ public class GXConditionRaw extends GXCondition<String> {
 
     @Override
     public String whereString() {
-        return GXDBStringEscapeUtils.normalizeAndValidateRawSqlCondition(value == null ? null : value.toString());
+        return GXDBStringUtils.normalizeAndValidateRawSqlCondition(value == null ? null : value.toString());
     }
 
     @Override
     public String getFieldValue() {
-        return GXDBStringEscapeUtils.normalizeAndValidateRawSqlCondition(value == null ? null : value.toString());
+        return GXDBStringUtils.normalizeAndValidateRawSqlCondition(value == null ? null : value.toString());
     }
 
     @Override
     public String getFieldOriginalValue() {
-        return GXDBStringEscapeUtils.normalizeAndValidateRawSqlCondition(value == null ? null : value.toString());
+        return GXDBStringUtils.normalizeAndValidateRawSqlCondition(value == null ? null : value.toString());
     }
 
     @Override
     public GXConditionSegment toSegment() {
-        return new GXConditionSegment(GXDBStringEscapeUtils.normalizeAndValidateRawSqlCondition(value == null ? null : value.toString()), Collections.emptyMap());
+        return new GXConditionSegment(GXDBStringUtils.normalizeAndValidateRawSqlCondition(value == null ? null : value.toString()), Collections.emptyMap());
     }
 }

@@ -1,7 +1,7 @@
 package cn.maple.core.framework.dto.inner.field;
 
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.maple.core.framework.util.GXDBStringEscapeUtils;
+import cn.maple.core.framework.util.GXDBStringUtils;
 import lombok.Getter;
 
 import java.io.Serializable;
@@ -46,11 +46,11 @@ public abstract class GXUpdateField<T> implements Serializable {
     }
 
     protected String qualifiedFieldName() {
-        String safeFieldName = GXDBStringEscapeUtils.validateSqlIdentifier(fieldName, "Update field name");
+        String safeFieldName = GXDBStringUtils.validateSqlIdentifier(fieldName, "Update field name");
         if (CharSequenceUtil.isEmpty(tableNameAlias)) {
             return safeFieldName;
         }
-        String safeAlias = GXDBStringEscapeUtils.validateSqlAlias(tableNameAlias, "Update table alias");
+        String safeAlias = GXDBStringUtils.validateSqlAlias(tableNameAlias, "Update table alias");
         return CharSequenceUtil.format("{}.{}", safeAlias, safeFieldName);
     }
 
