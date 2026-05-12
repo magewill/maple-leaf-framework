@@ -39,7 +39,7 @@ class GXAsyncConfigTest {
 
         handler.handleUncaughtException(exception, method, "value");
 
-        verify(customHandler).handleUncaughtException(exception, method, "value");
+        verify(customHandler).handleUncaughtException(exception, method, new Object[]{"value"});
     }
 
     @SuppressWarnings("unused")
