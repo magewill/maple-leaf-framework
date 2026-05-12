@@ -3,6 +3,25 @@
 本文档用于指导 `leaf-base-data-sync` 模块的后续迭代开发。修改本模块时，优先保证 Canal 消息接入、RabbitMQ
 监听装配、消息解析分发、默认兜底处理和配置来源切换的兼容性、可验证性、性能与线程安全，不做与当前模块职责无关的改动。
 
+## 通用硬性规则
+
+1. 每次修改只能触碰当前 Maven 模块；确需跨模块时，先说明触发原因、受影响模块、替代方案和最小改动集合。
+2. 现有代码已经在生产环境使用，不得随意更改对外接口规范、配置语义、默认行为、异常语义或序列化契约；必须变更时，同步补充兼容说明、迁移路径和回归测试。
+3. 在确保原有功能正确的前提下完善实现；修改既有逻辑前，先用测试锁定当前成功、失败、空值、边界和回归路径。
+4. 基础框架代码必须优先审查性能、线程安全、资源释放和并发可见性；线程池与虚拟线程都能满足需求时，优先使用虚拟线程。
+5. 空值处理必须支持 JSpecify 规范：新增或修改 API、DTO、配置属性、回调、集合元素和异步结果时，明确 `@NullMarked`、`@Nullable` 或等价约束，让空值语义可被 IDE、编译检查和测试验证。
+6. 严格遵循测试驱动最佳实践：先写或调整能暴露问题的测试，再实现最小代码变更，最后运行模块级验证命令。
+7. 涉及改动的点都要检查测试用例是否完整；覆盖不足时补齐成功、失败、异常、空值、边界和回归场景。
+8. 功能只有在 Spring Boot 应用运行后才能验证时，使用 `@SpringBootTest` 或等价方式模拟真实启动后的 Bean 装配、条件配置、AOP、监听器、异步流程和配置绑定。
+9. 修改线程安全或性能相关代码时，必须补充严格测试；覆盖并发访问、重复执行、超时、取消、资源释放和关键指标，无法自动化时在提交说明写清手工压测命令、样本规模和观察指标。
+10. 所有 `log` 日志内容必须使用 ASCII 字符，避免不同运行环境、终端编码或日志采集链路出现乱码。
+11. 不要随便把已存在代码抽取成单独方法或类；只有抽取后的逻辑至少被两个位置复用，或能显著降低复杂度且不破坏语义时，才允许抽取。
+12. 删除方法、类、变量上的冗余注释；清理 Javadoc 中重复、空泛或仅复述签名的信息，只保留语义说明、边界条件、异常约定等必要内容。
+13. 复杂方法、复杂类、公共扩展点或使用方式不直观的能力，应补充必要 Javadoc；使用门槛较高时，给出简短使用示例。
+14. 精准命令胜过陈词滥调：直接给出 `mvn -pl 当前模块 test`、`rg "类名|方法名" 当前模块/src/test` 这类具体步骤，避免“确保代码质量”“提升项目可维护性”等抽象套话。
+15. 控制 `AGENTS.md` 长度与结构，建议保持在 200 行以内；规范继续增多时，在子目录创建领域指南，本文件只保留入口链接和必须遵守的红线。
+16. 持续优化迭代：`AGENTS.md` 是动态文档；当 Agent 的实际输出与预期目标出现偏差时，把偏差改写成下一次可执行、可检查的规则。
+
 ## 1. 模块定位
 
 `leaf-base-data-sync` 是 Maple Leaf Framework 中承接 Canal 数据同步能力的基础模块，当前主要负责：
@@ -86,21 +105,7 @@
 7. 当前模块没有成熟测试基线。后续第一次修改运行时行为时，应优先建立最小可运行测试骨架，而不是继续无测试迭代。
 8. 提交前至少保证模块级测试命令可运行：`mvn -pl leaf-base-data-sync test`。
 
-## 7. AGENTS.md 自动更新时机
-
-出现以下任一情况时，必须在同一个 PR 或提交中同步更新本文档：
-
-1. 模块职责边界发生变化，例如新增消息接入方式、引入新的核心扩展点，或不再只围绕 Canal + RabbitMQ 同步。
-2. 目录结构发生变化，例如新增关键 package、迁移核心类、拆分或合并 `config`、`listener`、`properties`、`service` 等目录职责。
-3. 对外契约发生变化，例如 `GXCanalDataDto` 字段语义、`GXCanalMessageParseService` 方法语义、`GXProcessCanalDataService`
-   扩展约定或 Bean 命名规范发生变化。
-4. 默认运行行为发生变化，例如消息校验策略、Bean 路由规则、默认回退策略、`INSERT/UPDATE/DELETE` 分发规则或异常处理策略发生变化。
-5. 配置装配策略发生变化，例如本地/Nacos 切换条件、配置前缀、Data ID、Group、自动刷新语义、配置文件路径或默认值发生变化。
-6. 测试基线发生变化，例如新增必须遵守的 Spring Boot 集成测试要求、建立模块测试骨架，或模块级验证命令发生变化。
-7. 团队沉淀出新的长期规则，并且这些规则需要被此模块后续迭代持续遵守，例如日志、测试、注释、文档、兼容性、性能、线程安全或重构边界要求。
-8. 修复线上或高风险问题后，如果该问题暴露出可复用的开发约束、排查规则或回归测试要求，也必须回写到本文档。
-
-## 8. 变更前检查清单
+## 7. 变更前检查清单
 
 1. 是否只修改了 `leaf-base-data-sync` 当前模块？
 2. 是否影响 RabbitMQ 队列、交换机、路由键、并发消费者或监听绑定关系？
@@ -115,14 +120,14 @@
 11. 是否评估了性能、线程安全、资源释放和并发场景？
 12. 是否确认没有破坏生产环境已使用的对外接口规范？
 
-## 9. 提交说明建议
+## 8. 提交说明建议
 
 1. 涉及监听、解析、Bean 路由、默认回退或配置来源切换的改动，提交说明中要写清行为变化和兼容性影响。
 2. 涉及日志调整时，提交前确认新增和修改后的日志文本全部为 ASCII。
 3. 涉及运行时装配行为的改动，提交说明中要明确本次验证采用的是单元测试、Spring Boot 集成测试，还是两者都有。
 4. 如果本次改动理论上应补测试但暂时无法补齐，必须在提交说明中明确风险、缺口和后续补齐计划。
 
-## 10. Runtime Guardrails
+## 9. Runtime Guardrails
 
 1. Exceptions thrown by table-level `GXProcessCanalDataService` handlers must propagate out of `GXCanalMessageParseServiceImpl` so the RabbitMQ listener container can apply its acknowledge, retry, or reject policy. Do not silently convert handler failures into successful message consumption.
 2. RabbitMQ exchange and queue beans must be durable by default. The exchange must not default to `autoDelete=true`, because a temporary consumer disconnect must not remove shared infrastructure.
