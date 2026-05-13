@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-
 <Configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                xmlns="https://logging.apache.org/xml/ns"
                xsi:schemaLocation="https://logging.apache.org/xml/ns https://logging.apache.org/xml/ns/log4j-config-2.xsd"
                name="maple" status="WARN" monitorInterval="30">
     <properties>
-        <property name="LOG_HOME" value="${LOG_PATH:-./logs/}"/>
+        <Property name="LOG_HOME" value="${LOG_PATH:-./logs}"/>
         <Property name="LOG_PATTERN"
-                  value="[%style{%d{ISO8601}}{bright,green}] [traceId=%style{%X{X-B3-TraceId}}{red}] [%t] %style{%p}{bright,green} %style{%C{}.%M}{bright,yellow}:%L - %msg%n%style{%xEx}{bright,red}"/>
+                  value="[%style{%d{ISO8601}}{bright,green}] [traceId=%style{%X{X-B3-TraceId}}{red}] [%t] %style{%-5p}{bright,green} %style{%C{}.%M}{bright,yellow}:%L - %msg%n%style{%xEx}{bright,red}"/>
+        <Property name="LOG_RETENTION_DAYS" value="90d"/>
     </properties>
 
     <Appenders>
@@ -40,8 +40,8 @@
             </Policies>
             <DefaultRolloverStrategy max="20">
                 <Delete basePath="${LOG_HOME}" maxDepth="2">
-                    <IfFileName glob="**/*.log*"/>
-                    <IfLastModified age="90d"/>
+                    <IfFileName glob="**/info-*.log.gz"/>
+                    <IfLastModified age="${LOG_RETENTION_DAYS}"/>
                 </Delete>
             </DefaultRolloverStrategy>
         </RollingFile>
@@ -60,8 +60,8 @@
             </Policies>
             <DefaultRolloverStrategy max="20">
                 <Delete basePath="${LOG_HOME}" maxDepth="2">
-                    <IfFileName glob="**/*.log*"/>
-                    <IfLastModified age="90d"/>
+                    <IfFileName glob="**/warn-*.log.gz"/>
+                    <IfLastModified age="${LOG_RETENTION_DAYS}"/>
                 </Delete>
             </DefaultRolloverStrategy>
         </RollingFile>
@@ -79,8 +79,8 @@
             </Policies>
             <DefaultRolloverStrategy max="20">
                 <Delete basePath="${LOG_HOME}" maxDepth="2">
-                    <IfFileName glob="**/*.log*"/>
-                    <IfLastModified age="90d"/>
+                    <IfFileName glob="**/error-*.log.gz"/>
+                    <IfLastModified age="${LOG_RETENTION_DAYS}"/>
                 </Delete>
             </DefaultRolloverStrategy>
         </RollingFile>
@@ -95,12 +95,12 @@
             <PatternLayout pattern="${LOG_PATTERN}"/>
             <Policies>
                 <SizeBasedTriggeringPolicy size="500 MB"/>
-                <TimeBasedTriggeringPolicy interval="2" modulate="true"/>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
             </Policies>
             <DefaultRolloverStrategy max="20">
                 <Delete basePath="${LOG_HOME}" maxDepth="2">
-                    <IfFileName glob="**/*.log*"/>
-                    <IfLastModified age="90d"/>
+                    <IfFileName glob="**/druid-sql-*.log.gz"/>
+                    <IfLastModified age="${LOG_RETENTION_DAYS}"/>
                 </Delete>
             </DefaultRolloverStrategy>
         </RollingFile>
@@ -132,59 +132,26 @@
             <AppenderRef ref="asyncDruidSqlRollingFile"/>
         </Logger>
 
-        <Logger name="org.elasticsearch.client.RequestLogger" level="ERROR" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-        <Logger name="org.elasticsearch" level="ERROR" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-
-        <Logger name="org.springframework" level="ERROR" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-            <AppenderRef ref="asyncWarnFileAppender"/>
-            <AppenderRef ref="asyncErrorFileAppender"/>
-        </Logger>
-
-        <Logger name="com.alibaba" level="ERROR" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-
-        <Logger name="org.apache" level="ERROR" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-
-        <Logger name="org.redisson" level="ERROR" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-
-        <Logger name="io.netty" level="ERROR" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-
-        <Logger name="net.sf" level="ERROR" additivity="false"/>
-        <Logger name="java.util.logging" level="ERROR" additivity="false"/>
-        <Logger name="javax.management" level="ERROR" additivity="false"/>
-        <Logger name="sun.util" level="ERROR" additivity="false"/>
-        <Logger name="sun.rmi" level="ERROR" additivity="false"/>
-        <Logger name="org.jboss.logging" level="ERROR" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-        <Logger name="org.mybatis" level="ERROR" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-
-        <Logger name="com.p6spy" level="ERROR" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-        <Logger name="com.baomidou" level="ERROR" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-        <Logger name="org.hibernate" level="ERROR" additivity="false">
-            <AppenderRef ref="consoleAppender"/>
-        </Logger>
-
+        <Logger name="org.elasticsearch.client.RequestLogger" level="ERROR"/>
+        <Logger name="org.elasticsearch" level="ERROR"/>
+        <Logger name="org.springframework" level="ERROR"/>
+        <Logger name="com.alibaba" level="ERROR"/>
+        <Logger name="org.apache" level="ERROR"/>
+        <Logger name="org.redisson" level="ERROR"/>
+        <Logger name="io.netty" level="ERROR"/>
+        <Logger name="net.sf" level="ERROR"/>
+        <Logger name="java.util.logging" level="ERROR"/>
+        <Logger name="javax.management" level="ERROR"/>
+        <Logger name="sun.util" level="ERROR"/>
+        <Logger name="sun.rmi" level="ERROR"/>
+        <Logger name="org.jboss.logging" level="ERROR"/>
+        <Logger name="org.mybatis" level="ERROR"/>
+        <Logger name="com.p6spy" level="ERROR"/>
+        <Logger name="com.baomidou" level="ERROR"/>
+        <Logger name="org.hibernate" level="ERROR"/>
         <Logger name="org.springframework.web.servlet.handler.AbstractHandlerMethodMapping" level="ERROR"/>
         <Logger name="sun.util.logging.internal.LoggingProviderImpl$JULWrapper" level="ERROR"/>
+
         <Logger name="cn.maple" level="INFO" additivity="false">
             <AppenderRef ref="consoleAppender"/>
             <AppenderRef ref="asyncInfoFileAppender"/>
