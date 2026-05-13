@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.MDC;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.mock;
@@ -43,7 +45,7 @@ class GXLoggerUtilsTest {
                         && invocation.getArguments().length == 3
                         && "demo.yml".equals(invocation.getArguments()[1])
                         && Integer.valueOf(2).equals(invocation.getArguments()[2]));
-        org.junit.jupiter.api.Assertions.assertTrue(loggedWithArguments);
+        assertTrue(loggedWithArguments);
     }
 
     @Test
@@ -67,6 +69,44 @@ class GXLoggerUtilsTest {
 
         GXLoggerUtils.logError(logger, (Throwable) null);
 
-        verify(logger).error(startsWith("thread : "));
+        verify(logger).error(startsWith(GXTraceIdContextUtils.TRACE_ID_KEY + " : "));
+    }
+
+    @Test
+    void logErrorWithDescAndThrowableWritesUnifiedFormat() {
+        Logger logger = mock(Logger.class);
+        RuntimeException exception = new RuntimeException("failed");
+        when(logger.isErrorEnabled()).thenReturn(true);
+
+        GXLoggerUtils.logErrorWithThrowable(logger, "save failed", exception, "order-1");
+
+        boolean loggedWithThrowable = mockingDetails(logger).getInvocations().stream()
+                .anyMatch(invocation -> invocation.getMethod().getName().equals("error")
+                        && invocation.getArguments().length == 3
+                        && invocation.getArguments()[0].toString().contains("desc : save failed")
+                        && invocation.getArguments()[0].toString().contains("detail : {}")
+                        && "order-1".equals(invocation.getArguments()[1])
+                        && exception.equals(invocation.getArguments()[2]));
+        assertTrue(loggedWithThrowable);
+    }
+
+    @Test
+    void logErrorTreatsTrailingThrowableAsExceptionNotDetail() {
+        Logger logger = mock(Logger.class);
+        RuntimeException exception = new RuntimeException("failed");
+        when(logger.isErrorEnabled()).thenReturn(true);
+
+        GXLoggerUtils.logError(logger, "save failed", "order-1", exception);
+
+        Object[] arguments = mockingDetails(logger).getInvocations().stream()
+                .filter(invocation -> invocation.getMethod().getName().equals("error"))
+                .findFirst()
+                .orElseThrow()
+                .getArguments();
+        assertEquals(3, arguments.length);
+        assertTrue(arguments[0].toString().contains("detail : {}"));
+        assertTrue(!arguments[0].toString().contains("detail : {},{}"));
+        assertEquals("order-1", arguments[1]);
+        assertEquals(exception, arguments[2]);
     }
 }
