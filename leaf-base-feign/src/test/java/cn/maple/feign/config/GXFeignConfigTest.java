@@ -1,15 +1,22 @@
 package cn.maple.feign.config;
 
 import cn.maple.feign.codec.GXFeignCustomErrorDecoder;
+import cn.maple.feign.aspect.GXFeignAuthTokenAspect;
 import cn.maple.feign.interceptor.GXFeignRequestInterceptor;
 import feign.Logger;
 import feign.RequestInterceptor;
+import feign.codec.Encoder;
 import feign.codec.ErrorDecoder;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.cloud.openfeign.EnableFeignClients;
+import org.springframework.cloud.openfeign.FeignAutoConfiguration;
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.cloud.openfeign.FeignClientSpecification;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.bind.annotation.GetMapping;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -31,19 +38,36 @@ class GXFeignConfigTest {
     @Test
     void createsDefaultFeignBeans() {
         contextRunner.run(context -> {
-            assertThat(context).hasSingleBean(Logger.Level.class);
-            assertThat(context).hasSingleBean(ErrorDecoder.class);
+            assertThat(context).doesNotHaveBean(Logger.Level.class);
+            assertThat(context).doesNotHaveBean(ErrorDecoder.class);
+            assertThat(context).doesNotHaveBean(Encoder.class);
+            assertThat(context).hasSingleBean(FeignClientSpecification.class);
             assertThat(context).hasSingleBean(RequestInterceptor.class);
             assertThat(context).hasSingleBean(GXFeignRequestInterceptor.class);
-            assertThat(context.getBean(Logger.Level.class)).isEqualTo(Logger.Level.BASIC);
-            assertThat(context.getBean(ErrorDecoder.class)).isInstanceOf(GXFeignCustomErrorDecoder.class);
+            assertThat(context).hasSingleBean(GXFeignAuthTokenAspect.class);
             assertThat(context.getBean(RequestInterceptor.class)).isInstanceOf(GXFeignRequestInterceptor.class);
         });
     }
 
     @Test
+    void optionalFrameworkDefaultsCanBeEnabled() {
+        contextRunner.withPropertyValues(
+                        "maple.feign.logger-level.enabled=true",
+                        "maple.feign.error-decoder.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(Logger.Level.class);
+                    assertThat(context).hasSingleBean(ErrorDecoder.class);
+                    assertThat(context.getBean(Logger.Level.class)).isEqualTo(Logger.Level.BASIC);
+                    assertThat(context.getBean(ErrorDecoder.class)).isInstanceOf(GXFeignCustomErrorDecoder.class);
+                });
+    }
+
+    @Test
     void customRequestInterceptorDoesNotDisableFrameworkInterceptor() {
-        contextRunner.withUserConfiguration(CustomFeignConfig.class)
+        contextRunner.withPropertyValues(
+                        "maple.feign.logger-level.enabled=true",
+                        "maple.feign.error-decoder.enabled=true")
+                .withUserConfiguration(CustomFeignConfig.class)
                 .run(context -> {
                     assertThat(context).hasSingleBean(Logger.Level.class);
                     assertThat(context).hasSingleBean(ErrorDecoder.class);
@@ -62,6 +86,26 @@ class GXFeignConfigTest {
                     assertThat(context).hasSingleBean(GXFeignRequestInterceptor.class);
                     assertThat(context.getBean(GXFeignRequestInterceptor.class)).isSameAs(CustomFrameworkInterceptorConfig.REQUEST_INTERCEPTOR);
                 });
+    }
+
+    @Test
+    void createsFeignClientWithOnlyFrameworkFeignAutoConfiguration() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(FeignClientTestConfig.class)
+                .withConfiguration(AutoConfigurations.of(FeignAutoConfiguration.class, GXFeignConfig.class))
+                .run(context -> assertThat(context).hasSingleBean(TestServiceClient.class));
+    }
+
+    @Test
+    void frameworkRequestInterceptorCanBeDisabled() {
+        contextRunner.withPropertyValues("maple.feign.request-interceptor.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(GXFeignRequestInterceptor.class));
+    }
+
+    @Test
+    void frameworkAuthTokenAspectCanBeDisabled() {
+        contextRunner.withPropertyValues("maple.feign.auth-token-aspect.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(GXFeignAuthTokenAspect.class));
     }
 
     private String readAutoConfigurationImports() {
@@ -103,5 +147,16 @@ class GXFeignConfigTest {
         GXFeignRequestInterceptor customFrameworkRequestInterceptor() {
             return REQUEST_INTERCEPTOR;
         }
+    }
+
+    @Configuration
+    @EnableFeignClients(clients = TestServiceClient.class)
+    static class FeignClientTestConfig {
+    }
+
+    @FeignClient(name = "test-service", url = "http://localhost:1")
+    interface TestServiceClient {
+        @GetMapping("/test")
+        String test();
     }
 }

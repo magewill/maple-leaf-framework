@@ -8,8 +8,11 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.resources.ConnectionProvider;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 import tools.jackson.databind.json.JsonMapper;
@@ -30,7 +33,24 @@ class GXWebClientConfigTest {
                     WebClient.Builder secondBuilder = context.getBeanProvider(WebClient.Builder.class).getObject();
 
                     assertThat(firstBuilder).isNotSameAs(secondBuilder);
+                    assertThat(context).hasBean("mapleWebClientConnectionProvider");
+                    assertThat(context).hasBean("mapleWebClientConnector");
+                    assertThat(context.getBean("mapleWebClientConnectionProvider", ConnectionProvider.class))
+                            .isSameAs(context.getBean("mapleWebClientConnectionProvider", ConnectionProvider.class));
+                    assertThat(context.getBean("mapleWebClientConnector", ReactorClientHttpConnector.class))
+                            .isSameAs(context.getBean("mapleWebClientConnector", ReactorClientHttpConnector.class));
                     assertThat(context).hasSingleBean(WebClient.class);
+                });
+    }
+
+    @Test
+    void webClientBuilderUsesConfiguredConnectionPoolLimitWhenPresent() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(GXWebClientConfig.class, TestWebClientServiceConfig.class)
+                .withPropertyValues("maple.framework.web.client.max-connections=123")
+                .run(context -> {
+                    ConnectionProvider connectionProvider = context.getBean("mapleWebClientConnectionProvider", ConnectionProvider.class);
+                    assertThat(connectionProvider.maxConnections()).isEqualTo(123);
                 });
     }
 
@@ -48,7 +68,7 @@ class GXWebClientConfigTest {
             }
         };
 
-        WebClient webClient = config.webClientBuilder(serviceProvider(webClientService), jsonMapperProvider())
+        WebClient webClient = webClientBuilder(serviceProvider(webClientService))
                 .exchangeFunction(request -> Mono.just(ClientResponse.create(HttpStatus.OK).body("ok").build()))
                 .build();
 
@@ -63,7 +83,7 @@ class GXWebClientConfigTest {
     @Test
     void webClientRetriesRetryableHttpStatusBeforeReturningBusinessException() {
         AtomicInteger attempts = new AtomicInteger();
-        WebClient webClient = config.webClientBuilder(emptyServiceProvider(), jsonMapperProvider())
+        WebClient webClient = webClientBuilder(emptyServiceProvider())
                 .exchangeFunction(request -> Mono.defer(() -> {
                     attempts.incrementAndGet();
                     return Mono.just(ClientResponse.create(HttpStatus.SERVICE_UNAVAILABLE)
@@ -83,6 +103,16 @@ class GXWebClientConfigTest {
                 .verify();
 
         assertThat(attempts).hasValue(4);
+    }
+
+    private WebClient.Builder webClientBuilder(ObjectProvider<GXWebClientService> webClientServiceProvider) {
+        MockEnvironment environment = new MockEnvironment();
+        ConnectionProvider connectionProvider = config.mapleWebClientConnectionProvider(environment);
+        return config.webClientBuilder(
+                webClientServiceProvider,
+                jsonMapperProvider(),
+                config.mapleWebClientConnector(connectionProvider, environment),
+                environment);
     }
 
     private ObjectProvider<GXWebClientService> serviceProvider(GXWebClientService webClientService) {

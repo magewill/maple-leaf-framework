@@ -31,6 +31,8 @@
         <module>leaf-base-debezium</module>
         <module>leaf-base-dubbo-nacos-sentinel</module>
         <module>leaf-base-feign</module>
+        <module>leaf-base-eureka-server</module>
+        <module>leaf-base-eureka-client</module>
         <module>leaf-base-webclient</module>
     </modules>
 

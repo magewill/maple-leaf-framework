@@ -14,13 +14,19 @@ import cn.maple.webclient.service.GXWebClientService;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.handler.timeout.WriteTimeoutHandler;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.config.ConfigurableBeanFactory;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Scope;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.http.codec.json.JacksonJsonDecoder;
@@ -46,7 +52,8 @@ import java.util.concurrent.TimeUnit;
  * @author britton chen <britton@126.com>
  * @since 1.0.0
  */
-@Configuration
+@AutoConfiguration
+@ConditionalOnClass(WebClient.class)
 public class GXWebClientConfig {
     private static final Logger LOGGER = LoggerFactory.getLogger(GXWebClientConfig.class);
 
@@ -67,6 +74,61 @@ public class GXWebClientConfig {
     private static final int DEFAULT_RETRY_MAX_ATTEMPTS = 3;
 
     private static final int DEFAULT_RETRY_DELAY_MILLIS = 1000;
+
+    private static final String TIMEOUT_SECONDS_KEY = "maple.framework.web.client.timeout-seconds";
+
+    private static final String MEMORY_BUFFER_SIZE_MB_KEY = "maple.framework.web.client.memory-buffer-size-mb";
+
+    private static final String MAX_CONNECTIONS_KEY = "maple.framework.web.client.max-connections";
+
+    private static final String ACQUIRE_TIMEOUT_MILLIS_KEY = "maple.framework.web.client.acquire-timeout-millis";
+
+    private static final String PENDING_ACQUIRE_MAX_COUNT_KEY = "maple.framework.web.client.pending-acquire-max-count";
+
+    private static final String IDLE_TIMEOUT_MILLIS_KEY = "maple.framework.web.client.idle-timeout-millis";
+
+    private static final String MAX_LIFE_TIME_MILLIS_KEY = "maple.framework.web.client.max-life-time-millis";
+
+    private static final String EVICT_IN_BACKGROUND_SECONDS_KEY = "maple.framework.web.client.evict-in-background-seconds";
+
+    private static final String RETRY_MAX_ATTEMPTS_KEY = "maple.framework.web.client.retry-max-attempts";
+
+    private static final String RETRY_DELAY_MILLIS_KEY = "maple.framework.web.client.retry-delay-millis";
+
+    @Bean
+    @ConditionalOnMissingBean(name = "mapleWebClientConnectionProvider")
+    public ConnectionProvider mapleWebClientConnectionProvider(Environment environment) {
+        int maxConnections = getConfiguredInteger(environment, MAX_CONNECTIONS_KEY, DEFAULT_MAX_CONNECTIONS);
+        int acquireTimeoutMillis = getConfiguredInteger(environment, ACQUIRE_TIMEOUT_MILLIS_KEY, DEFAULT_ACQUIRE_TIMEOUT_MILLIS);
+        int pendingAcquireMaxCount = getConfiguredInteger(environment, PENDING_ACQUIRE_MAX_COUNT_KEY, DEFAULT_PENDING_ACQUIRE_MAX_COUNT);
+        int idleTimeoutMillis = getConfiguredInteger(environment, IDLE_TIMEOUT_MILLIS_KEY, DEFAULT_IDLE_TIMEOUT_MILLIS);
+        int maxLifeTimeMillis = getConfiguredInteger(environment, MAX_LIFE_TIME_MILLIS_KEY, DEFAULT_MAX_LIFE_TIME_MILLIS);
+        int evictInBackgroundSeconds = getConfiguredInteger(environment, EVICT_IN_BACKGROUND_SECONDS_KEY, 120);
+        return ConnectionProvider.builder("maple-leaf-webclient-connection-pool")
+                .maxConnections(maxConnections)
+                .pendingAcquireTimeout(Duration.ofMillis(acquireTimeoutMillis))
+                .maxIdleTime(Duration.ofMillis(idleTimeoutMillis))
+                .maxLifeTime(Duration.ofMillis(maxLifeTimeMillis))
+                .pendingAcquireMaxCount(pendingAcquireMaxCount)
+                .evictInBackground(Duration.ofSeconds(evictInBackgroundSeconds))
+                .build();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(name = "mapleWebClientConnector")
+    public ReactorClientHttpConnector mapleWebClientConnector(
+            @Qualifier("mapleWebClientConnectionProvider") ConnectionProvider connectionProvider,
+            Environment environment) {
+        int timeoutSeconds = getConfiguredInteger(environment, TIMEOUT_SECONDS_KEY, DEFAULT_TIMEOUT_SECONDS);
+        HttpClient httpClient = HttpClient.create(connectionProvider)
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, timeoutSeconds * 1000)
+                .compress(true)
+                .doOnConnected(conn -> conn
+                        .addHandlerLast(new ReadTimeoutHandler(timeoutSeconds, TimeUnit.SECONDS))
+                        .addHandlerLast(new WriteTimeoutHandler(timeoutSeconds, TimeUnit.SECONDS)))
+                .responseTimeout(Duration.ofSeconds(timeoutSeconds));
+        return new ReactorClientHttpConnector(httpClient);
+    }
 
     /**
      * Creates a builder for declarative HTTP clients.
@@ -91,25 +153,18 @@ public class GXWebClientConfig {
      * {@link WebClient.Builder} is mutable.
      *
      * @return configured WebClient builder
-     * @deprecated prefer {@link #httpServiceProxyFactory(HttpServiceProxyFactory.Builder)}
      */
     @Bean
-    @Deprecated(since = "4.3.0", forRemoval = false)
+    @LoadBalanced
     @Scope(ConfigurableBeanFactory.SCOPE_PROTOTYPE)
-    public WebClient.Builder webClientBuilder(ObjectProvider<GXWebClientService> webClientServiceProvider,
-                                              ObjectProvider<JsonMapper> jsonMapperProvider) {
+    public WebClient.Builder webClientBuilder(ObjectProvider<@NonNull GXWebClientService> webClientServiceProvider,
+                                              ObjectProvider<@NonNull JsonMapper> jsonMapperProvider,
+                                              @Qualifier("mapleWebClientConnector")
+                                              ReactorClientHttpConnector clientHttpConnector,
+                                              Environment environment) {
         ExchangeStrategies strategies = ExchangeStrategies.builder()
                 .codecs(configurer -> configurer.defaultCodecs()
-                        .maxInMemorySize(DEFAULT_MEMORY_BUFFER_SIZE_MB * 1024 * 1024))
-                .build();
-
-        ConnectionProvider connectionProvider = ConnectionProvider.builder("maple-leaf-webclient-connection-pool")
-                .maxConnections(DEFAULT_MAX_CONNECTIONS)
-                .pendingAcquireTimeout(Duration.ofMillis(DEFAULT_ACQUIRE_TIMEOUT_MILLIS))
-                .maxIdleTime(Duration.ofMillis(DEFAULT_IDLE_TIMEOUT_MILLIS))
-                .maxLifeTime(Duration.ofMillis(DEFAULT_MAX_LIFE_TIME_MILLIS))
-                .pendingAcquireMaxCount(DEFAULT_PENDING_ACQUIRE_MAX_COUNT)
-                .evictInBackground(Duration.ofSeconds(120))
+                        .maxInMemorySize(getConfiguredInteger(environment, MEMORY_BUFFER_SIZE_MB_KEY, DEFAULT_MEMORY_BUFFER_SIZE_MB) * 1024 * 1024))
                 .build();
 
         ExchangeFilterFunction requestFilter = ExchangeFilterFunction.ofRequestProcessor(clientRequest -> {
@@ -128,13 +183,6 @@ public class GXWebClientConfig {
             }
 
             requestBuilder.header("X-Request-Start-Time", String.valueOf(System.currentTimeMillis()));
-
-            requestBuilder.header("X-Content-Type-Options", "nosniff");
-            requestBuilder.header("X-Frame-Options", "DENY");
-            requestBuilder.header("X-XSS-Protection", "1; mode=block");
-            requestBuilder.header("Cache-Control", "no-cache, no-store, must-revalidate");
-            requestBuilder.header("Pragma", "no-cache");
-            requestBuilder.header("Expires", "0");
 
             String userAgent = String.format("Maple-Leaf-WebClient/1.0 (%s)",
                     System.getProperty("os.name", "Unknown"));
@@ -206,17 +254,6 @@ public class GXWebClientConfig {
                             LOGGER.trace("Response header: {}={}", name, String.join(", ", values)));
                 }
 
-                if (LOGGER.isTraceEnabled() && statusCode.is2xxSuccessful()) {
-                    return clientResponse.bodyToMono(String.class)
-                            .defaultIfEmpty("<empty response body>")
-                            .doOnNext(body -> {
-                                String truncatedBody = body.length() > 1000 ?
-                                        body.substring(0, 1000) + "...(truncated)" : body;
-                                LOGGER.trace("Response body: {}", truncatedBody);
-                            })
-                            .map(body -> clientResponse.mutate().body(body).build());
-                }
-
                 return Mono.just(clientResponse);
             });
         };
@@ -239,7 +276,9 @@ public class GXWebClientConfig {
         });
 
         ExchangeFilterFunction retryFilter = (clientRequest, next) -> next.exchange(clientRequest)
-                .retryWhen(Retry.fixedDelay(DEFAULT_RETRY_MAX_ATTEMPTS, Duration.ofMillis(DEFAULT_RETRY_DELAY_MILLIS))
+                .retryWhen(Retry.fixedDelay(
+                                getConfiguredInteger(environment, RETRY_MAX_ATTEMPTS_KEY, DEFAULT_RETRY_MAX_ATTEMPTS),
+                                Duration.ofMillis(getConfiguredInteger(environment, RETRY_DELAY_MILLIS_KEY, DEFAULT_RETRY_DELAY_MILLIS)))
                         .filter(this::isRetryableException)
                         .doBeforeRetry(retrySignal ->
                                 LOGGER.debug("Retry HTTP request: attempt={}, exceptionType={}",
@@ -253,13 +292,7 @@ public class GXWebClientConfig {
                 .filter(responseFilter)
                 .filter(retryFilter)
                 .filter(errorResponseHandleFilter)
-                .clientConnector(new ReactorClientHttpConnector(HttpClient.create(connectionProvider)
-                        .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, DEFAULT_TIMEOUT_SECONDS * 1000)
-                        .compress(true)
-                        .doOnConnected(conn -> conn
-                                .addHandlerLast(new ReadTimeoutHandler(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS))
-                                .addHandlerLast(new WriteTimeoutHandler(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS)))
-                        .responseTimeout(Duration.ofSeconds(DEFAULT_TIMEOUT_SECONDS))))
+                .clientConnector(clientHttpConnector)
                 .codecs(configurer -> {
                     if (ObjectUtil.isNotNull(jsonMapper)) {
                         configurer.defaultCodecs().jacksonJsonEncoder(
@@ -272,12 +305,12 @@ public class GXWebClientConfig {
                 });
     }
 
-    /**
-     * @deprecated retained for direct-call compatibility; Spring should use the
-     * provider-based Bean method.
-     */
-    @Deprecated(since = "4.3.0", forRemoval = false)
     public WebClient.Builder webClientBuilder() {
+        Environment environment = GXSpringContextUtils.getBean(Environment.class);
+        ReactorClientHttpConnector clientHttpConnector = GXSpringContextUtils.getBean(ReactorClientHttpConnector.class);
+        if (ObjectUtil.isNull(clientHttpConnector)) {
+            clientHttpConnector = mapleWebClientConnector(mapleWebClientConnectionProvider(environment), environment);
+        }
         return webClientBuilder(new ObjectProvider<>() {
             @Override
             public GXWebClientService getIfAvailable() {
@@ -288,7 +321,7 @@ public class GXWebClientConfig {
             public JsonMapper getIfAvailable() {
                 return GXSpringContextUtils.getBean(JsonMapper.class);
             }
-        });
+        }, clientHttpConnector, environment);
     }
 
     @Bean
@@ -312,7 +345,14 @@ public class GXWebClientConfig {
         };
     }
 
-    private Mono<ClientResponse> handle4xxError(ClientResponse clientResponse, HttpStatusCode httpStatusCode) {
+    private int getConfiguredInteger(Environment environment, String key, int defaultValue) {
+        if (ObjectUtil.isNull(environment)) {
+            return defaultValue;
+        }
+        return environment.getProperty(key, Integer.class, defaultValue);
+    }
+
+    private Mono<@NonNull ClientResponse> handle4xxError(ClientResponse clientResponse, HttpStatusCode httpStatusCode) {
         GXHttpInvokerApiErrorResDto errorApiResDto = new GXHttpInvokerApiErrorResDto();
         errorApiResDto.setMessage(getHttpStatusDescription(httpStatusCode));
         errorApiResDto.setCode(httpStatusCode.value());
@@ -328,7 +368,7 @@ public class GXWebClientConfig {
                 });
     }
 
-    private Mono<ClientResponse> handle5xxError(ClientResponse clientResponse, HttpStatusCode httpStatusCode) {
+    private Mono<@NonNull ClientResponse> handle5xxError(ClientResponse clientResponse, HttpStatusCode httpStatusCode) {
         GXHttpInvokerApiErrorResDto errorApiResDto = new GXHttpInvokerApiErrorResDto();
         errorApiResDto.setMessage(getHttpStatusDescription(httpStatusCode));
         errorApiResDto.setCode(httpStatusCode.value());

@@ -9,3 +9,18 @@ bot:
     exception: > # > 防止语法错误提示
       cn.maple.core.framework.exception.GXDataFormatIncorrectException, # 注意逗号
       cn.maple.core.framework.exception.GXBusinessException
+
+maple:
+  framework:
+    web:
+      client:
+        timeout-seconds: 30
+        memory-buffer-size-mb: 16
+        max-connections: 500
+        acquire-timeout-millis: 3000
+        pending-acquire-max-count: 1000
+        idle-timeout-millis: 30000
+        max-life-time-millis: 300000
+        evict-in-background-seconds: 120
+        retry-max-attempts: 3
+        retry-delay-millis: 1000

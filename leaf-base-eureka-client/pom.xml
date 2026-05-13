@@ -9,29 +9,30 @@
         <version>4.3.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>leaf-base-webclient</artifactId>
+    <artifactId>leaf-base-eureka-client</artifactId>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <eureka.client.version>5.0.1</eureka.client.version>
         <loadbalancer.version>5.0.1</loadbalancer.version>
     </properties>
-
     <dependencies>
         <dependency>
             <groupId>cn.maple.framework</groupId>
-            <artifactId>leaf-base-framework</artifactId>
+            <artifactId>leaf-base-feign</artifactId>
             <version>${project.parent.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-webflux</artifactId>
+            <groupId>cn.maple.framework</groupId>
+            <artifactId>leaf-base-webclient</artifactId>
+            <version>${project.parent.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+            <version>${eureka.client.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.cloud</groupId>
@@ -39,10 +40,9 @@
             <version>${loadbalancer.version}</version>
         </dependency>
         <dependency>
-            <groupId>io.projectreactor</groupId>
-            <artifactId>reactor-test</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
-
 </project>
