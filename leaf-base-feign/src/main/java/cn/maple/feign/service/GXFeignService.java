@@ -14,17 +14,24 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Feign 调用扩展契约，提供认证 token、平台标识、traceId、HMAC 和敏感请求头的默认能力。
+ * Extension contract for Maple Feign calls.
  *
- * <p>使用默认 token 实现时，必须配置 `maple.framework.web.feign.token` 和
- * `maple.framework.web.feign.secret`。</p>
+ * <p>The framework interceptor uses this service to create internal auth
+ * tokens, propagate platform and trace context, and expose shared HMAC helpers.
+ * Applications may implement this interface as a Spring bean to customize any
+ * of those behaviors.</p>
+ *
+ * <p>The default token implementation requires the following properties:
+ * {@code maple.framework.web.feign.token} and
+ * {@code maple.framework.web.feign.secret}.</p>
  */
 public interface GXFeignService {
     /**
-     * 生成 Feign 认证 token。
+     * Generates the default Feign auth token from
+     * {@code maple.framework.web.feign.token}.
      *
-     * @return 生成的认证令牌字符串
-     * @throws GXBusinessException 当未配置基础令牌源时抛出
+     * @return encoded auth token
+     * @throws GXBusinessException when the token source or secret is missing
      */
     default String generateHttpAuthToken() {
         String tokenSource = GXCommonUtils.getEnvironmentValue("maple.framework.web.feign.token", String.class);
@@ -35,12 +42,12 @@ public interface GXFeignService {
     }
 
     /**
-     * 使用指定源字符串和过期时间生成 Feign 认证 token。
+     * Generates a Feign auth token from a source value and expiry.
      *
-     * @param source 源字符串，用于生成Token的基础数据
-     * @param expiry Token的过期时间，单位为秒
-     * @return HTTP认证Token字符串，不应返回null
-     * @throws GXBusinessException 当Token生成失败时抛出
+     * @param source value to encode into the token
+     * @param expiry token expiry in seconds
+     * @return encoded auth token
+     * @throws GXBusinessException when the secret is missing or token creation fails
      */
     default String generateHttpAuthToken(String source, int expiry) {
         String authTokenSecret = getAuthTokenSecret();
@@ -48,14 +55,14 @@ public interface GXFeignService {
     }
 
     /**
-     * 检查当前请求中的 Feign 认证 token 是否有效。
+     * Checks whether the current request contains a valid Feign auth token.
      *
-     * @return true 有效 ; false 无效
+     * @return {@code true} when the current request token can be decoded
      */
     default boolean checkTokenValidity() {
         String webClientToken = GXCurrentRequestContextUtils.getHeader(GXCommonConstant.X_AUTH_TOKEN);
         if (CharSequenceUtil.isBlank(webClientToken)) {
-            return false; // Token为空，直接返回无效
+            return false;
         }
 
         try {
@@ -68,23 +75,23 @@ public interface GXFeignService {
     }
 
     /**
-     * 获取 Feign token 加解密密钥。
+     * Returns the secret used to encode and decode Feign auth tokens.
      *
-     * @return 密钥字符串
-     * @throws GXBusinessException 当未配置密钥时抛出
+     * @return configured token secret
+     * @throws GXBusinessException when {@code maple.framework.web.feign.secret} is missing
      */
     default String getAuthTokenSecret() {
         String tokenSecret = GXCommonUtils.getEnvironmentValue("maple.framework.web.feign.secret", String.class);
         if (CharSequenceUtil.isBlank(tokenSecret)) {
-            throw new GXBusinessException("请配置maple.framework.web.feign.secret");
+            throw new GXBusinessException("Please configure 'maple.framework.web.feign.secret' key");
         }
         return tokenSecret;
     }
 
     /**
-     * 获取需要在日志中脱敏的请求头字段。
+     * Returns request headers that should be masked by callers when logging.
      *
-     * @return 需要脱敏的请求头字段名称集合，键为字段名，值为脱敏后的显示值
+     * @return header names mapped to their masked display value
      */
     default Map<String, String> getSensitiveHeaderFields() {
         return Map.of(
@@ -97,42 +104,43 @@ public interface GXFeignService {
     }
 
     /**
-     * 获取当前请求的平台信息。
+     * Returns the current request platform header.
      *
-     * @return 平台标识字符串，可能返回null或空字符串（当请求头未设置时）
+     * @return platform value, or {@code null} when there is no HTTP request context
      */
     default String getPlatform() {
         return GXCurrentRequestContextUtils.getHeader(GXTokenConstant.PLATFORM);
     }
 
     /**
-     * 生成 HMAC 签名。
+     * Generates an HMAC signature for the supplied payload.
      *
-     * @param data   需要加密的数据对象
-     * @param secret 密钥字符串
-     * @return 生成的HMAC加密结果
-     * @throws GXBusinessException 当加密过程中发生错误时抛出
+     * @param data   payload to sign
+     * @param secret signing secret
+     * @return generated HMAC value
+     * @throws GXBusinessException when signing fails
      */
     default String generateHmac(Object data, String secret) {
         return GXCommonUtils.generateHmac(data, secret);
     }
 
     /**
-     * 验证 HMAC 签名是否匹配。
+     * Checks whether a client HMAC matches the supplied payload and secret.
      *
-     * @param secret     用于生成HMAC的密钥
-     * @param clientHmac 客户端提供的HMAC值
-     * @param payload    原始数据负载
-     * @return boolean true表示验证通过，false表示验证失败
+     * @param secret     signing secret
+     * @param clientHmac HMAC value supplied by the caller
+     * @param payload    original payload
+     * @return {@code true} when the HMAC values match
      */
     default boolean checkHmac(String secret, String clientHmac, Object payload) {
         return GXCommonUtils.checkHmac(secret, clientHmac, payload);
     }
 
     /**
-     * 获取当前请求的 traceId，优先级为请求属性、请求头、MDC、自动生成。
+     * Resolves the current trace id in request attribute, request header, MDC,
+     * then generated value order.
      *
-     * @return 当前请求的traceId，如果无法获取则返回全局traceId
+     * @return non-blank trace id for the current Feign call
      */
     default String getTraceId() {
         HttpServletRequest httpServletRequest = GXCurrentRequestContextUtils.getHttpServletRequest();

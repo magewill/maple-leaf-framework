@@ -34,6 +34,7 @@ class GXFeignConfigTest {
             assertThat(context).hasSingleBean(Logger.Level.class);
             assertThat(context).hasSingleBean(ErrorDecoder.class);
             assertThat(context).hasSingleBean(RequestInterceptor.class);
+            assertThat(context).hasSingleBean(GXFeignRequestInterceptor.class);
             assertThat(context.getBean(Logger.Level.class)).isEqualTo(Logger.Level.BASIC);
             assertThat(context.getBean(ErrorDecoder.class)).isInstanceOf(GXFeignCustomErrorDecoder.class);
             assertThat(context.getBean(RequestInterceptor.class)).isInstanceOf(GXFeignRequestInterceptor.class);
@@ -41,15 +42,25 @@ class GXFeignConfigTest {
     }
 
     @Test
-    void customFeignBeansBackOffDefaults() {
+    void customRequestInterceptorDoesNotDisableFrameworkInterceptor() {
         contextRunner.withUserConfiguration(CustomFeignConfig.class)
                 .run(context -> {
                     assertThat(context).hasSingleBean(Logger.Level.class);
                     assertThat(context).hasSingleBean(ErrorDecoder.class);
-                    assertThat(context).hasSingleBean(RequestInterceptor.class);
+                    assertThat(context).hasSingleBean(GXFeignRequestInterceptor.class);
+                    assertThat(context.getBeansOfType(RequestInterceptor.class)).hasSize(2);
                     assertThat(context.getBean(Logger.Level.class)).isEqualTo(Logger.Level.NONE);
                     assertThat(context.getBean(ErrorDecoder.class)).isSameAs(CustomFeignConfig.ERROR_DECODER);
-                    assertThat(context.getBean(RequestInterceptor.class)).isSameAs(CustomFeignConfig.REQUEST_INTERCEPTOR);
+                    assertThat(context.getBeansOfType(RequestInterceptor.class)).containsValue(CustomFeignConfig.REQUEST_INTERCEPTOR);
+                });
+    }
+
+    @Test
+    void customFrameworkInterceptorBacksOffDefault() {
+        contextRunner.withUserConfiguration(CustomFrameworkInterceptorConfig.class)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(GXFeignRequestInterceptor.class);
+                    assertThat(context.getBean(GXFeignRequestInterceptor.class)).isSameAs(CustomFrameworkInterceptorConfig.REQUEST_INTERCEPTOR);
                 });
     }
 
@@ -80,6 +91,16 @@ class GXFeignConfigTest {
 
         @Bean
         RequestInterceptor customRequestInterceptor() {
+            return REQUEST_INTERCEPTOR;
+        }
+    }
+
+    @Configuration
+    static class CustomFrameworkInterceptorConfig {
+        private static final GXFeignRequestInterceptor REQUEST_INTERCEPTOR = new GXFeignRequestInterceptor();
+
+        @Bean
+        GXFeignRequestInterceptor customFrameworkRequestInterceptor() {
             return REQUEST_INTERCEPTOR;
         }
     }

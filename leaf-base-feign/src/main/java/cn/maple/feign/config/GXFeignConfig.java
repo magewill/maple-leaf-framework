@@ -36,8 +36,8 @@ public class GXFeignConfig {
     }
 
     @Bean
-    @ConditionalOnMissingBean(RequestInterceptor.class)
-    public RequestInterceptor requestInterceptor(ObjectProvider<GXFeignService> feignServiceProvider) {
+    @ConditionalOnMissingBean(GXFeignRequestInterceptor.class)
+    public GXFeignRequestInterceptor requestInterceptor(ObjectProvider<GXFeignService> feignServiceProvider) {
         return new GXFeignRequestInterceptor(feignServiceProvider);
     }
 }

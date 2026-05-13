@@ -20,12 +20,33 @@ import org.springframework.core.annotation.AnnotationUtils;
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * Feign request interceptor.
  */
 @Slf4j
 public class GXFeignRequestInterceptor implements RequestInterceptor {
+    private static final Set<String> BLOCKED_PROPAGATION_HEADERS = Set.of(
+            "authorization",
+            "cookie",
+            "set-cookie",
+            GXCommonConstant.X_AUTH_TOKEN.toLowerCase(Locale.ROOT),
+            "x-hmac-signature",
+            "x-api-key",
+            "host",
+            "content-length",
+            "connection",
+            "keep-alive",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailer",
+            "transfer-encoding",
+            "upgrade"
+    );
+
     private final ObjectProvider<GXFeignService> feignServiceProvider;
 
     public GXFeignRequestInterceptor() {
@@ -126,6 +147,10 @@ public class GXFeignRequestInterceptor implements RequestInterceptor {
             if (CharSequenceUtil.isBlank(headerName)) {
                 continue;
             }
+            if (isBlockedPropagationHeader(headerName)) {
+                log.debug("Skipped blocked annotated header propagation");
+                continue;
+            }
             List<String> headerValues = Collections.list(request.getHeaders(headerName));
             if (headerValues.isEmpty()) {
                 continue;
@@ -134,6 +159,10 @@ public class GXFeignRequestInterceptor implements RequestInterceptor {
             requestTemplate.header(headerName, headerValues);
             log.debug("Propagated annotated header to Feign request");
         }
+    }
+
+    private boolean isBlockedPropagationHeader(String headerName) {
+        return BLOCKED_PROPAGATION_HEADERS.contains(headerName.toLowerCase(Locale.ROOT));
     }
 
     private void replaceHeader(RequestTemplate requestTemplate, String headerName, String headerValue) {
