@@ -1,3 +1,13 @@
+spring:
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
+        group:
+          enabled: false
+        alphanumeric-ids:
+          enabled: true
+
 customer:
   property1:
     name: jack
@@ -11,6 +21,14 @@ bot:
       cn.maple.core.framework.exception.GXBusinessException
 
 maple:
+  feign:
+    circuit-breaker:
+      enabled: true
+      max-retries: 3
+      backoff: 100ms
+      backoff-multiplier: 2.0
+      open-timeout: 20s
+      reset-timeout: 5s
   framework:
     web:
       client:
@@ -24,3 +42,4 @@ maple:
         evict-in-background-seconds: 120
         retry-max-attempts: 3
         retry-delay-millis: 1000
+

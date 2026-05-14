@@ -38,21 +38,21 @@ class GXFeignConfigTest {
     @Test
     void createsDefaultFeignBeans() {
         contextRunner.run(context -> {
-            assertThat(context).doesNotHaveBean(Logger.Level.class);
+            assertThat(context).hasSingleBean(Logger.Level.class);
             assertThat(context).doesNotHaveBean(ErrorDecoder.class);
             assertThat(context).doesNotHaveBean(Encoder.class);
             assertThat(context).hasSingleBean(FeignClientSpecification.class);
             assertThat(context).hasSingleBean(RequestInterceptor.class);
             assertThat(context).hasSingleBean(GXFeignRequestInterceptor.class);
             assertThat(context).hasSingleBean(GXFeignAuthTokenAspect.class);
+            assertThat(context.getBean(Logger.Level.class)).isEqualTo(Logger.Level.BASIC);
             assertThat(context.getBean(RequestInterceptor.class)).isInstanceOf(GXFeignRequestInterceptor.class);
         });
     }
 
     @Test
-    void optionalFrameworkDefaultsCanBeEnabled() {
+    void loggerLevelAndErrorDecoderCanBeExplicitlyEnabled() {
         contextRunner.withPropertyValues(
-                        "maple.feign.logger-level.enabled=true",
                         "maple.feign.error-decoder.enabled=true")
                 .run(context -> {
                     assertThat(context).hasSingleBean(Logger.Level.class);
@@ -106,6 +106,12 @@ class GXFeignConfigTest {
     void frameworkAuthTokenAspectCanBeDisabled() {
         contextRunner.withPropertyValues("maple.feign.auth-token-aspect.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(GXFeignAuthTokenAspect.class));
+    }
+
+    @Test
+    void loggerLevelCanBeDisabled() {
+        contextRunner.withPropertyValues("maple.feign.logger-level.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(Logger.Level.class));
     }
 
     private String readAutoConfigurationImports() {

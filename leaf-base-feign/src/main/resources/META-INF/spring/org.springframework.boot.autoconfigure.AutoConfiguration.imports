@@ -1,1 +1,2 @@
 cn.maple.feign.config.GXFeignConfig
+cn.maple.feign.config.GXCircuitBreakerConfig

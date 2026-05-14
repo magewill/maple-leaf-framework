@@ -14,7 +14,6 @@ import org.springframework.cloud.openfeign.FeignClientSpecification;
 import org.springframework.cloud.openfeign.loadbalancer.FeignLoadBalancerAutoConfiguration;
 
 import java.io.IOException;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -30,7 +29,7 @@ class GXEurekaClientConfigTest {
     }
 
     @Test
-    void autoConfigurationScansFeignClientsFromApplicationPackages() {
+    void autoConfigurationDoesNotRegisterFeignClientsByItself() {
         new ApplicationContextRunner()
                 .withUserConfiguration(TestApplication.class)
                 .withConfiguration(AutoConfigurations.of(
@@ -75,11 +74,14 @@ class GXEurekaClientConfigTest {
     }
 
     @Test
-    void defaultClientConfigurationRegistersWithEureka() throws IOException {
+    void applicationYamlContainsExpectedClientDefaults() throws IOException {
         try (var inputStream = getClass().getClassLoader().getResourceAsStream("application.yml")) {
             assertThat(inputStream).isNotNull();
-            List<String> lines = new String(inputStream.readAllBytes()).lines().toList();
-            assertThat(lines).contains("    register-with-eureka: true");
+            String yaml = new String(inputStream.readAllBytes());
+            assertThat(yaml).contains("register-with-eureka: true");
+            assertThat(yaml).contains("spring:\n  cloud:\n    openfeign:\n      circuitbreaker:\n        enabled: true");
+            assertThat(yaml).contains("alphanumeric-ids:\n          enabled: true");
+            assertThat(yaml).doesNotContain("feign.hystrix.enabled");
         }
     }
 

@@ -29,7 +29,8 @@ public class GXFeignConfig {
      */
     @Bean
     @ConditionalOnMissingBean(Logger.Level.class)
-    @ConditionalOnProperty(prefix = "maple.feign.logger-level", name = "enabled", havingValue = "true")
+    @ConditionalOnProperty(prefix = "maple.feign.logger-level", name = "enabled", havingValue = "true",
+            matchIfMissing = true)
     Logger.Level feignLoggerLevel() {
         return Logger.Level.BASIC;
     }
@@ -47,7 +48,7 @@ public class GXFeignConfig {
         return new FeignClientSpecification(
                 "default.mapleFeignFallback",
                 "default",
-                new Class<?>[]{GXFeignFallbackConfiguration.class}
+                new Class<?>[]{GXFeignFallbackConfig.class}
         );
     }
 

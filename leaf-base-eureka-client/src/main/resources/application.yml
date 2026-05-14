@@ -1,6 +1,12 @@
-feign:
-  hystrix:
-    enabled: true
+spring:
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
+        group:
+          enabled: false
+        alphanumeric-ids:
+          enabled: true
 
 eureka:
   client:

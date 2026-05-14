@@ -12,7 +12,7 @@ import org.springframework.cloud.openfeign.support.HttpMessageConverterCustomize
 import org.springframework.cloud.openfeign.support.SpringEncoder;
 import org.springframework.context.annotation.Bean;
 
-class GXFeignFallbackConfiguration {
+class GXFeignFallbackConfig {
     @Bean
     @ConditionalOnMissingBean(FeignHttpMessageConverters.class)
     FeignHttpMessageConverters feignHttpMessageConverters(

@@ -15,8 +15,6 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <eureka.client.version>5.0.1</eureka.client.version>
-        <loadbalancer.version>5.0.1</loadbalancer.version>
     </properties>
     <dependencies>
         <dependency>
@@ -32,12 +30,6 @@
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
-            <version>${eureka.client.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-starter-loadbalancer</artifactId>
-            <version>${loadbalancer.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
