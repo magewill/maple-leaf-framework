@@ -29,17 +29,21 @@
 2. RocketMQ 消息发送请求模型定义，包括主题、标签、消息体、延迟时间和消息 Key。
 3. 基于 `RocketMQTemplate` 的统一发送服务，封装普通发送、同步发送、异步发送、单向发送和延迟发送。
 4. 对发送前参数做基础校验，对发送结果做统一判定，并将异常包装为框架业务异常。
+5. 提供轻量 CDC 消费适配协议，将 RocketMQ 中的 CDC 原始消息转换为统一事件并分发给业务监听器。
 
-本模块当前不承载消息消费监听、业务路由编排、事务消息编排或复杂重试补偿逻辑；如需新增这些能力，必须先重新评估模块边界，并同步更新本文件。
+本模块当前不承载通用消息消费编排、事务消息编排或复杂重试补偿逻辑；CDC 能力仅限于消费端协议、事件模型和本地分发适配。如需新增通用消费容器、跨服务路由编排或重试补偿能力，必须先重新评估模块边界，并同步更新本文件。
 
 ## 2. 目录职责
 
 1. `dto/inner`：RocketMQ 内部请求模型，承载发送参数和基础构造逻辑。
 2. `properties/local`：本地 `rocket-mq.yml` 配置装配入口。
 3. `properties/nacos`：Nacos `rocket-mq.yml` 配置装配入口。
-4. `service`：对外发送服务契约。
-5. `service/impl`：基于 `RocketMQTemplate` 的发送实现、参数校验和结果判定。
-6. `src/test`：发送服务的 Spring Boot 测试基线，验证容器装配与关键发送路径。
+4. `dispatcher`：CDC 原始消息分发入口。
+5. `dispatcher/impl`：CDC 消息解析、开关判断、事件规范化和监听器分发实现。
+6. `listener`：CDC 消费端业务监听器扩展协议。
+7. `service`：对外发送服务契约。
+8. `service/impl`：基于 `RocketMQTemplate` 的发送实现、参数校验和结果判定。
+9. `src/test`：发送服务和 CDC 分发器的 Spring Boot 测试基线，验证容器装配与关键路径。
 
 ## 3. 强制开发规则
 
@@ -60,6 +64,7 @@
 15. 变更 `messageKey`、`body`、`deliverTime` 的处理逻辑时，必须评估对上游调用方和 RocketMQ 控制台排障方式的影响。
 16. 配置来源通过 `rocketmq.config-source` 显式选择；默认值为 `nacos`，如需启用本地 YAML 配置必须设置为 `local`。
 17. 本模块当前聚焦发送能力，新增功能时优先复用 `RocketMQTemplate` 与现有契约，避免平行引入另一套发送抽象。
+18. CDC 消费协议只负责原始消息解析、开关判断、事件规范化和本地监听器分发；业务幂等、落库事务、跨库路由和重试补偿应由业务模块或专门同步模块负责。
 
 ## 4. 测试要求
 
@@ -68,6 +73,7 @@
 3. 严格遵循测试驱动最佳实践，先用测试刻画目标行为、兼容性要求和边界条件，再进行实现或重构。
 4. 以下改动必须重点补测：
    - `GXSendRocketMQServiceImpl` 的参数校验、目的地拼装、发送结果判定、异常包装。
+   - `GXCdcMessageDispatcherImpl` 的开关判断、消息解析、`op` 分发、监听器过滤和无效消息吞吐行为。
    - 延迟发送的时间换算、非正数延迟、溢出场景。
    - 异步发送回调中的成功、非 `SEND_OK`、空结果和异常回调分支。
    - `GXLocalRocketMQConfigProperties` 与 `GXNacosRocketMQConfigProperties` 的条件装配和配置来源切换。
