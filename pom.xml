@@ -75,6 +75,7 @@
         <druid.version>1.2.28</druid.version>
         <error-prone.version>2.49.0</error-prone.version>
         <nullaway.version>0.13.4</nullaway.version>
+        <antlr-runtime.version>3.5.3</antlr-runtime.version>
     </properties>
 
     <dependencyManagement>
@@ -459,6 +460,20 @@
                 <groupId>org.bouncycastle</groupId>
                 <artifactId>bcprov-jdk18on</artifactId>
                 <version>${bcprov-jdk18on.version}</version>
+            </dependency>
+
+            <!-- 解决 seata与eureka引入包的冲突 -->
+            <dependency>
+                <groupId>org.antlr</groupId>
+                <artifactId>antlr-runtime</artifactId>
+                <version>${antlr-runtime.version}</version>
+            </dependency>
+
+            <!-- 解决 caffeine与eureka冲突 -->
+            <dependency>
+                <groupId>com.google.errorprone</groupId>
+                <artifactId>error_prone_annotations</artifactId>
+                <version>${error-prone.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
