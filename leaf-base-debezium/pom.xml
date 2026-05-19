@@ -12,7 +12,7 @@
     <artifactId>leaf-base-debezium</artifactId>
 
     <properties>
-        <debezium.version>3.5.0.Final</debezium.version>
+        <debezium.version>3.5.1.Final</debezium.version>
         <jaxb-api.version>2.4.0-b180830.0359</jaxb-api.version>
     </properties>
 
@@ -50,7 +50,16 @@
                     <groupId>javax.xml.bind</groupId>
                     <artifactId>jaxb-api</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>org.glassfish.hk2</groupId>
+                    <artifactId>hk2-locator</artifactId>
+                </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.glassfish.hk2</groupId>
+            <artifactId>hk2-locator</artifactId>
+            <version>${hk2.version}</version>
         </dependency>
         <dependency>
             <groupId>io.debezium</groupId>

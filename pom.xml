@@ -76,7 +76,7 @@
         <error-prone.version>2.49.0</error-prone.version>
         <nullaway.version>0.13.4</nullaway.version>
         <antlr-runtime.version>3.5.3</antlr-runtime.version>
-        <hk2-api.version>4.0.0-M3</hk2-api.version>
+        <hk2.version>4.0.1</hk2.version>
         <woodstox-core.version>7.1.1</woodstox-core.version>
         <httpclient.version>4.5.14</httpclient.version>
     </properties>
@@ -483,7 +483,7 @@
             <dependency>
                 <groupId>org.glassfish.hk2</groupId>
                 <artifactId>hk2-api</artifactId>
-                <version>${hk2-api.version}</version>
+                <version>${hk2.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.woodstox</groupId>
