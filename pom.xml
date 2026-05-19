@@ -76,6 +76,9 @@
         <error-prone.version>2.49.0</error-prone.version>
         <nullaway.version>0.13.4</nullaway.version>
         <antlr-runtime.version>3.5.3</antlr-runtime.version>
+        <hk2-api.version>4.0.0-M3</hk2-api.version>
+        <woodstox-core.version>7.1.1</woodstox-core.version>
+        <httpclient.version>4.5.14</httpclient.version>
     </properties>
 
     <dependencyManagement>
@@ -474,6 +477,23 @@
                 <groupId>com.google.errorprone</groupId>
                 <artifactId>error_prone_annotations</artifactId>
                 <version>${error-prone.version}</version>
+            </dependency>
+
+            <!-- 解决 elasticsearch与eureka server 冲突 -->
+            <dependency>
+                <groupId>org.glassfish.hk2</groupId>
+                <artifactId>hk2-api</artifactId>
+                <version>${hk2-api.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.woodstox</groupId>
+                <artifactId>woodstox-core</artifactId>
+                <version>${woodstox-core.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.httpcomponents</groupId>
+                <artifactId>httpclient</artifactId>
+                <version>${httpclient.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
