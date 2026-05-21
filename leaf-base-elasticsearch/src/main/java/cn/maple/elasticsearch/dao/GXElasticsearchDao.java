@@ -374,8 +374,7 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
                 .condition(condition)
                 .build();
         Query query = buildQuery(queryParamInnerDto);
-        Map<String, Object> params = new HashMap<>(updateFields.size());
-        StringBuilder script = new StringBuilder();
+        List<Map<String, Object>> updatesList = new ArrayList<>();
         updateFields.forEach(updateField -> {
             if (updateField == null || CharSequenceUtil.isBlank(updateField.getFieldName())) {
                 return;
@@ -384,19 +383,18 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
             validatePainlessFieldName(updateField.getFieldName());
             validatePainlessParamName(paramName);
             Object paramValue = updateField.getParamMap().get(paramName);
-            params.put(paramName, paramValue);
-            script.append("ctx._source['")
-                    .append(updateField.getFieldName())
-                    .append("'] = params['")
-                    .append(paramName)
-                    .append("'];");
+            Map<String, Object> updateMap = new HashMap<>();
+            updateMap.put("field", updateField.getFieldName());
+            updateMap.put("value", paramValue);
+            updatesList.add(updateMap);
         });
-        if (params.isEmpty()) {
+        if (updatesList.isEmpty()) {
             return 0;
         }
 
+        Map<String, Object> params = Map.of("_updates", updatesList);
         UpdateQuery updateQuery = UpdateQuery.builder(query)
-                .withScript(script.toString())
+                .withScript("for (update in params._updates) { ctx._source[update['field']] = update['value']; }")
                 .withParams(params)
                 .withLang("painless")
                 .build();
@@ -505,10 +503,15 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
         if (CollUtil.isEmpty(columns) || columns.contains("*")) {
             return query;
         }
-        String[] includes = columns.stream()
+        List<String> includesList = new ArrayList<>();
+        columns.stream()
                 .filter(CharSequenceUtil::isNotBlank)
-                .map(CharSequenceUtil::toUnderlineCase)
-                .toArray(String[]::new);
+                .forEach(col -> {
+                    includesList.add(col);
+                    includesList.add(CharSequenceUtil.toUnderlineCase(col));
+                    includesList.add(CharSequenceUtil.toCamelCase(col));
+                });
+        String[] includes = includesList.stream().distinct().toArray(String[]::new);
         if (includes.length > 0) {
             query.addSourceFilter(new FetchSourceFilterBuilder().withIncludes(includes).build());
         }
@@ -592,6 +595,19 @@ public interface GXElasticsearchDao<T extends GXElasticsearchModel, Q extends Ba
     }
 
     private Object getEntityId(T entity) {
+        try {
+            ElasticsearchTemplate template = getElasticsearchTemplate();
+            Object id = template.getElasticsearchConverter()
+                    .getMappingContext()
+                    .getRequiredPersistentEntity(entity.getClass())
+                    .getIdentifierAccessor(entity)
+                    .getIdentifier();
+            if (id != null) {
+                return id;
+            }
+        } catch (Exception e) {
+            // fallback to reflection if mapping context lookup fails
+        }
         String methodName = CharSequenceUtil.format("get{}", CharSequenceUtil.upperFirst("id"));
         return GXCommonUtils.reflectCallObjectMethod(entity, methodName);
     }

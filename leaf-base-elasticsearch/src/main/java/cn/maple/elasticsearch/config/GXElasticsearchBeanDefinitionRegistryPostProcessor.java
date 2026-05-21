@@ -40,6 +40,7 @@ import org.springframework.data.elasticsearch.support.HttpHeaders;
 import org.springframework.data.mapping.model.SimpleTypeHolder;
 import org.springframework.util.Assert;
 
+import java.beans.Introspector;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
@@ -67,15 +68,19 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
 
     private static final String ELASTICSEARCH_REPOSITORY_FACTORY_BEAN_POST_PROCESSOR_BEAN_NAME = "elasticsearchRepositoryFactoryBeanPostProcessor";
 
+    private static final String ELASTICSEARCH_DATASOURCE_PREFIX = "elasticsearch.datasource";
+
     private Environment environment;
 
     @Override
     public void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry beanDefinitionRegistry) throws BeansException {
         try {
-            Map<String, GXElasticsearchProperties> datasourceMap = getSourceElasticsearchProperties().getDatasource();
+            GXElasticsearchSourceProperties sourceProperties = getSourceElasticsearchProperties();
+            Map<String, GXElasticsearchProperties> datasourceMap = sourceProperties.getDatasource();
 
             checkElasticsearchDataSourceProperties(datasourceMap);
             registerElasticsearchConversionInfrastructure(beanDefinitionRegistry);
+            registerElasticsearchSourceProperties(beanDefinitionRegistry, sourceProperties);
 
             datasourceMap.forEach((key, dataSourceProperties) -> {
                 try {
@@ -216,7 +221,7 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
     private GXElasticsearchSourceProperties getSourceElasticsearchProperties() {
         try {
             BindResult<Map<String, GXElasticsearchProperties>> bind = Binder.get(this.environment)
-                    .bind("elasticsearch.datasource", Bindable.mapOf(String.class, GXElasticsearchProperties.class));
+                    .bind(ELASTICSEARCH_DATASOURCE_PREFIX, Bindable.mapOf(String.class, GXElasticsearchProperties.class));
             if (!bind.isBound() || bind.get() == null) {
                 throw new IllegalStateException("No valid Elasticsearch datasource configuration found");
             }
@@ -256,6 +261,27 @@ public class GXElasticsearchBeanDefinitionRegistryPostProcessor implements BeanD
             serverAddr = environment.getProperty("nacos.config.server-addr");
         }
         return CharSequenceUtil.isNotBlank(serverAddr);
+    }
+
+    private void registerElasticsearchSourceProperties(BeanDefinitionRegistry beanDefinitionRegistry,
+                                                       GXElasticsearchSourceProperties sourceProperties) {
+        String beanName = "elasticsearchSourceProperties";
+        if (beanDefinitionRegistry.containsBeanDefinition(beanName) || beanDefinitionRegistry.isAlias(beanName)) {
+            return;
+        }
+
+        String scannedBeanName = Introspector.decapitalize(sourceProperties.getClass().getSimpleName());
+        if (beanDefinitionRegistry.containsBeanDefinition(scannedBeanName)) {
+            beanDefinitionRegistry.registerAlias(scannedBeanName, beanName);
+            return;
+        }
+
+        @SuppressWarnings("unchecked")
+        Class<GXElasticsearchSourceProperties> sourcePropertiesClass = (Class<GXElasticsearchSourceProperties>) sourceProperties.getClass();
+        beanDefinitionRegistry.registerBeanDefinition(beanName,
+                BeanDefinitionBuilder.genericBeanDefinition(sourcePropertiesClass, () -> sourceProperties)
+                        .setPrimary(true)
+                        .getBeanDefinition());
     }
 
     private ElasticsearchClient buildElasticsearchClient(GXElasticsearchProperties elasticsearchSourceProperties) {

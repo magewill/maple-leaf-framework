@@ -14,19 +14,29 @@ import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.elasticsearch.config.GXElasticsearchBeanDefinitionRegistryPostProcessor;
 import cn.maple.elasticsearch.dao.GXElasticsearchDao;
 import cn.maple.elasticsearch.model.GXElasticsearchModel;
+import cn.maple.elasticsearch.properties.GXElasticsearchSourceProperties;
+import cn.maple.elasticsearch.properties.local.GXLocalElasticsearchProperties;
 import cn.maple.elasticsearch.repository.GXElasticsearchRepository;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.AnnotationConfigUtils;
 import org.springframework.context.support.GenericApplicationContext;
+import org.springframework.data.annotation.Id;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.data.elasticsearch.annotations.Document;
 import org.springframework.data.elasticsearch.client.elc.ElasticsearchTemplate;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.SearchHits;
 import org.springframework.data.elasticsearch.core.convert.ElasticsearchCustomConversions;
+import org.springframework.data.elasticsearch.core.convert.MappingElasticsearchConverter;
+import org.springframework.data.elasticsearch.core.mapping.SimpleElasticsearchMappingContext;
+import org.springframework.data.elasticsearch.core.query.ByQueryResponse;
 import org.springframework.data.elasticsearch.core.query.CriteriaQuery;
 import org.springframework.data.elasticsearch.core.query.CriteriaQueryBuilder;
+import org.springframework.data.elasticsearch.core.query.MoreLikeThisQuery;
+import org.springframework.data.elasticsearch.core.query.UpdateQuery;
 import org.springframework.data.mapping.model.SimpleTypeHolder;
 
 import java.lang.reflect.InvocationHandler;
@@ -35,6 +45,11 @@ import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class GXElasticsearchServiceImplTest {
     private final CapturingRepository repository = new CapturingRepository();
@@ -42,7 +57,14 @@ class GXElasticsearchServiceImplTest {
     private final TestService service = new TestService(repository);
 
     private static <T> T defaultMethodProxy(Class<T> type) {
+        return defaultMethodProxy(type, null);
+    }
+
+    private static <T> T defaultMethodProxy(Class<T> type, ElasticsearchTemplate elasticsearchTemplate) {
         Object proxy = Proxy.newProxyInstance(type.getClassLoader(), new Class[]{type}, (target, method, args) -> {
+            if (elasticsearchTemplate != null && method.getName().equals("getElasticsearchTemplate") && method.getParameterCount() == 0) {
+                return elasticsearchTemplate;
+            }
             if (method.isDefault()) {
                 return InvocationHandler.invokeDefault(target, method, args);
             }
@@ -189,6 +211,52 @@ class GXElasticsearchServiceImplTest {
     }
 
     @Test
+    void daoUpdateFieldByConditionUsesConstantPainlessScriptAndUpdateParams() {
+        ElasticsearchTemplate elasticsearchTemplate = mock(ElasticsearchTemplate.class);
+        when(elasticsearchTemplate.updateByQuery(any(UpdateQuery.class), any()))
+                .thenReturn(ByQueryResponse.builder().withUpdated(3).build());
+        TestDao dao = defaultMethodProxy(TestDao.class, elasticsearchTemplate);
+
+        Integer updated = dao.updateFieldByCondition(
+                "test_index",
+                List.of(new TestUpdateField("userName", "maple"), new TestUpdateField("status", "active")),
+                List.of(new GXConditionStrEQ("", "id", "1")));
+
+        ArgumentCaptor<UpdateQuery> updateQueryCaptor = ArgumentCaptor.forClass(UpdateQuery.class);
+        verify(elasticsearchTemplate).updateByQuery(updateQueryCaptor.capture(), any());
+        UpdateQuery updateQuery = updateQueryCaptor.getValue();
+        assertThat(updated).isEqualTo(3);
+        assertThat(updateQuery.getScript())
+                .isEqualTo("for (update in params._updates) { ctx._source[update['field']] = update['value']; }");
+        assertThat(updateQuery.getLang()).isEqualTo("painless");
+        assertThat(updateQuery.getParams()).containsOnlyKeys("_updates");
+        assertThat((List<Map<String, Object>>) updateQuery.getParams().get("_updates"))
+                .containsExactly(
+                        Map.of("field", "user_name", "value", "maple"),
+                        Map.of("field", "status", "value", "active"));
+    }
+
+    @Test
+    void daoSearchSimilarUsesSpringDataIdentifierMetadataBeforeIdGetterFallback() {
+        ElasticsearchTemplate elasticsearchTemplate = mock(ElasticsearchTemplate.class);
+        MappingElasticsearchConverter converter = new MappingElasticsearchConverter(new SimpleElasticsearchMappingContext());
+        SearchHits<TestEntityWithCustomId> searchHits = mock(SearchHits.class);
+        when(searchHits.getSearchHits()).thenReturn(Collections.emptyList());
+        when(searchHits.getTotalHits()).thenReturn(0L);
+        when(elasticsearchTemplate.getElasticsearchConverter()).thenReturn(converter);
+        when(elasticsearchTemplate.search(any(MoreLikeThisQuery.class), eq(TestEntityWithCustomId.class))).thenReturn(searchHits);
+        CustomIdDao dao = defaultMethodProxy(CustomIdDao.class, elasticsearchTemplate);
+        TestEntityWithCustomId entity = new TestEntityWithCustomId();
+        entity.setDocId("doc-42");
+
+        dao.searchSimilar(entity, new String[]{"name"}, org.springframework.data.domain.PageRequest.of(0, 10));
+
+        ArgumentCaptor<MoreLikeThisQuery> queryCaptor = ArgumentCaptor.forClass(MoreLikeThisQuery.class);
+        verify(elasticsearchTemplate).search(queryCaptor.capture(), eq(TestEntityWithCustomId.class));
+        assertThat(queryCaptor.getValue().getId()).isEqualTo("doc-42");
+    }
+
+    @Test
     void daoAppliesSourceFilterAndLimitFromQueryParam() {
         TestDao dao = defaultMethodProxy(TestDao.class);
         GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
@@ -202,7 +270,7 @@ class GXElasticsearchServiceImplTest {
 
         assertThat(query.getMaxResults()).isEqualTo(7);
         assertThat(query.getSourceFilter()).isNotNull();
-        assertThat(query.getSourceFilter().getIncludes()).containsExactlyInAnyOrder("user_name", "status");
+        assertThat(query.getSourceFilter().getIncludes()).containsExactlyInAnyOrder("userName", "user_name", "status");
     }
 
     @Test
@@ -243,6 +311,22 @@ class GXElasticsearchServiceImplTest {
             assertThat(target.elasticsearchTemplate).isSameAs(context.getBean("primaryElasticsearchTemplate"));
             assertThat(context.getBean("elasticsearchCustomConversions")).isInstanceOf(ElasticsearchCustomConversions.class);
             assertThat(context.getBean("elasticsearchSimpleTypeHolder")).isInstanceOf(SimpleTypeHolder.class);
+            assertThat(context.getBean("elasticsearchSourceProperties")).isInstanceOf(GXLocalElasticsearchProperties.class);
+            assertThat(context.getBean(GXElasticsearchSourceProperties.class)).isSameAs(context.getBean("elasticsearchSourceProperties"));
+            assertThat(context.getBean(GXLocalElasticsearchProperties.class)).isSameAs(context.getBean("elasticsearchSourceProperties"));
+        }
+    }
+
+    @Test
+    void registeredBeansFailWhenDatasourcePropertiesWereNotLoaded() {
+        StandardEnvironment environment = new StandardEnvironment();
+
+        try (GenericApplicationContext context = new GenericApplicationContext()) {
+            GXElasticsearchBeanDefinitionRegistryPostProcessor postProcessor = new GXElasticsearchBeanDefinitionRegistryPostProcessor();
+            postProcessor.setEnvironment(environment);
+            assertThatThrownBy(() -> postProcessor.postProcessBeanDefinitionRegistry(context))
+                    .isInstanceOf(GXBusinessException.class)
+                    .hasMessageContaining("No valid Elasticsearch datasource configuration found");
         }
     }
 
@@ -294,6 +378,9 @@ class GXElasticsearchServiceImplTest {
     }
 
     interface TestDao extends GXElasticsearchDao<TestEntity, CriteriaQuery, CriteriaQueryBuilder, String> {
+    }
+
+    interface CustomIdDao extends GXElasticsearchDao<TestEntityWithCustomId, CriteriaQuery, CriteriaQueryBuilder, String> {
     }
 
     static class TestService extends GXElasticsearchServiceImpl<CapturingRepository, TestEntity, TestDao, CriteriaQuery, CriteriaQueryBuilder, TestResDto, String> {
@@ -397,6 +484,20 @@ class GXElasticsearchServiceImplTest {
         }
     }
 
+    @Document(indexName = "test_index")
+    static class TestEntityWithCustomId extends GXElasticsearchModel {
+        @Id
+        private String docId;
+
+        public String getDocId() {
+            return docId;
+        }
+
+        public void setDocId(String docId) {
+            this.docId = docId;
+        }
+    }
+
     static class TestCondition extends GXCondition<String> {
         private final String op;
 
@@ -432,4 +533,5 @@ class GXElasticsearchServiceImplTest {
             return (String) value;
         }
     }
+
 }

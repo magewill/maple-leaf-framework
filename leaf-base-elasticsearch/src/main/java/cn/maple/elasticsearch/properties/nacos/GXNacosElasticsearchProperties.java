@@ -10,7 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -19,10 +18,9 @@ import java.util.Map;
 /** Nacos-based Elasticsearch configuration source. */
 @Data
 @Slf4j
-@Component
-@Primary
 @SuppressWarnings("all")
 @EqualsAndHashCode(callSuper = true)
+@Component
 @ConditionalOnClass(name = {"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
 @ConditionalOnExpression("!'${spring.cloud.nacos.config.server-addr:${nacos.config.server-addr:}}'.isBlank()")
 @NacosConfigurationProperties(dataId = "elasticsearch.yml",
