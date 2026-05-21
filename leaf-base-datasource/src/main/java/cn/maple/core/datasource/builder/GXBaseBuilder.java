@@ -59,7 +59,7 @@ public interface GXBaseBuilder {
             sql.SET(CharSequenceUtil.format("updated_at = #{dbQueryParamInnerDto.paramMap.{}}", updatedAtParamName));
             dbQueryParamInnerDto.getParamMap().put(updatedAtParamName, DateUtil.currentSeconds());
         }
-        Map<String, Object> paramMap = handleSQLCondition(sql, condition);
+        Map<String, Object> paramMap = handleSQLCondition(sql, condition, null, null);
         dbQueryParamInnerDto.getParamMap().putAll(paramMap);
         String logicNotDeletedCondition = GXSqlLogicDeleteSupport.buildLogicNotDeletedCondition(context, tableName, tableName, condition);
         if (CharSequenceUtil.isNotBlank(logicNotDeletedCondition)) {
@@ -86,11 +86,7 @@ public interface GXBaseBuilder {
         if (dbQueryParamInnerDto == null) {
             throw new GXBusinessException("Query parameter object must not be null");
         }
-        return findByCondition(dbQueryParamInnerDto, null);
-    }
-
-    private static String findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, String conditionAliasOverride) {
-        return findByCondition(dbQueryParamInnerDto, conditionAliasOverride, null);
+        return findByCondition(dbQueryParamInnerDto, null, null);
     }
 
     private static String findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto, String conditionAliasOverride, String paramNamespace) {
@@ -158,11 +154,7 @@ public interface GXBaseBuilder {
     }
 
     static Map<String, Object> handleSQLJoin(SQL sql, List<GXJoinDto> joins) {
-        return handleSQLJoin(sql, joins, new GXSqlBuildContext());
-    }
-
-    private static Map<String, Object> handleSQLJoin(SQL sql, List<GXJoinDto> joins, GXSqlBuildContext context) {
-        return handleSQLJoin(sql, joins, context, null);
+        return handleSQLJoin(sql, joins, new GXSqlBuildContext(), null);
     }
 
     private static Map<String, Object> handleSQLJoin(SQL sql, List<GXJoinDto> joins, GXSqlBuildContext context, String paramNamespace) {
@@ -239,14 +231,6 @@ public interface GXBaseBuilder {
         return paramMap;
     }
 
-    private static Tuple handleConditions(List<GXCondition<?>> conditions) {
-        return handleConditions(conditions, null);
-    }
-
-    private static Tuple handleConditions(List<GXCondition<?>> conditions, String conditionAliasOverride) {
-        return handleConditions(conditions, conditionAliasOverride, null);
-    }
-
     private static Tuple handleConditions(List<GXCondition<?>> conditions, String conditionAliasOverride, String paramNamespace) {
         Map<String, Object> paramMap = new HashMap<>();
         if (Objects.isNull(conditions) || conditions.isEmpty()) {
@@ -303,14 +287,6 @@ public interface GXBaseBuilder {
         return GXSqlDialectSupport.applySingleRowLimit(sql);
     }
 
-    static Map<String, Object> handleSQLCondition(SQL sql, List<GXCondition<?>> conditions) {
-        return handleSQLCondition(sql, conditions, null);
-    }
-
-    private static Map<String, Object> handleSQLCondition(SQL sql, List<GXCondition<?>> conditions, String conditionAliasOverride) {
-        return handleSQLCondition(sql, conditions, conditionAliasOverride, null);
-    }
-
     private static Map<String, Object> handleSQLCondition(SQL sql, List<GXCondition<?>> conditions, String conditionAliasOverride, String paramNamespace) {
         if (sql == null) {
             throw new IllegalArgumentException("SQL object must not be null");
@@ -362,7 +338,7 @@ public interface GXBaseBuilder {
             sql.SET(CharSequenceUtil.format("deleted_by = #{dbQueryParamInnerDto.paramMap.{}}", deletedByParamName));
             dbQueryParamInnerDto.getParamMap().put(deletedByParamName, extraData.getStr("deletedBy"));
         }
-        Map<String, Object> paramMap = handleSQLCondition(sql, condition);
+        Map<String, Object> paramMap = handleSQLCondition(sql, condition, null, null);
         dbQueryParamInnerDto.getParamMap().putAll(paramMap);
         String logicNotDeletedCondition = GXSqlLogicDeleteSupport.buildLogicNotDeletedCondition(context, tableName, tableName, condition);
         if (CharSequenceUtil.isNotBlank(logicNotDeletedCondition)) {
@@ -382,7 +358,7 @@ public interface GXBaseBuilder {
             throw new GXBusinessException("Conditions must not be empty");
         }
         SQL sql = new SQL().DELETE_FROM(tableName);
-        Map<String, Object> paramMap = handleSQLCondition(sql, condition);
+        Map<String, Object> paramMap = handleSQLCondition(sql, condition, null, null);
         dbQueryParamInnerDto.getParamMap().putAll(paramMap);
         String logicNotDeletedCondition = GXSqlLogicDeleteSupport.buildLogicNotDeletedCondition(context, tableName, tableName, condition);
         if (CharSequenceUtil.isNotBlank(logicNotDeletedCondition)) {
@@ -416,7 +392,7 @@ public interface GXBaseBuilder {
         GXBaseQueryParamInnerDto outerQuery = copyQueryParam(dbQueryParamInnerDto);
         outerQuery.setTableName("(" + unionSql + ")");
         outerQuery.setTableNameAlias("tmp");
-        String outerSql = findByCondition(outerQuery, "tmp");
+        String outerSql = findByCondition(outerQuery, "tmp", null);
         dbQueryParamInnerDto.getParamMap().putAll(outerQuery.getParamMap());
         return outerSql;
     }
@@ -503,14 +479,6 @@ public interface GXBaseBuilder {
         return dotIndex >= 0 ? trimmed.substring(dotIndex + 1) : trimmed;
     }
 
-    private static GXConditionSegment renderCondition(GXCondition<?> condition) {
-        return renderCondition(condition, null);
-    }
-
-    private static GXConditionSegment renderCondition(GXCondition<?> condition, String tableAliasOverride) {
-        return renderCondition(condition, tableAliasOverride, null);
-    }
-
     private static GXConditionSegment renderCondition(GXCondition<?> condition, String tableAliasOverride, String paramNamespace) {
         if (condition instanceof GXConditionJsonEQ jsonEq) {
             return namespaceConditionSegment(renderJsonEqCondition(jsonEq, tableAliasOverride), paramNamespace);
@@ -522,10 +490,6 @@ public interface GXBaseBuilder {
             return namespaceConditionSegment(segment, paramNamespace);
         }
         return namespaceConditionSegment(new GXConditionSegment(rewriteConditionAlias(segment.sql(), condition, tableAliasOverride), segment.params()), paramNamespace);
-    }
-
-    private static GXConditionSegment renderJsonEqCondition(GXConditionJsonEQ condition) {
-        return renderJsonEqCondition(condition, null);
     }
 
     private static GXConditionSegment renderJsonEqCondition(GXConditionJsonEQ condition, String tableAliasOverride) {
