@@ -36,7 +36,7 @@ final class GXSqlFieldRenderSupport {
         if (CharSequenceUtil.isBlank(trimmed) || "*".equals(trimmed) || GXBaseBuilder.QUALIFIED_WILDCARD_PATTERN.matcher(trimmed).matches()) {
             return;
         }
-        Matcher matcher = GXBaseBuilder.EXPRESSION_ALIAS_PATTERN.matcher(trimmed);
+        Matcher matcher = GXSqlConstants.EXPRESSION_ALIAS_PATTERN.matcher(trimmed);
         if (matcher.matches() && !isReservedTrailingKeyword(matcher.group(2))) {
             registerOutputAlias(allowedColumns, matcher.group(2), tableAlias);
             return;
@@ -108,16 +108,16 @@ final class GXSqlFieldRenderSupport {
         } catch (GXSqlInjectionException ex) {
             throw new GXSqlInjectionException(CharSequenceUtil.format("HAVING clause has SQL injection risk: {}", clause));
         }
-        if (GXBaseBuilder.DANGEROUS_SQL_TOKEN_PATTERN.matcher(trimmed).find()) {
+        if (GXSqlConstants.DANGEROUS_SQL_TOKEN_PATTERN.matcher(trimmed).find()) {
             throw new GXSqlInjectionException(CharSequenceUtil.format("HAVING clause contains dangerous tokens: {}", clause));
         }
 
         String searchableClause = stripQuotedStringLiterals(trimmed);
-        Matcher matcher = GXBaseBuilder.HAVING_TOKEN_PATTERN.matcher(searchableClause);
+        Matcher matcher = GXSqlConstants.HAVING_TOKEN_PATTERN.matcher(searchableClause);
         while (matcher.find()) {
             String token = matcher.group();
             String upper = token.toUpperCase(Locale.ROOT);
-            if (GXBaseBuilder.HAVING_KEYWORD_WHITELIST.contains(upper)) {
+            if (GXSqlConstants.HAVING_KEYWORD_WHITELIST.contains(upper)) {
                 continue;
             }
             String normalizedToken = token.toLowerCase(Locale.ROOT);
@@ -142,7 +142,7 @@ final class GXSqlFieldRenderSupport {
 
     static String extractExpressionPart(String expression) {
         String trimmed = CharSequenceUtil.trim(expression);
-        Matcher matcher = GXBaseBuilder.EXPRESSION_ALIAS_PATTERN.matcher(trimmed);
+        Matcher matcher = GXSqlConstants.EXPRESSION_ALIAS_PATTERN.matcher(trimmed);
         if (!matcher.matches()) {
             return trimmed;
         }
@@ -156,8 +156,8 @@ final class GXSqlFieldRenderSupport {
 
     static boolean isReservedTrailingKeyword(String token) {
         String normalized = token.toLowerCase(Locale.ROOT);
-        return GXBaseBuilder.SQL_FUNCTION_KEYWORDS.contains(normalized)
-                || GXBaseBuilder.HAVING_KEYWORD_WHITELIST.contains(token.toUpperCase(Locale.ROOT))
+        return GXSqlConstants.SQL_FUNCTION_KEYWORDS.contains(normalized)
+                || GXSqlConstants.HAVING_KEYWORD_WHITELIST.contains(token.toUpperCase(Locale.ROOT))
                 || "asc".equals(normalized)
                 || "desc".equals(normalized);
     }
@@ -175,7 +175,7 @@ final class GXSqlFieldRenderSupport {
 
     private static String renderExpressionToUnderline(String expression, Set<String> allowedColumns) {
         String trimmed = CharSequenceUtil.trim(expression);
-        Matcher matcher = GXBaseBuilder.EXPRESSION_ALIAS_PATTERN.matcher(trimmed);
+        Matcher matcher = GXSqlConstants.EXPRESSION_ALIAS_PATTERN.matcher(trimmed);
         if (matcher.matches() && !isReservedTrailingKeyword(matcher.group(2))) {
             String baseExpression = CharSequenceUtil.trim(matcher.group(1));
             if (CharSequenceUtil.isBlank(baseExpression)) {
@@ -310,7 +310,7 @@ final class GXSqlFieldRenderSupport {
         }
         return index < clause.length()
                 && clause.charAt(index) == '('
-                && GXBaseBuilder.HAVING_FUNCTION_WHITELIST.contains(token.toUpperCase(Locale.ROOT));
+                && GXSqlConstants.HAVING_FUNCTION_WHITELIST.contains(token.toUpperCase(Locale.ROOT));
     }
 
     private static boolean hasTrailingAlias(String expression) {

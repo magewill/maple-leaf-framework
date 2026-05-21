@@ -124,13 +124,13 @@ final class GXSqlLogicDeleteSupport {
         if (value.startsWith("'") && value.endsWith("'") && value.length() >= 2) {
             return value;
         }
-        if (GXBaseBuilder.NUMERIC_PATTERN.matcher(value).matches()) {
+        if (GXSqlConstants.NUMERIC_PATTERN.matcher(value).matches()) {
             return value;
         }
         if ("true".equalsIgnoreCase(value) || "false".equalsIgnoreCase(value)) {
             return value.toLowerCase(Locale.ROOT);
         }
-        if (GXBaseBuilder.SQL_FUNCTION_PATTERN.matcher(value).matches()) {
+        if (GXSqlConstants.SQL_FUNCTION_PATTERN.matcher(value).matches()) {
             return value;
         }
         return "'" + value.replace("'", "''") + "'";

@@ -196,7 +196,7 @@ final class GXSqlTableMetadataSupport {
         if (!lower.contains("select") && !lower.contains("with")) {
             throw new GXDBConditionException(CharSequenceUtil.format("{} derived table expression must contain SELECT/WITH query", scope));
         }
-        if (GXBaseBuilder.DANGEROUS_SQL_TOKEN_PATTERN.matcher(tableExpression).find()) {
+        if (GXSqlConstants.DANGEROUS_SQL_TOKEN_PATTERN.matcher(tableExpression).find()) {
             throw new GXSqlInjectionException(CharSequenceUtil.format("{} derived table expression contains dangerous SQL keywords", scope));
         }
         return tableExpression;

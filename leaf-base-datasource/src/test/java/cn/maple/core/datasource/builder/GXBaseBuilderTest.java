@@ -624,6 +624,34 @@ class GXBaseBuilderTest {
     }
 
     @Test
+    void unionFindByConditionNamespacesSharedBranchConditionParams() {
+        GXConditionEQ sharedCondition = new GXConditionEQ("", "status", 1);
+        GXBaseQueryParamInnerDto root = GXBaseQueryParamInnerDto.builder()
+                .tableName("ignored")
+                .columns(CollUtil.newLinkedHashSet("id"))
+                .build();
+        GXBaseQueryParamInnerDto firstBranch = GXBaseQueryParamInnerDto.builder()
+                .tableName("(select 1 as id, 1 as status)")
+                .columns(CollUtil.newLinkedHashSet("id"))
+                .condition(CollUtil.newArrayList(sharedCondition))
+                .build();
+        GXBaseQueryParamInnerDto secondBranch = GXBaseQueryParamInnerDto.builder()
+                .tableName("(select 2 as id, 2 as status)")
+                .columns(CollUtil.newLinkedHashSet("id"))
+                .condition(CollUtil.newArrayList(sharedCondition))
+                .build();
+
+        String sql = GXBaseBuilder.unionFindByCondition(root, CollUtil.newArrayList(firstBranch, secondBranch), GXUnionTypeEnums.UNION_ALL);
+
+        long unionParamCount = root.getParamMap().keySet().stream()
+                .filter(key -> key.startsWith("union_") && key.endsWith(sharedCondition.getParamName()))
+                .count();
+        assertEquals(2, unionParamCount);
+        assertEquals(2, countOccurrences(sql, sharedCondition.getParamName()));
+        assertEquals(2, root.getParamMap().size());
+    }
+
+    @Test
     void unionBranchWithQualifiedTableNameUsesSafeDefaultAlias() {
         GXBaseQueryParamInnerDto root = GXBaseQueryParamInnerDto.builder()
                 .tableName("ignored")
@@ -645,5 +673,15 @@ class GXBaseBuilderTest {
             assertTrue(sql.contains("FROM tenant_a.user user"), sql);
         }
         assertEquals(null, branch.getTableNameAlias());
+    }
+
+    private static int countOccurrences(String text, String token) {
+        int count = 0;
+        int index = 0;
+        while ((index = text.indexOf(token, index)) >= 0) {
+            count++;
+            index += token.length();
+        }
+        return count;
     }
 }

@@ -14,12 +14,14 @@ public abstract class GXDbJoinOp {
     @Setter
     protected @Nullable String masterTableNameAlias;
 
+    @Getter
     protected @Nullable String masterFieldName;
 
     @Setter
     @Getter
     protected @Nullable String joinTableNameAlias;
 
+    @Getter
     protected @Nullable String joinFieldName;
 
     protected GXDbJoinOp() {

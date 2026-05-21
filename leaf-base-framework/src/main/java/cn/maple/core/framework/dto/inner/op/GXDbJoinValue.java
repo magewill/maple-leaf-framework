@@ -4,11 +4,13 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.dto.inner.condition.GXConditionSegment;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringUtils;
+import lombok.Getter;
 
 import java.util.HashMap;
 import java.util.Map;
 
 @SuppressWarnings("all")
+@Getter
 public abstract class GXDbJoinValue extends GXDbJoinOp {
     private final String tableNameAlias;
 

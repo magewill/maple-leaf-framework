@@ -69,7 +69,7 @@ final class GXSqlExpressionIdentifierRenderer {
 
     private static Set<String> collectFallbackColumnReferences(String expression, Set<String> allowedColumns) {
         String searchableExpression = stripQuotedStringLiterals(extractExpressionPart(expression));
-        Matcher matcher = GXBaseBuilder.HAVING_TOKEN_PATTERN.matcher(searchableExpression);
+        Matcher matcher = GXSqlConstants.HAVING_TOKEN_PATTERN.matcher(searchableExpression);
         Set<String> columnRefs = new HashSet<>();
         while (matcher.find()) {
             String token = matcher.group();
@@ -82,7 +82,7 @@ final class GXSqlExpressionIdentifierRenderer {
 
     private static String renderByColumnReferences(String expression, Set<String> allowedColumns, Set<String> columnRefs) {
         String searchableExpression = stripQuotedStringLiterals(expression);
-        Matcher matcher = GXBaseBuilder.HAVING_TOKEN_PATTERN.matcher(searchableExpression);
+        Matcher matcher = GXSqlConstants.HAVING_TOKEN_PATTERN.matcher(searchableExpression);
         StringBuilder rendered = new StringBuilder(expression.length());
         int lastIndex = 0;
         while (matcher.find()) {
@@ -101,7 +101,7 @@ final class GXSqlExpressionIdentifierRenderer {
 
     private static String renderByFallbackTokens(String expression, Set<String> allowedColumns) {
         String searchableExpression = stripQuotedStringLiterals(expression);
-        Matcher matcher = GXBaseBuilder.HAVING_TOKEN_PATTERN.matcher(searchableExpression);
+        Matcher matcher = GXSqlConstants.HAVING_TOKEN_PATTERN.matcher(searchableExpression);
         StringBuilder rendered = new StringBuilder(expression.length());
         int lastIndex = 0;
         while (matcher.find()) {
@@ -120,8 +120,8 @@ final class GXSqlExpressionIdentifierRenderer {
 
     private static boolean shouldTreatFallbackTokenAsColumn(String searchableExpression, int tokenEndIndex, String token, Set<String> allowedColumns) {
         String upper = token.toUpperCase(Locale.ROOT);
-        if (GXBaseBuilder.HAVING_KEYWORD_WHITELIST.contains(upper)
-                || GXBaseBuilder.SQL_FUNCTION_KEYWORDS.contains(token.toLowerCase(Locale.ROOT))) {
+        if (GXSqlConstants.HAVING_KEYWORD_WHITELIST.contains(upper)
+                || GXSqlConstants.SQL_FUNCTION_KEYWORDS.contains(token.toLowerCase(Locale.ROOT))) {
             return false;
         }
         if (isFunctionToken(searchableExpression, tokenEndIndex, token)) {
@@ -140,7 +140,7 @@ final class GXSqlExpressionIdentifierRenderer {
         }
         return index < clause.length()
                 && clause.charAt(index) == '('
-                && GXBaseBuilder.HAVING_FUNCTION_WHITELIST.contains(token.toUpperCase(Locale.ROOT));
+                && GXSqlConstants.HAVING_FUNCTION_WHITELIST.contains(token.toUpperCase(Locale.ROOT));
     }
 
     private static boolean isAllowedColumn(String token, Set<String> allowedColumns) {
@@ -180,8 +180,8 @@ final class GXSqlExpressionIdentifierRenderer {
 
     private static boolean isReservedTrailingKeyword(String token) {
         String normalized = token.toLowerCase(Locale.ROOT);
-        return GXBaseBuilder.SQL_FUNCTION_KEYWORDS.contains(normalized)
-                || GXBaseBuilder.HAVING_KEYWORD_WHITELIST.contains(token.toUpperCase(Locale.ROOT))
+        return GXSqlConstants.SQL_FUNCTION_KEYWORDS.contains(normalized)
+                || GXSqlConstants.HAVING_KEYWORD_WHITELIST.contains(token.toUpperCase(Locale.ROOT))
                 || "asc".equals(normalized)
                 || "desc".equals(normalized);
     }
