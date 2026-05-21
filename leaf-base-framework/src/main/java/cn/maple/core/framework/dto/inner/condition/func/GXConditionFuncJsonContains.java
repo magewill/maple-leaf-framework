@@ -56,7 +56,7 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
 
     @Override
     public String whereString() {
-        return toSegment().sql();
+        return renderSql();
     }
 
     @Override
@@ -66,11 +66,19 @@ public class GXConditionFuncJsonContains extends GXConditionFunc<String> {
         Map<String, Object> params = new HashMap<>();
         params.put(paramName, getFieldValue());
         params.put(pathParamName, GXConditionFuncDialectSupport.normalizeJsonPath(rawJsonPath));
-        return new GXConditionSegment(GXConditionFuncDialectSupport.renderJsonContains(field, pathParamName, paramName), params);
+        return new GXConditionSegment(renderSql(field, pathParamName), params);
     }
 
     @Override
     public String getFieldOriginalValue() {
         return getFieldValue();
+    }
+
+    private String renderSql() {
+        return renderSql(GXConditionFuncDialectSupport.qualifiedColumn(tableNameAlias, jsonField), paramName + "_path");
+    }
+
+    private String renderSql(String field, String pathParamName) {
+        return GXConditionFuncDialectSupport.renderJsonContains(field, pathParamName, paramName);
     }
 }

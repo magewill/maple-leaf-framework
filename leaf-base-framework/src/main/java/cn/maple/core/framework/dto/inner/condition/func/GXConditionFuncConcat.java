@@ -33,15 +33,12 @@ public class GXConditionFuncConcat extends GXConditionFunc<String> {
 
     @Override
     public String whereString() {
-        return toSegment().sql();
+        return renderSql();
     }
 
     @Override
     public GXConditionSegment toSegment() {
-        return new GXConditionSegment(
-                CharSequenceUtil.format("{}({}) LIKE #{dbQueryParamInnerDto.paramMap.{}}",
-                        getFunctionName(), getFieldExpression(), paramName),
-                Map.of(paramName, getFieldValue()));
+        return new GXConditionSegment(renderSql(), Map.of(paramName, getFieldValue()));
     }
 
     @Override
@@ -55,5 +52,10 @@ public class GXConditionFuncConcat extends GXConditionFunc<String> {
         }
         String escapedValue = GXDBStringUtils.escapeSql(strValue);
         return CharSequenceUtil.format("'{}%'", escapedValue);
+    }
+
+    private String renderSql() {
+        return CharSequenceUtil.format("{}({}) LIKE #{dbQueryParamInnerDto.paramMap.{}}",
+                getFunctionName(), getFieldExpression(), paramName);
     }
 }

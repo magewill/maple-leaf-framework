@@ -62,7 +62,7 @@ public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
 
     @Override
     public String whereString() {
-        return toSegment().sql();
+        return renderSql();
     }
 
     @Override
@@ -72,9 +72,7 @@ public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
         Map<String, Object> params = new HashMap<>();
         params.put(oneOrAllParamName, oneOrAll);
         params.put(paramName, getFieldValue());
-        return new GXConditionSegment(
-                GXConditionFuncDialectSupport.renderJsonSearch(field, oneOrAllParamName, paramName),
-                params);
+        return new GXConditionSegment(renderSql(field, oneOrAllParamName), params);
     }
 
     @Override
@@ -86,5 +84,13 @@ public class GXConditionFuncJsonSearch extends GXConditionFunc<String> {
             throw new GXSqlInjectionException("SQL injection risk detected in JSON_SEARCH condition value");
         }
         return CharSequenceUtil.format("'{}'", GXDBStringUtils.escapeSql(value));
+    }
+
+    private String renderSql() {
+        return renderSql(GXConditionFuncDialectSupport.qualifiedColumn(tableNameAlias, jsonField), paramName + "_oneOrAll");
+    }
+
+    private String renderSql(String field, String oneOrAllParamName) {
+        return GXConditionFuncDialectSupport.renderJsonSearch(field, oneOrAllParamName, paramName);
     }
 }
