@@ -1,37 +1,44 @@
 # ============================================================
 # P6Spy 完整配置文件（spy.properties）
 # 官方文档：https://p6spy.readthedocs.io/en/latest/configandusage.html
+# 官方源码：https://github.com/p6spy/p6spy
 # ============================================================
 #
 # 【使用说明】
 # - 所有配置项默认处于注释状态，取消 # 即可生效
-# - 优先阅读顶部【场景速查】选择适合自己的配置方案
-# - 如需自定义，再参考下方各配置项的详细说明
+# - 每个配置项均已注明：可选值、默认值、适用场景
+# - 优先阅读顶部【场景速查】，选定配置后直接复制使用
+# - 配置优先级由高到低：JMX 运行时设置 > 系统属性(-D) > 环境变量 > spy.properties > 内置默认值
+# - 所有配置项均可通过 JVM 参数覆盖，格式：-Dp6spy.config.<配置项>=<值>
+#   示例：-Dp6spy.config.logfile=my.log -Dp6spy.config.append=true
+# - 若需指定不同路径的配置文件：-Dspy.properties=c:\jboss\lib\another_spy.properties
+# - 配置文件编码可通过 -Dspy.properties.charset=UTF-8 指定
 #
 # ============================================================
 # 【场景速查】直接复制对应场景的配置块覆盖使用
 # ============================================================
 #
 # ┌─────────────────────────────────────────────────────────┐
-# │  场景一：本地开发调试（记录所有 SQL，含调用栈，控制台输出）   │
+# │  场景一：本地开发调试（记录所有 SQL，控制台输出，即时可见）   │
 # └─────────────────────────────────────────────────────────┘
 # modulelist=com.p6spy.engine.spy.P6SpyFactory,com.p6spy.engine.logging.P6LogFactory
 # appender=com.p6spy.engine.spy.appender.StdoutLogger
 # logMessageFormat=com.p6spy.engine.spy.appender.CustomLineFormat
-# customLogMessageFormat=[ P6Spy ] %(currentTime) | %(executionTime)ms | %(category) | conn-%(connectionId) | %(effectiveSqlSingleLine)
+# customLogMessageFormat=[ P6Spy ] %(currentTime) | %(executionTime)ms | %(category) | conn-%(connectionId) | %(sql)
 # dateformat=yyyy-MM-dd HH:mm:ss.SSS
 # databaseDialectDateFormat=yyyy-MM-dd HH:mm:ss
 # databaseDialectTimestampFormat=yyyy-MM-dd HH:mm:ss.SSS
 # databaseDialectBooleanFormat=boolean
+# databaseDialectBinaryFormat=com.p6spy.engine.logging.format.HexEncodedBinaryFormat
 # excludecategories=info,debug,result,resultset,batch
-# excludebinary=true
+# excludebinary=false
 # executionThreshold=0
 # stacktrace=false
 # autoflush=true
 # filter=false
 #
 # ┌─────────────────────────────────────────────────────────┐
-# │  场景二：生产环境（仅记录慢查询，SLF4J 异步输出，低开销）    │
+# │  场景二：生产环境（仅记录慢查询，SLF4J 输出，低开销）        │
 # └─────────────────────────────────────────────────────────┘
 # modulelist=com.p6spy.engine.spy.P6SpyFactory,com.p6spy.engine.logging.P6LogFactory,com.p6spy.engine.outage.P6OutageFactory
 # appender=com.p6spy.engine.spy.appender.Slf4JLogger
@@ -41,6 +48,7 @@
 # databaseDialectDateFormat=yyyy-MM-dd HH:mm:ss
 # databaseDialectTimestampFormat=yyyy-MM-dd HH:mm:ss.SSS
 # databaseDialectBooleanFormat=boolean
+# databaseDialectBinaryFormat=com.p6spy.engine.logging.format.HexEncodedBinaryFormat
 # excludecategories=info,debug,result,resultset,batch
 # excludebinary=true
 # executionThreshold=500
@@ -58,11 +66,12 @@
 # logfile=/var/log/p6spy/sql-audit.log
 # append=true
 # logMessageFormat=com.p6spy.engine.spy.appender.CustomLineFormat
-# customLogMessageFormat=%(currentTime)|%(executionTime)ms|%(category)|conn-%(connectionId)|%(effectiveSqlSingleLine)
+# customLogMessageFormat=%(currentTime)|%(executionTime)ms|%(category)|conn-%(connectionId)|%(sql)
 # dateformat=yyyy-MM-dd HH:mm:ss.SSS
 # databaseDialectDateFormat=yyyy-MM-dd HH:mm:ss
 # databaseDialectTimestampFormat=yyyy-MM-dd HH:mm:ss.SSS
 # databaseDialectBooleanFormat=boolean
+# databaseDialectBinaryFormat=com.p6spy.engine.logging.format.HexEncodedBinaryFormat
 # excludecategories=info,debug,result,resultset
 # excludebinary=true
 # executionThreshold=0
@@ -77,10 +86,12 @@
 # modulelist=com.p6spy.engine.spy.P6SpyFactory,com.p6spy.engine.logging.P6LogFactory
 # appender=com.p6spy.engine.spy.appender.Slf4JLogger
 # logMessageFormat=com.p6spy.engine.spy.appender.CustomLineFormat
-# customLogMessageFormat=%(currentTime)|%(executionTime)ms|%(category)|conn-%(connectionId)|%(effectiveSqlSingleLine)
+# customLogMessageFormat=%(currentTime)|%(executionTime)ms|%(category)|conn-%(connectionId)|%(sql)
 # dateformat=yyyy-MM-dd HH:mm:ss.SSS
 # databaseDialectDateFormat=yyyy-MM-dd HH:mm:ss
 # databaseDialectTimestampFormat=yyyy-MM-dd HH:mm:ss.SSS
+# databaseDialectBooleanFormat=boolean
+# databaseDialectBinaryFormat=com.p6spy.engine.logging.format.HexEncodedBinaryFormat
 # excludecategories=info,debug,result,resultset,batch
 # excludebinary=true
 # executionThreshold=0
@@ -102,7 +113,7 @@
 # 【写入性能参考】
 # ============================================================
 #
-# 配置组合对性能的影响（由低到高开销）：
+# 各配置组合对性能的影响（由低到高开销）：
 #
 #  ① 最低开销（生产推荐）
 #     appender=Slf4JLogger + Logback AsyncAppender（异步队列写入）
@@ -123,10 +134,10 @@
 #
 #  ④ 最高开销（不建议在并发环境使用）
 #     appender=FileLogger + autoflush=true
-#     （FileLogger 本身无异步缓冲，autoflush=true 进一步强制每次刷盘）
+#     （FileLogger 本身无异步缓冲，autoflush=true 强制每次刷盘）
 #
 # 生产环境推荐：在 logback.xml 中为 p6spy Logger 配置 AsyncAppender，
-# 可将日志写入性能损耗降低至接近零：
+# 可将日志写入损耗降至接近零：
 #
 #   <appender name="ASYNC_P6SPY" class="ch.qos.logback.classic.AsyncAppender">
 #     <appender-ref ref="FILE"/>
@@ -149,11 +160,14 @@
 # 指定 P6Spy 启动时加载的功能模块，多个模块以英文逗号分隔，顺序不影响功能。
 #
 # 可选模块：
-#   com.p6spy.engine.spy.P6SpyFactory       - 【必须】核心拦截模块，代理 JDBC 连接，缺少则 P6Spy 完全不生效
+#   com.p6spy.engine.spy.P6SpyFactory       - 【必须】核心拦截模块，代理 JDBC 连接；
+#                                             此模块无法被禁用，即使从列表中移除仍会保持激活
 #   com.p6spy.engine.logging.P6LogFactory   - SQL 日志模块，启用后才会记录 SQL 语句到日志
-#   com.p6spy.engine.outage.P6OutageFactory - 慢查询阻断检测模块，检测长时间未返回的 SQL（需配合 outagedetection）
+#   com.p6spy.engine.outage.P6OutageFactory - 慢查询阻断检测模块（需配合 outagedetection=true）
 #
-# 说明：仅需 SQL 日志时不必加载 P6OutageFactory，可减少后台线程开销。
+# 重要：与其他配置项不同，modulelist 的变更需要触发配置重载才生效
+#       （JMX reload 或 reloadproperties=true 定时重载）。
+#
 # 默认值：com.p6spy.engine.spy.P6SpyFactory,com.p6spy.engine.logging.P6LogFactory,com.p6spy.engine.outage.P6OutageFactory
 # ---------------------------------------------------------------------------
 #modulelist=com.p6spy.engine.spy.P6SpyFactory,com.p6spy.engine.logging.P6LogFactory,com.p6spy.engine.outage.P6OutageFactory
@@ -163,10 +177,10 @@
 # JDBC 驱动列表（driverlist）
 # 指定需要被 P6Spy 代理的真实 JDBC 驱动类的全限定名，多个驱动以英文逗号分隔。
 #
-# 说明：P6Spy 3.x+ 通过 Java SPI（META-INF/services）自动发现驱动，通常无需配置。
+# P6Spy 3.x+ 通过 Java SPI（META-INF/services）自动发现驱动，通常无需配置。
 # 仅在以下情况才需手动指定：
-#   - 使用不支持 SPI 的旧版 JDBC 驱动
-#   - 类路径中多个驱动冲突导致自动发现失败
+#   - 使用不支持 SPI 自动注册的旧版 JDBC 驱动（JDBC 4.0 以下）
+#   - 在 JNDI 数据源的应用服务器环境中，部分容器会阻止 SPI 自动注册
 #   - OSGi 等特殊容器中 SPI 加载机制受限
 #
 # 常见驱动类名：
@@ -189,37 +203,38 @@
 
 # ---------------------------------------------------------------------------
 # 日志输出目标（appender）
-# 指定 SQL 日志的输出方式，三选一，取消对应行注释即可。
+# 指定 SQL 日志的输出方式，取消对应行注释即可切换。
 #
 # 可选值：
+#   com.p6spy.engine.spy.appender.FileLogger
+#     - 直接写入独立文件（路径由 logfile 指定）
+#     - 无内置日志滚动，无缓冲，不依赖日志框架，【默认值】
+#
 #   com.p6spy.engine.spy.appender.Slf4JLogger
 #     - 委托给 SLF4J，集成到项目已有的日志框架（Logback / Log4j2 等）
-#     - Logger 名称固定为 "p6spy"，可在 logback.xml 中单独配置级别和输出目标
+#     - Logger 名称固定为 "p6spy"，可在 logback.xml 中单独配置级别和目标
 #     - 配合异步 Appender 使用可将性能影响降至最低，【生产环境推荐】
 #
 #   com.p6spy.engine.spy.appender.StdoutLogger
 #     - 直接写入 System.out（标准控制台），不依赖任何日志框架
 #     - 无缓冲无异步，高并发下会成为性能瓶颈，【仅适合本地调试】
 #
-#   com.p6spy.engine.spy.appender.FileLogger
-#     - 直接写入独立文件（路径由 logfile 指定），输出路径与主日志完全隔离
-#     - 无内置日志滚动，建议配合操作系统 logrotate 使用，【适合独立审计归档】
-#
 #   com.example.MyCustomAppender（自定义）
 #     - 实现 com.p6spy.engine.spy.appender.FormattedLogger 接口
 #     - 可对接消息队列、数据库、告警系统等自定义目标
 #
-# 默认值：com.p6spy.engine.spy.appender.Slf4JLogger
+# 默认值：com.p6spy.engine.spy.appender.FileLogger
 # ---------------------------------------------------------------------------
+#appender=com.p6spy.engine.spy.appender.FileLogger
 #appender=com.p6spy.engine.spy.appender.Slf4JLogger
 #appender=com.p6spy.engine.spy.appender.StdoutLogger
-#appender=com.p6spy.engine.spy.appender.FileLogger
 
 
 # ---------------------------------------------------------------------------
 # 日志文件路径（logfile）
 # 仅当 appender=FileLogger 时生效。
 # 支持相对路径（相对于 JVM 启动目录）或绝对路径。
+# Windows 用户注意：路径分隔符请使用正斜杠（/），而非反斜杠（\）。
 #
 # 注意：
 #   - 确保应用进程对目标目录有写入权限
@@ -228,7 +243,7 @@
 #
 # 示例：
 #   logfile=/var/log/p6spy/sql.log    （Linux/Mac 绝对路径）
-#   logfile=C:/logs/p6spy/sql.log     （Windows 绝对路径）
+#   logfile=e:/logs/p6spy/sql.log     （Windows 绝对路径，正斜杠）
 #   logfile=logs/spy.log              （相对路径）
 #
 # 默认值：spy.log（写入 JVM 启动目录）
@@ -242,7 +257,10 @@
 #
 # 可选值：
 #   true  - 追加模式：每次应用启动时在文件末尾继续写入，保留历史记录（默认，推荐）
-#   false - 覆盖模式：每次应用启动时清空文件后重新写入，适合单次调试后不保留历史的场景
+#   false - 覆盖模式：每次应用启动时清空文件后重新写入，适合单次调试场景
+#
+# 警告：若 append=true 时修改了 spy.properties 触发热重载，日志文件会被意外截断。
+#       这是 P6Spy 的已知行为，热重载场景建议使用 append=false 或 Slf4JLogger。
 #
 # 默认值：true
 # ---------------------------------------------------------------------------
@@ -251,15 +269,15 @@
 
 # ---------------------------------------------------------------------------
 # 自动刷新日志缓冲区（autoflush）
-# 控制每条日志写入后是否立即执行 flush，将内容强制刷到磁盘/控制台。
+# 控制每条日志写入后是否立即执行 flush 操作。
 #
 # 可选值：
-#   false - 缓冲写入（默认，推荐）：由 JVM/OS 控制刷盘时机，批量写入性能好，
+#   false - 缓冲写入（默认）：由 JVM/OS 控制刷盘时机，批量写入性能好；
 #           极端情况（进程崩溃）下可能丢失缓冲区内最后几条日志
-#   true  - 立即刷新：每条日志写入后强制 flush，实时性最好但 I/O 开销显著增加，
-#           配合 StdoutLogger 或 FileLogger 使用时影响尤为明显，不建议高并发场景开启
+#   true  - 立即刷新：每条日志写入后强制 flush，实时性好但 I/O 开销显著增加；
+#           官方建议仅标准开发调试时使用，生产环境不建议开启
 #
-# 注意：使用 Slf4JLogger 时 flush 行为由日志框架自身控制，此配置影响有限。
+# 注意：使用 Slf4JLogger 时 flush 行为由日志框架自身控制，此配置对其影响有限。
 # 默认值：false
 # ---------------------------------------------------------------------------
 #autoflush=false
@@ -274,12 +292,12 @@
 # 控制每条 SQL 日志的格式化方式，四选一。
 #
 # 可选值：
-#   com.p6spy.engine.spy.appender.SingleLineFormat
-#     - P6Spy 内置单行格式（默认），字段固定，不可自定义
-#     - 输出示例：1704067200000|5|statement|connection 1|select * from user|select * from user where id=1
+#   com.p6spy.engine.spy.appender.SingleLineFormat（默认）
+#     - P6Spy 内置单行格式，字段固定，不可自定义
+#     - 输出示例：1704067200000|5|statement|connection 1|select * from user where id=?|select * from user where id=1
 #
 #   com.p6spy.engine.spy.appender.MultiLineFormat
-#     - P6Spy 内置多行格式，SQL 语句保留换行，便于阅读复杂 SQL（含多 JOIN/子查询）
+#     - P6Spy 内置多行格式，SQL 语句保留原始换行，便于阅读复杂 SQL（多 JOIN/子查询）
 #
 #   com.p6spy.engine.spy.appender.CustomLineFormat
 #     - 完全自定义格式，通过 customLogMessageFormat 配置模板，【推荐，灵活性最高】
@@ -306,18 +324,23 @@
 #   %(currentTime)            - 当前时间戳（格式由 dateformat 控制）
 #   %(executionTime)          - SQL 实际执行耗时，单位毫秒（不含网络传输和结果集读取）
 #   %(category)               - 操作类别（statement / commit / rollback / batch 等）
-#   %(effectiveSql)           - 参数已绑定的完整可执行 SQL，保留原始换行（多行）
-#   %(effectiveSqlSingleLine) - 参数已绑定的完整可执行 SQL，换行符替换为空格（单行，【日志分析推荐】）
-#   %(sql)                    - 原始 SQL 模板，含 ? 占位符，保留换行（多行）
-#   %(sqlSingleLine)          - 原始 SQL 模板，含 ? 占位符，单行
 #   %(url)                    - 当前连接的数据库 JDBC URL
 #
-# 推荐格式（时间 | 耗时 | 类别 | 连接 | 完整 SQL）：
-#   %(currentTime)|%(executionTime)ms|%(category)|conn-%(connectionId)|%(effectiveSqlSingleLine)
+#   ⚠️ 以下四个占位符命名存在反直觉情况，请注意区分：
+#   %(effectiveSql)           - 提交给驱动的原始 SQL（含 ? 占位符，多行格式）
+#   %(effectiveSqlSingleLine) - 提交给驱动的原始 SQL（含 ? 占位符，单行格式）
+#   %(sql)                    - P6Spy 重建的完整 SQL（? 已替换为实际参数值，多行格式）
+#   %(sqlSingleLine)          - P6Spy 重建的完整 SQL（? 已替换为实际参数值，单行格式，【日志分析推荐】）
+#
+#   说明：%(sql) 系列包含实际参数值，可直接复制到数据库客户端执行；
+#         %(effectiveSql) 系列只含 ? 占位符，适合关注 SQL 结构而非具体参数的场景。
+#
+# 推荐格式（时间 | 耗时 | 类别 | 连接 | 含参数的完整 SQL）：
+#   %(currentTime)|%(executionTime)ms|%(category)|conn-%(connectionId)|%(sqlSingleLine)
 #
 # 默认值：%(currentTime)|%(executionTime)|%(category)|connection%(connectionId)|%(sqlSingleLine)
 # ---------------------------------------------------------------------------
-#customLogMessageFormat=%(currentTime)|%(executionTime)ms|%(category)|conn-%(connectionId)|%(effectiveSqlSingleLine)
+#customLogMessageFormat=%(currentTime)|%(executionTime)ms|%(category)|conn-%(connectionId)|%(sqlSingleLine)
 
 
 # ---------------------------------------------------------------------------
@@ -325,9 +348,10 @@
 # 使用 Java SimpleDateFormat 格式化 %(currentTime) 时间戳。
 #
 # 常用格式：
-#   yyyy-MM-dd HH:mm:ss.SSS  → 2024-01-01 12:00:00.123（含毫秒，【推荐】）
-#   yyyy-MM-dd HH:mm:ss      → 2024-01-01 12:00:00
-#   HH:mm:ss.SSS             → 12:00:00.123（仅时间，适合当天调试）
+#   yyyy-MM-dd HH:mm:ss.SSS       → 2024-01-01 12:00:00.123（含毫秒，可读性好，推荐）
+#   yyyy-MM-dd'T'HH:mm:ss.SSSZ   → 2024-01-01T12:00:00.123+0900（ISO 8601，适合日志采集系统）
+#   yyyy-MM-dd HH:mm:ss           → 2024-01-01 12:00:00
+#   HH:mm:ss.SSS                  → 12:00:00.123（仅时间，适合当天调试）
 #
 # 默认值：空（输出自 Unix Epoch 起的毫秒数，不可读，强烈建议配置）
 # ---------------------------------------------------------------------------
@@ -340,13 +364,14 @@
 
 # ---------------------------------------------------------------------------
 # java.util.Date / java.sql.Date 参数的日志格式（databaseDialectDateFormat）
-# 控制 Date 类型参数在日志中的可读展示格式，格式遵循 Java SimpleDateFormat。
+# 控制 Date 类型参数在日志中的展示格式，格式遵循 Java SimpleDateFormat。
 #
 # 常用格式：
-#   yyyy-MM-dd              → 2024-01-01（仅日期，适合 DATE 类型字段）
-#   yyyy-MM-dd HH:mm:ss     → 2024-01-01 12:00:00（含时间）
+#   yyyy-MM-dd HH:mm:ss             → 2024-01-01 12:00:00（含时间，推荐）
+#   yyyy-MM-dd                      → 2024-01-01（仅日期，适合纯 DATE 类型字段）
+#   yyyy-MM-dd'T'HH:mm:ss.SSSZ     → 2024-01-01T12:00:00.000+0900（ISO 8601）
 #
-# 默认值：dd-MMM-yy（如 "01-Jan-24"，可读性差，强烈建议覆盖）
+# 默认值：yyyy-MM-dd'T'HH:mm:ss.SSSZ（ISO 8601 格式，可读性一般，建议覆盖为本地习惯格式）
 # ---------------------------------------------------------------------------
 #databaseDialectDateFormat=yyyy-MM-dd HH:mm:ss
 
@@ -357,10 +382,11 @@
 # 与 databaseDialectDateFormat 相互独立，分别控制不同 Java 类型，互不影响。
 #
 # 常用格式：
-#   yyyy-MM-dd HH:mm:ss.SSS  → 2024-01-01 12:00:00.123（含毫秒，【推荐】）
-#   yyyy-MM-dd HH:mm:ss      → 2024-01-01 12:00:00
+#   yyyy-MM-dd HH:mm:ss.SSS         → 2024-01-01 12:00:00.123（含毫秒，推荐）
+#   yyyy-MM-dd HH:mm:ss             → 2024-01-01 12:00:00
+#   yyyy-MM-dd'T'HH:mm:ss.SSSZ     → 2024-01-01T12:00:00.123+0900（ISO 8601）
 #
-# 默认值：dd-MMM-yy HH:mm:ss（可读性差，强烈建议覆盖）
+# 默认值：yyyy-MM-dd'T'HH:mm:ss.SSSZ（ISO 8601 格式，建议覆盖为本地习惯格式）
 # ---------------------------------------------------------------------------
 #databaseDialectTimestampFormat=yyyy-MM-dd HH:mm:ss.SSS
 
@@ -381,17 +407,26 @@
 # ---------------------------------------------------------------------------
 # 二进制类型参数的日志格式（databaseDialectBinaryFormat）
 # 控制 BINARY / VARBINARY / BLOB 等二进制参数在日志中的展示方式。
-# 建议始终配置此项，避免二进制内容破坏日志格式或导致日志文件膨胀。
+# 若同时配置了 excludebinary=true，则本配置不生效（二进制内容直接被忽略）。
 #
-# 可选值：
-#   （空，即不配置） - 以 Java 默认 byte[].toString() 输出（如 [B@1a2b3c），无实际意义
-#   hexencode        - 以十六进制字符串展示（如 0x48656C6C6F），可读且体积可控，【推荐】
-#   base64           - 以 Base64 字符串展示，适合需要还原二进制内容的场景，体积略大
+# 可选值（必须使用完整类名）：
+#   com.p6spy.engine.logging.format.HexEncodedBinaryFormat（默认）
+#     - 以十六进制字符串展示（如 0x48656C6C6F），通用格式，体积可控，【推荐】
 #
-# 注意：若同时配置了 excludebinary=true，则此配置不生效（二进制内容直接被忽略）。
-# 默认值：空（不编码）
+#   com.p6spy.engine.logging.format.MySQLBinaryFormat
+#     - MySQL 风格的二进制格式，与 MySQL 客户端工具输出一致，适合 MySQL 场景
+#
+#   com.p6spy.engine.logging.format.PostgreSQLBinaryFormat
+#     - PostgreSQL 风格的二进制格式（\\x 前缀十六进制），适合 PostgreSQL 场景
+#
+# 注意：若不配置此项（保持注释），P6Spy 会以 Java 默认的 byte[].toString() 输出
+#       （如 [B@1a2b3c），毫无意义且难以阅读，强烈建议显式配置。
+#
+# 默认值：com.p6spy.engine.logging.format.HexEncodedBinaryFormat
 # ---------------------------------------------------------------------------
-#databaseDialectBinaryFormat=hexencode
+#databaseDialectBinaryFormat=com.p6spy.engine.logging.format.HexEncodedBinaryFormat
+#databaseDialectBinaryFormat=com.p6spy.engine.logging.format.MySQLBinaryFormat
+#databaseDialectBinaryFormat=com.p6spy.engine.logging.format.PostgreSQLBinaryFormat
 
 
 # ============================================================
@@ -400,14 +435,13 @@
 
 # ---------------------------------------------------------------------------
 # SQL 过滤总开关（filter）
-# 设置为 true 时启用 include / exclude / sqlexpression 过滤规则，
-# 可大幅减少无意义日志量，降低 I/O 开销。
+# 设置为 true 时启用 include / exclude / sqlexpression 过滤规则。
 #
 # 可选值：
 #   false - 禁用过滤，记录所有 SQL（默认）
 #   true  - 启用过滤，仅记录符合规则的 SQL
 #
-# 注意：filter=false 时，include、exclude、sqlexpression 完全不生效。
+# 注意：filter=false 时，include、exclude、sqlexpression 三项完全不生效。
 # 默认值：false
 # ---------------------------------------------------------------------------
 #filter=false
@@ -417,14 +451,15 @@
 # SQL 白名单关键词（include）
 # 仅当 filter=true 时生效。
 # 只记录 SQL 中包含指定关键词的语句，多个关键词以英文逗号分隔。
-# 匹配规则：大小写不敏感的子字符串匹配，关键词之间是"或"的关系（任意匹配即记录）。
+# 注意：支持 Java 正则表达式特殊字符，若关键词含特殊字符需转义。
+# 匹配规则：大小写不敏感子字符串匹配，关键词之间是"或"关系（任意匹配即记录）。
 #
 # 示例：
 #   include=insert,update,delete   （只记录写操作，屏蔽所有 SELECT）
-#   include=user,order             （只记录涉及 user 或 order 表的 SQL）
+#   include=t_user,t_order         （只记录涉及 t_user 或 t_order 表的 SQL）
 #
 # 注意：include 和 exclude 同时配置时，先应用 include 白名单，再应用 exclude 黑名单。
-# 默认值：空（不限制，配合 filter=true 时允许所有 SQL 进入 exclude 阶段）
+# 默认值：空（不限制）
 # ---------------------------------------------------------------------------
 #include=
 
@@ -433,11 +468,12 @@
 # SQL 黑名单关键词（exclude）
 # 仅当 filter=true 时生效。
 # 包含指定关键词的 SQL 将被排除，不写入日志，多个关键词以英文逗号分隔。
-# 匹配规则：大小写不敏感的子字符串匹配，关键词之间是"或"的关系（任意匹配即排除）。
+# 注意：支持 Java 正则表达式特殊字符，若关键词含特殊字符需转义。
+# 匹配规则：大小写不敏感子字符串匹配，关键词之间是"或"关系（任意匹配即排除）。
 #
 # 示例：
 #   exclude=select                 （屏蔽所有 SELECT，只保留写操作日志）
-#   exclude=dual,ping,healthcheck  （屏蔽心跳探活和健康检查 SQL）
+#   exclude=dual,healthcheck,ping  （屏蔽心跳探活和健康检查 SQL）
 #
 # 默认值：空（不排除任何 SQL）
 # ---------------------------------------------------------------------------
@@ -446,13 +482,14 @@
 
 # ---------------------------------------------------------------------------
 # SQL 正则表达式过滤（sqlexpression）
-# 仅当 filter=true 时生效，且优先级高于 include / exclude 关键词过滤。
+# 仅当 filter=true 时生效，优先级高于 include / exclude。
 # 只有完整匹配该正则表达式的 SQL 语句才会被记录。
+# 注意：正则特殊字符需按 Java 规范转义（如 \d 需写为 \\d）。
 #
 # 示例：
 #   sqlexpression=^(INSERT|UPDATE|DELETE).*$       （只记录写操作）
-#   sqlexpression=(?i).*(user|account|order).*     （只记录涉及核心业务表的 SQL）
-#   sqlexpression=^(?!.*SELECT.*FROM.*sys).*$      （排除所有查系统表的 SQL）
+#   sqlexpression=(?i).*(t_user|t_order).*         （只记录涉及核心业务表的 SQL）
+#   sqlexpression=^(?!.*FROM\\s+sys\\.).*$         （排除所有查系统表的 SQL）
 #
 # 注意：正则应用于参数绑定前的原始 SQL 模板（含 ?），而非最终执行的完整 SQL。
 # 默认值：空（不启用正则过滤）
@@ -463,7 +500,6 @@
 # ---------------------------------------------------------------------------
 # 日志类别排除列表（excludecategories）
 # 排除指定类别的操作记录，多个类别以英文逗号分隔。
-# 可有效过滤噪音，专注于核心 SQL 语句的记录。
 #
 # 全部可用类别：
 #   statement - SQL 语句执行（核心类别，通常不排除）
@@ -476,9 +512,9 @@
 #   info      - P6Spy 驱动初始化和版本信息
 #   debug     - P6Spy 内部调试信息
 #
-# 推荐配置：
+# 推荐配置（按需选择）：
 #   仅 SQL 语句      : excludecategories=info,debug,result,resultset,batch,commit,rollback
-#   SQL + 事务日志   : excludecategories=info,debug,result,resultset,batch
+#   SQL + 事务日志   : excludecategories=info,debug,result,resultset,batch（默认，推荐）
 #   全量审计（含批量）: excludecategories=info,debug,result,resultset
 #
 # 默认值：info,debug,result,resultset,batch
@@ -489,18 +525,19 @@
 # ---------------------------------------------------------------------------
 # 是否排除二进制字段内容（excludebinary）
 # 设置为 true 时，BINARY / VARBINARY / BLOB / CLOB 等二进制类型的参数值
-# 在日志中不展示实际内容（以空字符串替代），可避免：
-#   - 二进制内容中含有换行符等特殊字符，破坏日志行结构
-#   - 加密字段、图片、文件等大体积二进制数据撑大日志文件
+# 在日志中以占位符 [binary] 替代，不展示实际内容。可避免：
+#   - 二进制内容含换行符等特殊字符，破坏日志行结构
+#   - 加密字段、图片、文件等大体积数据撑大日志文件
 #
 # 可选值：
-#   false - 记录二进制数据原始内容（默认，可能导致日志乱码或膨胀）
-#   true  - 忽略二进制内容，以空字符串替代（【推荐】）
+#   false - 记录二进制数据内容（默认），实际展示格式由 databaseDialectBinaryFormat 控制
+#   true  - 以 [binary] 占位符替代，忽略二进制内容（生产环境推荐）
 #
-# 注意：若需要以可读方式展示二进制数据，请关闭此项并改用 databaseDialectBinaryFormat=hexencode。
+# 注意：开启后无法从日志还原二进制参数值；
+#       若需可读展示，关闭此项并配置 databaseDialectBinaryFormat=com.p6spy.engine.logging.format.HexEncodedBinaryFormat。
 # 默认值：false
 # ---------------------------------------------------------------------------
-#excludebinary=true
+#excludebinary=false
 
 
 # ============================================================
@@ -515,10 +552,11 @@
 # 推荐值：
 #   0（或空） - 记录所有 SQL（开发/调试场景）
 #   200       - 仅记录超过 200ms 的 SQL（高性能接口场景）
-#   500       - 仅记录超过 500ms 的 SQL（一般生产场景，【推荐】）
+#   500       - 仅记录超过 500ms 的 SQL（一般生产场景推荐）
 #   1000      - 仅记录超过 1s 的 SQL（低敏感度或高吞吐场景）
 #
 # 注意：此阈值针对单条 SQL 的数据库端执行时间，不含网络传输和结果集读取耗时。
+#       此配置项支持热重载，无需重启即可在线调整。
 # 默认值：0（记录所有 SQL）
 # ---------------------------------------------------------------------------
 #executionThreshold=0
@@ -530,11 +568,16 @@
 #
 # 与 executionThreshold 的核心区别：
 #   executionThreshold : SQL 执行【完成后】判断是否超时（事后检测）
-#   outagedetection    : SQL 执行【过程中】实时监控，超时立即报警（实时检测，可发现死锁/阻塞）
+#   outagedetection    : SQL 执行【过程中】实时监控，超时立即报警（实时检测）
+#                        可发现仍在阻塞中的死锁/慢查询，而不必等待其执行完毕
+#
+# ⚠️ 重要行为：启用 outagedetection=true 后，P6Spy 将【只记录】超时的长耗时 SQL，
+#    其余所有正常 SQL 不再写入日志，与 executionThreshold 的行为不同。
+#    如需同时保留普通 SQL 日志，请勿开启此项，改用 executionThreshold。
 #
 # 可选值：
 #   false - 不启动后台监控线程（默认）
-#   true  - 启动后台检测线程，实时监控正在执行的 SQL，超过 outagedetectioninterval 立即记录告警
+#   true  - 启动后台检测线程，定时扫描正在执行的 SQL
 #
 # 默认值：false
 # ---------------------------------------------------------------------------
@@ -544,17 +587,20 @@
 # ---------------------------------------------------------------------------
 # 实时慢查询检测时间阈值（outagedetectioninterval）
 # 仅当 outagedetection=true 时生效，单位为秒（整数）。
-# 后台线程轮询间隔，超过此时间仍在执行的 SQL 会立即输出告警日志。
+# 后台线程每隔此时间轮询一次，仍在执行中且超过此时间的 SQL 会立即输出告警日志。
+#
+# ⚠️ 重要行为：同一条 SQL 会被【重复记录】。
+#    例如阈值设为 2 秒，某条查询共执行了 11 秒，则该 SQL 会被记录 5 次
+#    （分别在第 2、4、6、8、10 秒时触发告警），用于持续跟踪阻塞进展。
 #
 # 推荐值：
-#   5  - 对实时告警要求高，但后台轮询频率较高
-#   30 - 常规慢查询告警（【推荐】）
-#   60 - 仅关注严重阻塞场景
+#   5  - 对实时告警要求高（后台轮询频率较高）
+#   30 - 常规慢查询告警（推荐）
+#   60 - 仅关注严重阻塞场景（默认值）
 #
-# 注意：此值过小会增加后台线程调度开销，建议与应用慢查询 SLA 要求一致。
-# 默认值：无（建议显式设置为 30）
+# 默认值：60（秒）
 # ---------------------------------------------------------------------------
-#outagedetectioninterval=30
+#outagedetectioninterval=60
 
 
 # ============================================================
@@ -568,9 +614,10 @@
 #
 # 可选值：
 #   false - 不打印调用栈（默认，生产环境必须关闭）
-#   true  - 打印完整调用栈（仅开发/排查阶段使用，日志量和写入性能影响极大）
+#   true  - 打印完整调用栈（仅开发/排查阶段使用）
 #
-# 注意：高并发下开启此项会导致严重性能下降，生产环境禁止开启。
+# 注意：开启后每条 SQL 日志都附加完整线程栈序列化内容，
+#       日志量和写入性能影响极大，高并发下会造成严重性能下降，生产环境禁止开启。
 # 默认值：false
 # ---------------------------------------------------------------------------
 #stacktrace=false
@@ -600,6 +647,11 @@
 # 设置为 true 时，P6Spy 定期检测 spy.properties 文件修改时间，
 # 发现变更后自动重新加载，无需重启应用即可调整日志级别或过滤规则。
 #
+# ⚠️ 重要行为：热重载是【完全重置】，意味着：
+#    1. 忘记所有之前通过 JMX 动态修改的配置（即使未写入文件也会丢失）
+#    2. 仅保留配置文件中明确写入的值，其余恢复为内置默认值
+#    3. 如果 appender=FileLogger 且 append=true，重载时日志文件会被截断（清空）
+#
 # 可选值：
 #   false - 关闭热重载（默认，无额外轮询开销）
 #   true  - 启用热重载，适合需要在线动态调整 P6Spy 配置的场景
@@ -612,7 +664,8 @@
 # ---------------------------------------------------------------------------
 # 配置文件热重载检测间隔（reloadpropertiesinterval）
 # 仅当 reloadproperties=true 时生效，单位为秒（整数）。
-# P6Spy 每隔此时间检查一次 spy.properties 是否有变更。
+# P6Spy 每隔此时间检查一次 spy.properties 文件修改时间戳。
+#
 # 默认值：60（秒）
 # ---------------------------------------------------------------------------
 #reloadpropertiesinterval=60
@@ -624,8 +677,9 @@
 
 # ---------------------------------------------------------------------------
 # 是否启用 JMX 管理支持（jmx）
-# 设置为 true 时，P6Spy 配置项注册为 JMX MBean，
-# 可通过 JConsole / JVisualVM / Jolokia 在不重启应用的情况下动态修改配置。
+# 设置为 true 时，P6Spy 所有配置项注册为 JMX MBean，
+# 可通过 JConsole / JVisualVM / Jolokia 在不重启应用的情况下动态查看和修改配置，
+# JMX 还提供了手动触发配置 reload 的操作入口（reload operation）。
 #
 # 可选值：
 #   true  - 启用 JMX（默认）
@@ -639,15 +693,16 @@
 # ---------------------------------------------------------------------------
 # JMX MBean 名称前缀（jmxPrefix）
 # 仅当 jmx=true 时生效。
-# 同一 JVM 中存在多个 P6Spy 实例（如多数据源场景）时，
+# 当同一 JVM 中存在多个 P6Spy 实例（如多数据源场景）时，
 # 通过不同前缀区分各实例的 MBean 注册名，避免命名冲突。
+# 注意：若注册名已存在，新注册会先注销旧 MBean（后注册者覆盖前者）。
 #
-# MBean 注册名格式：com.p6spy(.<jmxPrefix>):name=<optionsClassName>
+# MBean 注册名格式：com.p6spy(.<jmxPrefix>)?:name=<optionsClassName>
 # 示例：
 #   jmxPrefix=primary    → com.p6spy.primary:name=P6SpyOptions
 #   jmxPrefix=secondary  → com.p6spy.secondary:name=P6SpyOptions
 #
-# 默认值：空（注册为 com.p6spy:name=<optionsClassName>，多实例场景下会冲突）
+# 默认值：空（注册为 com.p6spy:name=<optionsClassName>，多实例场景下会覆盖冲突）
 # ---------------------------------------------------------------------------
 #jmxPrefix=
 
@@ -664,10 +719,9 @@
 #   false - 使用 System.currentTimeMillis()，精度毫秒（ms），默认，适合绝大多数场景
 #   true  - 使用 System.nanoTime()，精度纳秒（ns），适合对极低延迟 SQL 进行精确计时
 #
-# 注意：
-#   - 开启后 %(executionTime) 单位变为纳秒，executionThreshold 也随之变为纳秒单位
-#   - 纳秒精度受操作系统时钟分辨率限制，部分 OS 实际精度未必达到纳秒级
-#   - 普通业务场景意义不大，不建议开启
+# ⚠️ 注意：开启后 %(executionTime) 单位变为纳秒，executionThreshold 也随之变为纳秒单位；
+#          例如原来 executionThreshold=500（毫秒），开启后需改为 executionThreshold=500000000（纳秒）。
+#          纳秒精度受操作系统时钟分辨率限制，部分 OS 实际精度未必达到纳秒级。
 #
 # 默认值：false
 # ---------------------------------------------------------------------------
@@ -679,6 +733,9 @@
 # ============================================================
 # 以下配置适用于 JBoss / WebLogic / WebSphere 等 Java EE 应用服务器
 # 通过 JNDI 管理数据源的场景，Spring Boot 等自管理连接池项目通常无需配置此节。
+#
+# 注意：此节中的配置项一旦加载后无法通过 reloadproperties 热重载生效，
+#       需要重启应用才能使变更生效。
 
 # ---------------------------------------------------------------------------
 # JNDI 路径指定真实数据源（realdatasource）
@@ -735,7 +792,11 @@
 # ---------------------------------------------------------------------------
 # JNDI 服务提供者 URL（jndicontextproviderurl）
 # JNDI 服务端的连接地址，格式为 host:port。
-# 示例：jndicontextproviderurl=localhost:1099
+#
+# 示例：
+#   jndicontextproviderurl=localhost:1099          （JBoss RMI）
+#   jndicontextproviderurl=iiop://localhost:900    （WebSphere IIOP）
+#
 # 默认值：空
 # ---------------------------------------------------------------------------
 #jndicontextproviderurl=localhost:1099
