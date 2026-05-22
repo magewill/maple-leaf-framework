@@ -50,11 +50,11 @@ class GXCircuitBreakerConfigTest {
     @Test
     void appEnvironmentPropertiesOverrideCircuitBreakerDefaults() {
         contextRunner.withPropertyValues(
-                        "maple.feign.circuit-breaker.max-retries=1",
-                        "maple.feign.circuit-breaker.backoff=10ms",
-                        "maple.feign.circuit-breaker.backoff-multiplier=1.5",
-                        "maple.feign.circuit-breaker.open-timeout=2s",
-                        "maple.feign.circuit-breaker.reset-timeout=1s")
+                        "maple.framework.feign.circuit-breaker.max-retries=1",
+                        "maple.framework.feign.circuit-breaker.backoff=10ms",
+                        "maple.framework.feign.circuit-breaker.backoff-multiplier=1.5",
+                        "maple.framework.feign.circuit-breaker.open-timeout=2s",
+                        "maple.framework.feign.circuit-breaker.reset-timeout=1s")
                 .run(context -> {
                     GXCircuitBreakerProperties properties = context.getBean(GXCircuitBreakerProperties.class);
                     FrameworkRetryCircuitBreaker circuitBreaker =
@@ -70,7 +70,7 @@ class GXCircuitBreakerConfigTest {
 
     @Test
     void circuitBreakerCustomizerCanBeDisabled() {
-        contextRunner.withPropertyValues("maple.feign.circuit-breaker.enabled=false")
+        contextRunner.withPropertyValues("maple.framework.feign.circuit-breaker.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(Customizer.class));
     }
 

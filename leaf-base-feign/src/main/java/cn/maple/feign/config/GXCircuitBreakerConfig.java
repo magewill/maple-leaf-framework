@@ -22,7 +22,7 @@ public class GXCircuitBreakerConfig {
     @Order(Ordered.LOWEST_PRECEDENCE - 100)
     @ConditionalOnMissingBean(name = "frameworkRetryCircuitBreakerCustomizer")
     @ConditionalOnProperty(
-            prefix = "maple.feign.circuit-breaker",
+            prefix = "maple.framework.feign.circuit-breaker",
             name = "enabled",
             havingValue = "true",
             matchIfMissing = true)

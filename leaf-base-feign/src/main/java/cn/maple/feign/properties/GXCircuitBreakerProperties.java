@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import java.time.Duration;
 
 @Getter
-@ConfigurationProperties(prefix = "maple.feign.circuit-breaker")
+@ConfigurationProperties(prefix = "maple.framework.feign.circuit-breaker")
 public class GXCircuitBreakerProperties {
     private int maxRetries = 3;
 

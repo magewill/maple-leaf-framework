@@ -53,7 +53,7 @@ class GXFeignConfigTest {
     @Test
     void loggerLevelAndErrorDecoderCanBeExplicitlyEnabled() {
         contextRunner.withPropertyValues(
-                        "maple.feign.error-decoder.enabled=true")
+                        "maple.framework.feign.error-decoder.enabled=true")
                 .run(context -> {
                     assertThat(context).hasSingleBean(Logger.Level.class);
                     assertThat(context).hasSingleBean(ErrorDecoder.class);
@@ -65,8 +65,8 @@ class GXFeignConfigTest {
     @Test
     void customRequestInterceptorDoesNotDisableFrameworkInterceptor() {
         contextRunner.withPropertyValues(
-                        "maple.feign.logger-level.enabled=true",
-                        "maple.feign.error-decoder.enabled=true")
+                        "maple.framework.feign.logger-level.enabled=true",
+                        "maple.framework.feign.error-decoder.enabled=true")
                 .withUserConfiguration(CustomFeignConfig.class)
                 .run(context -> {
                     assertThat(context).hasSingleBean(Logger.Level.class);
@@ -98,19 +98,19 @@ class GXFeignConfigTest {
 
     @Test
     void frameworkRequestInterceptorCanBeDisabled() {
-        contextRunner.withPropertyValues("maple.feign.request-interceptor.enabled=false")
+        contextRunner.withPropertyValues("maple.framework.feign.request-interceptor.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(GXFeignRequestInterceptor.class));
     }
 
     @Test
     void frameworkAuthTokenAspectCanBeDisabled() {
-        contextRunner.withPropertyValues("maple.feign.auth-token-aspect.enabled=false")
+        contextRunner.withPropertyValues("maple.framework.feign.auth-token-aspect.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(GXFeignAuthTokenAspect.class));
     }
 
     @Test
     void loggerLevelCanBeDisabled() {
-        contextRunner.withPropertyValues("maple.feign.logger-level.enabled=false")
+        contextRunner.withPropertyValues("maple.framework.feign.logger-level.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(Logger.Level.class));
     }
 

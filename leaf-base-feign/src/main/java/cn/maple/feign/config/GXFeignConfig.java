@@ -29,7 +29,7 @@ public class GXFeignConfig {
      */
     @Bean
     @ConditionalOnMissingBean(Logger.Level.class)
-    @ConditionalOnProperty(prefix = "maple.feign.logger-level", name = "enabled", havingValue = "true",
+    @ConditionalOnProperty(prefix = "maple.framework.feign.logger-level", name = "enabled", havingValue = "true",
             matchIfMissing = true)
     Logger.Level feignLoggerLevel() {
         return Logger.Level.BASIC;
@@ -37,7 +37,7 @@ public class GXFeignConfig {
 
     @Bean
     @ConditionalOnMissingBean(ErrorDecoder.class)
-    @ConditionalOnProperty(prefix = "maple.feign.error-decoder", name = "enabled", havingValue = "true")
+    @ConditionalOnProperty(prefix = "maple.framework.feign.error-decoder", name = "enabled", havingValue = "true")
     public ErrorDecoder errorDecoder() {
         return new GXFeignCustomErrorDecoder();
     }
@@ -55,7 +55,7 @@ public class GXFeignConfig {
     @Bean
     @ConditionalOnMissingBean(GXFeignRequestInterceptor.class)
     @ConditionalOnProperty(
-            prefix = "maple.feign.request-interceptor",
+            prefix = "maple.framework.feign.request-interceptor",
             name = "enabled",
             havingValue = "true",
             matchIfMissing = true)
@@ -66,7 +66,7 @@ public class GXFeignConfig {
     @Bean
     @ConditionalOnMissingBean(GXFeignAuthTokenAspect.class)
     @ConditionalOnProperty(
-            prefix = "maple.feign.auth-token-aspect",
+            prefix = "maple.framework.feign.auth-token-aspect",
             name = "enabled",
             havingValue = "true",
             matchIfMissing = true)
