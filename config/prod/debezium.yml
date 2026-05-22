@@ -3,8 +3,9 @@ debezium:
     name: ${spring.application.name}-engine
     snapshot.mode: no_data
     connector.class: io.debezium.connector.mysql.MySqlConnector
-    offset.storage: org.apache.kafka.connect.storage.FileOffsetBackingStore
-    offset.storage.file.filename: /data/java/project/data/offsets.dat
+    offset.storage: io.debezium.storage.redis.offset.RedisOffsetBackingStore
+    offset.storage.redis.address: ${DEBEZIUM_REDIS_ADDRESS:192.168.56.101:6379}
+    offset.storage.redis.key: debezium:${spring.application.name}:${spring.profiles.active}:offsets
     offset.flush.interval.ms: 60000
     database.hostname: ${DEBEZIUM_MYSQL_ADDR}
     database.port: ${DEBEZIUM_MYSQL_PORT}
@@ -14,8 +15,9 @@ debezium:
     topic.prefix: debezium-${DEBEZIUM_TOPIC_PREFIX}
     transforms.unwrap.drop.tombstones: false
     schema.history.internal.store.only.captured.tables.ddl: true # true 只读取指定的数据结构  false读取全部
-    schema.history.internal: io.debezium.storage.file.history.FileSchemaHistory
-    schema.history.internal.file.filename: /data/java/project/data/schema/history.dat
+    schema.history.internal: io.debezium.storage.redis.history.RedisSchemaHistory
+    schema.history.internal.redis.address: ${DEBEZIUM_REDIS_ADDRESS:192.168.56.101:6379}
+    schema.history.internal.redis.key: debezium:${spring.application.name}:${spring.profiles.active}:schema-history
     include.schema.changes: false
     database.include.list: orders
     table.include.list: orders.mgo_order

@@ -2,30 +2,16 @@ package cn.maple.debezium.services;
 
 import cn.hutool.core.lang.Dict;
 import cn.maple.core.framework.util.GXSpringContextUtils;
-import cn.maple.redisson.services.GXRedissonCacheService;
-import org.redisson.api.RMapCache;
-
-import java.time.Duration;
-import java.util.concurrent.TimeUnit;
-import java.util.UUID;
+import cn.maple.debezium.config.GXDebeziumEngineLockConfig;
 
 /**
  * Business extension point for Debezium CDC events.
  */
 public interface GXDebeziumService {
     /**
-     * Redis cache bucket for Debezium engine ownership.
-     */
-    String BUCKET_NAME = "maple-framework-debezium-engine";
-
-    /**
      * Redis lock name format.
      */
     String LOCK_NAME_FORMAT = "initial-engine-lock:{}:{}";
-
-    long LOCK_TTL_MINUTES = 5L;
-
-    String LOCK_VALUE = UUID.randomUUID().toString();
 
     /**
      * Handles a Debezium payload. The payload keeps Debezium field names such as
@@ -40,15 +26,19 @@ public interface GXDebeziumService {
      *
      * @param lockKey lock key
      * @return true if this instance owns the slot
+     * @deprecated use {@link GXDebeziumEngineLockConfig#tryLock(String)} instead
      */
+    @Deprecated
     default boolean tryInitialEngineLock(String lockKey) {
-        GXRedissonCacheService redissonCacheService = getRequiredRedissonCacheService();
-        RMapCache<Object, Object> mapCache = redissonCacheService.getRedissonClient().getMapCache(BUCKET_NAME);
-        return mapCache.fastPutIfAbsent(lockKey, LOCK_VALUE, LOCK_TTL_MINUTES, TimeUnit.MINUTES);
+        return getRequiredEngineLockConfig().tryLock(lockKey);
     }
 
+    /**
+     * @deprecated use {@link GXDebeziumEngineLockConfig#lock(String)} instead
+     */
+    @Deprecated
     default void initialEngineLock(String lockKey) {
-        tryInitialEngineLock(lockKey);
+        getRequiredEngineLockConfig().lock(lockKey);
     }
 
     /**
@@ -56,23 +46,22 @@ public interface GXDebeziumService {
      *
      * @param lockKey lock key
      * @return true if the slot still exists and was renewed
+     * @deprecated use {@link GXDebeziumEngineLockConfig#renew(String)} instead
      */
+    @Deprecated
     default boolean renewInitialEngineLock(String lockKey) {
-        GXRedissonCacheService redissonCacheService = getRequiredRedissonCacheService();
-        RMapCache<Object, Object> mapCache = redissonCacheService.getRedissonClient().getMapCache(BUCKET_NAME);
-        return LOCK_VALUE.equals(mapCache.get(lockKey))
-                && mapCache.expireEntry(lockKey, Duration.ofMinutes(LOCK_TTL_MINUTES), Duration.ZERO);
+        return getRequiredEngineLockConfig().renew(lockKey);
     }
 
     /**
      * Releases the distributed engine owner slot.
      *
      * @param lockKey lock key
+     * @deprecated use {@link GXDebeziumEngineLockConfig#unlock(String)} instead
      */
+    @Deprecated
     default void initialEngineUnLock(String lockKey) {
-        GXRedissonCacheService redissonCacheService = getRequiredRedissonCacheService();
-        RMapCache<Object, Object> mapCache = redissonCacheService.getRedissonClient().getMapCache(BUCKET_NAME);
-        mapCache.remove(lockKey, LOCK_VALUE);
+        getRequiredEngineLockConfig().unlock(lockKey);
     }
 
     /**
@@ -80,17 +69,28 @@ public interface GXDebeziumService {
      *
      * @param lockKey lock key
      * @return true if the slot exists
+     * @deprecated use {@link GXDebeziumEngineLockConfig#isLocked(String)} instead
      */
+    @Deprecated
     default boolean isEngineInitialized(String lockKey) {
-        GXRedissonCacheService redissonCacheService = getRequiredRedissonCacheService();
-        return redissonCacheService.exists(BUCKET_NAME, lockKey);
+        return getRequiredEngineLockConfig().isLocked(lockKey);
     }
 
-    private static GXRedissonCacheService getRequiredRedissonCacheService() {
-        GXRedissonCacheService redissonCacheService = GXSpringContextUtils.getBean(GXRedissonCacheService.class);
-        if (redissonCacheService == null) {
-            throw new IllegalStateException("GXRedissonCacheService bean is required for Debezium engine lock");
+    /**
+     * Returns the owner token used by this service instance for Debezium engine lock operations.
+     *
+     * @deprecated engine lock ownership is managed by {@link GXDebeziumEngineLockConfig}
+     */
+    @Deprecated
+    default String getEngineLockValue() {
+        return getRequiredEngineLockConfig().getOwnerToken();
+    }
+
+    private static GXDebeziumEngineLockConfig getRequiredEngineLockConfig() {
+        GXDebeziumEngineLockConfig engineLockConfig = GXSpringContextUtils.getBean(GXDebeziumEngineLockConfig.class);
+        if (engineLockConfig == null) {
+            throw new IllegalStateException("GXDebeziumEngineLockConfig bean is required for Debezium engine lock");
         }
-        return redissonCacheService;
+        return engineLockConfig;
     }
 }

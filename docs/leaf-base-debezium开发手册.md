@@ -97,8 +97,9 @@ debezium:
     name: ${spring.application.name}-engine
     snapshot.mode: no_data
     connector.class: io.debezium.connector.mysql.MySqlConnector
-    offset.storage: org.apache.kafka.connect.storage.FileOffsetBackingStore
-    offset.storage.file.filename: /data/offsets.dat
+    offset.storage: io.debezium.storage.redis.offset.RedisOffsetBackingStore
+    offset.storage.redis.address: ${DEBEZIUM_REDIS_ADDRESS:192.168.56.101:6379}
+    offset.storage.redis.key: debezium:${spring.application.name}:${spring.profiles.active}:offsets
     offset.flush.interval.ms: 60000
     database.hostname: ${DEBEZIUM_MYSQL_ADDR}
     database.port: ${DEBEZIUM_MYSQL_PORT}
@@ -108,8 +109,9 @@ debezium:
     topic.prefix: debezium-${DEBEZIUM_TOPIC_PREFIX}
     transforms.unwrap.drop.tombstones: false
     schema.history.internal.store.only.captured.tables.ddl: true
-    schema.history.internal: io.debezium.storage.file.history.FileSchemaHistory
-    schema.history.internal.file.filename: /data/schema/history.dat
+    schema.history.internal: io.debezium.storage.redis.history.RedisSchemaHistory
+    schema.history.internal.redis.address: ${DEBEZIUM_REDIS_ADDRESS:192.168.56.101:6379}
+    schema.history.internal.redis.key: debezium:${spring.application.name}:${spring.profiles.active}:schema-history
     include.schema.changes: false
     database.include.list: your_database_name
     table.include.list: your_database_name.your_table_name
@@ -131,9 +133,9 @@ debezium:
     - 在 Spring 容器启动后，通过 `@PostConstruct` 注解的 `initDebeziumEngine` 方法自动初始化并启动 Debezium 引擎。
     - 使用 `Thread.Builder.OfVirtual` 创建名为 `debezium-virtual-thread#` 的虚拟线程池 (`EXECUTOR_SERVICE`) 来异步执行 Debezium 引擎，充分利用虚拟线程轻量级的特性，提高 I/O 密集型任务的效率。
 - **分布式锁机制**：
-    - 在 `initDebeziumEngine` 方法中，调用 `GXDebeziumService` 的 `initialEngineLock` 方法获取分布式锁（锁的键名默认为 `debezium.initialLock`，结合应用名和实例key，例如 `debezium-initial-engine:{spring.application.name}:debezium.initialLock`）。
+    - 在 `initDebeziumEngine` 方法中，调用 `GXDebeziumEngineLockConfig` 获取分布式锁（锁名格式为 `initial-engine-lock:{spring.application.name}:{spring.profiles.active}`）。
     - 此机制确保在分布式部署的多实例环境中，只有一个实例能够成功初始化并运行 Debezium 引擎，防止数据被重复消费。
-    - 初始化完成后，在 `finally` 块中调用 `initialEngineUnLock` 释放锁。
+    - 初始化失败或引擎退出时，通过 `GXDebeziumEngineLockConfig` 校验 owner token 后释放锁。
 - **事件捕获与处理**：
     - 配置 Debezium 引擎使用 `io.debezium.engine.format.Json` 格式处理变更事件。
     - 通过 `debeziumEngine.notifying(record -> { ... })` 方法注册回调函数，处理从 Debezium 引擎接收到的 `ChangeEvent<String, String>` 记录。
@@ -169,7 +171,7 @@ EXECUTOR_SERVICE.execute(debeziumEngine);
 
 ### 3.2 GXDebeziumService
 
-`GXDebeziumService` 是一个核心接口，开发者需要实现此接口来定义如何处理从 Debezium 捕获到的数据库变更事件。该接口还提供了默认方法来实现基于 Redisson 的分布式锁，用于确保 Debezium 引擎在分布式环境中的单实例启动。
+`GXDebeziumService` 是一个核心接口，开发者需要实现此接口来定义如何处理从 Debezium 捕获到的数据库变更事件。分布式锁由模块内置的 `GXDebeziumEngineLockConfig` 管理，业务实现不需要处理锁生命周期。
 
 **接口方法详解：**
 
@@ -188,16 +190,9 @@ EXECUTOR_SERVICE.execute(debeziumEngine);
         *   其他可能的字段：根据具体配置和数据库类型，可能还包含事务相关的元数据等。
     *   **实现建议**：在实现此方法时，应根据 `op` 字段判断操作类型，并从 `before` 和 `after` 字段获取具体的数据进行业务处理。务必进行充分的错误处理，避免因单个事件处理失败影响整个 CDC 流程。
 
-2.  **`default void initialEngineLock(String key)`**
-    *   **功能**：获取分布式锁，用于在 `GXDebeziumEngineConfig` 初始化 Debezium 引擎之前。确保在多实例部署时，只有一个实例能够成功初始化并运行引擎。
-    *   **实现**：默认实现使用 `GXRedissonUtils.getLock(lockName).lock(10, TimeUnit.SECONDS)`。
-    *   **锁名生成规则**：`debezium-initial-engine:{spring.application.name}:{key}`。其中 `{spring.application.name}` 是当前应用名，`{key}` 是传入的参数 (在 `GXDebeziumEngineConfig` 中默认为 `"debezium.initialLock"`)。
-    *   **锁持有时间**：默认为10秒，设计上应足够完成 Debezium 引擎的初始化。
-
-3.  **`default void initialEngineUnLock(String key)`**
-    *   **功能**：释放由 `initialEngineLock` 获取的分布式锁。
-    *   **实现**：默认实现使用 `GXRedissonUtils.getLock(lockName).unlock()`。
-    *   **调用时机**：应在 `GXDebeziumEngineConfig` 初始化引擎的 `try...finally` 块中的 `finally` 部分调用，确保锁一定会被释放。
+2.  **兼容锁方法**
+    *   `tryInitialEngineLock`、`initialEngineLock`、`renewInitialEngineLock`、`initialEngineUnLock`、`isEngineInitialized` 仅作为历史兼容入口保留，内部委托给 `GXDebeziumEngineLockConfig`。
+    *   新代码不应在业务实现中调用或覆盖这些方法。
 
 **示例代码（接口实现）：**
 
@@ -240,7 +235,6 @@ public class MyDebeziumServiceImpl implements GXDebeziumService {
                 break;
         }
     }
-    // initialEngineLock 和 initialEngineUnLock 使用接口的默认实现即可
 }
 ```
 
@@ -356,7 +350,7 @@ dabezium:
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
 | `name`                      | Debezium 连接器的唯一名称。在分布式环境中，此名称也可能用于协调。                                                                         | `${spring.application.name}-engine`           |
 | `connector.class`           | 指定要使用的 Debezium 连接器类。根据源数据库类型选择。                                                                                   | `io.debezium.connector.mysql.MySqlConnector` (MySQL), `io.debezium.connector.postgresql.PostgresConnector` (PostgreSQL), `io.debezium.connector.sqlserver.SqlServerConnector` (SQL Server), `io.debezium.connector.oracle.OracleConnector` (Oracle), `io.debezium.connector.mongodb.MongoDbConnector` (MongoDB) |
-| `offset.storage`            | 指定用于存储 Debezium 偏移量 (offset) 的类。偏移量记录了连接器已处理的数据位置。                                                               | `org.apache.kafka.connect.storage.FileOffsetBackingStore` (文件存储), `io.debezium.storage.jdbc.offset.JdbcOffsetBackingStore` (JDBC存储), `io.debezium.storage.redis.offset.RedisOffsetBackingStore` (Redis存储) |
+| `offset.storage`            | 指定用于存储 Debezium 偏移量 (offset) 的类。集群部署应使用 Redis 等共享存储，避免 failover 后从错误 binlog 位置继续读取。                                                               | `io.debezium.storage.redis.offset.RedisOffsetBackingStore` (Redis存储), `io.debezium.storage.jdbc.offset.JdbcOffsetBackingStore` (JDBC存储) |
 | `offset.flush.interval.ms`  | Debezium 将偏移量刷新到 `offset.storage` 的时间间隔（毫秒）。                                                                               | `60000` (60秒)                                |
 | `snapshot.mode`             | 连接器启动时的快照模式。决定了连接器如何处理现有数据。常用的值有：                                                                                     | `initial` (全量快照后增量), `schema_only` (仅快照schema，然后增量，常用于生产避免锁表), `never` (从不快照，仅增量，需确保binlog/WAL包含历史), `no_data` (同`schema_only`) |
 | `topic.prefix`              | Debezium 为其内部主题和数据变更事件主题生成的主题名称的前缀。                                                                                 | `dbz-events-${spring.application.name}`       |
@@ -390,12 +384,13 @@ dabezium:
 
 ### 4.3 历史记录存储配置 (Schema History Storage - 以文件为例)
 
-Debezium 需要存储数据库的 schema 历史，以便正确解析 binlog/WAL 中的数据。以下参数用于配置 schema 历史的存储方式，以基于文件的存储为例 (`io.debezium.storage.file.history.FileSchemaHistory`)。
+Debezium 需要存储数据库的 schema 历史，以便正确解析 binlog/WAL 中的数据。集群部署应使用 Redis 等共享存储，避免 failover 后新实例无法解析历史 binlog。
 
 | 参数名                                  | 说明                                                                                             | 示例值                                          |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
-| `schema.history.internal`               | 指定用于存储 schema 历史的类。                                                                       | `io.debezium.storage.file.history.FileSchemaHistory` (文件存储), `io.debezium.storage.kafka.history.KafkaSchemaHistory` (Kafka存储), `io.debezium.storage.jdbc.history.JdbcSchemaHistory` (JDBC存储) |
-| `schema.history.internal.file.filename` | (如果 `schema.history.internal` 是文件存储) schema 历史文件的完整路径。Debezium 进程需要对此路径有写权限。 | `/data/schema_history.dat`, `C:/debezium/schema_history.dat` |
+| `schema.history.internal`               | 指定用于存储 schema 历史的类。                                                                       | `io.debezium.storage.redis.history.RedisSchemaHistory` (Redis存储), `io.debezium.storage.kafka.history.KafkaSchemaHistory` (Kafka存储), `io.debezium.storage.jdbc.history.JdbcSchemaHistory` (JDBC存储) |
+| `schema.history.internal.redis.address` | Redis schema history 存储的连接地址。 | `${DEBEZIUM_REDIS_ADDRESS:192.168.56.101:6379}` |
+| `schema.history.internal.redis.key` | Redis schema history 存储的 key，应按应用和 profile 隔离。 | `debezium:${spring.application.name}:${spring.profiles.active}:schema-history` |
 | `schema.history.internal.store.only.captured.tables.ddl` | (可选) 是否只存储被 `table.include.list` 捕获的表的 DDL 变更。`true` 可以减小历史文件大小。        | `true`                                          |
 
 **注意：**
@@ -487,13 +482,13 @@ public void processCaptureDataChange(Dict data) {
 
 ### 5.4 分布式环境下的单实例运行
 
-本模块通过 `GXDebeziumEngineConfig` 中的 Redisson 分布式锁机制 (`initialEngineLock` 和 `initialEngineUnLock` 方法) 确保在分布式部署（多个服务实例）的场景下，只有一个实例会成功获取锁并初始化和运行 Debezium 引擎。这避免了多个实例同时消费数据库变更日志导致的数据重复处理或冲突。
+本模块通过 `GXDebeziumEngineConfig` 和 `GXDebeziumEngineLockConfig` 中的 Redisson 分布式锁机制，确保在分布式部署（多个服务实例）的场景下，只有一个实例会成功获取锁并初始化和运行 Debezium 引擎。这避免了多个实例同时消费数据库变更日志导致的数据重复处理或冲突。
 
 **关键点：**
 
 -   **依赖 Redisson**：确保项目中已正确配置并引入 Redisson 客户端。
--   **锁的唯一性**：锁的名称 (`DEBEZIUM_ENGINE_LOCK_KEY`) 对于所有希望参与竞争的实例必须是相同的。
--   **容错性**：如果持有锁的实例宕机，锁会自动释放 (根据 Redisson 的配置，如看门狗机制)，其他实例可以竞争获取锁并接管 Debezium 引擎的运行。
+-   **锁的唯一性**：锁名格式为 `initial-engine-lock:{spring.application.name}:{spring.profiles.active}`，同一应用与 profile 下的实例会竞争同一个 Redis key。
+-   **容错性**：锁使用带 TTL 的 Redis string key。运行期间每 1 分钟续期一次；连续续期异常或 owner 校验失败时，当前实例会主动关闭 Debezium 引擎。释放锁时会校验 owner token，避免误删其它实例新获得的锁。
 
 开发者无需在业务层面额外处理分布式锁，模块已内置此逻辑。
 
@@ -583,7 +578,7 @@ public class MyDebeziumServiceImpl implements GXDebeziumService {
 1.  **配置错误 (`debezium.yml` 或 Nacos 配置)：**
     *   **检查核心参数**：`name`, `connector.class`, `offset.storage`, `schema.history.internal` 是否正确配置。
     *   **数据库连接参数**：`database.hostname`, `database.port`, `database.user`, `database.password` 是否准确无误。对于特定数据库，如 MySQL 的 `database.server.id` 是否配置且在集群中唯一。
-    *   **路径配置**：如果使用文件存储偏移量或 schema 历史 (`offset.storage.file.filename`, `schema.history.internal.file.filename`)，确保路径存在且应用有读写权限。
+    *   **Redis 配置**：集群部署时确认 `offset.storage.redis.address`、`offset.storage.redis.key`、`schema.history.internal.redis.address` 和 `schema.history.internal.redis.key` 指向共享 Redis，并按应用和 profile 隔离。
     *   **Nacos 配置检查**：如果使用 Nacos，确认 `dataId`, `groupId` 是否正确，Nacos 服务是否可达，应用是否有权限读取该配置。
 2.  **数据库权限不足：**
     *   Debezium 连接数据库的用户通常需要特定的权限来读取事务日志。例如，MySQL 用户需要 `REPLICATION SLAVE`, `REPLICATION CLIENT`, `SELECT` (对要监控的表) 等权限。PostgreSQL 用户需要复制权限和对 `pg_replication_slots` 的访问权限。请查阅对应数据库连接器的 Debezium 文档。
