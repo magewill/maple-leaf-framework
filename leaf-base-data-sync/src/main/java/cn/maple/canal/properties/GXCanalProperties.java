@@ -1,6 +1,6 @@
 package cn.maple.canal.properties;
 
-import cn.maple.canal.constant.CanalConstant;
+import cn.maple.canal.constant.GXCanalConstant;
 import lombok.Data;
 
 /**
@@ -11,17 +11,17 @@ public class GXCanalProperties {
     /**
      * Rabbit listener concurrency.
      */
-    protected String concurrencyCount = CanalConstant.RABBITMQ_CANAL_CONCURRENCY_COUNT;
+    protected String concurrencyCount = GXCanalConstant.RABBITMQ_CANAL_CONCURRENCY_COUNT;
     /**
      * Queue name consumed by application.
      */
-    protected String canalQueueName = CanalConstant.RABBITMQ_CANAL_QUEUE_NAME;
+    protected String canalQueueName = GXCanalConstant.RABBITMQ_CANAL_QUEUE_NAME;
     /**
      * Exchange name used by Canal producer.
      */
-    protected String exchangeName = CanalConstant.RABBITMQ_CANAL_EXCHANGE_NAME;
+    protected String exchangeName = GXCanalConstant.RABBITMQ_CANAL_EXCHANGE_NAME;
     /**
      * Routing key used by Canal producer.
      */
-    protected String routingKey = CanalConstant.RABBITMQ_CANAL_ROUTING_KEY;
+    protected String routingKey = GXCanalConstant.RABBITMQ_CANAL_ROUTING_KEY;
 }
