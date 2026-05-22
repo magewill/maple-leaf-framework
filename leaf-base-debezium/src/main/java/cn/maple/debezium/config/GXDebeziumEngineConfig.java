@@ -20,8 +20,11 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Configuration;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -47,6 +50,9 @@ public class GXDebeziumEngineConfig implements DisposableBean {
             Math.max(TimeUnit.SECONDS.toMillis(30L),
                     TimeUnit.MINUTES.toMillis(GXDebeziumEngineLockConfig.LOCK_TTL_MINUTES - 1L));
     private static final int MAX_LOCK_RENEW_FAILURES = 3;
+    private static final long DUPLICATE_EVENT_TTL_MILLIS = TimeUnit.MINUTES.toMillis(2);
+    private static final int DUPLICATE_EVENT_CACHE_MAX_SIZE = 10_000;
+    private static final int DUPLICATE_EVENT_CLEANUP_INTERVAL = 200;
 
     private final AtomicReference<ExecutorService> executorServiceRef = new AtomicReference<>();
     private final AtomicReference<ScheduledExecutorService> lockRenewalExecutorRef = new AtomicReference<>();
@@ -57,6 +63,8 @@ public class GXDebeziumEngineConfig implements DisposableBean {
     private final AtomicBoolean engineStopRequested = new AtomicBoolean(false);
     private final AtomicInteger renewalFailureCount = new AtomicInteger(0);
     private final AtomicLong lastLockRenewalSuccessTimeMillis = new AtomicLong(0L);
+    private final ConcurrentMap<String, Long> recentEventCache = new ConcurrentHashMap<>();
+    private final AtomicInteger duplicateEventCleanupCounter = new AtomicInteger(0);
 
     @Resource
     private GXDebeziumProperties debeziumProperties;
@@ -165,20 +173,20 @@ public class GXDebeziumEngineConfig implements DisposableBean {
     }
 
     private void handleChangeEvent(ChangeEvent<String, String> record, GXDebeziumService debeziumService) {
-        try {
-            if (engineShutdown.get()) {
-                log.debug("Debezium event ignored because engine is shutting down");
-                return;
-            }
-            if (engineStopRequested.get()) {
-                throw new IllegalStateException("Debezium engine stop was requested after lock renewal failure");
-            }
-            if (record == null || record.value() == null) {
-                log.warn("Debezium event ignored because value is empty");
-                return;
-            }
+        if (engineShutdown.get()) {
+            log.debug("Debezium event ignored because engine is shutting down");
+            return;
+        }
+        if (engineStopRequested.get()) {
+            throw new RejectedExecutionException("Debezium engine stop was requested after lock renewal failure");
+        }
+        if (record == null || record.value() == null) {
+            log.warn("Debezium event ignored because value is empty");
+            return;
+        }
 
-            log.debug("Debezium event received: key={}", record.key());
+        log.debug("Debezium event received: key={}", record.key());
+        try {
             Dict dbChangeData = JSONUtil.toBean(record.value(), Dict.class);
             Dict payload = Convert.convert(Dict.class, dbChangeData.getObj("payload"));
             if (payload == null) {
@@ -186,20 +194,90 @@ public class GXDebeziumEngineConfig implements DisposableBean {
                 return;
             }
 
+            if (isDuplicateEvent(payload)) {
+                log.debug("Debezium duplicate event skipped: key={}", record.key());
+                return;
+            }
+
             processPayload(debeziumService, payload);
-        } catch (RuntimeException e) {
-            log.error("Debezium event handling failed: {}", e.getMessage(), e);
+        } catch (RejectedExecutionException e) {
             throw e;
+        } catch (RuntimeException e) {
+            log.warn("Debezium event handling failed and skipped: key={}, exceptionType={}, reason={}",
+                    record.key(), e.getClass().getSimpleName(), e.getMessage(), e);
         } catch (Exception e) {
-            log.error("Debezium event handling failed: {}", e.getMessage(), e);
-            throw new IllegalStateException("Debezium event handling failed", e);
+            log.warn("Debezium event handling failed and skipped: key={}, exceptionType={}, reason={}",
+                    record.key(), e.getClass().getSimpleName(), e.getMessage(), e);
         }
     }
+
 
     private void processPayload(GXDebeziumService debeziumService, Dict payload) {
         long startTime = System.currentTimeMillis();
         debeziumService.processCaptureDataChange(payload);
         log.debug("Debezium event processed: cost={}ms", System.currentTimeMillis() - startTime);
+    }
+
+    private boolean isDuplicateEvent(Dict payload) {
+        String fingerprint = buildEventFingerprint(payload);
+        if (fingerprint == null) {
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        cleanupExpiredEventCacheIfNeeded(now);
+        Long previous = recentEventCache.putIfAbsent(fingerprint, now + DUPLICATE_EVENT_TTL_MILLIS);
+        if (previous == null) {
+            return false;
+        }
+        if (previous > now) {
+            return true;
+        }
+
+        recentEventCache.put(fingerprint, now + DUPLICATE_EVENT_TTL_MILLIS);
+        return false;
+    }
+
+    private String buildEventFingerprint(Dict payload) {
+        Dict source = Convert.convert(Dict.class, payload.getObj("source"));
+        if (source == null) {
+            return null;
+        }
+
+        Object file = source.getObj("file");
+        Object pos = source.getObj("pos");
+        Object row = source.getObj("row");
+        Object tsMs = payload.getObj("ts_ms");
+        Object op = payload.getObj("op");
+
+        if (file == null || pos == null || op == null) {
+            return null;
+        }
+
+        return String.join("|",
+                Objects.toString(file, ""),
+                Objects.toString(pos, ""),
+                Objects.toString(row, ""),
+                Objects.toString(tsMs, ""),
+                Objects.toString(op, ""));
+    }
+
+    private void cleanupExpiredEventCacheIfNeeded(long now) {
+        if (duplicateEventCleanupCounter.incrementAndGet() % DUPLICATE_EVENT_CLEANUP_INTERVAL != 0
+                && recentEventCache.size() < DUPLICATE_EVENT_CACHE_MAX_SIZE) {
+            return;
+        }
+
+        recentEventCache.entrySet().removeIf(entry -> entry.getValue() <= now);
+        if (recentEventCache.size() <= DUPLICATE_EVENT_CACHE_MAX_SIZE) {
+            return;
+        }
+
+        recentEventCache.entrySet().stream()
+                .sorted(Map.Entry.comparingByValue())
+                .limit(recentEventCache.size() - DUPLICATE_EVENT_CACHE_MAX_SIZE)
+                .map(Map.Entry::getKey)
+                .forEach(recentEventCache::remove);
     }
 
     private void runDebeziumEngine(DebeziumEngine<ChangeEvent<String, String>> engine,
@@ -236,32 +314,35 @@ public class GXDebeziumEngineConfig implements DisposableBean {
             return;
         }
 
-        renewalExecutor.scheduleWithFixedDelay(() -> {
-            if (!engineLockAcquired.get() || engineShutdown.get()) {
-                return;
-            }
-            try {
-                if (!engineLockConfig.renew(lockKey)) {
-                    log.error("Debezium engine lock ownership was lost; closing engine");
-                    closeEngineAfterLockProblem();
-                    return;
-                }
-                markLockRenewalSuccess();
-            } catch (Exception e) {
-                int failures = renewalFailureCount.incrementAndGet();
-                log.error("Debezium engine lock renewal failed: failures={}, maxFailures={}, error={}",
-                        failures, MAX_LOCK_RENEW_FAILURES, e.getMessage(), e);
-                if (failures >= MAX_LOCK_RENEW_FAILURES) {
-                    log.error("Debezium engine lock renewal failure threshold reached; closing engine");
-                    closeEngineAfterLockProblem();
-                }
-            }
-        }, LOCK_RENEW_INTERVAL_MINUTES, LOCK_RENEW_INTERVAL_MINUTES, TimeUnit.MINUTES);
+        renewalExecutor.scheduleWithFixedDelay(() -> onLockRenewalTick(engineLockConfig, lockKey),
+                LOCK_RENEW_INTERVAL_MINUTES, LOCK_RENEW_INTERVAL_MINUTES, TimeUnit.MINUTES);
 
         renewalExecutor.scheduleWithFixedDelay(this::checkLockRenewalFreshness,
                 LOCK_RENEW_WATCHDOG_INTERVAL_SECONDS,
                 LOCK_RENEW_WATCHDOG_INTERVAL_SECONDS,
                 TimeUnit.SECONDS);
+    }
+
+    private void onLockRenewalTick(GXDebeziumEngineLockConfig engineLockConfig, String lockKey) {
+        if (!engineLockAcquired.get() || engineShutdown.get() || engineStopRequested.get()) {
+            return;
+        }
+        try {
+            if (!engineLockConfig.renew(lockKey)) {
+                log.error("Debezium engine lock ownership was lost; closing engine");
+                closeEngineAfterLockProblem();
+                return;
+            }
+            markLockRenewalSuccess();
+        } catch (Exception e) {
+            int failures = renewalFailureCount.incrementAndGet();
+            log.error("Debezium engine lock renewal failed: failures={}, maxFailures={}, error={}",
+                    failures, MAX_LOCK_RENEW_FAILURES, e.getMessage(), e);
+            if (failures >= MAX_LOCK_RENEW_FAILURES) {
+                log.error("Debezium engine lock renewal failure threshold reached; closing engine");
+                closeEngineAfterLockProblem();
+            }
+        }
     }
 
     private void markLockRenewalSuccess() {
@@ -374,6 +455,8 @@ public class GXDebeziumEngineConfig implements DisposableBean {
 
         shutdownExecutorService(executorServiceRef.getAndSet(null));
         stopLockRenewal();
+        recentEventCache.clear();
+        duplicateEventCleanupCounter.set(0);
 
         if (engineLockConfig != null) {
             releaseEngineLock(engineLockConfig, lockKey);

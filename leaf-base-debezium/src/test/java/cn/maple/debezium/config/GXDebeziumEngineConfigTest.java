@@ -12,9 +12,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -67,17 +70,26 @@ class GXDebeziumEngineConfigTest {
     }
 
     @Test
-    void handleChangeEventPropagatesProcessingFailure() throws Exception {
+    void handleChangeEventSkipsProcessingFailureWithoutPropagating() throws Exception {
         GXDebeziumEngineConfig config = new GXDebeziumEngineConfig();
         GXDebeziumService service = data -> {
             throw new IllegalStateException("processing failed");
         };
 
-        InvocationTargetException exception = assertThrows(
-                InvocationTargetException.class,
-                () -> invokeHandleChangeEvent(config, service, "{\"payload\":{\"op\":\"c\"}}"));
+        assertDoesNotThrow(() -> invokeHandleChangeEvent(config, service, "{\"payload\":{\"op\":\"c\"}}"));
+    }
 
-        assertInstanceOf(IllegalStateException.class, exception.getCause());
+    @Test
+    void handleChangeEventSkipsDuplicateEventByFingerprint() throws Exception {
+        GXDebeziumEngineConfig config = new GXDebeziumEngineConfig();
+        AtomicInteger processedCount = new AtomicInteger(0);
+        GXDebeziumService service = data -> processedCount.incrementAndGet();
+        String value = "{\"payload\":{\"op\":\"u\",\"ts_ms\":123,\"source\":{\"file\":\"mysql-bin.000001\",\"pos\":100,\"row\":1}}}";
+
+        invokeHandleChangeEvent(config, service, value);
+        invokeHandleChangeEvent(config, service, value);
+
+        assertEquals(1, processedCount.get());
     }
 
     @Test
@@ -90,42 +102,75 @@ class GXDebeziumEngineConfigTest {
                 () -> invokeHandleChangeEvent(config, data -> {
                 }, "{\"payload\":{\"op\":\"c\"}}"));
 
-        assertInstanceOf(IllegalStateException.class, exception.getCause());
+        assertInstanceOf(RejectedExecutionException.class, exception.getCause());
     }
 
     @Test
-    void lockRenewalWatchdogClosesEngineWhenLastRenewalIsStale() throws Exception {
+    void onLockRenewalTickStopsEngineAfterFailureThreshold() throws Exception {
         GXDebeziumEngineConfig config = new GXDebeziumEngineConfig();
+        GXDebeziumEngineLockConfig engineLockConfig = mock(GXDebeziumEngineLockConfig.class);
         DebeziumEngine<ChangeEvent<String, String>> engine = mock(DebeziumEngine.class);
 
+        when(engineLockConfig.renew("lock-key")).thenThrow(new IllegalStateException("redis timeout"));
         getAtomicBoolean(config, "engineLockAcquired").set(true);
         getAtomicReference(config, "debeziumEngineRef").set(engine);
-        getAtomicLong(config, "lastLockRenewalSuccessTimeMillis")
-                .set(System.currentTimeMillis() - getStaticLong("LOCK_RENEW_STALE_TIMEOUT_MILLIS") - 1L);
 
-        Method method = GXDebeziumEngineConfig.class.getDeclaredMethod("checkLockRenewalFreshness");
+        Method method = GXDebeziumEngineConfig.class.getDeclaredMethod(
+                "onLockRenewalTick", GXDebeziumEngineLockConfig.class, String.class);
         method.setAccessible(true);
-        method.invoke(config);
 
+        method.invoke(config, engineLockConfig, "lock-key");
+        assertFalse(getAtomicBoolean(config, "engineStopRequested").get());
+
+        method.invoke(config, engineLockConfig, "lock-key");
+        assertFalse(getAtomicBoolean(config, "engineStopRequested").get());
+
+        method.invoke(config, engineLockConfig, "lock-key");
+        assertTrue(getAtomicBoolean(config, "engineStopRequested").get());
         verify(engine).close();
     }
 
     @Test
-    void releaseEngineLockDoesNotRestoreAcquiredStateWhenRedisReleaseFails() throws Exception {
+    void onLockRenewalTickDoesNothingAfterStopWasRequested() throws Exception {
         GXDebeziumEngineConfig config = new GXDebeziumEngineConfig();
         GXDebeziumEngineLockConfig engineLockConfig = mock(GXDebeziumEngineLockConfig.class);
-        doThrow(new IllegalStateException("redis unavailable")).when(engineLockConfig).unlock("lock-key");
+        DebeziumEngine<ChangeEvent<String, String>> engine = mock(DebeziumEngine.class);
 
-        AtomicBoolean engineLockAcquired = getAtomicBoolean(config, "engineLockAcquired");
-        engineLockAcquired.set(true);
+        getAtomicBoolean(config, "engineLockAcquired").set(true);
+        getAtomicBoolean(config, "engineStopRequested").set(true);
+        getAtomicReference(config, "debeziumEngineRef").set(engine);
+        getAtomicInteger(config, "renewalFailureCount").set(2);
+
+        Method method = GXDebeziumEngineConfig.class.getDeclaredMethod(
+                "onLockRenewalTick", GXDebeziumEngineLockConfig.class, String.class);
+        method.setAccessible(true);
+        method.invoke(config, engineLockConfig, "lock-key");
+
+        assertEquals(2, getAtomicInteger(config, "renewalFailureCount").get());
+    }
+
+    @Test
+    void releaseEngineLockResetsRenewalState() throws Exception {
+        GXDebeziumEngineConfig config = new GXDebeziumEngineConfig();
+        GXDebeziumEngineLockConfig engineLockConfig = mock(GXDebeziumEngineLockConfig.class);
+
+        getAtomicBoolean(config, "engineLockAcquired").set(true);
+        getAtomicBoolean(config, "engineStopRequested").set(true);
+        getAtomicInteger(config, "renewalFailureCount").set(2);
+        getAtomicLong(config, "lastLockRenewalSuccessTimeMillis").set(System.currentTimeMillis());
 
         Method method = GXDebeziumEngineConfig.class.getDeclaredMethod(
                 "releaseEngineLock", GXDebeziumEngineLockConfig.class, String.class);
         method.setAccessible(true);
         method.invoke(config, engineLockConfig, "lock-key");
 
-        assertFalse(engineLockAcquired.get());
+        assertFalse(getAtomicBoolean(config, "engineLockAcquired").get());
+        assertFalse(getAtomicBoolean(config, "engineStopRequested").get());
+        assertEquals(0, getAtomicInteger(config, "renewalFailureCount").get());
+        assertEquals(0L, getAtomicLong(config, "lastLockRenewalSuccessTimeMillis").get());
+        verify(engineLockConfig).unlock("lock-key");
     }
+
 
     private boolean invokeValidateConfiguration(GXDebeziumEngineConfig config, Map<String, String> debeziumConfig) throws Exception {
         Method method = GXDebeziumEngineConfig.class.getDeclaredMethod("validateConfiguration", Map.class);
@@ -147,6 +192,12 @@ class GXDebeziumEngineConfigTest {
         Field field = GXDebeziumEngineConfig.class.getDeclaredField(fieldName);
         field.setAccessible(true);
         return (AtomicBoolean) field.get(config);
+    }
+
+    private AtomicInteger getAtomicInteger(GXDebeziumEngineConfig config, String fieldName) throws Exception {
+        Field field = GXDebeziumEngineConfig.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return (AtomicInteger) field.get(config);
     }
 
     private AtomicLong getAtomicLong(GXDebeziumEngineConfig config, String fieldName) throws Exception {
