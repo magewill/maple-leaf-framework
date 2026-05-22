@@ -6,9 +6,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -105,6 +107,42 @@ class GXSseEmitterServiceImplTest {
         assertTrue(boundedChunks.stream().allMatch(chunk -> !chunk.isEmpty() && chunk.length() <= 100));
     }
 
+    @Test
+    void staleCompletionCallback_DoesNotRemoveReconnectedEmitter() {
+        SseEmitter firstEmitter = service.createSseConnect("client-1", 120L);
+        SseEmitter secondEmitter = service.createSseConnect("client-1", 120L);
+
+        Runnable completionCallback = invokeCompletionCallback(service, "client-1", firstEmitter);
+        completionCallback.run();
+
+        assertSame(secondEmitter, service.getSseEmitterByClientId("client-1"));
+        assertEquals(1, service.getActiveConnectionCount());
+    }
+
+    @Test
+    void staleTimeoutCallback_DoesNotRemoveReconnectedEmitter() {
+        SseEmitter firstEmitter = service.createSseConnect("client-1", 120L);
+        SseEmitter secondEmitter = service.createSseConnect("client-1", 120L);
+
+        Runnable timeoutCallback = invokeTimeoutCallback(service, "client-1", firstEmitter);
+        timeoutCallback.run();
+
+        assertSame(secondEmitter, service.getSseEmitterByClientId("client-1"));
+        assertEquals(1, service.getActiveConnectionCount());
+    }
+
+    @Test
+    void staleErrorCallback_DoesNotRemoveReconnectedEmitter() {
+        SseEmitter firstEmitter = service.createSseConnect("client-1", 120L);
+        SseEmitter secondEmitter = service.createSseConnect("client-1", 120L);
+
+        Consumer<Throwable> errorCallback = invokeErrorCallback(service, "client-1", firstEmitter);
+        errorCallback.accept(new RuntimeException("boom"));
+
+        assertSame(secondEmitter, service.getSseEmitterByClientId("client-1"));
+        assertEquals(1, service.getActiveConnectionCount());
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, SseEmitter> getClientCache(GXSseEmitterServiceImpl service) {
         try {
@@ -113,6 +151,37 @@ class GXSseEmitterServiceImplTest {
             return (Map<String, SseEmitter>) field.get(service);
         } catch (ReflectiveOperationException e) {
             throw new AssertionError("Unable to read SSE client cache", e);
+        }
+    }
+
+    private static Runnable invokeCompletionCallback(GXSseEmitterServiceImpl service, String clientId, SseEmitter emitter) {
+        try {
+            Method method = GXSseEmitterServiceImpl.class.getDeclaredMethod("onCompletionCallBack", String.class, SseEmitter.class);
+            method.setAccessible(true);
+            return (Runnable) method.invoke(service, clientId, emitter);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Unable to invoke completion callback", e);
+        }
+    }
+
+    private static Runnable invokeTimeoutCallback(GXSseEmitterServiceImpl service, String clientId, SseEmitter emitter) {
+        try {
+            Method method = GXSseEmitterServiceImpl.class.getDeclaredMethod("onTimeoutCallBack", String.class, SseEmitter.class);
+            method.setAccessible(true);
+            return (Runnable) method.invoke(service, clientId, emitter);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Unable to invoke timeout callback", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Consumer<Throwable> invokeErrorCallback(GXSseEmitterServiceImpl service, String clientId, SseEmitter emitter) {
+        try {
+            Method method = GXSseEmitterServiceImpl.class.getDeclaredMethod("onErrorCallBack", String.class, SseEmitter.class);
+            method.setAccessible(true);
+            return (Consumer<Throwable>) method.invoke(service, clientId, emitter);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Unable to invoke error callback", e);
         }
     }
 }

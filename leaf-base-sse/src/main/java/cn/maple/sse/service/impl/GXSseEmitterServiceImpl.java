@@ -45,7 +45,7 @@ public class GXSseEmitterServiceImpl extends GXBusinessServiceImpl implements GX
 
     private void cleanupConnections() {
         sseClientCache.forEach((clientId, emitter) -> {
-            if (isCurrentEmitter(clientId, emitter)) {
+            if (!isCurrentEmitter(clientId, emitter)) {
                 return;
             }
             try {
@@ -160,20 +160,12 @@ public class GXSseEmitterServiceImpl extends GXBusinessServiceImpl implements GX
             log.error("Send SSE message failed: no connection found for clientId: {}, message: {}", clientId, messageDto);
             return;
         }
-        if (isCurrentEmitter(clientId, sseEmitter)) {
+        if (!isCurrentEmitter(clientId, sseEmitter)) {
             log.debug("Skip sending SSE message to inactive connection, clientId: {}", clientId);
             return;
         }
 
-        SseEmitter.SseEventBuilder sendData = SseEmitter.event()
-                .data(Objects.requireNonNull(messageDto.getData(), "SSE message data must not be null"),
-                        MediaType.APPLICATION_JSON)
-                .id(messageDto.getMsgId())
-                .comment(messageDto.getComment() + ":" + clientId)
-                .reconnectTime(messageDto.getReconnectTimeMillis())
-                .name(messageDto.getEventName());
-
-        send(clientId, sseEmitter, sendData);
+        send(clientId, sseEmitter, messageDto, 1);
     }
 
     private Runnable onCompletionCallBack(String clientId, SseEmitter sseEmitter) {
@@ -203,21 +195,21 @@ public class GXSseEmitterServiceImpl extends GXBusinessServiceImpl implements GX
         }
     }
 
-    private void send(String clientId, SseEmitter sseEmitter, SseEmitter.SseEventBuilder sseEventBuilder) {
-        if (isCurrentEmitter(clientId, sseEmitter)) {
+    private void send(String clientId, SseEmitter sseEmitter, GXSseMessageInnerReqDto messageDto, int retryCount) {
+        if (!isCurrentEmitter(clientId, sseEmitter)) {
             return;
         }
 
         try {
-            sendNow(sseEmitter, sseEventBuilder);
+            sendNow(sseEmitter, buildEvent(clientId, messageDto));
         } catch (IOException | IllegalStateException e) {
             log.error("SSE message send failed, clientId: {}, reason: {}", clientId, e.getMessage());
-            retryWithBackoff(clientId, sseEmitter, sseEventBuilder, 1);
+            retryWithBackoff(clientId, sseEmitter, messageDto, retryCount);
         }
     }
 
     private void retryWithBackoff(String clientId, SseEmitter sseEmitter,
-                                  SseEmitter.SseEventBuilder sseEventBuilder, int retryCount) {
+                                  GXSseMessageInnerReqDto messageDto, int retryCount) {
         if (retryCount > MAX_RETRIES) {
             log.warn("SSE message send failed after retries, clientId: {}", clientId);
             removeEmitter(clientId, sseEmitter);
@@ -227,17 +219,17 @@ public class GXSseEmitterServiceImpl extends GXBusinessServiceImpl implements GX
         long delayMs = (long) Math.pow(2, retryCount - 1) * 100;
         try {
             scheduler.schedule(() -> {
-                if (isCurrentEmitter(clientId, sseEmitter)) {
+                if (!isCurrentEmitter(clientId, sseEmitter)) {
                     return;
                 }
 
                 try {
                     log.debug("Retry SSE message send, clientId: {}, retryCount: {}", clientId, retryCount);
-                    sendNow(sseEmitter, sseEventBuilder);
+                    sendNow(sseEmitter, buildEvent(clientId, messageDto));
                 } catch (IOException | IllegalStateException e) {
                     log.error("Retry SSE message send failed, clientId: {}, retryCount: {}, reason: {}",
                             clientId, retryCount, e.getMessage());
-                    retryWithBackoff(clientId, sseEmitter, sseEventBuilder, retryCount + 1);
+                    retryWithBackoff(clientId, sseEmitter, messageDto, retryCount + 1);
                 }
             }, delayMs, TimeUnit.MILLISECONDS);
         } catch (RejectedExecutionException e) {
@@ -248,8 +240,18 @@ public class GXSseEmitterServiceImpl extends GXBusinessServiceImpl implements GX
         }
     }
 
+    private SseEmitter.SseEventBuilder buildEvent(String clientId, GXSseMessageInnerReqDto messageDto) {
+        return SseEmitter.event()
+                .data(Objects.requireNonNull(messageDto.getData(), "SSE message data must not be null"),
+                        MediaType.APPLICATION_JSON)
+                .id(messageDto.getMsgId())
+                .comment(messageDto.getComment() + ":" + clientId)
+                .reconnectTime(messageDto.getReconnectTimeMillis())
+                .name(messageDto.getEventName());
+    }
+
     private boolean isCurrentEmitter(String clientId, SseEmitter sseEmitter) {
-        return sseClientCache.get(clientId) != sseEmitter;
+        return sseClientCache.get(clientId) == sseEmitter;
     }
 
     @Override
@@ -290,7 +292,7 @@ public class GXSseEmitterServiceImpl extends GXBusinessServiceImpl implements GX
 
     public boolean sendHeartbeat(String clientId) {
         SseEmitter emitter = sseClientCache.get(clientId);
-        if (emitter == null || isCurrentEmitter(clientId, emitter)) {
+        if (emitter == null || !isCurrentEmitter(clientId, emitter)) {
             return false;
         }
 
