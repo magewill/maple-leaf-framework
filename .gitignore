@@ -11,3 +11,4 @@ spy.log
 .flattened-pom.xml
 .m2-local
 .claude
+.vscode
