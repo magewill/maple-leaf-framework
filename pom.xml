@@ -43,7 +43,7 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <lombok.version>1.18.46</lombok.version>
-        <hutool.version>5.8.44</hutool.version>
+        <hutool.version>5.8.46</hutool.version>
         <aspectjweaver.version>1.9.25.1</aspectjweaver.version>
         <guava.version>33.6.0-jre</guava.version>
         <caffeine.version>3.2.4</caffeine.version>
@@ -532,7 +532,10 @@
                         <!--arg>-Xplugin:ErrorProne -XepDisableAllChecks -Xep:NullAway:ERROR -XepOpt:NullAway:OnlyNullMarked=true -XepOpt:NullAway:JSpecifyMode=true -XepExcludedPaths:(.*[\\/]test[\\/]java[\\/].*|.*[\\/]target[\\/]generated-sources[\\/].*)
                         </arg-->
                         <!-- 包级别扫描 -->
-                        <arg>-Xplugin:ErrorProne -XepDisableAllChecks -Xep:NullAway:ERROR -XepOpt:NullAway:AnnotatedPackages=cn.maple -XepOpt:NullAway:JSpecifyMode=true -XepExcludedPaths:(.*[\\/]test[\\/]java[\\/].*|.*[\\/]target[\\/]generated-sources[\\/].*)</arg>
+                        <arg>-Xplugin:ErrorProne -XepDisableAllChecks -Xep:NullAway:ERROR
+                            -XepOpt:NullAway:AnnotatedPackages=cn.maple -XepOpt:NullAway:JSpecifyMode=true
+                            -XepExcludedPaths:(.*[\\/]test[\\/]java[\\/].*|.*[\\/]target[\\/]generated-sources[\\/].*)
+                        </arg>
                     </compilerArgs>
                     <annotationProcessorPaths>
                         <path>
