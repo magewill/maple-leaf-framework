@@ -25,6 +25,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GXDynamicDataSourceFactoryTest {
 
     @Test
+    void registerDbTypeAllowsResolveByCurrentDatasourceContext() {
+        GXDynamicDbTypeRegistry.clear();
+        GXDynamicDbTypeRegistry.register("framework", "postgresql");
+
+        try (GXDynamicContextHolder.AutoCloseableDataSource ignored = GXDynamicContextHolder.withDataSource("framework")) {
+            assertEquals("postgresql", GXDynamicDbTypeRegistry.resolveCurrent());
+        }
+
+        GXDynamicDbTypeRegistry.clear();
+    }
+
+    @Test
     void dynamicDatasourcePropertiesOverrideSpringDruidDefaults() throws Exception {
         GXDataSourceProperties properties = new GXDataSourceProperties();
         properties.setInitialSize(2);

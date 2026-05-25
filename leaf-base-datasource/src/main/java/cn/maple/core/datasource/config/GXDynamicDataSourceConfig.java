@@ -107,6 +107,7 @@ public class GXDynamicDataSourceConfig extends GXApplicationContextAware {
                 try {
                     DataSource dataSource = wrapSeataDataSource(druidDataSource);
                     targetDataSources.put(dataSourceName, dataSource);
+                    GXDynamicDbTypeRegistry.register(dataSourceName, entry.getValue().getDbType());
                     log.debug("Datasource created: {}", dataSourceName);
                 } catch (RuntimeException e) {
                     throw new GXBusinessException("Failed to create datasource: " + dataSourceName, e);

@@ -1,6 +1,7 @@
 package cn.maple.core.datasource.config;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.datasource.config.GXDynamicDbTypeRegistry;
 import cn.maple.core.datasource.handler.GXDataFilterDataPermissionHandler;
 import cn.maple.core.datasource.interceptor.GXDataFilterInterceptor;
 import cn.maple.core.datasource.properties.GXDataSourceProperties;
@@ -114,10 +115,13 @@ public class GXMyBatisPlusConfig {
     }
 
     private DbType resolvePaginationDbType() {
-        String configuredDbType = Optional.ofNullable(dataSourceProperties)
-                .map(GXDataSourceProperties::getDbType)
-                .filter(CharSequenceUtil::isNotBlank)
-                .orElse("mysql");
+        String configuredDbType = GXDynamicDbTypeRegistry.resolveCurrent();
+        if (CharSequenceUtil.isBlank(configuredDbType)) {
+            configuredDbType = Optional.ofNullable(dataSourceProperties)
+                    .map(GXDataSourceProperties::getDbType)
+                    .filter(CharSequenceUtil::isNotBlank)
+                    .orElse("mysql");
+        }
         String normalized = configuredDbType.trim().toUpperCase(Locale.ROOT).replace('-', '_');
         return switch (normalized) {
             case "MYSQL" -> DbType.MYSQL;

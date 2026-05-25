@@ -1,6 +1,7 @@
 package cn.maple.core.datasource.builder;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.datasource.config.GXDynamicDbTypeRegistry;
 import cn.maple.core.datasource.properties.GXDataSourceProperties;
 import cn.maple.core.framework.util.GXDBStringUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
@@ -50,6 +51,10 @@ final class GXSqlDialectSupport {
     }
 
     static String resolveDbTypeFromContext() {
+        String currentDbType = GXDynamicDbTypeRegistry.resolveCurrent();
+        if (CharSequenceUtil.isNotBlank(currentDbType)) {
+            return currentDbType;
+        }
         try {
             GXDataSourceProperties properties = GXSpringContextUtils.getBean(GXDataSourceProperties.class);
             if (Objects.nonNull(properties) && CharSequenceUtil.isNotBlank(properties.getDbType())) {
