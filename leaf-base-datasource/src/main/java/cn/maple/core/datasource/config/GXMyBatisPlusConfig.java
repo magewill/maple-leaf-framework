@@ -1,6 +1,7 @@
 package cn.maple.core.datasource.config;
 
 import cn.hutool.core.text.CharSequenceUtil;
+import cn.maple.core.datasource.handler.GXDataFilterDataPermissionHandler;
 import cn.maple.core.datasource.interceptor.GXDataFilterInterceptor;
 import cn.maple.core.datasource.properties.GXDataSourceProperties;
 import cn.maple.core.datasource.service.GXTenantIdService;
@@ -93,7 +94,7 @@ public class GXMyBatisPlusConfig {
         if (Boolean.TRUE.equals(enableDataPermission)) {
             DataPermissionHandler dataPermissionHandler = GXSpringContextUtils.getBean(DataPermissionHandler.class);
             if (Objects.isNull(dataPermissionHandler)) {
-                throw new GXBusinessException("DataPermissionHandler bean is required when data permission is enabled");
+                dataPermissionHandler = new GXDataFilterDataPermissionHandler();
             }
             interceptor.addInnerInterceptor(new DataPermissionInterceptor(dataPermissionHandler));
             return;

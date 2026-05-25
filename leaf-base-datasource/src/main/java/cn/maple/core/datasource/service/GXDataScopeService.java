@@ -5,13 +5,11 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.datasource.annotation.GXDataFilter;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
-import cn.maple.core.framework.dto.inner.condition.GXCondition;
-import cn.maple.core.framework.dto.inner.condition.GXIgnoreDataFilterCondition;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import org.aspectj.lang.JoinPoint;
 
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.HashSet;
+import java.util.Set;
 
 public interface GXDataScopeService {
     default Set<Number> getDeptIdLst() {
@@ -46,69 +44,7 @@ public interface GXDataScopeService {
     }
 
     default String getSqlFilter(GXDataFilter dataFilter, JoinPoint point) {
-        if (isSuperAdmin()) {
-            return "";
-        }
-
-        boolean hasIgnoreDataFilterCondition = checkIgnoreDataFilter(point);
-        GXDataScopeService dataScopeService = GXSpringContextUtils.getBean(GXDataScopeService.class);
-        if (hasIgnoreDataFilterCondition || ObjectUtil.isNull(dataScopeService)) {
-            return "";
-        }
-
-        String tableAlias = dataFilter.tableAlias();
-
-        String[] deptIdFieldNames = dataFilter.deptIdFieldNames();
-        String[] userIdFieldNames = dataFilter.userIdFieldNames();
-
-        List<String> whereLst = new ArrayList<>();
-
-        String userIdCondition = getUserCondition(tableAlias, userIdFieldNames);
-        if (ObjectUtil.isNotNull(userIdCondition)) {
-            //sqlFilter.append(userIdCondition);
-            whereLst.add(userIdCondition);
-        }
-
-        String deptCondition = getDeptCondition(tableAlias, deptIdFieldNames);
-        if (ObjectUtil.isNotNull(deptCondition)) {
-            whereLst.add(deptCondition);
-        }
-        if (CollUtil.isNotEmpty(whereLst)) {
-            return CharSequenceUtil.format(" ({}) ", CollUtil.join(whereLst, " or "));
-        }
-        return " (1 = 0) ";
-    }
-
-    private boolean checkIgnoreDataFilter(JoinPoint point) {
-        List<Object> args = Arrays.asList(point.getArgs());
-        if (CollUtil.isEmpty(List.of(args))) {
-            return true;
-        }
-        List<Object> argsLst = args.stream().filter(t -> t.getClass().isAssignableFrom(GXBaseQueryParamInnerDto.class)).collect(Collectors.toList());
-        if (CollUtil.isEmpty(argsLst)) {
-            return true;
-        }
-        GXBaseQueryParamInnerDto queryParams = (GXBaseQueryParamInnerDto) argsLst.getFirst();
-        if (queryParams.isIgnoreDataFilter()) {
-            return true;
-        }
-        List<GXCondition<?>> conditionLst = queryParams.getCondition();
-        if (CollUtil.isNotEmpty(conditionLst)) {
-            List<GXCondition<?>> newConditionList = new ArrayList<>();
-            List<Integer> removeIndexLst = CollUtil.newArrayList();
-
-            for (int i = 0, len = conditionLst.size(); i < len; i++) {
-                if (!conditionLst.get(i).getClass().isAssignableFrom(GXIgnoreDataFilterCondition.class)) {
-                    newConditionList.add(conditionLst.get(i));
-                } else {
-                    removeIndexLst.add(i);
-                }
-            }
-
-            queryParams.setCondition(newConditionList);
-            return CollUtil.isNotEmpty(removeIndexLst);
-        }
-        return false;
+        return GXDataFilterSqlResolver.resolve(this, dataFilter, point, null).getSqlFilter();
     }
 
     default String getDeptIdFieldName(String[] deptIdFieldNames) {

@@ -1,9 +1,12 @@
 package cn.maple.core.datasource.util;
 
+import cn.maple.core.datasource.annotation.GXDataFilter;
+import cn.maple.core.datasource.dto.GXDataFilterContext;
 import cn.maple.core.datasource.dto.GXDataFilterInnerDto;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.util.concurrent.Callable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -54,5 +57,30 @@ class GXDataFilterThreadLocalUtilsTest {
 
         assertEquals("ok", wrapped.call());
         assertNull(GXDataFilterThreadLocalUtils.getDataFilterInnerDto());
+    }
+
+    @Test
+    void contextMethodsPreserveFullContextSnapshots() throws Exception {
+        GXDataFilter annotation = getAnnotation();
+        GXDataFilterContext source = new GXDataFilterContext("tenant_id = 1", annotation, "testMethod", false);
+        GXDataFilterThreadLocalUtils.setDataFilterContext(source);
+
+        source.setMethodName("mutated");
+        GXDataFilterContext snapshot = GXDataFilterThreadLocalUtils.getDataFilterContext();
+        snapshot.setIgnored(true);
+
+        GXDataFilterContext actual = GXDataFilterThreadLocalUtils.getDataFilterContext();
+        assertEquals("testMethod", actual.getMethodName());
+        assertEquals(annotation, actual.getDataFilter());
+        assertEquals(false, actual.isIgnored());
+    }
+
+    @GXDataFilter
+    void dataFilterMethod() {
+    }
+
+    private GXDataFilter getAnnotation() throws NoSuchMethodException {
+        Method method = getClass().getDeclaredMethod("dataFilterMethod");
+        return method.getAnnotation(GXDataFilter.class);
     }
 }

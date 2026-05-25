@@ -2,7 +2,8 @@ package cn.maple.core.datasource.aspect;
 
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.datasource.annotation.GXDataFilter;
-import cn.maple.core.datasource.dto.GXDataFilterInnerDto;
+import cn.maple.core.datasource.dto.GXDataFilterContext;
+import cn.maple.core.datasource.service.GXDataFilterSqlResolver;
 import cn.maple.core.datasource.service.GXDataScopeService;
 import cn.maple.core.datasource.util.GXDataFilterThreadLocalUtils;
 import cn.maple.core.framework.exception.GXBusinessException;
@@ -39,7 +40,7 @@ public class GXDataFilterAspect {
 
     @Around("dataFilterPointCut()")
     public Object dataFilterAround(ProceedingJoinPoint point) throws Throwable {
-        GXDataFilterInnerDto oldFilterDto = GXDataFilterThreadLocalUtils.getDataFilterInnerDto();
+        GXDataFilterContext oldFilterContext = GXDataFilterThreadLocalUtils.getDataFilterContext();
         boolean hasSetNewFilter = false;
 
         try {
@@ -65,11 +66,12 @@ public class GXDataFilterAspect {
 
             if (!isSuperAdmin) {
                 try {
-                    String sqlFilter = getSqlFilter(point, dataScopeService);
+                    GXDataFilterContext dataFilterContext = resolveDataFilterContext(point, dataScopeService, methodName);
+                    String sqlFilter = dataFilterContext.getSqlFilter();
 
                     if (CharSequenceUtil.isEmpty(sqlFilter)) {
                         log.debug("No SQL filter found, clearing inherited filter to avoid leakage. method={}", methodName);
-                        GXDataFilterThreadLocalUtils.cleanDataFilterInnerDto();
+                        GXDataFilterThreadLocalUtils.cleanDataFilterContext();
                         hasSetNewFilter = true;
                     } else {
                         String lowerSqlFilter = sqlFilter.toLowerCase();
@@ -80,8 +82,7 @@ public class GXDataFilterAspect {
                             log.warn("SQL filter may contain injection risk, ensure parameterized query usage. filter={}", sqlFilter);
                         }
 
-                        GXDataFilterInnerDto dataScope = new GXDataFilterInnerDto(sqlFilter);
-                        GXDataFilterThreadLocalUtils.setDataFilterInnerDto(dataScope);
+                        GXDataFilterThreadLocalUtils.setDataFilterContext(dataFilterContext);
                         hasSetNewFilter = true;
                         log.debug("Applied data filter. filter={}, method={}", sqlFilter, methodName);
                     }
@@ -91,8 +92,8 @@ public class GXDataFilterAspect {
                 }
             } else {
                 log.debug("Super admin access, clearing possible data filter and skipping. method={}", methodName);
-                if (oldFilterDto != null) {
-                    GXDataFilterThreadLocalUtils.cleanDataFilterInnerDto();
+                if (oldFilterContext != null) {
+                    GXDataFilterThreadLocalUtils.cleanDataFilterContext();
                     hasSetNewFilter = true;
                 }
             }
@@ -101,12 +102,12 @@ public class GXDataFilterAspect {
 
         } finally {
             if (hasSetNewFilter) {
-                if (oldFilterDto != null) {
-                    log.debug("Restoring outer data filter after method completion. filter={}", oldFilterDto.getSqlFilter());
-                    GXDataFilterThreadLocalUtils.setDataFilterInnerDto(oldFilterDto);
+                if (oldFilterContext != null) {
+                    log.debug("Restoring outer data filter after method completion. filter={}", oldFilterContext.getSqlFilter());
+                    GXDataFilterThreadLocalUtils.setDataFilterContext(oldFilterContext);
                 } else {
                     log.debug("Clearing current data filter after method completion.");
-                    GXDataFilterThreadLocalUtils.cleanDataFilterInnerDto();
+                    GXDataFilterThreadLocalUtils.cleanDataFilterContext();
                 }
             } else {
                 log.trace("No new data filter was mounted, skip context restore.");
@@ -114,7 +115,7 @@ public class GXDataFilterAspect {
         }
     }
 
-    private String getSqlFilter(JoinPoint point, GXDataScopeService dataScopeService) {
+    private GXDataFilterContext resolveDataFilterContext(JoinPoint point, GXDataScopeService dataScopeService, String methodName) {
         MethodSignature signature = (MethodSignature) point.getSignature();
         Method method = signature.getMethod();
         Object target = point.getTarget();
@@ -143,9 +144,9 @@ public class GXDataFilterAspect {
             throw new GXBusinessException("Unable to find @GXDataFilter annotation for the intercepted target.");
         }
 
-        String sqlFilter = dataScopeService.getSqlFilter(cacheEntry.annotation(), point);
-        log.debug("Resolved SQL filter: {}", sqlFilter);
-        return sqlFilter;
+        GXDataFilterContext context = GXDataFilterSqlResolver.resolve(dataScopeService, cacheEntry.annotation(), point, methodName);
+        log.debug("Resolved SQL filter: {}", context.getSqlFilter());
+        return context;
     }
 
     private record DataFilterCacheEntry(boolean hasAnnotation, GXDataFilter annotation) {

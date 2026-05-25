@@ -1,22 +1,22 @@
 package cn.maple.core.datasource.dto;
 
-public class GXDataFilterInnerDto {
-    private String sqlFilter;
+import cn.maple.core.datasource.annotation.GXDataFilter;
 
+public class GXDataFilterInnerDto extends GXDataFilterContext {
     public GXDataFilterInnerDto(String sqlFilter) {
-        this.sqlFilter = sqlFilter;
+        super(sqlFilter);
     }
 
-    public String getSqlFilter() {
-        return sqlFilter;
+    public GXDataFilterInnerDto(String sqlFilter, GXDataFilter dataFilter, String methodName, boolean ignored) {
+        super(sqlFilter, dataFilter, methodName, ignored);
     }
 
-    public void setSqlFilter(String sqlFilter) {
-        this.sqlFilter = sqlFilter;
+    public GXDataFilterInnerDto(GXDataFilterContext context) {
+        super(context);
     }
 
     @Override
     public String toString() {
-        return this.sqlFilter;
+        return getSqlFilter();
     }
 }

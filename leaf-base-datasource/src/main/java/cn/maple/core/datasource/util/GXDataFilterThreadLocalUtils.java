@@ -1,38 +1,55 @@
 package cn.maple.core.datasource.util;
 
+import cn.maple.core.datasource.dto.GXDataFilterContext;
 import cn.maple.core.datasource.dto.GXDataFilterInnerDto;
 
 import java.util.Objects;
 import java.util.concurrent.Callable;
 
 public final class GXDataFilterThreadLocalUtils {
-    private static final ThreadLocal<GXDataFilterInnerDto> DATA_FILTER_INNER_DTO = new ThreadLocal<>();
+    private static final ThreadLocal<GXDataFilterContext> DATA_FILTER_CONTEXT = new ThreadLocal<>();
 
     private GXDataFilterThreadLocalUtils() {
     }
 
+    public static GXDataFilterContext getDataFilterContext() {
+        return copy(DATA_FILTER_CONTEXT.get());
+    }
+
+    public static void setDataFilterContext(GXDataFilterContext context) {
+        GXDataFilterContext snapshot = copy(context);
+        if (snapshot == null) {
+            DATA_FILTER_CONTEXT.remove();
+            return;
+        }
+        DATA_FILTER_CONTEXT.set(snapshot);
+    }
+
+    public static void cleanDataFilterContext() {
+        DATA_FILTER_CONTEXT.remove();
+    }
+
     public static GXDataFilterInnerDto getDataFilterInnerDto() {
-        return copy(DATA_FILTER_INNER_DTO.get());
+        GXDataFilterContext context = getDataFilterContext();
+        if (context == null) {
+            return null;
+        }
+        return new GXDataFilterInnerDto(context);
     }
 
     public static void setDataFilterInnerDto(GXDataFilterInnerDto dto) {
-        GXDataFilterInnerDto snapshot = copy(dto);
-        if (snapshot == null) {
-            DATA_FILTER_INNER_DTO.remove();
-            return;
-        }
-        DATA_FILTER_INNER_DTO.set(snapshot);
+        setDataFilterContext(dto);
     }
 
     public static void cleanDataFilterInnerDto() {
-        DATA_FILTER_INNER_DTO.remove();
+        cleanDataFilterContext();
     }
 
     public static Runnable wrap(Runnable task) {
         Objects.requireNonNull(task, "Task must not be null");
-        GXDataFilterInnerDto capturedContext = snapshot();
+        GXDataFilterContext capturedContext = snapshot();
         return () -> {
-            GXDataFilterInnerDto previousContext = snapshot();
+            GXDataFilterContext previousContext = snapshot();
             restore(capturedContext);
             try {
                 task.run();
@@ -44,9 +61,9 @@ public final class GXDataFilterThreadLocalUtils {
 
     public static <V> Callable<V> wrap(Callable<V> task) {
         Objects.requireNonNull(task, "Task must not be null");
-        GXDataFilterInnerDto capturedContext = snapshot();
+        GXDataFilterContext capturedContext = snapshot();
         return () -> {
-            GXDataFilterInnerDto previousContext = snapshot();
+            GXDataFilterContext previousContext = snapshot();
             restore(capturedContext);
             try {
                 return task.call();
@@ -56,22 +73,22 @@ public final class GXDataFilterThreadLocalUtils {
         };
     }
 
-    private static GXDataFilterInnerDto snapshot() {
-        return copy(DATA_FILTER_INNER_DTO.get());
+    private static GXDataFilterContext snapshot() {
+        return copy(DATA_FILTER_CONTEXT.get());
     }
 
-    private static void restore(GXDataFilterInnerDto context) {
+    private static void restore(GXDataFilterContext context) {
         if (context == null) {
-            DATA_FILTER_INNER_DTO.remove();
+            DATA_FILTER_CONTEXT.remove();
             return;
         }
-        DATA_FILTER_INNER_DTO.set(copy(context));
+        DATA_FILTER_CONTEXT.set(copy(context));
     }
 
-    private static GXDataFilterInnerDto copy(GXDataFilterInnerDto dto) {
-        if (dto == null) {
+    private static GXDataFilterContext copy(GXDataFilterContext context) {
+        if (context == null) {
             return null;
         }
-        return new GXDataFilterInnerDto(dto.getSqlFilter());
+        return new GXDataFilterContext(context);
     }
 }

@@ -1,7 +1,7 @@
 package cn.maple.core.datasource.interceptor;
 
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.maple.core.datasource.dto.GXDataFilterInnerDto;
+import cn.maple.core.datasource.dto.GXDataFilterContext;
 import cn.maple.core.datasource.util.GXDataFilterThreadLocalUtils;
 import com.baomidou.mybatisplus.core.toolkit.PluginUtils;
 import com.baomidou.mybatisplus.extension.plugins.inner.InnerInterceptor;
@@ -25,7 +25,7 @@ import java.util.Objects;
 public class GXDataFilterInterceptor implements InnerInterceptor {
     @Override
     public void beforeQuery(Executor executor, MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
-        GXDataFilterInnerDto scope = getDataScope();
+        GXDataFilterContext scope = getDataScope();
         if (Objects.isNull(scope) || CharSequenceUtil.isBlank(scope.getSqlFilter())) {
             return;
         }
@@ -33,14 +33,14 @@ public class GXDataFilterInterceptor implements InnerInterceptor {
         String buildSql = getSelect(boundSql.getSql(), scope);
 
         PluginUtils.mpBoundSql(boundSql).sql(buildSql);
-        log.info("已应用数据权限过滤，重写SQL完成");
+        log.debug("已应用数据权限过滤，重写SQL完成");
     }
 
-    private GXDataFilterInnerDto getDataScope() {
-        return GXDataFilterThreadLocalUtils.getDataFilterInnerDto();
+    private GXDataFilterContext getDataScope() {
+        return GXDataFilterThreadLocalUtils.getDataFilterContext();
     }
 
-    private String getSelect(String originalSql, GXDataFilterInnerDto scope) {
+    private String getSelect(String originalSql, GXDataFilterContext scope) {
         if (CharSequenceUtil.isBlank(originalSql)) {
             log.warn("原始SQL为空，无法应用数据权限过滤");
             return originalSql;
