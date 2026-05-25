@@ -48,6 +48,18 @@ class GXDataFilterSqlResolverTest {
     }
 
     @Test
+    void resolveReturnsDenyAllWhenConditionsAreBlank() throws Exception {
+        GXDataFilter annotation = getAnnotation("defaultFilter");
+        JoinPoint point = Mockito.mock(JoinPoint.class);
+        when(point.getArgs()).thenReturn(new Object[0]);
+
+        GXDataFilterContext context = GXDataFilterSqlResolver.resolve(new BlankConditionDataScopeService(), annotation, point, "test");
+
+        assertFalse(context.isIgnored());
+        assertEquals(" (1 = 0) ", context.getSqlFilter());
+    }
+
+    @Test
     void resolveUsesConfiguredAliasAndFieldNames() throws Exception {
         GXDataFilter annotation = getAnnotation("customFilter");
         JoinPoint point = Mockito.mock(JoinPoint.class);
@@ -69,6 +81,18 @@ class GXDataFilterSqlResolverTest {
     private GXDataFilter getAnnotation(String methodName) throws NoSuchMethodException {
         Method method = getClass().getDeclaredMethod(methodName);
         return method.getAnnotation(GXDataFilter.class);
+    }
+
+    private static class BlankConditionDataScopeService extends TestDataScopeService {
+        @Override
+        public String getDeptCondition(String tableAlias, String[] deptIdFieldNames) {
+            return "   ";
+        }
+
+        @Override
+        public String getUserCondition(String tableAlias, String[] userIdFieldNames) {
+            return "";
+        }
     }
 
     private static class TestDataScopeService implements GXDataScopeService {

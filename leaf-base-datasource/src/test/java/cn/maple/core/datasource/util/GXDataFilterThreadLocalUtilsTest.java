@@ -8,6 +8,10 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -57,6 +61,59 @@ class GXDataFilterThreadLocalUtilsTest {
 
         assertEquals("ok", wrapped.call());
         assertNull(GXDataFilterThreadLocalUtils.getDataFilterInnerDto());
+    }
+
+    @Test
+    void wrappedRunnableDoesNotPolluteThreadPoolThreadAcrossTasks() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            GXDataFilterThreadLocalUtils.cleanDataFilterInnerDto();
+            GXDataFilterThreadLocalUtils.setDataFilterInnerDto(new GXDataFilterInnerDto("captured_filter"));
+            Future<?> first = executor.submit(GXDataFilterThreadLocalUtils.wrap(() -> {
+                assertEquals("captured_filter", GXDataFilterThreadLocalUtils.getDataFilterInnerDto().getSqlFilter());
+                GXDataFilterThreadLocalUtils.setDataFilterInnerDto(new GXDataFilterInnerDto("mutated_in_worker"));
+            }));
+            first.get();
+
+            Future<GXDataFilterInnerDto> second = executor.submit(GXDataFilterThreadLocalUtils::getDataFilterInnerDto);
+            assertNull(second.get());
+            assertEquals("captured_filter", GXDataFilterThreadLocalUtils.getDataFilterInnerDto().getSqlFilter());
+        } finally {
+            executor.shutdownNow();
+            GXDataFilterThreadLocalUtils.cleanDataFilterInnerDto();
+        }
+    }
+
+    @Test
+    void wrappedCallableInheritsCapturedContextAndRestoresWorkerContext() throws Exception {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> init = executor.submit(() -> GXDataFilterThreadLocalUtils.setDataFilterInnerDto(new GXDataFilterInnerDto("worker_baseline")));
+            init.get();
+
+            GXDataFilterThreadLocalUtils.setDataFilterInnerDto(new GXDataFilterInnerDto("caller_context"));
+            Callable<String> wrappedCallable = GXDataFilterThreadLocalUtils.wrap(() -> {
+                assertEquals("caller_context", GXDataFilterThreadLocalUtils.getDataFilterInnerDto().getSqlFilter());
+                GXDataFilterThreadLocalUtils.setDataFilterInnerDto(new GXDataFilterInnerDto("worker_mutated"));
+                return "done";
+            });
+
+            Future<String> result = executor.submit(() -> {
+                try {
+                    return wrappedCallable.call();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            assertEquals("done", result.get());
+
+            Future<GXDataFilterInnerDto> after = executor.submit(GXDataFilterThreadLocalUtils::getDataFilterInnerDto);
+            GXDataFilterInnerDto afterContext = after.get();
+            assertEquals("worker_baseline", afterContext.getSqlFilter());
+        } finally {
+            executor.shutdownNow();
+            GXDataFilterThreadLocalUtils.cleanDataFilterInnerDto();
+        }
     }
 
     @Test

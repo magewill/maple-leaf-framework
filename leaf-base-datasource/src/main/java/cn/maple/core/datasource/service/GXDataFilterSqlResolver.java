@@ -2,7 +2,6 @@ package cn.maple.core.datasource.service;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.datasource.annotation.GXDataFilter;
 import cn.maple.core.datasource.dto.GXDataFilterContext;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
@@ -37,12 +36,12 @@ public final class GXDataFilterSqlResolver {
         List<String> whereLst = new ArrayList<>();
 
         String userIdCondition = dataScopeService.getUserCondition(tableAlias, userIdFieldNames);
-        if (ObjectUtil.isNotNull(userIdCondition)) {
+        if (CharSequenceUtil.isNotBlank(userIdCondition)) {
             whereLst.add(userIdCondition);
         }
 
         String deptCondition = dataScopeService.getDeptCondition(tableAlias, deptIdFieldNames);
-        if (ObjectUtil.isNotNull(deptCondition)) {
+        if (CharSequenceUtil.isNotBlank(deptCondition)) {
             whereLst.add(deptCondition);
         }
 
