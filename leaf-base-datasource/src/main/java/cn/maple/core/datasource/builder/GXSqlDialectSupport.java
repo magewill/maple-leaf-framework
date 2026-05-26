@@ -13,6 +13,27 @@ final class GXSqlDialectSupport {
     private GXSqlDialectSupport() {
     }
 
+    static String buildExistsQuery(String innerSql) {
+        String dbType = resolveDbTypeFromContext().toLowerCase(Locale.ROOT);
+        if (GXSqlConstants.MYSQL_LIKE_DIALECTS.contains(dbType)) {
+            return CharSequenceUtil.format("SELECT EXISTS ({})", innerSql);
+        }
+        if (GXSqlConstants.POSTGRES_DIALECTS.contains(dbType)) {
+            return CharSequenceUtil.format("SELECT EXISTS ({})", innerSql);
+        }
+        if (GXSqlConstants.SQLSERVER_DIALECTS.contains(dbType)) {
+            return CharSequenceUtil.format("SELECT CASE WHEN EXISTS ({}) THEN 1 ELSE 0 END AS exists_result", innerSql);
+        }
+        if (GXSqlConstants.ORACLE_DIALECTS.contains(dbType)) {
+            return CharSequenceUtil.format("SELECT CASE WHEN EXISTS ({}) THEN 1 ELSE 0 END AS exists_result FROM DUAL", innerSql);
+        }
+        if (GXSqlConstants.DB2_DIALECTS.contains(dbType)) {
+            return CharSequenceUtil.format("SELECT CASE WHEN EXISTS ({}) THEN 1 ELSE 0 END AS exists_result FROM SYSIBM.SYSDUMMY1", innerSql);
+        }
+        GXBaseBuilder.LOGGER.warn("Unrecognized dbType [{}] for exists query, falling back to standard CASE WHEN EXISTS syntax.", dbType);
+        return CharSequenceUtil.format("SELECT CASE WHEN EXISTS ({}) THEN 1 ELSE 0 END AS exists_result", innerSql);
+    }
+
     static String applySingleRowLimit(String sql) {
         String dbType = resolveDbTypeFromContext().toLowerCase(Locale.ROOT);
         if (GXSqlConstants.MYSQL_LIKE_DIALECTS.contains(dbType) || GXSqlConstants.POSTGRES_DIALECTS.contains(dbType)) {

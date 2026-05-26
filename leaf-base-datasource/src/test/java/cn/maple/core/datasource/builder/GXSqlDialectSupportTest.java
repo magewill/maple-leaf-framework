@@ -61,4 +61,49 @@ class GXSqlDialectSupportTest {
             assertEquals("SELECT * FROM (SELECT 1) gx_tmp_one WHERE ROWNUM <= 1", sql);
         }
     }
+
+    @Test
+    void buildExistsQueryUsesMysqlCompatibleSyntax() {
+        GXDynamicDbTypeRegistry.register("master", "mysql");
+        try (GXDynamicContextHolder.AutoCloseableDataSource ignored = GXDynamicContextHolder.withDataSource("master")) {
+            String sql = GXSqlDialectSupport.buildExistsQuery("SELECT 1 FROM sys_menu");
+            assertEquals("SELECT EXISTS (SELECT 1 FROM sys_menu)", sql);
+        }
+    }
+
+    @Test
+    void buildExistsQueryUsesPostgresCompatibleSyntax() {
+        GXDynamicDbTypeRegistry.register("report", "postgresql");
+        try (GXDynamicContextHolder.AutoCloseableDataSource ignored = GXDynamicContextHolder.withDataSource("report")) {
+            String sql = GXSqlDialectSupport.buildExistsQuery("SELECT 1 FROM sys_menu");
+            assertEquals("SELECT EXISTS (SELECT 1 FROM sys_menu)", sql);
+        }
+    }
+
+    @Test
+    void buildExistsQueryUsesSqlServerCompatibleSyntax() {
+        GXDynamicDbTypeRegistry.register("slave", "sqlserver");
+        try (GXDynamicContextHolder.AutoCloseableDataSource ignored = GXDynamicContextHolder.withDataSource("slave")) {
+            String sql = GXSqlDialectSupport.buildExistsQuery("SELECT 1 FROM sys_menu");
+            assertEquals("SELECT CASE WHEN EXISTS (SELECT 1 FROM sys_menu) THEN 1 ELSE 0 END AS exists_result", sql);
+        }
+    }
+
+    @Test
+    void buildExistsQueryUsesOracleCompatibleSyntax() {
+        GXDynamicDbTypeRegistry.register("archive", "oracle");
+        try (GXDynamicContextHolder.AutoCloseableDataSource ignored = GXDynamicContextHolder.withDataSource("archive")) {
+            String sql = GXSqlDialectSupport.buildExistsQuery("SELECT 1 FROM sys_menu");
+            assertEquals("SELECT CASE WHEN EXISTS (SELECT 1 FROM sys_menu) THEN 1 ELSE 0 END AS exists_result FROM DUAL", sql);
+        }
+    }
+
+    @Test
+    void buildExistsQueryUsesDb2CompatibleSyntax() {
+        GXDynamicDbTypeRegistry.register("report", "db2");
+        try (GXDynamicContextHolder.AutoCloseableDataSource ignored = GXDynamicContextHolder.withDataSource("report")) {
+            String sql = GXSqlDialectSupport.buildExistsQuery("SELECT 1 FROM sys_menu");
+            assertEquals("SELECT CASE WHEN EXISTS (SELECT 1 FROM sys_menu) THEN 1 ELSE 0 END AS exists_result FROM SYSIBM.SYSDUMMY1", sql);
+        }
+    }
 }

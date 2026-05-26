@@ -19,6 +19,7 @@ final class GXSqlConstants {
     static final Set<String> POSTGRES_DIALECTS = Set.of("postgres", "postgresql", "postgre_sql");
     static final Set<String> SQLSERVER_DIALECTS = Set.of("sqlserver", "sql_server", "mssql", "sql-server");
     static final Set<String> ORACLE_DIALECTS = Set.of("oracle");
+    static final Set<String> DB2_DIALECTS = Set.of("db2");
     static final Pattern SQL_FUNCTION_PATTERN = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*\\s*\\(.*\\)$", Pattern.DOTALL);
     static final Pattern EXPRESSION_ALIAS_PATTERN = Pattern.compile("^(.*?)(?:(?i)\\s+as\\s+|\\s+)([A-Za-z_][A-Za-z0-9_]*)\\s*$", Pattern.DOTALL);
 

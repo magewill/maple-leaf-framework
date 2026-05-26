@@ -79,7 +79,7 @@ public interface GXBaseBuilder {
         existsQuery.setColumns(CollUtil.newLinkedHashSet("1"));
         String innerSql = findByCondition(existsQuery, null, newParamNamespace("exists"));
         dbQueryParamInnerDto.getParamMap().putAll(existsQuery.getParamMap());
-        return CharSequenceUtil.format("SELECT EXISTS ({})", innerSql);
+        return GXSqlDialectSupport.buildExistsQuery(innerSql);
     }
 
     static String findByCondition(GXBaseQueryParamInnerDto dbQueryParamInnerDto) {
