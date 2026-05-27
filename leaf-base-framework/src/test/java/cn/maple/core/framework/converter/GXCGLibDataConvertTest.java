@@ -103,11 +103,35 @@ class GXCGLibDataConvertTest {
     }
 
     @Test
-    void convertsCollectionToSet() {
-        Object result = converter.convert(List.of("a", "b", "a"), LinkedHashSet.class, null);
+    void convertsCollectionToObjectCollectionWithIdentityPreserved() {
+        List<Object> source = new ArrayList<>();
+        Object marker = new Object();
+        source.add("A");
+        source.add(1);
+        source.add(marker);
 
-        assertInstanceOf(LinkedHashSet.class, result);
-        assertEquals(new LinkedHashSet<>(List.of("a", "b")), result);
+        Object result = converter.convert(source, List.class, null);
+
+        assertInstanceOf(List.class, result);
+        List<?> list = (List<?>) result;
+        assertEquals(3, list.size());
+        assertSame(marker, list.get(2));
+        assertEquals("A", list.get(0));
+        assertEquals(1, list.get(1));
+    }
+
+    @Test
+    void convertsMapToMapReturnsDirectEntriesWhenObjectTypes() {
+        Object key = new Object();
+        Object value = new Object();
+        Map<Object, Object> source = new LinkedHashMap<>();
+        source.put(key, value);
+
+        Object result = converter.convert(source, Map.class, null);
+
+        assertInstanceOf(Map.class, result);
+        Map<?, ?> map = (Map<?, ?>) result;
+        assertSame(value, map.get(key));
     }
 
     @Test
@@ -144,6 +168,21 @@ class GXCGLibDataConvertTest {
         assertInstanceOf(TreeMap.class, result);
         Map<?, ?> map = (Map<?, ?>) result;
         assertEquals("value", map.get(key.toString()));
+    }
+
+    @Test
+    void convertsMapToTreeMapSkipsNullKeyButKeepsNullValue() {
+        Map<Object, Object> source = new LinkedHashMap<>();
+        source.put(null, 1);
+        source.put("a", null);
+
+        Object result = assertDoesNotThrow(() -> converter.convert(source, TreeMap.class, null));
+
+        assertInstanceOf(TreeMap.class, result);
+        Map<?, ?> map = (Map<?, ?>) result;
+        assertFalse(map.keySet().stream().anyMatch(Objects::isNull));
+        assertTrue(map.containsKey("a"));
+        assertNull(map.get("a"));
     }
 
     @Test

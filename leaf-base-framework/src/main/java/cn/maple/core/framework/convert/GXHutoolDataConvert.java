@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentMap;
 public class GXHutoolDataConvert {
     private static final Logger LOG = LoggerFactory.getLogger(GXHutoolDataConvert.class);
     private static final GXHutoolDataConvert INSTANCE = new GXHutoolDataConvert();
+    private static volatile ObjectMapper cachedObjectMapper;
 
     private GXHutoolDataConvert() {
     }
@@ -152,14 +153,13 @@ public class GXHutoolDataConvert {
             Object convertedValue = Convert.convertWithCheck(type, value, null, false);
             return convertedValue != null ? convertedValue : value;
         } catch (Exception e) {
-            LOG.debug("Type convert failed: {} -> {}, {}",
-                    value.getClass().getName(),
-                    type.getTypeName(),
-                    e.getMessage());
+            String sourceType = value.getClass().getName();
+            String targetType = type == null ? "null" : type.getTypeName();
+            LOG.debug("Type convert failed: {} -> {}, {}", sourceType, targetType, e.getMessage());
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Type convert failed", e);
             }
-            return value;
+            return null;
         }
     }
 
@@ -317,14 +317,15 @@ public class GXHutoolDataConvert {
         try {
             return JSONUtil.toBean(value, targetClass);
         } catch (Exception e) {
-            ObjectMapper objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
+            ObjectMapper objectMapper = getObjectMapper();
             if (objectMapper == null) {
                 throw e;
             }
             try {
                 return objectMapper.readValue(value, targetClass);
             } catch (Exception jacksonException) {
-                throw e;
+                jacksonException.addSuppressed(e);
+                throw jacksonException;
             }
         }
     }
@@ -339,6 +340,21 @@ public class GXHutoolDataConvert {
             componentType = Dict.class;
         }
         return convertCollectionToTarget(targetClass, parsedList, componentType);
+    }
+
+    private @Nullable ObjectMapper getObjectMapper() {
+        ObjectMapper objectMapper = cachedObjectMapper;
+        if (objectMapper != null) {
+            return objectMapper;
+        }
+        synchronized (GXHutoolDataConvert.class) {
+            objectMapper = cachedObjectMapper;
+            if (objectMapper == null) {
+                objectMapper = GXSpringContextUtils.getBean(ObjectMapper.class);
+                cachedObjectMapper = objectMapper;
+            }
+        }
+        return objectMapper;
     }
 
     private @Nullable Object handleCollectionConversion(@Nullable Type type, Class<?> targetClass, Collection<?> sourceCollection) {
@@ -474,7 +490,7 @@ public class GXHutoolDataConvert {
             if (resultMap instanceof TreeMap<?, ?> && convertedKey != null && !(convertedKey instanceof Comparable<?>)) {
                 convertedKey = convertedKey.toString();
             }
-            if (rejectsNullEntries(resultMap) && (convertedKey == null || convertedValue == null)) {
+            if (rejectsNullEntries(resultMap, convertedKey, convertedValue)) {
                 continue;
             }
             resultMap.put(convertedKey, convertedValue);
@@ -504,8 +520,14 @@ public class GXHutoolDataConvert {
         }
     }
 
-    private boolean rejectsNullEntries(Map<?, ?> map) {
-        return map instanceof ConcurrentMap<?, ?> || map instanceof Hashtable<?, ?> || map instanceof TreeMap<?, ?>;
+    private boolean rejectsNullEntries(Map<?, ?> map, @Nullable Object key, @Nullable Object value) {
+        if (map instanceof ConcurrentMap<?, ?> || map instanceof Hashtable<?, ?>) {
+            return key == null || value == null;
+        }
+        if (map instanceof TreeMap<?, ?>) {
+            return key == null;
+        }
+        return false;
     }
 
     private boolean rejectsNullElements(Collection<?> collection) {

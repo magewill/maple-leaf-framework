@@ -24,7 +24,8 @@ public class GXCGLibDataConvert implements Converter {
 
     private static final Map<Class<?>, GXCGLibDataConvert> CONVERTER_CACHE = new WeakKeyConcurrentMap<>(new ConcurrentHashMap<>(1024));
     private static final Map<Class<?>, ClassMetadata> CLASS_METADATA_CACHE = new WeakKeyConcurrentMap<>(new ConcurrentHashMap<>(1024));
-    private static final Map<Class<?>, Map<Class<?>, BeanCopier>> BEAN_COPIER_CACHE = new WeakKeyConcurrentMap<>(new ConcurrentHashMap<>(1024));
+    private static final Map<BeanCopierCacheKey, BeanCopier> BEAN_COPIER_CACHE = new WeakKeyConcurrentMap<>(new ConcurrentHashMap<>(2048));
+    private static final Map<String, String> SETTER_PROPERTY_CACHE = new ConcurrentHashMap<>(256);
 
     private final ClassMetadata classMetadata;
 
@@ -43,9 +44,8 @@ public class GXCGLibDataConvert implements Converter {
     }
 
     private static BeanCopier getBeanCopier(Class<?> sourceClass, Class<?> targetClass) {
-        return BEAN_COPIER_CACHE
-                .computeIfAbsent(sourceClass, k -> new ConcurrentHashMap<>())
-                .computeIfAbsent(targetClass, k -> BeanCopier.create(sourceClass, targetClass, true));
+        return BEAN_COPIER_CACHE.computeIfAbsent(new BeanCopierCacheKey(sourceClass, targetClass),
+                k -> BeanCopier.create(sourceClass, targetClass, true));
     }
 
     private static ClassMetadata buildClassMetadata(Class<?> clazz) {
@@ -199,19 +199,21 @@ public class GXCGLibDataConvert implements Converter {
 
     private @Nullable String getPropertyName(@Nullable String setterName) {
         if (setterName == null) {
-            return "";
+            return null;
         }
-        if (setterName.startsWith("set") && setterName.length() > 3) {
-            String propertyNamePart = setterName.substring(3);
-            if (propertyNamePart.length() == 1) {
-                return propertyNamePart.toLowerCase();
+        return SETTER_PROPERTY_CACHE.computeIfAbsent(setterName, key -> {
+            if (key.startsWith("set") && key.length() > 3) {
+                String propertyNamePart = key.substring(3);
+                if (propertyNamePart.length() == 1) {
+                    return propertyNamePart.toLowerCase();
+                }
+                if (Character.isUpperCase(propertyNamePart.charAt(0)) && Character.isLowerCase(propertyNamePart.charAt(1))) {
+                    return Character.toLowerCase(propertyNamePart.charAt(0)) + propertyNamePart.substring(1);
+                }
+                return propertyNamePart;
             }
-            if (Character.isUpperCase(propertyNamePart.charAt(0)) && Character.isLowerCase(propertyNamePart.charAt(1))) {
-                return Character.toLowerCase(propertyNamePart.charAt(0)) + propertyNamePart.substring(1);
-            }
-            return propertyNamePart;
-        }
-        return setterName;
+            return key;
+        });
     }
 
     private boolean isComplexBean(Class<?> clazz) {
@@ -350,9 +352,14 @@ public class GXCGLibDataConvert implements Converter {
             Object resultArray = Array.newInstance(targetComponentClass, sourceCollection.size());
             int i = 0;
             for (Object sourceItem : sourceCollection) {
-                Object convertedItem = convert(sourceItem, targetComponentClass, null);
-                if (convertedItem == null && targetComponentClass.isPrimitive()) {
-                    convertedItem = GXCommonUtils.getClassDefaultValue(targetComponentClass);
+                Object convertedItem = sourceItem;
+                if (sourceItem == null) {
+                    convertedItem = targetComponentClass.isPrimitive() ? GXCommonUtils.getClassDefaultValue(targetComponentClass) : null;
+                } else if (targetComponentClass != Object.class && !isAssignableValue(targetComponentClass, sourceItem)) {
+                    convertedItem = convert(sourceItem, targetComponentClass, null);
+                    if (convertedItem == null && targetComponentClass.isPrimitive()) {
+                        convertedItem = GXCommonUtils.getClassDefaultValue(targetComponentClass);
+                    }
                 }
                 Array.set(resultArray, i++, convertedItem);
             }
@@ -361,7 +368,11 @@ public class GXCGLibDataConvert implements Converter {
 
         Collection<Object> resultCollection = newTargetCollection(targetClass, sourceCollection.size());
         for (Object sourceItem : sourceCollection) {
-            resultCollection.add(convert(sourceItem, targetComponentClass, null));
+            if (sourceItem == null || targetComponentClass == Object.class || isAssignableValue(targetComponentClass, sourceItem)) {
+                resultCollection.add(sourceItem);
+            } else {
+                resultCollection.add(convert(sourceItem, targetComponentClass, null));
+            }
         }
         return resultCollection;
     }
@@ -397,13 +408,23 @@ public class GXCGLibDataConvert implements Converter {
         Map<Object, Object> resultMap = newTargetMap(targetClass, sourceMap.size());
 
         for (Map.Entry<?, ?> entry : sourceMap.entrySet()) {
-            Object convertedKey = convert(entry.getKey(), targetKeyClass, null);
-            Object convertedValue = convert(entry.getValue(), targetValueClass, null);
+            Object sourceKey = entry.getKey();
+            Object sourceValue = entry.getValue();
+            if (rejectsNullEntries(resultMap, sourceKey, sourceValue)) {
+                continue;
+            }
+
+            Object convertedKey = (sourceKey == null || targetKeyClass == Object.class || isAssignableValue(targetKeyClass, sourceKey))
+                    ? sourceKey
+                    : convert(sourceKey, targetKeyClass, null);
+            Object convertedValue = (sourceValue == null || targetValueClass == Object.class || isAssignableValue(targetValueClass, sourceValue))
+                    ? sourceValue
+                    : convert(sourceValue, targetValueClass, null);
 
             if (resultMap instanceof TreeMap && convertedKey != null && !(convertedKey instanceof Comparable<?>)) {
                 convertedKey = convertedKey.toString();
             }
-            if (rejectsNullEntries(resultMap) && (convertedKey == null || convertedValue == null)) {
+            if (rejectsNullEntries(resultMap, convertedKey, convertedValue)) {
                 continue;
             }
             resultMap.put(convertedKey, convertedValue);
@@ -429,8 +450,14 @@ public class GXCGLibDataConvert implements Converter {
         return result != null ? result : new HashMap<>(size);
     }
 
-    private boolean rejectsNullEntries(Map<?, ?> map) {
-        return map instanceof ConcurrentHashMap<?, ?> || map instanceof Hashtable<?, ?>;
+    private boolean rejectsNullEntries(Map<?, ?> map, @Nullable Object key, @Nullable Object value) {
+        if (map instanceof ConcurrentHashMap<?, ?> || map instanceof Hashtable<?, ?>) {
+            return key == null || value == null;
+        }
+        if (map instanceof TreeMap<?, ?>) {
+            return key == null;
+        }
+        return false;
     }
 
     private @Nullable Type getGenericTypeArgumentForTarget(@Nullable String propertyName, Class<?> targetType, int index) {
@@ -466,5 +493,8 @@ public class GXCGLibDataConvert implements Converter {
 
     private record ClassMetadata(Map<String, Field> fieldCache, Map<String, Type> genericTypeCache) {
         private static final ClassMetadata EMPTY = new ClassMetadata(Collections.emptyMap(), Collections.emptyMap());
+    }
+
+    private record BeanCopierCacheKey(Class<?> sourceClass, Class<?> targetClass) {
     }
 }

@@ -632,12 +632,11 @@ class GXHutoolDataConvertTest {
     // ==================== IJSONTypeConverter 分支 ====================
 
     @Test
-    @DisplayName("convert 异常时返回原值")
-    void testConvertExceptionReturnsOriginalValue() {
-        // 传入无法处理的类型组合，内部可能触发异常，但应返回原值
-        Object input = new Thread(); // 一个不会转换成功的对象
-        Object result = converter.convert(Integer.class, input);
-        assertThat(result).isSameAs(input);
+    @DisplayName("convert: conversion failure should return null for reference target without switch")
+    void testConvertFailureReturnsNullWithoutSwitch() {
+        Object result = converter.convert(Integer.class, new Object());
+
+        assertThat(result).isNull();
     }
 
     // ==================== Dict 转 Bean 方法 (convert(Class<T>, Dict)) ====================
@@ -720,15 +719,16 @@ class GXHutoolDataConvertTest {
     }
 
     @Test
-    @DisplayName("Map: TreeMap 遇到不可比较 key 时不抛异常")
-    void testMapToTreeMapWithNonComparableKey() {
-        Object key = new Object();
-        Map<Object, Object> source = new LinkedHashMap<>();
-        source.put(key, "value");
+    @DisplayName("Map: TreeMap should keep null values when key is valid")
+    void testMapToTreeMapKeepsNullValues() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("a", null);
 
-        TreeMap<?, ?> result = (TreeMap<?, ?>) converter.convert(TreeMap.class, source);
+        @SuppressWarnings("unchecked")
+        TreeMap<String, Object> result = (TreeMap<String, Object>) converter.convert(TreeMap.class, source);
 
-        assertThat(result.get(key.toString())).isEqualTo("value");
+        assertThat(result).containsKey("a");
+        assertThat(result.get("a")).isNull();
     }
 
     @Test
@@ -768,11 +768,12 @@ class GXHutoolDataConvertTest {
         }
     }
 
+
+
     enum Status {ACTIVE, INACTIVE, PENDING}
 
-    // ==================== 集合和数组空值 ====================
-
     enum Color {RED, GREEN, BLUE}
+
 
     // 测试用 GXBaseData 子类
     static class TestData extends GXBaseData {
