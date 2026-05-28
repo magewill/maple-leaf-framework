@@ -8,7 +8,9 @@ import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotNull;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpInputMessage;
 import org.springframework.http.converter.HttpMessageConverter;
@@ -27,14 +29,22 @@ public class GXRequestBodyAdvice extends RequestBodyAdviceAdapter {
     private static final GXRequestBodyAdviceService DEFAULT_SERVICE = new GXRequestBodyAdviceService() {
     };
 
-    private final ObjectProvider<GXRequestBodyAdviceService> requestBodyAdviceServiceProvider;
+    private final ObjectProvider<@NonNull GXRequestBodyAdviceService> requestBodyAdviceServiceProvider;
+    private final boolean captureAllRequestBodies;
 
-    public GXRequestBodyAdvice(ObjectProvider<GXRequestBodyAdviceService> requestBodyAdviceServiceProvider) {
+    @Autowired
+    public GXRequestBodyAdvice(ObjectProvider<@NonNull GXRequestBodyAdviceService> requestBodyAdviceServiceProvider) {
+        this(requestBodyAdviceServiceProvider,
+                GXCommonUtils.getEnvironmentValue("maple.framework.web.advice.capture-all-request-bodies", boolean.class, false));
+    }
+
+    GXRequestBodyAdvice(ObjectProvider<@NonNull GXRequestBodyAdviceService> requestBodyAdviceServiceProvider, boolean captureAllRequestBodies) {
         this.requestBodyAdviceServiceProvider = requestBodyAdviceServiceProvider;
+        this.captureAllRequestBodies = captureAllRequestBodies;
     }
 
     @Override
-    public boolean supports(MethodParameter methodParameter, Type targetType, Class<? extends HttpMessageConverter<?>> converterType) {
+    public boolean supports(@NonNull MethodParameter methodParameter, @NonNull Type targetType, @NonNull Class<? extends HttpMessageConverter<?>> converterType) {
         if (isCaptureAllRequestBodies()) {
             return true;
         }
@@ -43,18 +53,18 @@ public class GXRequestBodyAdvice extends RequestBodyAdviceAdapter {
 
     @NotNull
     @Override
-    public Object afterBodyRead(Object body, HttpInputMessage inputMessage, MethodParameter parameter, Type targetType, Class<? extends HttpMessageConverter<?>> converterType) {
+    public Object afterBodyRead(@NonNull Object body, @NonNull HttpInputMessage inputMessage, @NonNull MethodParameter parameter, @NonNull Type targetType, @NonNull Class<? extends HttpMessageConverter<?>> converterType) {
         storeJsonRequestBodyIfAbsent(body, inputMessage);
         return getRequestBodyAdviceService().afterBodyRead(body, inputMessage, parameter, targetType, converterType);
     }
 
     @Override
-    public HttpInputMessage beforeBodyRead(HttpInputMessage inputMessage, MethodParameter parameter, Type targetType, Class<? extends HttpMessageConverter<?>> converterType) throws IOException {
+    public HttpInputMessage beforeBodyRead(@NonNull HttpInputMessage inputMessage, @NonNull MethodParameter parameter, @NonNull Type targetType, @NonNull Class<? extends HttpMessageConverter<?>> converterType) throws IOException {
         return getRequestBodyAdviceService().beforeBodyRead(inputMessage, parameter, targetType, converterType);
     }
 
     @Override
-    public Object handleEmptyBody(Object body, HttpInputMessage inputMessage, MethodParameter parameter, Type targetType, Class<? extends HttpMessageConverter<?>> converterType) {
+    public Object handleEmptyBody(Object body, @NonNull HttpInputMessage inputMessage, @NonNull MethodParameter parameter, @NonNull Type targetType, @NonNull Class<? extends HttpMessageConverter<?>> converterType) {
         return getRequestBodyAdviceService().handleEmptyBody(body, inputMessage, parameter, targetType, converterType);
     }
 
@@ -64,7 +74,7 @@ public class GXRequestBodyAdvice extends RequestBodyAdviceAdapter {
     }
 
     private boolean isCaptureAllRequestBodies() {
-        return GXCommonUtils.getEnvironmentValue("maple.framework.web.advice.capture-all-request-bodies", boolean.class, false);
+        return captureAllRequestBodies;
     }
 
     private void storeJsonRequestBodyIfAbsent(Object body, HttpInputMessage inputMessage) {

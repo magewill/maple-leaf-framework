@@ -13,6 +13,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 class GXRequestBodyAdviceTest {
@@ -32,7 +33,7 @@ class GXRequestBodyAdviceTest {
 
     @Test
     void supportsUsesDefaultProtocolScopeWhenServiceUnavailable() {
-        GXRequestBodyAdvice advice = new GXRequestBodyAdvice(provider(null));
+        GXRequestBodyAdvice advice = new GXRequestBodyAdvice(provider(null), false);
 
         assertTrue(advice.supports(null, ValidRequest.class, null));
         assertFalse(advice.supports(null, String.class, null));
@@ -40,14 +41,25 @@ class GXRequestBodyAdviceTest {
 
     @Test
     void supportsAllRequestBodiesWhenConfigured() {
-        GXRequestBodyAdvice advice = new GXRequestBodyAdvice(provider(null));
+        GXRequestBodyAdvice advice = new GXRequestBodyAdvice(provider(null), true);
 
+        assertTrue(advice.supports(null, String.class, null));
+    }
+
+    @Test
+    void supportsCachesCaptureAllRequestBodiesFlag() {
         try (MockedStatic<GXCommonUtils> commonUtils = Mockito.mockStatic(GXCommonUtils.class)) {
             commonUtils.when(() -> GXCommonUtils.getEnvironmentValue(
                     "maple.framework.web.advice.capture-all-request-bodies", boolean.class, false
             )).thenReturn(true);
 
+            GXRequestBodyAdvice advice = new GXRequestBodyAdvice(provider(null));
+
             assertTrue(advice.supports(null, String.class, null));
+            assertTrue(advice.supports(null, ValidRequest.class, null));
+            commonUtils.verify(() -> GXCommonUtils.getEnvironmentValue(
+                    "maple.framework.web.advice.capture-all-request-bodies", boolean.class, false
+            ), times(1));
         }
     }
 
