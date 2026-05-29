@@ -15,15 +15,19 @@ import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Constants;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import lombok.extern.slf4j.Slf4j;
+import net.sf.jsqlparser.expression.BinaryExpression;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.ExpressionVisitorAdapter;
+import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
-import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
-import net.sf.jsqlparser.expression.operators.relational.GreaterThanEquals;
-import net.sf.jsqlparser.expression.operators.relational.LikeExpression;
-import net.sf.jsqlparser.expression.operators.relational.MinorThanEquals;
+import net.sf.jsqlparser.expression.operators.relational.Between;
+import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
+import net.sf.jsqlparser.expression.operators.relational.InExpression;
+import net.sf.jsqlparser.expression.operators.relational.IsNullExpression;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -37,14 +41,17 @@ import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 @Aspect
 @Component
 @Slf4j
 @SuppressWarnings("all")
 public class GXMyBatisPlusUpdateEntityAspect {
-    private static final ConcurrentHashMap<String, List<ConditionToken>> WHERE_SQL_CONDITION_CACHE = new ConcurrentHashMap<>(128);
+    private static final Cache<String, List<ConditionToken>> WHERE_SQL_CONDITION_CACHE = Caffeine.newBuilder()
+            .maximumSize(2048)
+            .expireAfterAccess(1, TimeUnit.DAYS)
+            .build();
 
     @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && execution(* update(..))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
@@ -91,46 +98,45 @@ public class GXMyBatisPlusUpdateEntityAspect {
             return;
         }
 
-        try {
-            Type[] mapperTypes = AopUtils.getTargetClass(point.getTarget()).getInterfaces();
-            Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
-            if (ObjectUtil.isEmpty(mapperTypes)) {
-                return;
+        Type[] mapperTypes = AopUtils.getTargetClass(point.getTarget()).getInterfaces();
+        Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
+        if (ObjectUtil.isEmpty(mapperTypes)) {
+            return;
+        }
+
+        Dict source = handlePointArgs(point);
+        if (ObjectUtil.isEmpty(source)) {
+            return;
+        }
+
+        for (Type type : mapperTypes) {
+            Class<?> mapperClass = convertTypeToClass(type);
+            if (ObjectUtil.isNull(mapperClass)) {
+                continue;
             }
 
-            for (Type type : mapperTypes) {
-                Class<?> mapperClass = convertTypeToClass(type);
-                if (ObjectUtil.isNull(mapperClass)) {
-                    continue;
-                }
+            GXMyBatisListener listenerConfig = resolveListenerConfig(mapperClass, invokedMethod);
+            if (ObjectUtil.isNull(listenerConfig)) {
+                continue;
+            }
 
-                GXMyBatisListener listenerConfig = resolveListenerConfig(mapperClass, invokedMethod);
-                if (ObjectUtil.isNull(listenerConfig)) {
-                    continue;
-                }
+            Class<? extends GXMybatisListenerService> listenerClass = listenerConfig.listenerClazz();
+            String eventType = GXModelEventNamingEnums.SYNC_UPDATE_ENTITY.getEventType();
+            String eventName = GXModelEventNamingEnums.SYNC_UPDATE_ENTITY.getEventName();
+            if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
+                eventType = GXModelEventNamingEnums.ASYNC_UPDATE_ENTITY.getEventType();
+                eventName = GXModelEventNamingEnums.ASYNC_UPDATE_ENTITY.getEventName();
+            }
 
-                Dict source = handlePointArgs(point);
-                if (ObjectUtil.isEmpty(source)) {
-                    continue;
-                }
-
-                Class<? extends GXMybatisListenerService> listenerClass = listenerConfig.listenerClazz();
-                String eventType = GXModelEventNamingEnums.SYNC_UPDATE_ENTITY.getEventType();
-                String eventName = GXModelEventNamingEnums.SYNC_UPDATE_ENTITY.getEventName();
-                if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
-                    eventType = GXModelEventNamingEnums.ASYNC_UPDATE_ENTITY.getEventType();
-                    eventName = GXModelEventNamingEnums.ASYNC_UPDATE_ENTITY.getEventName();
-                }
-
-                Dict eventParam = Dict.create()
-                        .set("listenerClazzName", listenerClass.getSimpleName())
-                        .set("listenerClazz", listenerClass);
-                GXMyBatisModelUpdateEntityEvent<Dict> event = new GXMyBatisModelUpdateEntityEvent<>(source, eventType, eventParam, eventName);
+            Dict eventParam = Dict.create()
+                    .set("listenerClazzName", listenerClass.getSimpleName())
+                    .set("listenerClazz", listenerClass);
+            GXMyBatisModelUpdateEntityEvent<Dict> event = new GXMyBatisModelUpdateEntityEvent<>(source, eventType, eventParam, eventName);
+            if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
                 GXEventPublisherUtils.publishEventAfterCommit(event);
-                return;
+            } else {
+                GXEventPublisherUtils.publishEvent(event);
             }
-        } catch (Exception e) {
-            log.error("Failed to publish update entity event", e);
         }
     }
 
@@ -154,80 +160,135 @@ public class GXMyBatisPlusUpdateEntityAspect {
     }
 
     private <T> Dict handleUpdateWrapper(Object objectWrapper) {
-        UpdateWrapper<T> updateWrapper = Convert.convert(new TypeReference<UpdateWrapper<T>>() {
+        UpdateWrapper<T> updateWrapper = Convert.convert(new TypeReference<>() {
         }, objectWrapper);
         return parseWhereSQL(updateWrapper);
     }
 
     private <T> Dict parseWhereSQL(UpdateWrapper<T> updateWrapper) {
-        if (ObjectUtil.isNull(updateWrapper)) {
-            return Dict.create().set("keyOperatorPairs", Dict.create()).set("keyValuePairs", Dict.create());
-        }
-        String whereSQL = updateWrapper.getTargetSql();
         Dict keyValuePairs = Dict.create();
         Dict keyOperatorPairs = Dict.create();
+        Dict result = Dict.create()
+                .set("keyOperatorPairs", keyOperatorPairs)
+                .set("keyValuePairs", keyValuePairs);
+        if (ObjectUtil.isNull(updateWrapper)) {
+            return result;
+        }
+
+        String whereSQL = updateWrapper.getTargetSql();
         Map<String, Object> paramNameValuePairs = updateWrapper.getParamNameValuePairs();
-        if (CharSequenceUtil.isBlank(whereSQL) || ObjectUtil.isEmpty(paramNameValuePairs)) {
-            return Dict.create().set("keyOperatorPairs", keyOperatorPairs).set("keyValuePairs", keyValuePairs);
+        if (CharSequenceUtil.isBlank(whereSQL)) {
+            return result.set("rawWhereSql", whereSQL);
         }
 
-        List<ConditionToken> conditionTokens = WHERE_SQL_CONDITION_CACHE.computeIfAbsent(whereSQL, this::extractConditionTokens);
-        for (int i = 0; i < conditionTokens.size(); i++) {
-            ConditionToken token = conditionTokens.get(i);
-            String paramName = Constants.WRAPPER_PARAM + (i + 1);
+        List<ConditionToken> conditionTokens = WHERE_SQL_CONDITION_CACHE.get(whereSQL, this::extractConditionTokens);
+        if (ObjectUtil.isEmpty(paramNameValuePairs) || ObjectUtil.isEmpty(conditionTokens)) {
+            return result.set("rawWhereSql", whereSQL);
+        }
+
+        int paramIndex = 1;
+        for (ConditionToken token : conditionTokens) {
             keyOperatorPairs.set(token.field(), token.operator());
-            keyValuePairs.set(token.field(), paramNameValuePairs.get(paramName));
+            if (token.paramCount() <= 0) {
+                keyValuePairs.set(token.field(), null);
+                continue;
+            }
+            if (token.paramCount() == 1) {
+                String paramName = Constants.WRAPPER_PARAM + paramIndex++;
+                keyValuePairs.set(token.field(), paramNameValuePairs.get(paramName));
+                continue;
+            }
+            List<Object> values = new ArrayList<>(token.paramCount());
+            for (int i = 0; i < token.paramCount(); i++) {
+                String paramName = Constants.WRAPPER_PARAM + paramIndex++;
+                values.add(paramNameValuePairs.get(paramName));
+            }
+            keyValuePairs.set(token.field(), values);
         }
 
-        return Dict.create().set("keyOperatorPairs", keyOperatorPairs).set("keyValuePairs", keyValuePairs);
+        return result.set("rawWhereSql", whereSQL);
     }
 
     private List<ConditionToken> extractConditionTokens(String whereSQL) {
         List<ConditionToken> conditionTokens = new ArrayList<>(8);
+        if (CharSequenceUtil.isBlank(whereSQL)) {
+            return List.copyOf(conditionTokens);
+        }
+
         try {
             Expression expression = CCJSqlParserUtil.parseCondExpression(whereSQL);
-            expression.accept(new ExpressionVisitorAdapter() {
+            expression.accept(new ExpressionVisitorAdapter<Void>() {
                 @Override
-                public void visit(AndExpression andExpression) {
-                    andExpression.getLeftExpression().accept(this);
-                    andExpression.getRightExpression().accept(this);
+                public <S> Void visit(AndExpression andExpression, S context) {
+                    andExpression.getLeftExpression().accept(this, context);
+                    andExpression.getRightExpression().accept(this, context);
+                    return null;
                 }
 
                 @Override
-                public void visit(OrExpression orExpression) {
-                    orExpression.getLeftExpression().accept(this);
-                    orExpression.getRightExpression().accept(this);
+                public <S> Void visit(OrExpression orExpression, S context) {
+                    orExpression.getLeftExpression().accept(this, context);
+                    orExpression.getRightExpression().accept(this, context);
+                    return null;
                 }
 
                 @Override
-                public void visit(EqualsTo equalsTo) {
-                    appendToken(equalsTo.getLeftExpression().toString(), equalsTo.getStringExpression());
+                public <S> Void visit(Between between, S context) {
+                    appendToken(between.getLeftExpression().toString(), between.isNot() ? "not between" : "between", 2);
+                    return null;
                 }
 
                 @Override
-                public void visit(GreaterThanEquals greaterThanEquals) {
-                    appendToken(greaterThanEquals.getLeftExpression().toString(), greaterThanEquals.getStringExpression());
+                public <S> Void visit(InExpression inExpression, S context) {
+                    appendToken(inExpression.getLeftExpression().toString(), inExpression.isNot() ? "not in" : "in", countExpressionValues(inExpression.getRightExpression()));
+                    return null;
                 }
 
                 @Override
-                public void visit(LikeExpression likeExpression) {
-                    appendToken(likeExpression.getLeftExpression().toString(), likeExpression.getStringExpression());
+                public <S> Void visit(IsNullExpression isNullExpression, S context) {
+                    appendToken(isNullExpression.getLeftExpression().toString(), isNullExpression.isNot() ? "is not null" : "is null", 0);
+                    return null;
                 }
 
                 @Override
-                public void visit(MinorThanEquals minorThanEquals) {
-                    appendToken(minorThanEquals.getLeftExpression().toString(), minorThanEquals.getStringExpression());
+                protected <S> Void visitBinaryExpression(BinaryExpression binaryExpression, S context) {
+                    appendToken(binaryExpression.getLeftExpression().toString(), binaryExpression.getStringExpression(), 1);
+                    return null;
                 }
 
-                private void appendToken(String leftExpression, String operator) {
+                @Override
+                public <S> Void visit(ExpressionList<? extends Expression> expressionList, S context) {
+                    if (ObjectUtil.isNull(expressionList) || expressionList.isEmpty()) {
+                        return null;
+                    }
+                    for (Expression item : expressionList.getExpressions()) {
+                        if (ObjectUtil.isNotNull(item)) {
+                            item.accept(this, context);
+                        }
+                    }
+                    return null;
+                }
+
+                private void appendToken(String leftExpression, String operator, int paramCount) {
                     String field = CharSequenceUtil.toCamelCase(leftExpression);
-                    conditionTokens.add(new ConditionToken(field, operator));
+                    conditionTokens.add(new ConditionToken(field, operator, Math.max(0, paramCount)));
                 }
-            });
+            }, null);
         } catch (Exception e) {
-            throw new GXBusinessException(e.getMessage(), e);
+            log.warn("Failed to parse update wrapper conditions, fallback to raw sql only: {}", whereSQL, e);
         }
+
         return List.copyOf(conditionTokens);
+    }
+
+    private int countExpressionValues(Expression expression) {
+        if (ObjectUtil.isNull(expression)) {
+            return 0;
+        }
+        if (expression instanceof ExpressionList<?> expressionList) {
+            return expressionList.getExpressions().size();
+        }
+        return 1;
     }
 
     private Class<?> convertTypeToClass(Type type) {
@@ -235,7 +296,6 @@ public class GXMyBatisPlusUpdateEntityAspect {
         }, type);
     }
 
-    private record ConditionToken(String field, String operator) {
+    private record ConditionToken(String field, String operator, int paramCount) {
     }
 }
-

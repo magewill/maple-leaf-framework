@@ -69,42 +69,42 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
             return;
         }
 
-        try {
-            Type mapperType = GXCommonUtils.getGenericClassType(AopUtils.getTargetClass(point.getTarget()), 0);
-            if (ObjectUtil.isNull(mapperType)) {
-                return;
-            }
+        Type mapperType = GXCommonUtils.getGenericClassType(AopUtils.getTargetClass(point.getTarget()), 0);
+        if (ObjectUtil.isNull(mapperType)) {
+            return;
+        }
 
-            Class<?> mapperClass = convertTypeToClass(mapperType);
-            if (ObjectUtil.isNull(mapperClass)) {
-                return;
-            }
+        Class<?> mapperClass = convertTypeToClass(mapperType);
+        if (ObjectUtil.isNull(mapperClass)) {
+            return;
+        }
 
-            GXMyBatisListener listenerConfig = AnnotationUtil.getAnnotation(mapperClass, GXMyBatisListener.class);
-            if (ObjectUtil.isNull(listenerConfig)) {
-                return;
-            }
+        GXMyBatisListener listenerConfig = AnnotationUtil.getAnnotation(mapperClass, GXMyBatisListener.class);
+        if (ObjectUtil.isNull(listenerConfig)) {
+            return;
+        }
 
-            Dict source = handlePointArgs(point);
-            if (ObjectUtil.isEmpty(source)) {
-                return;
-            }
+        Dict source = handlePointArgs(point);
+        if (ObjectUtil.isEmpty(source)) {
+            return;
+        }
 
-            Class<? extends GXMybatisListenerService> listenerClass = listenerConfig.listenerClazz();
-            String eventType = GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY.getEventType();
-            String eventName = GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY.getEventName();
-            if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
-                eventType = GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY.getEventType();
-                eventName = GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY.getEventName();
-            }
+        Class<? extends GXMybatisListenerService> listenerClass = listenerConfig.listenerClazz();
+        String eventType = GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY.getEventType();
+        String eventName = GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY.getEventName();
+        if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
+            eventType = GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY.getEventType();
+            eventName = GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY.getEventName();
+        }
 
-            Dict eventParam = Dict.create()
-                    .set("listenerClazzName", listenerClass.getSimpleName())
-                    .set("listenerClazz", listenerClass);
-            GXMyBatisModelSaveBatchEntityEvent<Dict> event = new GXMyBatisModelSaveBatchEntityEvent<>(source, eventType, eventParam, eventName);
+        Dict eventParam = Dict.create()
+                .set("listenerClazzName", listenerClass.getSimpleName())
+                .set("listenerClazz", listenerClass);
+        GXMyBatisModelSaveBatchEntityEvent<Dict> event = new GXMyBatisModelSaveBatchEntityEvent<>(source, eventType, eventParam, eventName);
+        if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
             GXEventPublisherUtils.publishEventAfterCommit(event);
-        } catch (Exception e) {
-            log.error("Failed to publish save batch entity event", e);
+        } else {
+            GXEventPublisherUtils.publishEvent(event);
         }
     }
 

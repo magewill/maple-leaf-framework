@@ -14,7 +14,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @SuppressWarnings("all")
 public class GXEventPublisherUtils {
+    private static final int REGISTER_LOCK_STRIPE_SIZE = 64;
     private static final ConcurrentHashMap<String, Boolean> EVENT_BUS_REGISTER_CACHE = new ConcurrentHashMap<>(1024);
+    private static final Object[] EVENT_BUS_REGISTER_LOCK_STRIPES = initRegisterLockStripes();
 
     private GXEventPublisherUtils() {
     }
@@ -102,9 +104,15 @@ public class GXEventPublisherUtils {
             throw new GXBusinessException("Event listener does not exist");
         }
         String key = buildRegisterCacheKey(eventBus, listener);
-        if (!Boolean.TRUE.equals(EVENT_BUS_REGISTER_CACHE.get(key))) {
-            eventBus.register(listener);
-            EVENT_BUS_REGISTER_CACHE.put(key, Boolean.TRUE);
+        if (Boolean.TRUE.equals(EVENT_BUS_REGISTER_CACHE.get(key))) {
+            eventBus.post(event);
+            return;
+        }
+        synchronized (resolveRegisterLock(key)) {
+            if (!Boolean.TRUE.equals(EVENT_BUS_REGISTER_CACHE.get(key))) {
+                eventBus.register(listener);
+                EVENT_BUS_REGISTER_CACHE.put(key, Boolean.TRUE);
+            }
         }
         eventBus.post(event);
     }
@@ -114,13 +122,31 @@ public class GXEventPublisherUtils {
             return;
         }
         String key = buildRegisterCacheKey(eventBus, listener);
-        if (Boolean.TRUE.equals(EVENT_BUS_REGISTER_CACHE.get(key))) {
-            eventBus.unregister(listener);
-            EVENT_BUS_REGISTER_CACHE.remove(key);
+        if (!Boolean.TRUE.equals(EVENT_BUS_REGISTER_CACHE.get(key))) {
+            return;
+        }
+        synchronized (resolveRegisterLock(key)) {
+            if (Boolean.TRUE.equals(EVENT_BUS_REGISTER_CACHE.get(key))) {
+                eventBus.unregister(listener);
+                EVENT_BUS_REGISTER_CACHE.remove(key);
+            }
         }
     }
 
     private static String buildRegisterCacheKey(EventBus eventBus, Object listener) {
         return System.identityHashCode(eventBus) + ":" + System.identityHashCode(listener) + ":" + listener.getClass().getName();
+    }
+
+    private static Object[] initRegisterLockStripes() {
+        Object[] stripes = new Object[REGISTER_LOCK_STRIPE_SIZE];
+        for (int i = 0; i < stripes.length; i++) {
+            stripes[i] = new Object();
+        }
+        return stripes;
+    }
+
+    private static Object resolveRegisterLock(String key) {
+        int lockIndex = (key.hashCode() & Integer.MAX_VALUE) % REGISTER_LOCK_STRIPE_SIZE;
+        return EVENT_BUS_REGISTER_LOCK_STRIPES[lockIndex];
     }
 }

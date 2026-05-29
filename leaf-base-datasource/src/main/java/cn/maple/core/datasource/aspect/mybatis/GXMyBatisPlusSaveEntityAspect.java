@@ -64,46 +64,45 @@ public class GXMyBatisPlusSaveEntityAspect {
             return;
         }
 
-        try {
-            Type[] mapperTypes = AopUtils.getTargetClass(point.getTarget()).getInterfaces();
-            Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
-            if (ObjectUtil.isEmpty(mapperTypes)) {
-                return;
+        Type[] mapperTypes = AopUtils.getTargetClass(point.getTarget()).getInterfaces();
+        Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
+        if (ObjectUtil.isEmpty(mapperTypes)) {
+            return;
+        }
+
+        Dict source = handlePointArgs(point);
+        if (ObjectUtil.isEmpty(source)) {
+            return;
+        }
+
+        for (Type type : mapperTypes) {
+            Class<?> mapperClass = convertTypeToClass(type);
+            if (ObjectUtil.isNull(mapperClass)) {
+                continue;
             }
 
-            for (Type type : mapperTypes) {
-                Class<?> mapperClass = convertTypeToClass(type);
-                if (ObjectUtil.isNull(mapperClass)) {
-                    continue;
-                }
+            GXMyBatisListener listenerConfig = resolveListenerConfig(mapperClass, invokedMethod);
+            if (ObjectUtil.isNull(listenerConfig)) {
+                continue;
+            }
 
-                GXMyBatisListener listenerConfig = resolveListenerConfig(mapperClass, invokedMethod);
-                if (ObjectUtil.isNull(listenerConfig)) {
-                    continue;
-                }
+            Class<? extends GXMybatisListenerService> listenerClass = listenerConfig.listenerClazz();
+            String eventType = GXModelEventNamingEnums.SYNC_SAVE_ENTITY.getEventType();
+            String eventName = GXModelEventNamingEnums.SYNC_SAVE_ENTITY.getEventName();
+            if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
+                eventType = GXModelEventNamingEnums.ASYNC_SAVE_ENTITY.getEventType();
+                eventName = GXModelEventNamingEnums.ASYNC_SAVE_ENTITY.getEventName();
+            }
 
-                Dict source = handlePointArgs(point);
-                if (ObjectUtil.isEmpty(source)) {
-                    continue;
-                }
-
-                Class<? extends GXMybatisListenerService> listenerClass = listenerConfig.listenerClazz();
-                String eventType = GXModelEventNamingEnums.SYNC_SAVE_ENTITY.getEventType();
-                String eventName = GXModelEventNamingEnums.SYNC_SAVE_ENTITY.getEventName();
-                if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
-                    eventType = GXModelEventNamingEnums.ASYNC_SAVE_ENTITY.getEventType();
-                    eventName = GXModelEventNamingEnums.ASYNC_SAVE_ENTITY.getEventName();
-                }
-
-                Dict eventParam = Dict.create()
-                        .set("listenerClazzName", listenerClass.getSimpleName())
-                        .set("listenerClazz", listenerClass);
-                GXMyBatisModelSaveEntityEvent<Dict> event = new GXMyBatisModelSaveEntityEvent<>(source, eventType, eventParam, eventName);
+            Dict eventParam = Dict.create()
+                    .set("listenerClazzName", listenerClass.getSimpleName())
+                    .set("listenerClazz", listenerClass);
+            GXMyBatisModelSaveEntityEvent<Dict> event = new GXMyBatisModelSaveEntityEvent<>(source, eventType, eventParam, eventName);
+            if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
                 GXEventPublisherUtils.publishEventAfterCommit(event);
-                return;
+            } else {
+                GXEventPublisherUtils.publishEvent(event);
             }
-        } catch (Exception e) {
-            log.error("Failed to publish save entity event", e);
         }
     }
 

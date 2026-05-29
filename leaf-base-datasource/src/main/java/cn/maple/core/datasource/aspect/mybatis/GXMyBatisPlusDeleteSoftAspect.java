@@ -58,7 +58,7 @@ public class GXMyBatisPlusDeleteSoftAspect {
 
     private Dict handlePointArgs(ProceedingJoinPoint point) {
         Object[] args = point.getArgs();
-        if (ObjectUtil.isEmpty(args) || args.length < 2) {
+        if (ObjectUtil.isEmpty(args) || args.length < 2 || ObjectUtil.isNull(args[0]) || ObjectUtil.isNull(args[1])) {
             return Dict.create();
         }
 
@@ -66,6 +66,9 @@ public class GXMyBatisPlusDeleteSoftAspect {
         }, args[0]);
         List<GXUpdateField<?>> updateFieldList = Convert.convert(new TypeReference<>() {
         }, args[1]);
+        if (ObjectUtil.isNull(baseQueryParam) || ObjectUtil.isNull(baseQueryParam.getCondition()) || ObjectUtil.isNull(updateFieldList)) {
+            return Dict.create();
+        }
 
         Dict conditionFieldData = Dict.create();
         List<GXCondition<?>> conditionList = baseQueryParam.getCondition();
@@ -88,46 +91,45 @@ public class GXMyBatisPlusDeleteSoftAspect {
             return;
         }
 
-        try {
-            Type[] mapperTypes = AopUtils.getTargetClass(point.getTarget()).getInterfaces();
-            Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
-            if (ObjectUtil.isEmpty(mapperTypes)) {
-                return;
+        Type[] mapperTypes = AopUtils.getTargetClass(point.getTarget()).getInterfaces();
+        Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
+        if (ObjectUtil.isEmpty(mapperTypes)) {
+            return;
+        }
+
+        Dict source = handlePointArgs(point);
+        if (ObjectUtil.isEmpty(source)) {
+            return;
+        }
+
+        for (Type type : mapperTypes) {
+            Class<?> mapperClass = convertTypeToClass(type);
+            if (ObjectUtil.isNull(mapperClass)) {
+                continue;
             }
 
-            for (Type type : mapperTypes) {
-                Class<?> mapperClass = convertTypeToClass(type);
-                if (ObjectUtil.isNull(mapperClass)) {
-                    continue;
-                }
+            GXMyBatisListener listenerConfig = resolveListenerConfig(mapperClass, invokedMethod);
+            if (ObjectUtil.isNull(listenerConfig)) {
+                continue;
+            }
 
-                GXMyBatisListener listenerConfig = resolveListenerConfig(mapperClass, invokedMethod);
-                if (ObjectUtil.isNull(listenerConfig)) {
-                    continue;
-                }
+            Class<? extends GXMybatisListenerService> listenerClass = listenerConfig.listenerClazz();
+            String eventType = GXModelEventNamingEnums.SYNC_DELETE_SOFT.getEventType();
+            String eventName = GXModelEventNamingEnums.SYNC_DELETE_SOFT.getEventName();
+            if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
+                eventType = GXModelEventNamingEnums.ASYNC_DELETE_SOFT.getEventType();
+                eventName = GXModelEventNamingEnums.ASYNC_DELETE_SOFT.getEventName();
+            }
 
-                Dict source = handlePointArgs(point);
-                if (ObjectUtil.isEmpty(source)) {
-                    continue;
-                }
-
-                Class<? extends GXMybatisListenerService> listenerClass = listenerConfig.listenerClazz();
-                String eventType = GXModelEventNamingEnums.SYNC_DELETE_SOFT.getEventType();
-                String eventName = GXModelEventNamingEnums.SYNC_DELETE_SOFT.getEventName();
-                if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
-                    eventType = GXModelEventNamingEnums.ASYNC_DELETE_SOFT.getEventType();
-                    eventName = GXModelEventNamingEnums.ASYNC_DELETE_SOFT.getEventName();
-                }
-
-                Dict eventParam = Dict.create()
-                        .set("listenerClazzName", listenerClass.getSimpleName())
-                        .set("listenerClazz", listenerClass);
-                GXMyBatisModelDeleteSoftEvent<Dict> event = new GXMyBatisModelDeleteSoftEvent<>(source, eventType, eventParam, eventName);
+            Dict eventParam = Dict.create()
+                    .set("listenerClazzName", listenerClass.getSimpleName())
+                    .set("listenerClazz", listenerClass);
+            GXMyBatisModelDeleteSoftEvent<Dict> event = new GXMyBatisModelDeleteSoftEvent<>(source, eventType, eventParam, eventName);
+            if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
                 GXEventPublisherUtils.publishEventAfterCommit(event);
-                return;
+            } else {
+                GXEventPublisherUtils.publishEvent(event);
             }
-        } catch (Exception e) {
-            log.error("Failed to publish delete soft event", e);
         }
     }
 
