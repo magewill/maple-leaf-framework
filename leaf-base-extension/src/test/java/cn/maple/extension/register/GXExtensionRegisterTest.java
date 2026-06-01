@@ -9,7 +9,13 @@ import cn.maple.extension.GXExtensionRepository;
 import cn.maple.extension.GXExtensions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.annotation.AliasFor;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -57,6 +63,14 @@ class GXExtensionRegisterTest {
         assertThrows(GXBusinessException.class, () -> extensionRegister.doRegistration(new MultiExtPointExtension()));
     }
 
+    @Test
+    void composedAnnotationWithAliasForIsMergedCorrectly() {
+        extensionRegister.doRegistration(new ComposedAliasExtension());
+
+        assertSame(ComposedAliasExtension.class,
+                extensionRepository.findExtension(coordinate(GXBizScenario.valueOf("aliasBiz"))).orElseThrow().getClass());
+    }
+
     private void assertRegistered(GXBizScenario bizScenario) {
         assertEquals(MultiValueExtension.class,
                 extensionRepository.findExtension(coordinate(bizScenario)).orElseThrow().getClass());
@@ -93,5 +107,17 @@ class GXExtensionRegisterTest {
 
     @GXExtension(bizId = "multi")
     private static class MultiExtPointExtension implements RegisterTestExtPoint, AnotherRegisterTestExtPoint {
+    }
+
+    @Target(ElementType.TYPE)
+    @Retention(RetentionPolicy.RUNTIME)
+    @GXExtension
+    private @interface AliasGXExtension {
+        @AliasFor(annotation = GXExtension.class, attribute = "bizId")
+        String bizId() default GXBizScenario.DEFAULT_BIZ_ID;
+    }
+
+    @AliasGXExtension(bizId = "aliasBiz")
+    private static class ComposedAliasExtension implements RegisterTestExtPoint {
     }
 }

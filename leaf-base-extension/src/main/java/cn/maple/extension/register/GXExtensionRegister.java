@@ -10,7 +10,7 @@ import cn.maple.extension.GXExtensionRepository;
 import cn.maple.extension.GXExtensions;
 import jakarta.annotation.Resource;
 import org.springframework.aop.support.AopUtils;
-import org.springframework.core.annotation.AnnotationUtils;
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.ClassUtils;
 
@@ -32,7 +32,7 @@ public class GXExtensionRegister {
         Objects.requireNonNull(extensionObject, "Extension object cannot be null");
 
         Class<?> extensionClz = getExtensionClass(extensionObject);
-        GXExtension extensionAnn = AnnotationUtils.findAnnotation(extensionClz, GXExtension.class);
+        GXExtension extensionAnn = AnnotatedElementUtils.findMergedAnnotation(extensionClz, GXExtension.class);
         if (Objects.nonNull(extensionAnn)) {
             GXBizScenario bizScenario = GXBizScenario.valueOf(extensionAnn.bizId(), extensionAnn.useCase(), extensionAnn.scenario());
             registerExtension(extensionClz, bizScenario, extensionObject);
@@ -43,7 +43,7 @@ public class GXExtensionRegister {
         Objects.requireNonNull(extensionObject, "Extension object cannot be null");
 
         Class<?> extensionClz = getExtensionClass(extensionObject);
-        GXExtensions extensionsAnnotation = AnnotationUtils.findAnnotation(extensionClz, GXExtensions.class);
+        GXExtensions extensionsAnnotation = AnnotatedElementUtils.findMergedAnnotation(extensionClz, GXExtensions.class);
         Objects.requireNonNull(extensionsAnnotation, "GXExtensions annotation not found on " + extensionClz.getName());
 
         GXExtension[] extensions = extensionsAnnotation.value();
