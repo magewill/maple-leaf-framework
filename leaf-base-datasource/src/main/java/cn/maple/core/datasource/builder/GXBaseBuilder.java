@@ -485,8 +485,8 @@ public interface GXBaseBuilder {
         }
         GXConditionSegment segment = condition.toSegment();
         if (CharSequenceUtil.isBlank(tableAliasOverride)
-                || CharSequenceUtil.isBlank(condition.getFieldExpression())
-                || condition instanceof GXConditionRaw) {
+                || condition instanceof GXConditionRaw
+                || CharSequenceUtil.isBlank(condition.getFieldExpression())) {
             return namespaceConditionSegment(segment, paramNamespace);
         }
         return namespaceConditionSegment(new GXConditionSegment(rewriteConditionAlias(segment.sql(), condition, tableAliasOverride), segment.params()), paramNamespace);

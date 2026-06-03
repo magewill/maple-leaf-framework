@@ -6,6 +6,7 @@ import cn.maple.core.framework.dto.inner.GXJoinDto;
 import cn.maple.core.framework.dto.inner.GXJoinTypeEnums;
 import cn.maple.core.framework.dto.inner.GXUnionTypeEnums;
 import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
+import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
 import cn.maple.core.framework.dto.inner.op.GXDbJoinEQ;
 import cn.maple.core.framework.dto.inner.op.GXDbJoinValueEQ;
 import cn.maple.core.framework.exception.GXDBConditionException;
@@ -46,7 +47,7 @@ class GXBaseBuilderTest {
     void deleteConditionKeepsSafeQualifiedTableName() {
         GXBaseQueryParamInnerDto query = GXBaseQueryParamInnerDto.builder()
                 .tableName("tenant_a.user_table")
-                .condition(CollUtil.newArrayList(new GXConditionEQ("tenant_a.user_table", "id", 1)))
+                .condition(CollUtil.newArrayList(new GXConditionEQ("", "id", 1)))
                 .build();
 
         String sql = GXBaseBuilder.deleteCondition(query);
@@ -621,6 +622,23 @@ class GXBaseBuilderTest {
         assertEquals("u", rootCondition.getTableNameAlias());
         assertEquals("ignored", root.getTableName());
         assertEquals(null, root.getTableNameAlias());
+    }
+
+    @Test
+    void unionFindByConditionKeepsRawRootConditionWithOuterAliasOverride() {
+        GXBaseQueryParamInnerDto root = GXBaseQueryParamInnerDto.builder()
+                .tableName("ignored")
+                .columns(CollUtil.newLinkedHashSet("id"))
+                .condition(CollUtil.newArrayList(new GXConditionRaw("1 = 1")))
+                .build();
+        GXBaseQueryParamInnerDto branch = GXBaseQueryParamInnerDto.builder()
+                .tableName("(select 1 as id)")
+                .columns(CollUtil.newLinkedHashSet("id"))
+                .build();
+
+        String sql = GXBaseBuilder.unionFindByCondition(root, CollUtil.newArrayList(branch), GXUnionTypeEnums.UNION_ALL);
+
+        assertTrue(sql.contains("1 = 1"), sql);
     }
 
     @Test

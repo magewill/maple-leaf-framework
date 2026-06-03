@@ -13,6 +13,7 @@ import cn.maple.core.datasource.event.GXMyBatisModelUpdateFieldEvent;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
+import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
 import cn.maple.core.framework.dto.inner.field.GXUpdateField;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -79,9 +80,16 @@ public class GXMyBatisPlusUpdateFieldAspect {
 
         List<GXCondition<?>> conditionList = baseQueryParam.getCondition();
         Dict conditionFieldData = Dict.create();
-        conditionList.forEach(condition ->
-                conditionFieldData.set(CharSequenceUtil.toCamelCase(condition.getFieldExpression()), condition.getFieldValue())
-        );
+        conditionList.forEach(condition -> {
+            if (condition instanceof GXConditionRaw) {
+                return;
+            }
+            String fieldExpression = condition.getFieldExpression();
+            if (CharSequenceUtil.isBlank(fieldExpression)) {
+                return;
+            }
+            conditionFieldData.set(CharSequenceUtil.toCamelCase(fieldExpression), condition.getFieldValue());
+        });
 
         return Dict.create()
                 .set("updateFieldData", updateFieldData)
@@ -159,4 +167,3 @@ public class GXMyBatisPlusUpdateFieldAspect {
         }, type);
     }
 }
-

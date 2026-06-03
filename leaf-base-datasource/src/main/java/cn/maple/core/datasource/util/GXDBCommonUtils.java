@@ -12,6 +12,7 @@ import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionIsNULL;
 import cn.maple.core.framework.dto.inner.condition.GXConditionIsNotNULL;
+import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
 import cn.maple.core.framework.dto.inner.condition.GXExclusionDeletedFieldCondition;
 import cn.maple.core.framework.dto.res.GXPaginationResDto;
 import cn.maple.core.framework.exception.GXBusinessException;
@@ -247,6 +248,10 @@ public final class GXDBCommonUtils {
 
         condition.stream().filter(Objects::nonNull).forEach(c -> {
             if (!GXExclusionDeletedFieldCondition.class.isAssignableFrom(c.getClass())) {
+                if (c instanceof GXConditionRaw) {
+                    updateWrapper.apply(c.toSegment().sql());
+                    return;
+                }
                 String column = c.getFieldExpression();
                 Object value = c.getFieldOriginalValue();
 

@@ -100,6 +100,42 @@ class GXConditionFuncTest {
     }
 
     @Test
+    void jsonSearchUsesDialectImplementationsWhenAvailable() {
+        withDbType("postgresql", () -> {
+            GXConditionFuncJsonSearch search = new GXConditionFuncJsonSearch("u", "extra", "alpha");
+
+            GXConditionSegment segment = search.toSegment();
+
+            assertTrue(segment.sql().contains("jsonb_path_query(CAST(u.extra AS jsonb)"), segment.sql());
+            assertTrue(segment.sql().contains("LIKE CAST(#{dbQueryParamInnerDto.paramMap."), segment.sql());
+        });
+        withDbType("sqlite", () -> {
+            GXConditionFuncJsonSearch search = new GXConditionFuncJsonSearch("u", "extra", "alpha");
+
+            GXConditionSegment segment = search.toSegment();
+
+            assertTrue(segment.sql().contains("json_tree(u.extra)"), segment.sql());
+            assertTrue(segment.sql().contains("gx_json_search.type = 'text'"), segment.sql());
+        });
+        withDbType("oracle", () -> {
+            GXConditionFuncJsonSearch search = new GXConditionFuncJsonSearch("u", "extra", "alpha");
+
+            GXConditionSegment segment = search.toSegment();
+
+            assertTrue(segment.sql().contains("JSON_EXISTS(u.extra"), segment.sql());
+            assertTrue(segment.sql().contains("stringOnly() like $search"), segment.sql());
+        });
+    }
+
+    @Test
+    void jsonSearchRejectsDialectsWithoutExactJsonSearchImplementation() {
+        List.of("sqlserver", "h2").forEach(dbType -> withDbType(dbType, () -> {
+            GXConditionFuncJsonSearch search = new GXConditionFuncJsonSearch("u", "extra", "alpha");
+            assertThrows(GXBusinessException.class, search::toSegment);
+        }));
+    }
+
+    @Test
     void jsonFunctionsRejectUnsupportedH2AndSqliteDialects() {
         withDbType("h2", () -> {
             GXConditionFuncJsonSearch search = new GXConditionFuncJsonSearch("u", "extra", "alpha");

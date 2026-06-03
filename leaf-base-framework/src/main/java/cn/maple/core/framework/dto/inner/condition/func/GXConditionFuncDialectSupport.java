@@ -14,6 +14,7 @@ final class GXConditionFuncDialectSupport {
     private static final Set<String> POSTGRES_DIALECTS = Set.of("postgres", "postgresql", "postgre_sql");
     private static final Set<String> SQLSERVER_DIALECTS = Set.of("sqlserver", "sql_server", "mssql", "sql-server");
     private static final Set<String> ORACLE_DIALECTS = Set.of("oracle");
+    private static final Set<String> SQLITE_DIALECTS = Set.of("sqlite");
     private static final Set<String> UNSUPPORTED_JSON_DIALECTS = Set.of("h2", "sqlite");
 
     private GXConditionFuncDialectSupport() {
@@ -75,16 +76,20 @@ final class GXConditionFuncDialectSupport {
             return "JSON_SEARCH(" + field + ", " + param(oneOrAllParamName) + ", " + valueParam + ") IS NOT NULL";
         }
         if (POSTGRES_DIALECTS.contains(dbType)) {
-            return "CAST(" + field + " AS text) LIKE ('%' || CAST(" + valueParam + " AS text) || '%')";
+            return "EXISTS (SELECT 1 FROM jsonb_path_query(CAST(" + field
+                    + " AS jsonb), '$.** ? (@.type() == \"string\")') gx_json_search(value)"
+                    + " WHERE gx_json_search.value #>> '{}' LIKE CAST(" + valueParam + " AS text))";
         }
-        if (SQLSERVER_DIALECTS.contains(dbType)) {
-            return "CAST(" + field + " AS NVARCHAR(MAX)) LIKE '%' + CAST(" + valueParam + " AS NVARCHAR(MAX)) + '%'";
+        if (SQLITE_DIALECTS.contains(dbType)) {
+            return "EXISTS (SELECT 1 FROM json_tree(" + field + ") gx_json_search"
+                    + " WHERE gx_json_search.type = 'text' AND gx_json_search.value LIKE " + valueParam + ")";
         }
         if (ORACLE_DIALECTS.contains(dbType)) {
-            return "JSON_SERIALIZE(" + field + " RETURNING VARCHAR2(4000)) LIKE '%' || CAST(" + valueParam + " AS VARCHAR2(4000)) || '%'";
+            return "JSON_EXISTS(" + field
+                    + ", '$..*?(@.stringOnly() like $search)' PASSING CAST(" + valueParam
+                    + " AS VARCHAR2(4000)) AS \"search\")";
         }
-        rejectUnsupportedJsonDialect(dbType, "JSON_SEARCH");
-        return "JSON_SEARCH(" + field + ", " + param(oneOrAllParamName) + ", " + valueParam + ") IS NOT NULL";
+        throw new GXBusinessException(CharSequenceUtil.format("JSON_SEARCH is not supported for dbType: {}", dbType));
     }
 
     static String renderJsonContains(String field, String pathParamName, String valueParamName) {

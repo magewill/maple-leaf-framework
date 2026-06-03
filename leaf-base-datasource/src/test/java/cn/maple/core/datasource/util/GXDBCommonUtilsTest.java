@@ -6,6 +6,7 @@ import cn.maple.core.framework.constant.GXBuilderConstant;
 import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
 import cn.maple.core.framework.dto.inner.condition.GXConditionIsNULL;
 import cn.maple.core.framework.dto.inner.condition.GXConditionIsNotNULL;
+import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
@@ -32,6 +33,18 @@ class GXDBCommonUtilsTest {
         String sqlSegment = wrapper.getSqlSegment();
         assertTrue(sqlSegment.contains("deleted_at IS NULL"), sqlSegment);
         assertTrue(sqlSegment.contains("created_at IS NOT NULL"), sqlSegment);
+    }
+
+    @Test
+    void assemblyUpdateWrapperAppliesRawConditions() {
+        UpdateWrapper<Object> wrapper = assertDoesNotThrow(() -> GXDBCommonUtils.assemblyUpdateWrapper(CollUtil.newArrayList(
+                new GXConditionRaw("1 = 1"),
+                new GXConditionEQ("user", "id", 1)
+        )));
+
+        String sqlSegment = wrapper.getSqlSegment();
+        assertTrue(sqlSegment.contains("1 = 1"), sqlSegment);
+        assertTrue(sqlSegment.contains("id ="), sqlSegment);
     }
 
     @Test

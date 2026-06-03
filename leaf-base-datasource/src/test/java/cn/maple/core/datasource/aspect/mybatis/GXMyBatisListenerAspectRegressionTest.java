@@ -6,6 +6,7 @@ import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.listener.GXMyBatisSyncListener;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
+import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
 import cn.maple.core.framework.dto.inner.field.GXUpdateNumberField;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
@@ -60,6 +61,21 @@ class GXMyBatisListenerAspectRegressionTest {
     }
 
     @Test
+    void updateFieldIgnoresRawConditionsWhenPublishingEvent() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new UpdateFieldMapperImpl(), UpdateFieldMapper.class.getMethod("updateFieldByCondition", Object.class, Object.class));
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+                .condition(List.of(new GXConditionRaw("1 = 1")))
+                .build();
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{queryParam, List.of(new GXUpdateNumberField(null, "score", 1))});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            assertDoesNotThrow(() -> updateFieldAspect.around(point));
+            eventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(1));
+        }
+    }
+
+    @Test
     void deleteSoftSkipsNullConditionPayloadWithoutThrowing() throws Throwable {
         ProceedingJoinPoint point = mockJoinPoint(new DeleteSoftMapperImpl(), DeleteSoftMapper.class.getMethod("deleteSoftCondition", Object.class, Object.class));
         Mockito.when(point.proceed()).thenReturn(1);
@@ -68,6 +84,21 @@ class GXMyBatisListenerAspectRegressionTest {
         try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
             assertDoesNotThrow(() -> deleteSoftAspect.around(point));
             eventPublisher.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    void deleteSoftIgnoresRawConditionsWhenPublishingEvent() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new DeleteSoftMapperImpl(), DeleteSoftMapper.class.getMethod("deleteSoftCondition", Object.class, Object.class));
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+                .condition(List.of(new GXConditionRaw("1 = 1")))
+                .build();
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{queryParam, List.of(new GXUpdateNumberField(null, "deletedFlag", 1))});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            assertDoesNotThrow(() -> deleteSoftAspect.around(point));
+            eventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(1));
         }
     }
 
