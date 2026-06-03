@@ -4,20 +4,17 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
-import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXDBStringUtils;
-import cn.maple.core.framework.util.GXSpringContextUtils;
+import cn.maple.core.framework.util.GXSqlDbTypeResolver;
 
-import java.lang.reflect.Method;
-import java.util.Locale;
 import java.util.Set;
 
 final class GXConditionFuncDialectSupport {
-    private static final String DB_TYPE_PROPERTY_KEY = "spring.datasource.druid.db-type";
-    private static final Set<String> MYSQL_LIKE_DIALECTS = Set.of("mysql", "mariadb", "h2", "sqlite");
+    private static final Set<String> MYSQL_JSON_DIALECTS = Set.of("mysql", "mariadb");
     private static final Set<String> POSTGRES_DIALECTS = Set.of("postgres", "postgresql", "postgre_sql");
     private static final Set<String> SQLSERVER_DIALECTS = Set.of("sqlserver", "sql_server", "mssql", "sql-server");
     private static final Set<String> ORACLE_DIALECTS = Set.of("oracle");
+    private static final Set<String> UNSUPPORTED_JSON_DIALECTS = Set.of("h2", "sqlite");
 
     private GXConditionFuncDialectSupport() {
     }
@@ -74,7 +71,7 @@ final class GXConditionFuncDialectSupport {
     static String renderJsonSearch(String field, String oneOrAllParamName, String valueParamName) {
         String dbType = resolveDbType();
         String valueParam = param(valueParamName);
-        if (MYSQL_LIKE_DIALECTS.contains(dbType)) {
+        if (MYSQL_JSON_DIALECTS.contains(dbType)) {
             return "JSON_SEARCH(" + field + ", " + param(oneOrAllParamName) + ", " + valueParam + ") IS NOT NULL";
         }
         if (POSTGRES_DIALECTS.contains(dbType)) {
@@ -86,6 +83,7 @@ final class GXConditionFuncDialectSupport {
         if (ORACLE_DIALECTS.contains(dbType)) {
             return "JSON_SERIALIZE(" + field + " RETURNING VARCHAR2(4000)) LIKE '%' || CAST(" + valueParam + " AS VARCHAR2(4000)) || '%'";
         }
+        rejectUnsupportedJsonDialect(dbType, "JSON_SEARCH");
         return "JSON_SEARCH(" + field + ", " + param(oneOrAllParamName) + ", " + valueParam + ") IS NOT NULL";
     }
 
@@ -93,7 +91,7 @@ final class GXConditionFuncDialectSupport {
         String dbType = resolveDbType();
         String pathParam = param(pathParamName);
         String valueParam = param(valueParamName);
-        if (MYSQL_LIKE_DIALECTS.contains(dbType)) {
+        if (MYSQL_JSON_DIALECTS.contains(dbType)) {
             return "JSON_CONTAINS(" + field + ", CAST(" + valueParam + " AS JSON), " + pathParam + ")";
         }
         if (POSTGRES_DIALECTS.contains(dbType)) {
@@ -105,6 +103,7 @@ final class GXConditionFuncDialectSupport {
         if (ORACLE_DIALECTS.contains(dbType)) {
             return "JSON_EQUAL(JSON_QUERY(" + field + ", " + pathParam + "), JSON_QUERY(" + valueParam + ", '$'))";
         }
+        rejectUnsupportedJsonDialect(dbType, "JSON_CONTAINS");
         return "JSON_CONTAINS(" + field + ", CAST(" + valueParam + " AS JSON), " + pathParam + ")";
     }
 
@@ -112,7 +111,7 @@ final class GXConditionFuncDialectSupport {
         String dbType = resolveDbType();
         String pathParam = param(pathParamName);
         String valueParam = param(valueParamName);
-        if (MYSQL_LIKE_DIALECTS.contains(dbType)) {
+        if (MYSQL_JSON_DIALECTS.contains(dbType)) {
             return "JSON_OVERLAPS(JSON_EXTRACT(" + field + ", " + pathParam + "), CAST(" + valueParam + " AS JSON))";
         }
         if (POSTGRES_DIALECTS.contains(dbType)) {
@@ -129,6 +128,7 @@ final class GXConditionFuncDialectSupport {
                     + "), '$[*]' COLUMNS (value VARCHAR2(4000) PATH '$')) gx_src JOIN JSON_TABLE(" + valueParam
                     + ", '$[*]' COLUMNS (value VARCHAR2(4000) PATH '$')) gx_candidate ON gx_src.value = gx_candidate.value)";
         }
+        rejectUnsupportedJsonDialect(dbType, "JSON_OVERLAPS");
         return "JSON_OVERLAPS(JSON_EXTRACT(" + field + ", " + pathParam + "), CAST(" + valueParam + " AS JSON))";
     }
 
@@ -156,32 +156,12 @@ final class GXConditionFuncDialectSupport {
     }
 
     private static String resolveDbType() {
-        String systemDbType = System.getProperty(DB_TYPE_PROPERTY_KEY);
-        if (CharSequenceUtil.isNotBlank(systemDbType)) {
-            return normalizeDbType(systemDbType);
-        }
-        String beanDbType = resolveDbTypeFromBean();
-        if (CharSequenceUtil.isNotBlank(beanDbType)) {
-            return normalizeDbType(beanDbType);
-        }
-        return normalizeDbType(GXCommonUtils.getEnvironmentValue(DB_TYPE_PROPERTY_KEY, String.class, "mysql"));
+        return GXSqlDbTypeResolver.resolveDbType();
     }
 
-    private static String resolveDbTypeFromBean() {
-        Object properties = GXSpringContextUtils.getBean("dataSourceProperties");
-        if (properties == null) {
-            return null;
+    private static void rejectUnsupportedJsonDialect(String dbType, String functionName) {
+        if (UNSUPPORTED_JSON_DIALECTS.contains(dbType)) {
+            throw new GXBusinessException(CharSequenceUtil.format("{} is not supported for dbType: {}", functionName, dbType));
         }
-        try {
-            Method method = properties.getClass().getMethod("getDbType");
-            Object dbType = method.invoke(properties);
-            return dbType == null ? null : dbType.toString();
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private static String normalizeDbType(String dbType) {
-        return CharSequenceUtil.isBlank(dbType) ? "mysql" : dbType.toLowerCase(Locale.ROOT);
     }
 }

@@ -3,6 +3,7 @@ package cn.maple.core.datasource.aspect.mybatis;
 import cn.hutool.core.lang.Dict;
 import cn.maple.core.datasource.annotation.GXMyBatisListener;
 import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
+import cn.maple.core.datasource.listener.GXMyBatisSyncListener;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.field.GXUpdateNumberField;
@@ -13,9 +14,13 @@ import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
+import org.springframework.context.event.EventListener;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionAttribute;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -89,6 +94,20 @@ class GXMyBatisListenerAspectRegressionTest {
         assertEquals(List.of(60, 80), keyValuePairs.get("score"));
         assertEquals(List.of("A", "B"), keyValuePairs.get("type"));
         assertNull(keyValuePairs.get("deletedAt"));
+    }
+
+    @Test
+    void syncListenerEventHandlersDoNotDeclareSpringTransactionBoundary() {
+        AnnotationTransactionAttributeSource txAttributeSource = new AnnotationTransactionAttributeSource();
+        Method[] listenerMethods = Arrays.stream(GXMyBatisSyncListener.class.getDeclaredMethods())
+                .filter(method -> method.isAnnotationPresent(EventListener.class))
+                .toArray(Method[]::new);
+
+        assertEquals(5, listenerMethods.length);
+        Arrays.stream(listenerMethods).forEach(method -> {
+            TransactionAttribute transactionAttribute = txAttributeSource.getTransactionAttribute(method, GXMyBatisSyncListener.class);
+            assertNull(transactionAttribute, method.getName());
+        });
     }
 
     private ProceedingJoinPoint mockJoinPoint(Object target, Method method) {

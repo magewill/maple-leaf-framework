@@ -1,9 +1,11 @@
 package cn.maple.core.framework.dto.inner.field;
 
+import cn.maple.core.framework.exception.GXBusinessException;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GXUpdateJsonFieldTest {
@@ -54,6 +56,18 @@ class GXUpdateJsonFieldTest {
 
             assertTrue(sql.startsWith("u.extra = CAST("), sql);
             assertTrue(sql.endsWith(" AS jsonb)"), sql);
+        });
+    }
+
+    @Test
+    void jsonUpdateFieldsRejectUnsupportedH2AndSqliteDialects() {
+        withDbType("h2", () -> {
+            GXUpdateJsonSetStrField field = new GXUpdateJsonSetStrField("u", "extra", "profile.name", "alice");
+            assertThrows(GXBusinessException.class, field::updateString);
+        });
+        withDbType("sqlite", () -> {
+            GXUpdateJsonRemoveField field = new GXUpdateJsonRemoveField("u", "extra", "profile.name");
+            assertThrows(GXBusinessException.class, field::updateString);
         });
     }
 

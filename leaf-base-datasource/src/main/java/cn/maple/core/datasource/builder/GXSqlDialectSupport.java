@@ -1,15 +1,17 @@
 package cn.maple.core.datasource.builder;
 
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.maple.core.datasource.config.GXDynamicDbTypeRegistry;
-import cn.maple.core.datasource.properties.GXDataSourceProperties;
 import cn.maple.core.framework.util.GXDBStringUtils;
-import cn.maple.core.framework.util.GXSpringContextUtils;
+import cn.maple.core.framework.util.GXSqlDbTypeResolver;
 
 import java.util.Locale;
-import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 final class GXSqlDialectSupport {
+    private static final Pattern SQLSERVER_SELECT_DISTINCT_PREFIX = Pattern.compile("(?is)^\\s*SELECT\\s+DISTINCT\\s+");
+    private static final Pattern SQLSERVER_SELECT_PREFIX = Pattern.compile("(?is)^\\s*SELECT\\s+");
+
     private GXSqlDialectSupport() {
     }
 
@@ -40,16 +42,22 @@ final class GXSqlDialectSupport {
             return CharSequenceUtil.format("SELECT * FROM ({}) gx_tmp_one LIMIT 1", sql);
         }
         if (GXSqlConstants.SQLSERVER_DIALECTS.contains(dbType)) {
-            return CharSequenceUtil.format("SELECT TOP 1 * FROM ({}) gx_tmp_one", sql);
+            return applySqlServerSingleRowLimit(sql);
         }
         if (GXSqlConstants.ORACLE_DIALECTS.contains(dbType)) {
             return CharSequenceUtil.format("SELECT * FROM ({}) gx_tmp_one WHERE ROWNUM <= 1", sql);
+        }
+        if (GXSqlConstants.DB2_DIALECTS.contains(dbType)) {
+            return CharSequenceUtil.format("{} FETCH FIRST 1 ROW ONLY", sql);
         }
         GXBaseBuilder.LOGGER.warn("Unrecognized dbType [{}] for findOneByCondition, fallback to LIMIT 1 syntax.", dbType);
         return CharSequenceUtil.format("SELECT * FROM ({}) gx_tmp_one LIMIT 1", sql);
     }
 
     static String renderJsonEqByDialect(String dbType, String field, String pathParam, String valueParam) {
+        if (isMysqlOrMariaDb(dbType)) {
+            return CharSequenceUtil.format("JSON_UNQUOTE(JSON_EXTRACT({}, {})) = CAST({} AS CHAR)", field, pathParam, valueParam);
+        }
         if (GXSqlConstants.MYSQL_LIKE_DIALECTS.contains(dbType)) {
             return CharSequenceUtil.format("JSON_EXTRACT({}, {}) = {}", field, pathParam, valueParam);
         }
@@ -72,18 +80,23 @@ final class GXSqlDialectSupport {
     }
 
     static String resolveDbTypeFromContext() {
-        String currentDbType = GXDynamicDbTypeRegistry.resolveCurrent();
-        if (CharSequenceUtil.isNotBlank(currentDbType)) {
-            return currentDbType;
+        return GXSqlDbTypeResolver.resolveDbType();
+    }
+
+    private static String applySqlServerSingleRowLimit(String sql) {
+        Matcher distinctMatcher = SQLSERVER_SELECT_DISTINCT_PREFIX.matcher(sql);
+        if (distinctMatcher.find()) {
+            return "SELECT DISTINCT TOP 1 " + sql.substring(distinctMatcher.end());
         }
-        try {
-            GXDataSourceProperties properties = GXSpringContextUtils.getBean(GXDataSourceProperties.class);
-            if (Objects.nonNull(properties) && CharSequenceUtil.isNotBlank(properties.getDbType())) {
-                return properties.getDbType();
-            }
-        } catch (Exception ignored) {
+        Matcher selectMatcher = SQLSERVER_SELECT_PREFIX.matcher(sql);
+        if (selectMatcher.find()) {
+            return "SELECT TOP 1 " + sql.substring(selectMatcher.end());
         }
-        GXBaseBuilder.LOGGER.error("Unable to resolve database type, please configure 'dbType' in GXDataSourceProperties");
-        return "mysql";
+        GXBaseBuilder.LOGGER.warn("SQL Server single-row limit expects SELECT SQL, falling back to derived-table TOP syntax.");
+        return CharSequenceUtil.format("SELECT TOP 1 * FROM ({}) gx_tmp_one", sql);
+    }
+
+    private static boolean isMysqlOrMariaDb(String dbType) {
+        return "mysql".equals(dbType) || "mariadb".equals(dbType);
     }
 }

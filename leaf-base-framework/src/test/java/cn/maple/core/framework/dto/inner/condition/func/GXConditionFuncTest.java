@@ -99,6 +99,21 @@ class GXConditionFuncTest {
         assertThrows(GXSqlInjectionException.class, condition::toSegment);
     }
 
+    @Test
+    void jsonFunctionsRejectUnsupportedH2AndSqliteDialects() {
+        withDbType("h2", () -> {
+            GXConditionFuncJsonSearch search = new GXConditionFuncJsonSearch("u", "extra", "alpha");
+            assertThrows(GXBusinessException.class, search::toSegment);
+        });
+        withDbType("sqlite", () -> {
+            GXConditionFuncJsonContains contains = new GXConditionFuncJsonContains(
+                    "u", "extra", Dict.create().set("name", "alpha"), "profile");
+            GXConditionFuncJsonOverlaps overlaps = new GXConditionFuncJsonOverlaps("u", "tags", List.of("a"), "$");
+            assertThrows(GXBusinessException.class, contains::toSegment);
+            assertThrows(GXBusinessException.class, overlaps::toSegment);
+        });
+    }
+
     private static void withDbType(String dbType, Runnable runnable) {
         String oldValue = System.getProperty("spring.datasource.druid.db-type");
         System.setProperty("spring.datasource.druid.db-type", dbType);

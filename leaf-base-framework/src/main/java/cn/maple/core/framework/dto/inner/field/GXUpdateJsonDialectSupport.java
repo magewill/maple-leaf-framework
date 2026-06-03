@@ -1,20 +1,18 @@
 package cn.maple.core.framework.dto.inner.field;
 
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXDBStringUtils;
-import cn.maple.core.framework.util.GXSpringContextUtils;
+import cn.maple.core.framework.exception.GXBusinessException;
+import cn.maple.core.framework.util.GXSqlDbTypeResolver;
 
-import java.lang.reflect.Method;
-import java.util.Locale;
 import java.util.Set;
 
 final class GXUpdateJsonDialectSupport {
-    private static final String DB_TYPE_PROPERTY_KEY = "spring.datasource.druid.db-type";
-    private static final Set<String> MYSQL_LIKE_DIALECTS = Set.of("mysql", "mariadb", "h2", "sqlite");
+    private static final Set<String> MYSQL_JSON_DIALECTS = Set.of("mysql", "mariadb");
     private static final Set<String> POSTGRES_DIALECTS = Set.of("postgres", "postgresql", "postgre_sql");
     private static final Set<String> SQLSERVER_DIALECTS = Set.of("sqlserver", "sql_server", "mssql", "sql-server");
     private static final Set<String> ORACLE_DIALECTS = Set.of("oracle");
+    private static final Set<String> UNSUPPORTED_JSON_DIALECTS = Set.of("h2", "sqlite");
 
     private GXUpdateJsonDialectSupport() {
     }
@@ -26,7 +24,7 @@ final class GXUpdateJsonDialectSupport {
         String dbType = resolveDbType();
         String valueExpr = renderJsonSetValue(dbType, valueParam, jsonValue);
 
-        if (MYSQL_LIKE_DIALECTS.contains(dbType)) {
+        if (MYSQL_JSON_DIALECTS.contains(dbType)) {
             return field + " = JSON_SET(" + field + ", " + pathParam + ", " + valueExpr + ")";
         }
         if (POSTGRES_DIALECTS.contains(dbType)) {
@@ -40,6 +38,7 @@ final class GXUpdateJsonDialectSupport {
             String formatJson = jsonValue && valueParam != null ? " FORMAT JSON" : "";
             return field + " = JSON_TRANSFORM(COALESCE(" + field + ", '{}'), SET " + pathParam + " = " + valueExpr + formatJson + ")";
         }
+        rejectUnsupportedJsonDialect(dbType, "JSON_SET");
         return field + " = JSON_SET(" + field + ", " + pathParam + ", " + valueExpr + ")";
     }
 
@@ -48,7 +47,7 @@ final class GXUpdateJsonDialectSupport {
         String pathParam = param(pathParamName);
         String dbType = resolveDbType();
 
-        if (MYSQL_LIKE_DIALECTS.contains(dbType)) {
+        if (MYSQL_JSON_DIALECTS.contains(dbType)) {
             return field + " = JSON_REMOVE(" + field + ", " + pathParam + ")";
         }
         if (POSTGRES_DIALECTS.contains(dbType)) {
@@ -60,6 +59,7 @@ final class GXUpdateJsonDialectSupport {
         if (ORACLE_DIALECTS.contains(dbType)) {
             return field + " = JSON_TRANSFORM(" + field + ", REMOVE " + pathParam + ")";
         }
+        rejectUnsupportedJsonDialect(dbType, "JSON_REMOVE");
         return field + " = JSON_REMOVE(" + field + ", " + pathParam + ")";
     }
 
@@ -68,7 +68,7 @@ final class GXUpdateJsonDialectSupport {
         String valueParam = mapParam(paramName);
         String dbType = resolveDbType();
 
-        if (MYSQL_LIKE_DIALECTS.contains(dbType)) {
+        if (MYSQL_JSON_DIALECTS.contains(dbType)) {
             return field + " = CAST(" + valueParam + " AS JSON)";
         }
         if (POSTGRES_DIALECTS.contains(dbType)) {
@@ -80,6 +80,7 @@ final class GXUpdateJsonDialectSupport {
         if (ORACLE_DIALECTS.contains(dbType)) {
             return field + " = JSON_QUERY(" + valueParam + ", '$')";
         }
+        rejectUnsupportedJsonDialect(dbType, "JSON object assignment");
         return field + " = CAST(" + valueParam + " AS JSON)";
     }
 
@@ -119,32 +120,12 @@ final class GXUpdateJsonDialectSupport {
     }
 
     private static String resolveDbType() {
-        String systemDbType = System.getProperty(DB_TYPE_PROPERTY_KEY);
-        if (CharSequenceUtil.isNotBlank(systemDbType)) {
-            return normalizeDbType(systemDbType);
-        }
-        String beanDbType = resolveDbTypeFromBean();
-        if (CharSequenceUtil.isNotBlank(beanDbType)) {
-            return normalizeDbType(beanDbType);
-        }
-        return normalizeDbType(GXCommonUtils.getEnvironmentValue(DB_TYPE_PROPERTY_KEY, String.class, "mysql"));
+        return GXSqlDbTypeResolver.resolveDbType();
     }
 
-    private static String resolveDbTypeFromBean() {
-        Object properties = GXSpringContextUtils.getBean("dataSourceProperties");
-        if (properties == null) {
-            return null;
+    private static void rejectUnsupportedJsonDialect(String dbType, String operationName) {
+        if (UNSUPPORTED_JSON_DIALECTS.contains(dbType)) {
+            throw new GXBusinessException(CharSequenceUtil.format("{} is not supported for dbType: {}", operationName, dbType));
         }
-        try {
-            Method method = properties.getClass().getMethod("getDbType");
-            Object dbType = method.invoke(properties);
-            return dbType == null ? null : dbType.toString();
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
-    private static String normalizeDbType(String dbType) {
-        return CharSequenceUtil.isBlank(dbType) ? "mysql" : dbType.toLowerCase(Locale.ROOT);
     }
 }
