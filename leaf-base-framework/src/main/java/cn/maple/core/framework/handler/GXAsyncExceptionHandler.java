@@ -4,34 +4,63 @@ import cn.maple.core.framework.service.GXBotNotificationExceptionService;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.Collection;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ThreadPoolExecutor;
 
 @Slf4j
 @Component
 public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
+    private static final ClassValue<Optional<Method>> DATA_METHOD_CACHE = new ClassValue<>() {
+        @Override
+        protected Optional<Method> computeValue(@NonNull Class<?> type) {
+            return findDataMethod(type);
+        }
+    };
+
     private final ObjectProvider<ThreadPoolTaskExecutor> asyncExecutorProvider;
 
     public GXAsyncExceptionHandler(ObjectProvider<ThreadPoolTaskExecutor> asyncExecutorProvider) {
         this.asyncExecutorProvider = asyncExecutorProvider;
     }
 
+    private static Optional<Method> findDataMethod(Class<?> type) {
+        Class<?> current = type;
+        while (current != null && Throwable.class.isAssignableFrom(current)) {
+            try {
+                Method method = current.getDeclaredMethod("getData");
+                if (method.getParameterCount() == 0 && method.getReturnType() != Void.TYPE) {
+                    method.setAccessible(true);
+                    return Optional.of(method);
+                }
+                current = current.getSuperclass();
+            } catch (NoSuchMethodException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+        return Optional.empty();
+    }
+
     @Override
-    public void handleUncaughtException(Throwable throwable, Method method, Object @Nullable [] params) {
+    public void handleUncaughtException(Throwable throwable, Method method, Object @NonNull [] params) {
         StringBuilder errorMsg = new StringBuilder(512)
                 .append("--------------Maple Leaf Framework async exception--------------\n")
                 .append("Exception message: ").append(throwable.getMessage()).append("\n")
                 .append("Method name: ").append(method.getName()).append("\n")
                 .append("Class name: ").append(method.getDeclaringClass().getName()).append("\n");
 
-        appendParams(errorMsg, params);
+        appendParams(errorMsg, throwable, params);
         appendExecutorStatus(errorMsg);
         errorMsg.append("--------------Maple Leaf Framework async exception--------------");
 
@@ -39,7 +68,8 @@ public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
         notifyException(throwable);
     }
 
-    private void appendParams(StringBuilder errorMsg, Object @Nullable [] params) {
+    private void appendParams(StringBuilder errorMsg, Throwable throwable, Object @Nullable [] params) {
+        appendExceptionData(errorMsg, throwable);
         if (params == null || params.length == 0) {
             return;
         }
@@ -47,6 +77,42 @@ public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
         for (int i = 0; i < params.length; i++) {
             errorMsg.append("  param[").append(i).append("]: ").append(safeToString(params[i])).append("\n");
         }
+    }
+
+    private void appendExceptionData(StringBuilder errorMsg, Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            Object data = getExceptionData(current);
+            if (hasDataValue(data)) {
+                errorMsg.append("Exception data: ").append(safeToString(data)).append("\n");
+                return;
+            }
+            current = current.getCause();
+        }
+    }
+
+    private Object getExceptionData(Throwable throwable) {
+        return DATA_METHOD_CACHE.get(throwable.getClass())
+                .map(method -> invokeDataMethod(method, throwable))
+                .orElse(null);
+    }
+
+    private Object invokeDataMethod(Method method, Throwable throwable) {
+        try {
+            return method.invoke(throwable);
+        } catch (IllegalAccessException | InvocationTargetException e) {
+            return null;
+        }
+    }
+
+    private boolean hasDataValue(@Nullable Object data) {
+        return switch (data) {
+            case null -> false;
+            case Map<?, ?> map -> !map.isEmpty();
+            case Collection<?> collection -> !collection.isEmpty();
+            case CharSequence charSequence -> !charSequence.isEmpty();
+            default -> true;
+        };
     }
 
     private String safeToString(@Nullable Object param) {
