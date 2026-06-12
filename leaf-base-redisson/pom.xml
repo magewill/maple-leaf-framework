@@ -47,6 +47,10 @@
                     <groupId>com.fasterxml.jackson.core</groupId>
                     <artifactId>jackson-databind</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>org.jctools</groupId>
+                    <artifactId>jctools-core</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
@@ -54,6 +58,11 @@
             <groupId>org.redisson</groupId>
             <artifactId>redisson-spring-cache</artifactId>
             <version>${redisson.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jctools</groupId>
+            <artifactId>jctools-core</artifactId>
         </dependency>
 
         <dependency>

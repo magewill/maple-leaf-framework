@@ -69,11 +69,21 @@
         <dependency>
             <groupId>io.debezium</groupId>
             <artifactId>debezium-storage-redis</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.jctools</groupId>
+                    <artifactId>jctools-core</artifactId>
+                </exclusion>
+            </exclusions>
             <version>${debezium.version}</version>
         </dependency>
         <dependency>
             <groupId>org.reflections</groupId>
             <artifactId>reflections</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.jctools</groupId>
+            <artifactId>jctools-core</artifactId>
         </dependency>
         <dependency>
             <groupId>javax.xml.bind</groupId>

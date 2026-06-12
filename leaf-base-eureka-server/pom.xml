@@ -15,7 +15,7 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <eureka.server.version>5.0.1</eureka.server.version>
+        <eureka.server.version>5.0.2</eureka.server.version>
     </properties>
     <dependencies>
         <dependency>
@@ -26,6 +26,10 @@
                 <exclusion>
                     <groupId>org.glassfish.hk2</groupId>
                     <artifactId>hk2-api</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.glassfish.hk2</groupId>
+                    <artifactId>hk2-utils</artifactId>
                 </exclusion>
                 <exclusion>
                     <groupId>org.apache.httpcomponents</groupId>
@@ -40,6 +44,10 @@
         <dependency>
             <groupId>org.glassfish.hk2</groupId>
             <artifactId>hk2-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.glassfish.hk2</groupId>
+            <artifactId>hk2-utils</artifactId>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.woodstox</groupId>
