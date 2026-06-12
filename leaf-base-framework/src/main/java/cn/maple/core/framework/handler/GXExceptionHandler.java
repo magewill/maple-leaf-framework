@@ -117,7 +117,9 @@ public class GXExceptionHandler {
     public GXResultUtils<Map<String, Object>> handleValidationException(ValidationException e) {
         log.error(e.getMessage(), e);
         HashMap<String, Object> hashMap = new HashMap<>();
-        hashMap.put("msg", e.getCause().getMessage());
+        if (e.getCause() != null) {
+            hashMap.put("msg", e.getCause().getMessage());
+        }
         exceptionNotify(e);
         return GXResultUtils.error(GXDefaultResultStatusCode.INTERNAL_SYSTEM_ERROR, hashMap);
     }
@@ -126,7 +128,11 @@ public class GXExceptionHandler {
     public GXResultUtils<String> handleMultipartException(MultipartException e, RedirectAttributes redirectAttributes) {
         log.error(e.getMessage(), e);
         exceptionNotify(e);
-        return GXResultUtils.error(HttpStatus.HTTP_INTERNAL_ERROR, e.getCause().getMessage());
+        String errMsg = "Internal Server Error!!!";
+        if (e.getCause() != null) {
+            errMsg = e.getCause().getMessage();
+        }
+        return GXResultUtils.error(HttpStatus.HTTP_INTERNAL_ERROR, errMsg);
     }
 
     @ExceptionHandler(GXTokenInvalidException.class)

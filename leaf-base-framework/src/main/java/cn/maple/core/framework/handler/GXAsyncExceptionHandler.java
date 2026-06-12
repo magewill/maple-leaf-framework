@@ -4,7 +4,7 @@ import cn.maple.core.framework.service.GXBotNotificationExceptionService;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import lombok.extern.slf4j.Slf4j;
-import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.NullMarked;
 import org.jspecify.annotations.Nullable;
 import org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler;
 import org.springframework.beans.factory.ObjectProvider;
@@ -24,7 +24,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
     private static final ClassValue<Optional<Method>> DATA_METHOD_CACHE = new ClassValue<>() {
         @Override
-        protected Optional<Method> computeValue(@NonNull Class<?> type) {
+        @NullMarked
+        protected Optional<Method> computeValue(Class<?> type) {
             return findDataMethod(type);
         }
     };
@@ -53,7 +54,8 @@ public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
     }
 
     @Override
-    public void handleUncaughtException(Throwable throwable, Method method, Object @NonNull [] params) {
+    @NullMarked
+    public void handleUncaughtException(Throwable throwable, Method method, @Nullable Object... params) {
         StringBuilder errorMsg = new StringBuilder(512)
                 .append("--------------Maple Leaf Framework async exception--------------\n")
                 .append("Exception message: ").append(throwable.getMessage()).append("\n")
@@ -68,7 +70,7 @@ public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
         notifyException(throwable);
     }
 
-    private void appendParams(StringBuilder errorMsg, Throwable throwable, Object @Nullable [] params) {
+    private void appendParams(StringBuilder errorMsg, Throwable throwable, @Nullable Object... params) {
         appendExceptionData(errorMsg, throwable);
         if (params == null || params.length == 0) {
             return;
@@ -91,13 +93,13 @@ public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
         }
     }
 
-    private Object getExceptionData(Throwable throwable) {
+    private @Nullable Object getExceptionData(Throwable throwable) {
         return DATA_METHOD_CACHE.get(throwable.getClass())
                 .map(method -> invokeDataMethod(method, throwable))
                 .orElse(null);
     }
 
-    private Object invokeDataMethod(Method method, Throwable throwable) {
+    private @Nullable Object invokeDataMethod(Method method, Throwable throwable) {
         try {
             return method.invoke(throwable);
         } catch (IllegalAccessException | InvocationTargetException e) {
