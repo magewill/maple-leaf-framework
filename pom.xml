@@ -545,10 +545,7 @@
                         <!--arg>-Xplugin:ErrorProne -XepDisableAllChecks -Xep:NullAway:ERROR -XepOpt:NullAway:OnlyNullMarked=true -XepOpt:NullAway:JSpecifyMode=true -XepExcludedPaths:(.*[\\/]test[\\/]java[\\/].*|.*[\\/]target[\\/]generated-sources[\\/].*)
                         </arg-->
                         <!-- 包级别扫描 -->
-                        <arg>-Xplugin:ErrorProne -XepDisableAllChecks -Xep:NullAway:ERROR
-                            -XepOpt:NullAway:AnnotatedPackages=cn.maple -XepOpt:NullAway:JSpecifyMode=true
-                            -XepExcludedPaths:(.*[\\/]test[\\/]java[\\/].*|.*[\\/]target[\\/]generated-sources[\\/].*)
-                        </arg>
+                        <arg>-Xplugin:ErrorProne -XepDisableAllChecks -Xep:NullAway:ERROR -XepOpt:NullAway:AnnotatedPackages=cn.maple -XepOpt:NullAway:JSpecifyMode=true -XepExcludedPaths:(.*[\\/]test[\\/]java[\\/].*|.*[\\/]target[\\/]generated-sources[\\/].*)</arg>
                     </compilerArgs>
                     <annotationProcessorPaths>
                         <path>
