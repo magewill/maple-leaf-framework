@@ -27,11 +27,6 @@ import java.util.Map;
  * 所有方法默认返回 Manticore 接口原始的 JSON 字符串，调用方可自行用
  * {@code JSONUtil} 解析，也可以使用 {@link #executeSqlAsList(String)}、
  * {@link #extractHits(String)} 等便捷方法直接拿到结构化结果。</p>
- *
- * <p><b>安全提示：</b>示例中的 baseUrl / username / password 仅作为默认值占位，
- * 生产环境请勿把真实账号密码硬编码在源码中，建议通过配置中心 / 环境变量
- * 在应用启动时（例如 Spring 的 {@code @PostConstruct}）调用
- * {@link #initConfig(String, String, String)} 完成注入。</p>
  */
 public class GXMantiCoreUtils {
     private static final Logger log = LoggerFactory.getLogger(GXMantiCoreUtils.class);
@@ -41,12 +36,6 @@ public class GXMantiCoreUtils {
     private static final int DEFAULT_BULK_BATCH_SIZE = 1000;
     // query_string 语法中作为操作符使用、必须转义的特殊字符
     private static final String QUERY_STRING_SPECIAL_CHARS = "!\"$'()-/<@\\^|~";
-    // 1. 默认服务器与认证配置（建议通过 initConfig 在启动时覆盖，而不是直接改这里）
-    private static String baseUrl = "http://192.168.7.209:9308";
-    private static String username = "britton";
-    private static String password = "britton@123!!";
-    private static int connectTimeout = DEFAULT_CONNECT_TIMEOUT_MS;
-    private static int readTimeout = DEFAULT_READ_TIMEOUT_MS;
     // 请求体中表示"表/索引名称"的字段名。旧版本 Manticore 用 "index"，
     // 当前官方文档（Manticore 6.x+）已统一改为 "table"（"index" 作为兼容别名仍可使用）。
     // 默认保持 "index" 以兼容本类历史用法，若使用较新版本建议启动时调用 useTableKeyword()。
@@ -57,30 +46,6 @@ public class GXMantiCoreUtils {
     private static volatile long retryBackoffMs = 200L;
 
     private GXMantiCoreUtils() {
-    }
-
-    /**
-     * 动态修改连接配置（可在 Spring 项目的 @PostConstruct 或启动配置类中调用）
-     */
-    public static void initConfig(String url, String user, String pwd) {
-        initConfig(url, user, pwd, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_READ_TIMEOUT_MS);
-    }
-
-    /**
-     * 动态修改连接配置，并自定义连接/读取超时时间
-     *
-     * @param url              服务地址，如 http://127.0.0.1:9308
-     * @param user             basic auth 用户名
-     * @param pwd              basic auth 密码
-     * @param connectTimeoutMs 连接超时（毫秒）
-     * @param readTimeoutMs    读取超时（毫秒）
-     */
-    public static void initConfig(String url, String user, String pwd, int connectTimeoutMs, int readTimeoutMs) {
-        baseUrl = StrUtil.removeSuffix(url, "/");
-        username = user;
-        password = pwd;
-        connectTimeout = connectTimeoutMs;
-        readTimeout = readTimeoutMs;
     }
 
     /**
@@ -912,6 +877,12 @@ public class GXMantiCoreUtils {
         int attempt = 0;
         while (true) {
             try {
+                String baseUrl = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.base-url", String.class);
+                String username = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.username", String.class);
+                String password = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.password", String.class);
+                int connectTimeout = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.connect-timeout", Integer.class, DEFAULT_CONNECT_TIMEOUT_MS);
+                int readTimeout = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.read-timeout", Integer.class, DEFAULT_READ_TIMEOUT_MS);
+                baseUrl = StrUtil.removeSuffix(baseUrl, "/");
                 HttpResponse response = HttpRequest.post(baseUrl + endpoint)
                         .basicAuth(username, password)
                         .header(Header.CONTENT_TYPE, contentType)
