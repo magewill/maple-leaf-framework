@@ -1,8 +1,8 @@
 package cn.maple.core.framework.util;
 
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.core.util.URLUtil;
 import cn.hutool.http.Header;
+import cn.hutool.http.HttpException;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONArray;
@@ -22,11 +22,16 @@ import java.util.Map;
  * Manticore Search HTTP API 操作工具类。
  *
  * <p>覆盖了增/删/改/查、批量写入（/bulk，含自动分批）、按条件更新与删除、
- * 原生 SQL（/sql）、常用表管理语句、向量检索（KNN）、常用查询 DSL 构造器、
- * 结果解析、Percolate（反向搜索）以及 Autocomplete 自动补全等场景。
+ * 原生 SQL（/sql?mode=raw，支持任意语句与分号分隔的多语句）、常用表管理语句、
+ * 向量检索（KNN）、JOIN、分组聚合/Facet、常用查询 DSL 构造器、结果解析、
+ * Percolate（反向搜索）以及 Autocomplete 自动补全等场景。
  * 所有方法默认返回 Manticore 接口原始的 JSON 字符串，调用方可自行用
  * {@code JSONUtil} 解析，也可以使用 {@link #executeSqlAsList(String)}、
  * {@link #extractHits(String)} 等便捷方法直接拿到结构化结果。</p>
+ *
+ * <p><b>鉴权：</b>默认使用 Basic Auth（username/password）。如果 Manticore 端开启了鉴权
+ * 并希望改用 Bearer Token，调用 {@link #useBearerToken(String)} 即可，token 可通过
+ * {@link #createOrRotateToken()} 创建。</p>
  */
 public class GXMantiCoreUtils {
     private static final Logger log = LoggerFactory.getLogger(GXMantiCoreUtils.class);
@@ -44,8 +49,41 @@ public class GXMantiCoreUtils {
     // 可通过 setRetryPolicy 按需开启。仅对连接/IO 异常重试，HTTP 状态码错误不重试。
     private static volatile int maxRetries = 0;
     private static volatile long retryBackoffMs = 200L;
+    // Bearer Token 鉴权（可选）。Manticore 开启鉴权后，HTTP 接口可用 Basic Auth 或 Bearer Token 两种方式之一。
+    // 一旦设置了 token，sendPost 会优先用 "Authorization: Bearer <token>"，不再发送 Basic Auth 头。
+    private static volatile String bearerToken;
 
     private GXMantiCoreUtils() {
+    }
+
+    /**
+     * 改用 Bearer Token 鉴权（对应 Manticore 的 Authentication and authorization 功能，
+     * 需要 Manticore 端已开启鉴权且该 token 有效）。设置后所有请求都会带上
+     * "Authorization: Bearer &lt;token&gt;"，不再发送 Basic Auth 头。
+     *
+     * @param token 有效的 bearer token
+     */
+    public static void useBearerToken(String token) {
+        bearerToken = token;
+    }
+
+    /**
+     * 清除 Bearer Token，恢复使用 Basic Auth（initConfig 中配置的用户名密码）鉴权
+     */
+    public static void clearBearerToken() {
+        bearerToken = null;
+    }
+
+    /**
+     * 为当前 Basic Auth 用户创建或轮换一个 Bearer Token (POST /token)。
+     * 该操作本身仍使用 Basic Auth 鉴权，与是否已调用过 {@link #useBearerToken(String)} 无关。
+     * <p><b>注意：</b>响应中的 token 明文只会返回这一次，请调用后立即解析并妥善保存
+     * （如写入配置中心），之后只能通过 SQL 的 {@code SHOW TOKEN} 看到哈希值，看不到明文。
+     *
+     * @return 接口原始响应 JSON 字符串
+     */
+    public static String createOrRotateToken() {
+        return sendPost("/token", "{}", "application/json");
     }
 
     /**
@@ -61,6 +99,8 @@ public class GXMantiCoreUtils {
     public static void useIndexKeyword() {
         tableFieldName = "index";
     }
+
+    // ==================== 单条写入 ====================
 
     /**
      * 配置网络异常时的重试策略
@@ -93,11 +133,13 @@ public class GXMantiCoreUtils {
     }
 
     /**
-     * 局部更新 (/update) —— 只更新 doc 中传入的指定字段
+     * 局部更新 (/update) —— 只更新 doc 中传入的指定字段（按行覆盖属性值）。
+     * <p><b>注意：</b>UPDATE 无法修改全文字段（text 类型）和 columnar 属性，doc 中传入这些字段会被忽略或报错；
+     * 如需修改全文字段/columnar 属性的内容，必须用 {@link #replace(String, Long, Map)} 整条替换。
      *
      * @param index 索引/表名称
      * @param id    文档 ID（必须指定）
-     * @param doc   需要修改的字段键值对 Map
+     * @param doc   需要修改的字段键值对 Map（不能包含全文字段/columnar 属性）
      * @return 接口响应 JSON 字符串
      */
     public static String update(String index, Long id, Map<String, Object> doc) {
@@ -159,6 +201,8 @@ public class GXMantiCoreUtils {
 
         return sendPost("/delete", JSONUtil.toJsonStr(payload), "application/json");
     }
+
+    // ==================== 批量写入 /bulk（NDJSON） ====================
 
     /**
      * 根据条件批量删除数据 (/delete)
@@ -274,6 +318,8 @@ public class GXMantiCoreUtils {
         return responses;
     }
 
+    // ==================== 查询 ====================
+
     private static String bulkAction(String action, String index, List<Map<String, Object>> docList,
                                      String idFieldName, boolean idRequired) {
         StringBuilder ndjson = new StringBuilder();
@@ -355,6 +401,8 @@ public class GXMantiCoreUtils {
     public static String search(Map<String, Object> fullPayload) {
         return sendPost("/search", JSONUtil.toJsonStr(fullPayload), "application/json");
     }
+
+    // -------- 查询 DSL 构造器：省去手写嵌套 Map 的麻烦 --------
 
     /**
      * 向量近邻检索 (/search 的 knn 语法)，要求目标表中已定义对应的向量字段
@@ -587,6 +635,8 @@ public class GXMantiCoreUtils {
         return join;
     }
 
+    // -------- /search 响应解析 --------
+
     /**
      * 从 /search 响应中提取命中文档列表，每条记录包含 _id、_score，
      * 并把 _source 中的字段平铺到同一层，便于直接使用
@@ -677,22 +727,30 @@ public class GXMantiCoreUtils {
         return buckets;
     }
 
+    // ==================== 原生 SQL (/sql) ====================
+
     /**
-     * 执行原生 Manticore SQL 脚本 (/sql)，返回原始响应
+     * 执行原生 Manticore SQL 脚本 (/sql?mode=raw)，返回原始响应。
+     * 使用 mode=raw 是必须的：不带该参数的 /sql 只允许 SELECT，且响应结构是 hits 格式（与 /search 一致），
+     * 无法执行 CREATE/DROP/TRUNCATE 等 DDL 语句；mode=raw 下任意语句都可执行，
+     * 响应统一为 [{"columns":[...], "data":[...], "total":..., "error":"", "warning":""}] 结构，
+     * 并且支持用 ";" 分隔的多语句（此时数组里会有多个结果集，参见 {@link #executeSqlMultiAsList(String)}）。
      *
      * @param sql 完整的 Manticore SQL 语句
      * @return 接口响应 JSON 字符串
      */
     public static String executeSql(String sql) {
-        String body = "query=" + URLUtil.encode(sql, StandardCharsets.UTF_8);
-        return sendPost("/sql", body, "application/x-www-form-urlencoded");
+        // 直接把 SQL 作为纯文本 POST body 发送，不做 URL 编码，避免和 "query=" 表单参数方式混用出错
+        return sendPost("/sql?mode=raw", sql, "text/plain");
     }
 
     /**
-     * 执行 SELECT 类型的 SQL 并将结果解析为 List&lt;Map&gt;，便于直接使用。
-     * 对于 DDL/DML 语句（无 data 字段返回），返回空列表。
+     * 执行单条 SQL（SELECT/SHOW/DESCRIBE 等有结果集返回的语句）并解析为 List&lt;Map&gt;，便于直接使用。
+     * 对于只有单一语句、无需关心多结果集的场景用这个即可；
+     * 分号分隔的多语句请用 {@link #executeSqlMultiAsList(String)}。
+     * 对于纯 DDL/DML（无 data 字段返回，如 CREATE/DROP/UPDATE），返回空列表，可用 {@link #executeSql(String)} 拿原始响应确认执行结果。
      *
-     * @param sql SELECT 语句
+     * @param sql 单条 SQL 语句
      * @return 每行数据组成的 List，每行是列名到值的 Map
      */
     public static List<Map<String, Object>> executeSqlAsList(String sql) {
@@ -717,6 +775,46 @@ public class GXMantiCoreUtils {
         }
         return result;
     }
+
+    /**
+     * 执行以 ";" 分隔的多条 SQL 语句，按语句顺序返回各自的结果集列表。
+     * 任意一条语句报错都会直接抛出 ManticoreException（附带是第几条语句失败）。
+     *
+     * @param sqlBatch 分号分隔的多条 SQL 语句
+     * @return 每条语句对应一个 List&lt;Map&gt; 结果集，顺序与语句顺序一致
+     */
+    public static List<List<Map<String, Object>>> executeSqlMultiAsList(String sqlBatch) {
+        String resp = executeSql(sqlBatch);
+        List<List<Map<String, Object>>> resultSets = new ArrayList<>();
+
+        JSONArray arr = JSONUtil.parseArray(resp);
+        for (int i = 0; i < arr.size(); i++) {
+            JSONObject item = arr.getJSONObject(i);
+            String error = item.getStr("error");
+            if (StrUtil.isNotBlank(error)) {
+                throw new GXManticoreException("多语句 SQL 第 " + (i + 1) + " 条执行失败: " + error, resp);
+            }
+            List<Map<String, Object>> rows = new ArrayList<>();
+            JSONArray data = item.getJSONArray("data");
+            if (data != null) {
+                for (int j = 0; j < data.size(); j++) {
+                    rows.add(data.getJSONObject(j));
+                }
+            }
+            resultSets.add(rows);
+        }
+        return resultSets;
+    }
+
+    /**
+     * FLUSH ATTRIBUTES —— 将所有活跃表在内存中的属性更新（UPDATE 产生的）落盘，
+     * 返回响应中的 "tag" 字段可用于确认落盘状态
+     */
+    public static String flushAttributes() {
+        return executeSql("FLUSH ATTRIBUTES");
+    }
+
+    // ==================== 表管理（基于 /sql） ====================
 
     /**
      * SHOW TABLES —— 列出所有表/索引
@@ -784,10 +882,30 @@ public class GXMantiCoreUtils {
      * @return 接口响应 JSON 字符串
      */
     public static String pqAddRule(String pqIndex, Long id, Map<String, Object> query, List<String> tags) {
+        return pqAddRule(pqIndex, id, query, tags, null);
+    }
+
+    /**
+     * 向 PQ（percolate）表中存储一条查询规则，并附带属性过滤条件。
+     * PQ 表规则固定包含 id / query / tags / filters 四个字段，filters 对应一个类似 SQL WHERE
+     * 的属性过滤表达式（如 "price > 5"），只有同时满足 query 全文匹配和 filters 属性条件的文档才会命中该规则。
+     *
+     * @param pqIndex percolate 表名称（需提前用 CREATE TABLE ... type='pq' 建好）
+     * @param id      规则 ID，传 null 由 Manticore 自动生成
+     * @param query   规则对应的查询条件（与 /search 的 query DSL 语法一致，可用 build* 方法构造）
+     * @param tags    可选标签列表，便于后续按标签筛选或删除规则，可传 null
+     * @param filters 可选的属性过滤表达式（如 "price > 5"），可传 null
+     * @return 接口响应 JSON 字符串
+     */
+    public static String pqAddRule(String pqIndex, Long id, Map<String, Object> query, List<String> tags,
+                                   String filters) {
         Map<String, Object> doc = new HashMap<>();
         doc.put("query", query);
         if (tags != null && !tags.isEmpty()) {
             doc.put("tags", tags);
+        }
+        if (StrUtil.isNotBlank(filters)) {
+            doc.put("filters", filters);
         }
         return insert(pqIndex, id, doc);
     }
@@ -865,6 +983,8 @@ public class GXMantiCoreUtils {
         return sendPost("/autocomplete", JSONUtil.toJsonStr(payload), "application/json");
     }
 
+    // ==================== 内部工具方法 ====================
+
     private static List<Float> toList(float[] arr) {
         List<Float> list = new ArrayList<>(arr.length);
         for (float f : arr) {
@@ -875,22 +995,30 @@ public class GXMantiCoreUtils {
 
     private static String sendPost(String endpoint, String body, String contentType) {
         int attempt = 0;
+        // 快照一份，避免循环过程中被另一个线程并发调用 setRetryPolicy 修改，导致重试上限在循环中途变化
+        int localMaxRetries = maxRetries;
+        String baseUrl = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.base-url", String.class);
+        String username = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.username", String.class);
+        String password = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.password", String.class);
+        int connectTimeout = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.connect-timeout", Integer.class, DEFAULT_CONNECT_TIMEOUT_MS);
+        int readTimeout = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.read-timeout", Integer.class, DEFAULT_READ_TIMEOUT_MS);
+        baseUrl = StrUtil.removeSuffix(baseUrl, "/");
         while (true) {
             try {
-                String baseUrl = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.base-url", String.class);
-                String username = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.username", String.class);
-                String password = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.password", String.class);
-                int connectTimeout = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.connect-timeout", Integer.class, DEFAULT_CONNECT_TIMEOUT_MS);
-                int readTimeout = GXSpringContextUtils.getEnvironment().getProperty("maple.framework.manticore.read-timeout", Integer.class, DEFAULT_READ_TIMEOUT_MS);
-                baseUrl = StrUtil.removeSuffix(baseUrl, "/");
-                HttpResponse response = HttpRequest.post(baseUrl + endpoint)
-                        .basicAuth(username, password)
+                HttpRequest request = HttpRequest.post(baseUrl + endpoint)
                         .header(Header.CONTENT_TYPE, contentType)
                         .charset(StandardCharsets.UTF_8)
                         .setConnectionTimeout(connectTimeout)
                         .setReadTimeout(readTimeout)
-                        .body(body)
-                        .execute();
+                        .body(body);
+
+                if (StrUtil.isNotBlank(bearerToken)) {
+                    request.header("Authorization", "Bearer " + bearerToken);
+                } else {
+                    request.basicAuth(username, password);
+                }
+
+                HttpResponse response = request.execute();
 
                 String result = response.body();
                 if (!response.isOk()) {
@@ -901,10 +1029,12 @@ public class GXMantiCoreUtils {
                 }
                 return result;
             } catch (GXManticoreException e) {
+                // HTTP 状态码反映的是业务/查询本身的错误，重试没有意义，直接抛出
                 throw e;
-            } catch (Exception e) {
+            } catch (HttpException e) {
+                // 只对网络层异常（连接失败、超时等）重试；其他代码逻辑错误不应被悄悄重试掩盖
                 attempt++;
-                if (attempt > maxRetries) {
+                if (attempt > localMaxRetries) {
                     log.error("调用 Manticore 接口异常（已重试 {} 次）, endpoint={}", attempt - 1, endpoint, e);
                     throw new GXManticoreException("调用 Manticore 接口异常: " + e.getMessage(), null);
                 }
