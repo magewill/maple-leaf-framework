@@ -1,6 +1,5 @@
 package cn.maple.core.framework.util;
 
-import cn.maple.core.framework.config.aware.GXApplicationContextSingleton;
 import cn.maple.core.framework.event.GXBaseEvent;
 import com.google.common.eventbus.AsyncEventBus;
 import com.google.common.eventbus.EventBus;
@@ -10,9 +9,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
-import org.springframework.context.ApplicationContext;
+import org.springframework.context.ApplicationListener;
 import org.springframework.context.support.GenericApplicationContext;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GXEventPublisherUtilsTest {
@@ -33,6 +35,7 @@ class GXEventPublisherUtilsTest {
     @BeforeEach
     void setUp() {
         clearRegisterCache();
+        TransactionSynchronizationManager.clear();
     }
 
     @AfterEach
@@ -41,6 +44,73 @@ class GXEventPublisherUtilsTest {
             springContextUtils.close();
         }
         clearRegisterCache();
+        TransactionSynchronizationManager.clear();
+    }
+
+    @Test
+    void publishEventAfterCommitPublishesImmediatelyWithoutTransaction() {
+        AtomicInteger publishedEvents = new AtomicInteger();
+        withApplicationContext(event -> publishedEvents.incrementAndGet(), () ->
+                GXEventPublisherUtils.publishEventAfterCommit(new GXBaseEvent<>("event"))
+        );
+
+        assertEquals(1, publishedEvents.get());
+    }
+
+    @Test
+    void publishEventAfterCommitDefersPublicationUntilCommit() {
+        AtomicInteger publishedEvents = new AtomicInteger();
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+
+        withApplicationContext(event -> publishedEvents.incrementAndGet(), () -> {
+            GXEventPublisherUtils.publishEventAfterCommit(new GXBaseEvent<>("event"));
+
+            assertEquals(0, publishedEvents.get());
+            assertEquals(1, TransactionSynchronizationManager.getSynchronizations().size());
+            TransactionSynchronizationManager.getSynchronizations().getFirst().afterCommit();
+        });
+
+        assertEquals(1, publishedEvents.get());
+    }
+
+    @Test
+    void publishEventAfterCommitDoesNotPublishWhenTransactionRollsBack() {
+        AtomicInteger publishedEvents = new AtomicInteger();
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+
+        withApplicationContext(event -> publishedEvents.incrementAndGet(), () -> {
+            GXEventPublisherUtils.publishEventAfterCommit(new GXBaseEvent<>("event"));
+
+            TransactionSynchronizationManager.getSynchronizations().getFirst()
+                    .afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+        });
+
+        assertEquals(0, publishedEvents.get());
+    }
+
+    @Test
+    void publishEventAfterCommitContainsListenerFailureAfterCommit() {
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+
+        withApplicationContext(event -> {
+            throw new IllegalStateException("listener failure");
+        }, () -> {
+            GXEventPublisherUtils.publishEventAfterCommit(new GXBaseEvent<>("event"));
+
+            TransactionSynchronization synchronization = TransactionSynchronizationManager.getSynchronizations().getFirst();
+            assertDoesNotThrow(synchronization::afterCommit);
+        });
+    }
+
+    @Test
+    void publishEventAfterCommitPropagatesListenerFailureWithoutTransaction() {
+        withApplicationContext(event -> {
+            throw new IllegalStateException("listener failure");
+        }, () -> assertThrows(IllegalStateException.class,
+                () -> GXEventPublisherUtils.publishEventAfterCommit(new GXBaseEvent<>("event"))));
     }
 
     @Test
@@ -62,21 +132,16 @@ class GXEventPublisherUtilsTest {
     void syncPublishRegistersListenerOnceWhenCalledConcurrently() throws Exception {
         SlowRegisterEventBus syncEventBus = new SlowRegisterEventBus();
         TestListener listener = new TestListener();
-        ApplicationContext originalContext = GXApplicationContextSingleton.INSTANCE.getApplicationContext();
-        GenericApplicationContext applicationContext = new GenericApplicationContext();
-        applicationContext.registerBean("eventBus", EventBus.class, () -> syncEventBus);
-        applicationContext.refresh();
-        GXApplicationContextSingleton.INSTANCE.setApplicationContext(applicationContext);
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         CountDownLatch startGate = new CountDownLatch(1);
         Future<?> first = executor.submit(() -> {
             await(startGate);
-            GXEventPublisherUtils.publishGuavaSyncEvent(new GXBaseEvent<>("first"), listener);
+            invokeRegisterAndPost(syncEventBus, listener, new GXBaseEvent<>("first"));
         });
         Future<?> second = executor.submit(() -> {
             await(startGate);
-            GXEventPublisherUtils.publishGuavaSyncEvent(new GXBaseEvent<>("second"), listener);
+            invokeRegisterAndPost(syncEventBus, listener, new GXBaseEvent<>("second"));
         });
 
         startGate.countDown();
@@ -86,12 +151,6 @@ class GXEventPublisherUtilsTest {
             assertDoesNotThrow(() -> second.get(5, TimeUnit.SECONDS));
         } finally {
             executor.shutdownNow();
-            if (originalContext == null) {
-                GXApplicationContextSingleton.INSTANCE.clearApplicationContext();
-            } else {
-                GXApplicationContextSingleton.INSTANCE.setApplicationContext(originalContext);
-            }
-            applicationContext.close();
         }
 
         assertEquals(2, listener.getCount());
@@ -156,6 +215,18 @@ class GXEventPublisherUtilsTest {
         );
         if (cache != null) {
             cache.clear();
+        }
+    }
+
+    private void withApplicationContext(ApplicationListener<GXBaseEvent<?>> listener, Runnable action) {
+        GenericApplicationContext applicationContext = new GenericApplicationContext();
+        applicationContext.addApplicationListener(listener);
+        applicationContext.refresh();
+        try (MockedStatic<GXSpringContextUtils> applicationContextUtils = Mockito.mockStatic(GXSpringContextUtils.class)) {
+            applicationContextUtils.when(GXSpringContextUtils::getApplicationContext).thenReturn(applicationContext);
+            action.run();
+        } finally {
+            applicationContext.close();
         }
     }
 

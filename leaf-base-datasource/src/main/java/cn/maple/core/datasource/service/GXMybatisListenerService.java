@@ -23,7 +23,15 @@ public interface GXMybatisListenerService<T> {
         LOG.info("请自定义实现deleteSoftListener监听逻辑");
     }
 
+    default void deleteListener(Dict data) {
+        LOG.info("Physical delete listener invoked");
+    }
+
     default void saveBatchListener(Dict data) {
         LOG.info("请自定义实现saveBatchListener监听逻辑");
+    }
+
+    default void batchChangeListener(Dict data) {
+        saveBatchListener(data);
     }
 }

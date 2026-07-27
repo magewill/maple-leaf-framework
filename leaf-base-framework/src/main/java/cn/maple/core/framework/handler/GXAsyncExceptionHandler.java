@@ -58,7 +58,7 @@ public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
     public void handleUncaughtException(Throwable throwable, Method method, @Nullable Object... params) {
         StringBuilder errorMsg = new StringBuilder(512)
                 .append("--------------Maple Leaf Framework async exception--------------\n")
-                .append("Exception message: ").append(throwable.getMessage()).append("\n")
+                .append("Exception type: ").append(throwable.getClass().getName()).append("\n")
                 .append("Method name: ").append(method.getName()).append("\n")
                 .append("Class name: ").append(method.getDeclaringClass().getName()).append("\n");
 
@@ -77,7 +77,8 @@ public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
         }
         errorMsg.append("Method params:\n");
         for (int i = 0; i < params.length; i++) {
-            errorMsg.append("  param[").append(i).append("]: ").append(safeToString(params[i])).append("\n");
+            errorMsg.append("  param[").append(i).append("] type: ")
+                    .append(describeValue(params[i])).append("\n");
         }
     }
 
@@ -86,7 +87,7 @@ public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
         while (current != null) {
             Object data = getExceptionData(current);
             if (hasDataValue(data)) {
-                errorMsg.append("Exception data: ").append(safeToString(data)).append("\n");
+                errorMsg.append("Exception data summary: ").append(describeValue(data)).append("\n");
                 return;
             }
             current = current.getCause();
@@ -117,12 +118,17 @@ public class GXAsyncExceptionHandler implements AsyncUncaughtExceptionHandler {
         };
     }
 
-    private String safeToString(@Nullable Object param) {
-        try {
-            return param == null ? "null" : param.toString();
-        } catch (Exception e) {
-            return "Failed to convert param to string: " + e.getMessage();
+    private String describeValue(@Nullable Object value) {
+        if (value == null) {
+            return "null";
         }
+        if (value instanceof Map<?, ?> map) {
+            return value.getClass().getName() + "(size=" + map.size() + ")";
+        }
+        if (value instanceof Collection<?> collection) {
+            return value.getClass().getName() + "(size=" + collection.size() + ")";
+        }
+        return value.getClass().getName();
     }
 
     private void appendExecutorStatus(StringBuilder errorMsg) {

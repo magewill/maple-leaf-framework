@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.stereotype.Component;
 
@@ -61,7 +62,9 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
         }, args[0]);
         Collection<Dict> entityData = Convert.convert(new TypeReference<List<Dict>>() {
         }, entities);
-        return Dict.create().set("entityData", entityData);
+        return Dict.create()
+                .set("operation", ((MethodSignature) point.getSignature()).getName())
+                .set("entityData", entityData);
     }
 
     private void publishEvent(ProceedingJoinPoint point) {
@@ -90,11 +93,20 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
         }
 
         Class<? extends GXMybatisListenerService> listenerClass = listenerConfig.listenerClazz();
-        String eventType = GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY.getEventType();
-        String eventName = GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY.getEventName();
+        boolean batchChange = CharSequenceUtil.equals("saveOrUpdateBatch", source.getStr("operation"));
+        String eventType = batchChange
+                ? GXModelEventNamingEnums.SYNC_BATCH_CHANGE.getEventType()
+                : GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY.getEventType();
+        String eventName = batchChange
+                ? GXModelEventNamingEnums.SYNC_BATCH_CHANGE.getEventName()
+                : GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY.getEventName();
         if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
-            eventType = GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY.getEventType();
-            eventName = GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY.getEventName();
+            eventType = batchChange
+                    ? GXModelEventNamingEnums.ASYNC_BATCH_CHANGE.getEventType()
+                    : GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY.getEventType();
+            eventName = batchChange
+                    ? GXModelEventNamingEnums.ASYNC_BATCH_CHANGE.getEventName()
+                    : GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY.getEventName();
         }
 
         Dict eventParam = Dict.create()

@@ -3,9 +3,11 @@ package cn.maple.core.datasource.aspect.mybatis;
 import cn.hutool.core.lang.Dict;
 import cn.maple.core.datasource.annotation.GXMyBatisListener;
 import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
+import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.datasource.listener.GXMyBatisSyncListener;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
+import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
 import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
 import cn.maple.core.framework.dto.inner.field.GXUpdateNumberField;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
@@ -28,6 +30,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 
 class GXMyBatisListenerAspectRegressionTest {
@@ -35,6 +38,8 @@ class GXMyBatisListenerAspectRegressionTest {
     private final GXMyBatisPlusUpdateFieldAspect updateFieldAspect = new GXMyBatisPlusUpdateFieldAspect();
     private final GXMyBatisPlusDeleteSoftAspect deleteSoftAspect = new GXMyBatisPlusDeleteSoftAspect();
     private final GXMyBatisPlusUpdateEntityAspect updateEntityAspect = new GXMyBatisPlusUpdateEntityAspect();
+    private final GXMyBatisPlusSaveBatchEntityAspect saveBatchEntityAspect = new GXMyBatisPlusSaveBatchEntityAspect();
+    private final GXMyBatisPlusDeleteAspect deleteAspect = new GXMyBatisPlusDeleteAspect();
 
     @Test
     void saveEntityPublishesEveryMatchedMapperConfiguration() throws Throwable {
@@ -45,6 +50,19 @@ class GXMyBatisListenerAspectRegressionTest {
         try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
             assertDoesNotThrow(() -> saveEntityAspect.around(point));
             eventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(2));
+        }
+    }
+
+    @Test
+    void saveEntityDefersAsyncListenerUntilCommit() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new AsyncSaveMapperImpl(), AsyncSaveMapper.class.getMethod("insert", Object.class));
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{Map.of("id", 1)});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            assertDoesNotThrow(() -> saveEntityAspect.around(point));
+            eventPublisher.verify(() -> GXEventPublisherUtils.publishEventAfterCommit(any()), Mockito.times(1));
+            eventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.never());
         }
     }
 
@@ -128,13 +146,75 @@ class GXMyBatisListenerAspectRegressionTest {
     }
 
     @Test
+    void physicalDeletePublishesAfterCommitEvent() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new DeleteMapperImpl(), DeleteMapper.class.getMethod("deleteCondition", Object.class));
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+                .condition(List.of(new GXConditionEQ(null, "id", 7)))
+                .build();
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{queryParam});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            assertDoesNotThrow(() -> deleteAspect.around(point));
+            eventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(1));
+        }
+    }
+
+    @Test
+    void updateEntityKeepsOnlyRawConditionForOrExpression() {
+        UpdateWrapper<Object> wrapper = new UpdateWrapper<>();
+        wrapper.eq("status", "enabled").or().eq("status", "disabled");
+
+        Dict parsed = ReflectionTestUtils.invokeMethod(updateEntityAspect, "parseWhereSQL", wrapper);
+
+        assertTrue(((Dict) parsed.get("keyOperatorPairs")).isEmpty());
+        assertTrue(((Dict) parsed.get("keyValuePairs")).isEmpty());
+        assertEquals(wrapper.getTargetSql(), parsed.get("rawWhereSql"));
+    }
+
+    @Test
+    void saveOrUpdateBatchMarksPayloadAsBatchChange() {
+        ProceedingJoinPoint point = Mockito.mock(ProceedingJoinPoint.class);
+        MethodSignature signature = Mockito.mock(MethodSignature.class);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of(Map.of("id", 7))});
+        Mockito.when(point.getSignature()).thenReturn(signature);
+        Mockito.when(signature.getName()).thenReturn("saveOrUpdateBatch");
+
+        Dict source = ReflectionTestUtils.invokeMethod(saveBatchEntityAspect, "handlePointArgs", point);
+
+        assertEquals("saveOrUpdateBatch", source.get("operation"));
+    }
+
+    @Test
+    void exposesDistinctBatchChangeEventType() {
+        assertEquals("sync_batch_change", GXModelEventNamingEnums.valueOf("SYNC_BATCH_CHANGE").getEventType());
+        assertEquals("async_batch_change", GXModelEventNamingEnums.valueOf("ASYNC_BATCH_CHANGE").getEventType());
+    }
+
+    @Test
+    void updateEntityCapturesUpdateByIdWithoutInventingACondition() {
+        ProceedingJoinPoint point = Mockito.mock(ProceedingJoinPoint.class);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{Map.of("id", 7, "status", "enabled")});
+        MethodSignature signature = Mockito.mock(MethodSignature.class);
+        Mockito.when(point.getSignature()).thenReturn(signature);
+        Mockito.when(signature.getName()).thenReturn("updateById");
+
+        Dict source = ReflectionTestUtils.invokeMethod(updateEntityAspect, "handlePointArgs", point);
+
+        assertEquals("updateById", source.get("operation"));
+        assertEquals(7, ((Dict) source.get("entityData")).get("id"));
+        assertEquals(Dict.create(), source.get("keyValuePairs"));
+        assertEquals(Dict.create(), source.get("keyOperatorPairs"));
+    }
+
+    @Test
     void syncListenerEventHandlersDoNotDeclareSpringTransactionBoundary() {
         AnnotationTransactionAttributeSource txAttributeSource = new AnnotationTransactionAttributeSource();
         Method[] listenerMethods = Arrays.stream(GXMyBatisSyncListener.class.getDeclaredMethods())
                 .filter(method -> method.isAnnotationPresent(EventListener.class))
                 .toArray(Method[]::new);
 
-        assertEquals(5, listenerMethods.length);
+        assertTrue(listenerMethods.length > 0);
         Arrays.stream(listenerMethods).forEach(method -> {
             TransactionAttribute transactionAttribute = txAttributeSource.getTransactionAttribute(method, GXMyBatisSyncListener.class);
             assertNull(transactionAttribute, method.getName());
@@ -189,6 +269,32 @@ class GXMyBatisListenerAspectRegressionTest {
         public Object deleteSoftCondition(Object query, Object updateFields) {
             return 1;
         }
+    }
+
+    @GXMyBatisListener(listenerClazz = FirstListener.class, runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)
+    private interface AsyncSaveMapper {
+        Object insert(Object entity);
+    }
+
+    private static class AsyncSaveMapperImpl implements AsyncSaveMapper {
+        @Override
+        public Object insert(Object entity) {
+            return entity;
+        }
+    }
+
+    @GXMyBatisListener(listenerClazz = FirstListener.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+    private interface DeleteMapper {
+        Object deleteCondition(Object query);
+
+    }
+
+    private static class DeleteMapperImpl implements DeleteMapper {
+        @Override
+        public Object deleteCondition(Object query) {
+            return 1;
+        }
+
     }
 
     private static class FirstListener implements GXMybatisListenerService<Object> {

@@ -65,6 +65,16 @@ interface GXMyBatisBaseListener {
         listener.deleteSoftListener(convertToDict(source));
     }
 
+    default void listenerDelete(GXMyBatisModelDeleteEvent<Dict> deleteEvent) {
+        Dict source = deleteEvent.getSource();
+        Dict param = deleteEvent.getParam();
+
+        Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
+        GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
+
+        listener.deleteListener(convertToDict(source));
+    }
+
     default void listenerSaveBatch(GXMyBatisModelSaveBatchEntityEvent<Dict> saveBatchEntityEvent) {
         Dict source = saveBatchEntityEvent.getSource();
         Dict param = saveBatchEntityEvent.getParam();
@@ -73,6 +83,16 @@ interface GXMyBatisBaseListener {
         GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
 
         listener.saveBatchListener(convertToDict(source));
+    }
+
+    default void listenerBatchChange(GXMyBatisModelSaveBatchEntityEvent<Dict> batchChangeEvent) {
+        Dict source = batchChangeEvent.getSource();
+        Dict param = batchChangeEvent.getParam();
+
+        Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
+        GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
+
+        listener.batchChangeListener(convertToDict(source));
     }
 
     private Class<? extends GXMybatisListenerService<?>> resolveListenerClass(Dict param) {

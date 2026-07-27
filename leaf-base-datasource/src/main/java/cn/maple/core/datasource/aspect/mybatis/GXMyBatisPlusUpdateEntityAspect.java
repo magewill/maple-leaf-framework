@@ -46,12 +46,12 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 @SuppressWarnings("all")
 public class GXMyBatisPlusUpdateEntityAspect {
-    private static final Cache<String, List<ConditionToken>> WHERE_SQL_CONDITION_CACHE = Caffeine.newBuilder()
+    private static final Cache<String, ConditionParseResult> WHERE_SQL_CONDITION_CACHE = Caffeine.newBuilder()
             .maximumSize(2048)
             .expireAfterAccess(1, TimeUnit.DAYS)
             .build();
 
-    @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && execution(* update(..))")
+    @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && (execution(* update(..)) || execution(* updateById(..)))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();
         if (!isSuccessfulResult(proceed)) {
@@ -76,16 +76,28 @@ public class GXMyBatisPlusUpdateEntityAspect {
 
     private Dict handlePointArgs(ProceedingJoinPoint point) {
         Object[] args = point.getArgs();
-        if (ObjectUtil.isEmpty(args) || args.length < 2 || ObjectUtil.isNull(args[0])) {
+        if (ObjectUtil.isEmpty(args) || ObjectUtil.isNull(args[0])) {
             return Dict.create();
         }
 
         Object entity = args[0];
+        String operation = ((MethodSignature) point.getSignature()).getName();
+        if (CharSequenceUtil.equals(operation, "updateById")) {
+            return Dict.create()
+                    .set("operation", operation)
+                    .set("entityData", Convert.convert(Dict.class, entity))
+                    .set("keyOperatorPairs", Dict.create())
+                    .set("keyValuePairs", Dict.create());
+        }
+        if (args.length < 2) {
+            return Dict.create();
+        }
         Object objectWrapper = args[1];
         Dict updateCondition = handleUpdateWrapper(objectWrapper);
         Dict entityData = Convert.convert(Dict.class, entity);
 
         return Dict.create()
+                .set("operation", operation)
                 .set("entityData", entityData)
                 .set("keyOperatorPairs", updateCondition.get("keyOperatorPairs"))
                 .set("keyValuePairs", updateCondition.get("keyValuePairs"));
@@ -179,13 +191,16 @@ public class GXMyBatisPlusUpdateEntityAspect {
             return result.set("rawWhereSql", whereSQL);
         }
 
-        List<ConditionToken> conditionTokens = WHERE_SQL_CONDITION_CACHE.get(whereSQL, this::extractConditionTokens);
-        if (ObjectUtil.isEmpty(paramNameValuePairs) || ObjectUtil.isEmpty(conditionTokens)) {
+        ConditionParseResult conditionParseResult = WHERE_SQL_CONDITION_CACHE.get(whereSQL, this::extractConditionTokens);
+        if (ObjectUtil.isEmpty(paramNameValuePairs)
+                || ObjectUtil.isNull(conditionParseResult)
+                || !conditionParseResult.lossless()
+                || ObjectUtil.isEmpty(conditionParseResult.conditionTokens())) {
             return result.set("rawWhereSql", whereSQL);
         }
 
         int paramIndex = 1;
-        for (ConditionToken token : conditionTokens) {
+        for (ConditionToken token : conditionParseResult.conditionTokens()) {
             keyOperatorPairs.set(token.field(), token.operator());
             if (token.paramCount() <= 0) {
                 keyValuePairs.set(token.field(), null);
@@ -207,12 +222,13 @@ public class GXMyBatisPlusUpdateEntityAspect {
         return result.set("rawWhereSql", whereSQL);
     }
 
-    private List<ConditionToken> extractConditionTokens(String whereSQL) {
+    private ConditionParseResult extractConditionTokens(String whereSQL) {
         List<ConditionToken> conditionTokens = new ArrayList<>(8);
         if (CharSequenceUtil.isBlank(whereSQL)) {
-            return List.copyOf(conditionTokens);
+            return new ConditionParseResult(List.copyOf(conditionTokens), false);
         }
 
+        boolean[] lossless = {true};
         try {
             Expression expression = CCJSqlParserUtil.parseCondExpression(whereSQL);
             expression.accept(new ExpressionVisitorAdapter<Void>() {
@@ -225,6 +241,7 @@ public class GXMyBatisPlusUpdateEntityAspect {
 
                 @Override
                 public <S> Void visit(OrExpression orExpression, S context) {
+                    lossless[0] = false;
                     orExpression.getLeftExpression().accept(this, context);
                     orExpression.getRightExpression().accept(this, context);
                     return null;
@@ -269,14 +286,18 @@ public class GXMyBatisPlusUpdateEntityAspect {
 
                 private void appendToken(String leftExpression, String operator, int paramCount) {
                     String field = CharSequenceUtil.toCamelCase(leftExpression);
+                    if (conditionTokens.stream().anyMatch(token -> CharSequenceUtil.equals(token.field(), field))) {
+                        lossless[0] = false;
+                    }
                     conditionTokens.add(new ConditionToken(field, operator, Math.max(0, paramCount)));
                 }
             }, null);
         } catch (Exception e) {
             log.warn("Failed to parse update wrapper conditions, fallback to raw sql only: {}", whereSQL, e);
+            lossless[0] = false;
         }
 
-        return List.copyOf(conditionTokens);
+        return new ConditionParseResult(List.copyOf(conditionTokens), lossless[0]);
     }
 
     private int countExpressionValues(Expression expression) {
@@ -295,5 +316,8 @@ public class GXMyBatisPlusUpdateEntityAspect {
     }
 
     private record ConditionToken(String field, String operator, int paramCount) {
+    }
+
+    private record ConditionParseResult(List<ConditionToken> conditionTokens, boolean lossless) {
     }
 }

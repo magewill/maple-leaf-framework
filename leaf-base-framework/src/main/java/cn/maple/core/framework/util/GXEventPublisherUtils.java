@@ -6,6 +6,8 @@ import cn.maple.core.framework.event.center.SyncEventBusCenter;
 import cn.maple.core.framework.exception.GXBusinessException;
 import com.google.common.eventbus.AsyncEventBus;
 import com.google.common.eventbus.EventBus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -15,6 +17,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @SuppressWarnings("all")
 public class GXEventPublisherUtils {
     private static final int REGISTER_LOCK_STRIPE_SIZE = 64;
+    private static final int EVENT_METADATA_LOG_MAX_LENGTH = 128;
+    private static final Logger LOG = LoggerFactory.getLogger(GXEventPublisherUtils.class);
     private static final ConcurrentHashMap<String, Boolean> EVENT_BUS_REGISTER_CACHE = new ConcurrentHashMap<>(1024);
     private static final Object[] EVENT_BUS_REGISTER_LOCK_STRIPES = initRegisterLockStripes();
 
@@ -25,13 +29,27 @@ public class GXEventPublisherUtils {
         GXSpringContextUtils.getApplicationContext().publishEvent(event);
     }
 
+    /**
+     * Publishes an event after a successfully committed transaction, or immediately when no actual transaction exists.
+     * <p>
+     * A publishing failure in {@link TransactionSynchronization#afterCommit()} is logged and contained because the
+     * database transaction has already committed at that point. Without a transaction, publishing remains immediate
+     * and preserves the caller-visible exception behavior.
+     * <p>
+     * This method is not a durable outbox: a process failure between commit and callback can still lose the event.
+     * Synchronous listeners that write to the database should use a new transaction propagation.
+     */
     public static <T> void publishEventAfterCommit(GXBaseEvent<T> event) {
         if (TransactionSynchronizationManager.isSynchronizationActive()
                 && TransactionSynchronizationManager.isActualTransactionActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    publishEvent(event);
+                    try {
+                        publishEvent(event);
+                    } catch (RuntimeException exception) {
+                        logAfterCommitPublishFailure(event, exception);
+                    }
                 }
             });
             return;
@@ -148,5 +166,26 @@ public class GXEventPublisherUtils {
     private static Object resolveRegisterLock(String key) {
         int lockIndex = (key.hashCode() & Integer.MAX_VALUE) % REGISTER_LOCK_STRIPE_SIZE;
         return EVENT_BUS_REGISTER_LOCK_STRIPES[lockIndex];
+    }
+
+    private static void logAfterCommitPublishFailure(GXBaseEvent<?> event, RuntimeException exception) {
+        LOG.error(
+                "Failed to publish event after transaction commit: eventClass={}, eventType={}, eventName={}",
+                event == null ? null : event.getClass().getName(),
+                event == null ? null : sanitizeEventMetadata(event.getEventType()),
+                event == null || event.getEventName() == null ? null : sanitizeEventMetadata(event.getEventName().toString()),
+                exception
+        );
+    }
+
+    private static String sanitizeEventMetadata(String value) {
+        if (value == null) {
+            return null;
+        }
+        String sanitized = value.replace('\r', ' ').replace('\n', ' ').replace('\t', ' ');
+        if (sanitized.length() <= EVENT_METADATA_LOG_MAX_LENGTH) {
+            return sanitized;
+        }
+        return sanitized.substring(0, EVENT_METADATA_LOG_MAX_LENGTH) + "...";
     }
 }
