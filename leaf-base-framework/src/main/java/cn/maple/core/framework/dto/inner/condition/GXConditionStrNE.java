@@ -25,7 +25,7 @@ public class GXConditionStrNE extends GXCondition<String> {
         }
         this.paramMap.clear();
         this.paramMap.put(paramName, value);
-        return "";
+        return (String) value;
     }
 
     @Override

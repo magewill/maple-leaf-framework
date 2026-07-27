@@ -28,7 +28,7 @@ public class GXConditionLikeLeft extends GXCondition<String> {
         }
         this.paramMap.clear();
         this.paramMap.put(paramName, "%" + value);
-        return "";
+        return "%" + value;
     }
 
     @Override

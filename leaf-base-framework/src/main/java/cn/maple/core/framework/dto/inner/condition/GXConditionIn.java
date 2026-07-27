@@ -11,14 +11,19 @@ import cn.maple.core.framework.util.GXDBStringUtils;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class GXConditionIn extends GXCondition<String> {
+public class GXConditionIn extends GXCondition<Object> {
     private static final int DEFAULT_IN_LIMIT_COUNT = 100000;
     private static final int DEV_LOCAL_IN_LIMIT_COUNT = 50;
     private final Set<Number> numbers;
 
     public GXConditionIn(String tableNameAlias, String fieldName, Set<Number> value) {
         super(tableNameAlias, fieldName, value);
-        this.numbers = value;
+        this.numbers = value == null ? null : Collections.unmodifiableSet(new LinkedHashSet<>(value));
+        this.value = numbers;
+        this.paramMap.clear();
+        if (numbers != null) {
+            this.paramMap.put(paramName, numbers);
+        }
     }
 
     private static void validateNumberValue(Number number) {
@@ -47,10 +52,10 @@ public class GXConditionIn extends GXCondition<String> {
     }
 
     @Override
-    public String getFieldValue() {
+    public Object getFieldValue() {
         this.paramMap.clear();
         this.paramMap.putAll(buildValidatedParams());
-        return "";
+        return numbers;
     }
 
     @Override

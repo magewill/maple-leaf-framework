@@ -11,14 +11,19 @@ import cn.maple.core.framework.util.GXDBStringUtils;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class GXConditionStrNotIn extends GXCondition<String> {
+public class GXConditionStrNotIn extends GXCondition<Object> {
     private static final int DEFAULT_NOT_IN_LIMIT_COUNT = 100000;
     private static final int DEV_LOCAL_NOT_IN_LIMIT_COUNT = 50;
     private final Set<String> values;
 
     public GXConditionStrNotIn(String tableNameAlias, String fieldName, Set<String> value) {
         super(tableNameAlias, fieldName, value);
-        this.values = value;
+        this.values = value == null ? null : Collections.unmodifiableSet(new LinkedHashSet<>(value));
+        this.value = values;
+        this.paramMap.clear();
+        if (values != null) {
+            this.paramMap.put(paramName, values);
+        }
     }
 
     private static void validateStringValue(String value) {
@@ -46,10 +51,10 @@ public class GXConditionStrNotIn extends GXCondition<String> {
     }
 
     @Override
-    public String getFieldValue() {
+    public Object getFieldValue() {
         this.paramMap.clear();
         this.paramMap.putAll(buildValidatedParams());
-        return "";
+        return values;
     }
 
     @Override
