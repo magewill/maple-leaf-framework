@@ -18,7 +18,7 @@ import java.util.Set;
  * 该类用于构建SQL中的字符串类型IN条件，采用MyBatis参数化查询机制，
  * 有效防止SQL注入攻击。每个值都会被单独参数化处理，确保查询安全。
  * </p>
- * 
+ *
  * <p>
  * 安全特性：
  * <ul>
@@ -29,7 +29,7 @@ import java.util.Set;
  *   <li>为每个值创建独立的参数名，避免参数混淆</li>
  * </ul>
  * </p>
- * 
+ *
  * <p>
  * 使用示例：
  * <pre>
@@ -37,20 +37,20 @@ import java.util.Set;
  * Set<String> roleSet = new HashSet<>();
  * roleSet.add("admin");
  * roleSet.add("manager");
- * 
+ *
  * // 2. 创建IN条件（WHERE u.role IN ('admin', 'manager')）
  * GXConditionStrIn condition = new GXConditionStrIn("u", "role", roleSet);
- * 
+ *
  * // 3. 在查询构建器中使用该条件
  * GXModelQueryParamDto queryParam = new GXModelQueryParamDto();
  * queryParam.addCondition(condition);
  * List<UserEntity> users = userMapper.selectByCondition(queryParam);
- * 
+ *
  * // 4. 也可以与其他条件组合使用
  * queryParam.addCondition(new GXConditionEQ("u", "is_active", 1));
  * </pre>
  * </p>
- * 
+ *
  * <p>
  * 性能优化：
  * <ul>
@@ -59,10 +59,10 @@ import java.util.Set;
  *   <li>使用StringBuilder构建参数占位符列表，减少字符串连接开销</li>
  * </ul>
  * </p>
- * 
+ *
  * @author 塵渊
  */
-public class GXConditionStrIn extends GXCondition<String> {
+public class GXConditionStrIn extends GXCondition<Object> {
     /**
      * 存储IN条件的字符串值集合
      */
@@ -70,10 +70,10 @@ public class GXConditionStrIn extends GXCondition<String> {
 
     /**
      * 构造函数
-     * 
+     *
      * @param tableNameAlias 表别名，如"u"、"user"等，可以为空
-     * @param fieldName 字段名，如"role"、"type"等
-     * @param value 字符串值集合，用于IN条件
+     * @param fieldName      字段名，如"role"、"type"等
+     * @param value          字符串值集合，用于IN条件
      */
     public GXConditionStrIn(String tableNameAlias, String fieldName, Set<String> value) {
         super(tableNameAlias, fieldName, value);
@@ -82,7 +82,7 @@ public class GXConditionStrIn extends GXCondition<String> {
 
     /**
      * 获取操作符
-     * 
+     *
      * @return 返回"in"操作符
      */
     @Override
@@ -97,7 +97,7 @@ public class GXConditionStrIn extends GXCondition<String> {
      * [tableAlias].[fieldName] IN (#{param1}, #{param2}, ...)
      * 每个参数都会被单独处理，确保安全。
      * </p>
-     * 
+     *
      * @return 返回构建好的WHERE子句字符串
      * @throws GXBusinessException 当IN条件中的值数量超过限制时抛出
      */
@@ -144,12 +144,12 @@ public class GXConditionStrIn extends GXCondition<String> {
      * 该方法处理参数映射，为每个值创建单独的参数，并进行SQL注入检查。
      * 虽然方法返回空字符串，但会填充paramMap用于MyBatis参数化查询。
      * </p>
-     * 
+     *
      * @return 空字符串，实际值存储在paramMap中
      * @throws GXSqlInjectionException 当检测到SQL注入风险时抛出
      */
     @Override
-    public String getFieldValue() {
+    public Object getFieldValue() {
         // 清除原来的参数映射，因为IN条件需要特殊处理
         this.paramMap.clear();
         // 为每个值创建单独的参数
@@ -163,6 +163,6 @@ public class GXConditionStrIn extends GXCondition<String> {
             String itemParamName = paramName + "_" + index++;
             this.paramMap.put(itemParamName, str);
         }
-        return "";
+        return values;
     }
 }

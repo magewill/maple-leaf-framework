@@ -17,7 +17,7 @@ import java.util.Set;
  * 支持参数化查询，自动生成参数占位符，并提供安全的参数绑定机制。
  * 内置查询条件数量限制，防止过大的IN查询导致性能问题。
  * </p>
- * 
+ *
  * <p>使用示例：</p>
  * <pre>
  * // 1. 创建数值类型的IN条件
@@ -26,32 +26,32 @@ import java.util.Set;
  * idSet.add(2);
  * idSet.add(3);
  * GXConditionIn condition = new GXConditionIn("t", "user_id", idSet);
- * 
+ *
  * // 2. 在查询参数中使用
  * GXBaseQueryParamInnerDto queryParam = new GXBaseQueryParamInnerDto();
  * queryParam.addCondition(condition);
- * 
+ *
  * // 3. 在Mapper方法中使用
  * List<UserEntity> users = userMapper.selectByCondition(queryParam);
  * </pre>
- * 
+ *
  * <p>生成的SQL示例：</p>
  * <pre>
  * -- 假设参数为：tableNameAlias="t", fieldName="user_id", numbers={1,2,3}
  * -- 生成的SQL片段为：
  * t.user_id in (#{dbQueryParamInnerDto.paramMap.COND_0_0}, #{dbQueryParamInnerDto.paramMap.COND_0_1}, #{dbQueryParamInnerDto.paramMap.COND_0_2})
  * </pre>
- * 
+ *
  * <p>安全特性：</p>
  * <ol>
  *   <li>参数化查询：避免SQL注入风险</li>
  *   <li>数量限制：防止过大的IN查询导致数据库性能问题</li>
  *   <li>环境感知：在开发环境和生产环境使用不同的数量限制</li>
  * </ol>
- * 
+ *
  * @author 塵渊 britton@126.com
  */
-public class GXConditionIn extends GXCondition<String> {
+public class GXConditionIn extends GXCondition<Object> {
     /**
      * 数值集合，用于IN条件查询
      * 存储需要进行IN条件查询的所有数值
@@ -144,7 +144,7 @@ public class GXConditionIn extends GXCondition<String> {
      * @return 返回空字符串，实际值已通过参数映射处理
      */
     @Override
-    public String getFieldValue() {
+    public Object getFieldValue() {
         // 清除原来的参数映射，因为IN条件需要特殊处理
         this.paramMap.clear();
         // 为每个值创建单独的参数
@@ -154,6 +154,6 @@ public class GXConditionIn extends GXCondition<String> {
             this.paramMap.put(itemParamName, num);
         }
         // 此方法不再使用，但为了兼容性保留
-        return "";
+        return numbers;
     }
 }

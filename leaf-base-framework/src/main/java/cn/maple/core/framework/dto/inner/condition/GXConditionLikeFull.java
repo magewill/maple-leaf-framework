@@ -18,15 +18,15 @@ import cn.maple.core.framework.util.GXDBStringEscapeUtils;
  * <pre>
  * // 创建一个简单的全模糊匹配查询条件
  * GXConditionLikeFull condition = new GXConditionLikeFull("", "username", "张");
- * String whereClause = condition.whereString(); 
+ * String whereClause = condition.whereString();
  * // 结果: username like #{dbQueryParamInnerDto.paramMap.condition_username_1}
  * // 参数值会被处理为: %张%
- * 
+ *
  * // 带表别名的全模糊匹配查询条件
  * GXConditionLikeFull condition = new GXConditionLikeFull("user", "username", "张");
  * String whereClause = condition.whereString();
  * // 结果: user.username like #{dbQueryParamInnerDto.paramMap.condition_username_1}
- * 
+ *
  * // 在实际应用中与查询构建器结合使用
  * GXModelQueryParamDto paramDto = new GXModelQueryParamDto();
  * paramDto.addCondition(new GXConditionLikeFull("", "username", "张"));
@@ -55,6 +55,6 @@ public class GXConditionLikeFull extends GXCondition<String> {
         // 清除原参数映射并添加带通配符的参数
         this.paramMap.clear();
         this.paramMap.put(paramName, "%" + value + "%");
-        return "";
+        return "%" + value + "%";
     }
 }

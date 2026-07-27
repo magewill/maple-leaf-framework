@@ -21,6 +21,6 @@ public class GXConditionLikeLeft extends GXCondition<String> {
         // 清除原参数映射并添加带通配符的参数
         this.paramMap.clear();
         this.paramMap.put(paramName, "%" + value);
-        return "";
+        return "%" + value;
     }
 }
