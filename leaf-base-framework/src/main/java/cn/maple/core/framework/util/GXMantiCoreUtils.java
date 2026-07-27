@@ -270,8 +270,18 @@ public final class GXMantiCoreUtils {
         return GXManticorePercolateOperations.pqMatchDocument(pqIndex, document);
     }
 
+    public static GXMantiCoreResDto<JSON> pqMatchDocument(String pqIndex, Map<String, Object> document,
+                                                           int offset, int limit, Map<String, Object> options) {
+        return GXManticorePercolateOperations.pqMatchDocument(pqIndex, document, offset, limit, options);
+    }
+
     public static GXMantiCoreResDto<JSON> pqMatchDocuments(String pqIndex, List<Map<String, Object>> documents) {
         return GXManticorePercolateOperations.pqMatchDocuments(pqIndex, documents);
+    }
+
+    public static GXMantiCoreResDto<JSON> pqMatchDocuments(String pqIndex, List<Map<String, Object>> documents,
+                                                            int offset, int limit, Map<String, Object> options) {
+        return GXManticorePercolateOperations.pqMatchDocuments(pqIndex, documents, offset, limit, options);
     }
 
     public static GXMantiCoreResDto<JSON> autocomplete(String table, String query) {

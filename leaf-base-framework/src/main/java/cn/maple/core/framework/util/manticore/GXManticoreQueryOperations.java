@@ -60,6 +60,8 @@ public final class GXManticoreQueryOperations {
      * 等价于 {"match": {field: keyword}} 的全文匹配条件
      */
     public static Map<String, Object> buildMatchQuery(String field, String keyword) {
+        requireNonBlank(field, "field");
+        requireNonBlank(keyword, "keyword");
         Map<String, Object> match = new HashMap<>();
         match.put(field, keyword);
 
@@ -73,6 +75,8 @@ public final class GXManticoreQueryOperations {
      * must occur consecutively in the specified full-text field.
      */
     public static Map<String, Object> buildMatchPhraseQuery(String field, String phrase) {
+        requireNonBlank(field, "field");
+        requireNonBlank(phrase, "phrase");
         Map<String, Object> matchPhrase = new HashMap<>();
         matchPhrase.put(field, phrase);
 
@@ -95,6 +99,7 @@ public final class GXManticoreQueryOperations {
      * contain the specified attribute or field.
      */
     public static Map<String, Object> buildExistsQuery(String field) {
+        requireNonBlank(field, "field");
         Map<String, Object> exists = new HashMap<>();
         exists.put("field", field);
 
@@ -128,6 +133,7 @@ public final class GXManticoreQueryOperations {
      * 等价于 {"query_string": text} 的原生 MATCH() 语法查询，text 中的特殊字符建议先用 escapeQueryString 处理
      */
     public static Map<String, Object> buildQueryString(String text) {
+        requireNonBlank(text, "text");
         Map<String, Object> query = new HashMap<>();
         query.put("query_string", text);
         return query;
@@ -137,6 +143,8 @@ public final class GXManticoreQueryOperations {
      * 等价于 {"equals": {field: value}} 的精确匹配条件，常用于数值/字符串属性过滤
      */
     public static Map<String, Object> buildEqualsQuery(String field, Object value) {
+        requireNonBlank(field, "field");
+        requireNonNull(value, "value");
         Map<String, Object> equalsMap = new HashMap<>();
         equalsMap.put(field, value);
 
@@ -149,6 +157,10 @@ public final class GXManticoreQueryOperations {
      * 等价于 {"in": {field: [values...]}} 的多值匹配条件
      */
     public static Map<String, Object> buildInQuery(String field, List<?> values) {
+        requireNonBlank(field, "field");
+        if (values == null || values.isEmpty() || values.stream().anyMatch(value -> value == null)) {
+            throw new IllegalArgumentException("values must contain non-null values");
+        }
         Map<String, Object> in = new HashMap<>();
         in.put(field, values);
 
@@ -162,6 +174,10 @@ public final class GXManticoreQueryOperations {
      * gte / lte 任一传 null 表示不限制该侧边界
      */
     public static Map<String, Object> buildRangeQuery(String field, Object gte, Object lte) {
+        requireNonBlank(field, "field");
+        if (gte == null && lte == null) {
+            throw new IllegalArgumentException("at least one range boundary must be specified");
+        }
         Map<String, Object> bounds = new HashMap<>();
         if (gte != null) {
             bounds.put("gte", gte);
@@ -216,8 +232,12 @@ public final class GXManticoreQueryOperations {
      * @param globalOptions 全局高亮选项，可传 null
      */
     public static Map<String, Object> buildHighlight(List<String> fields, Map<String, Object> globalOptions) {
+        if (fields == null || fields.isEmpty()) {
+            throw new IllegalArgumentException("fields must not be empty");
+        }
         Map<String, Object> fieldsMap = new HashMap<>();
         for (String field : fields) {
+            requireNonBlank(field, "field");
             fieldsMap.put(field, new HashMap<>());
         }
 
@@ -235,6 +255,8 @@ public final class GXManticoreQueryOperations {
      * 可直接赋值给完整请求体的 "sort" 字段
      */
     public static List<Map<String, String>> buildSort(String field, String order) {
+        requireNonBlank(field, "field");
+        requireSortOrder(order);
         List<Map<String, String>> sort = new ArrayList<>();
         Map<String, String> item = new HashMap<>();
         item.put(field, order);
@@ -247,8 +269,13 @@ public final class GXManticoreQueryOperations {
      * 传入 LinkedHashMap 以保证排序字段的先后顺序生效
      */
     public static List<Map<String, String>> buildSort(Map<String, String> fieldOrderMap) {
+        if (fieldOrderMap == null || fieldOrderMap.isEmpty()) {
+            throw new IllegalArgumentException("fieldOrderMap must not be empty");
+        }
         List<Map<String, String>> sort = new ArrayList<>();
         for (Map.Entry<String, String> entry : fieldOrderMap.entrySet()) {
+            requireNonBlank(entry.getKey(), "field");
+            requireSortOrder(entry.getValue());
             Map<String, String> item = new HashMap<>();
             item.put(entry.getKey(), entry.getValue());
             sort.add(item);
@@ -323,6 +350,8 @@ public final class GXManticoreQueryOperations {
             if (source != null) {
                 row.putAll(source);
             }
+            row.put("_id", hit.get("_id"));
+            row.put("_score", hit.get("_score"));
             list.add(row);
         }
         return list;
@@ -387,6 +416,12 @@ public final class GXManticoreQueryOperations {
             buckets.add(bucketArr.getJSONObject(i));
         }
         return buckets;
+    }
+
+    private static void requireSortOrder(String order) {
+        if (!"asc".equalsIgnoreCase(order) && !"desc".equalsIgnoreCase(order)) {
+            throw new IllegalArgumentException("order must be asc or desc");
+        }
     }
 }
 

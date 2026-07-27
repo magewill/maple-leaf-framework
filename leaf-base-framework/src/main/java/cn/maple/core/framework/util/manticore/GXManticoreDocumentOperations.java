@@ -235,6 +235,9 @@ public final class GXManticoreDocumentOperations {
 
     private static List<GXMantiCoreResDto<JSON>> batchedBulkAction(String action, String index, List<Map<String, Object>> docList,
                                                                    String idFieldName, boolean idRequired, int batchSize) {
+        if (docList == null || docList.isEmpty()) {
+            throw new IllegalArgumentException("docList must contain non-empty documents");
+        }
         int bs = batchSize > 0 ? batchSize : DEFAULT_BULK_BATCH_SIZE;
         List<GXMantiCoreResDto<JSON>> responses = new ArrayList<>();
         int total = docList.size();

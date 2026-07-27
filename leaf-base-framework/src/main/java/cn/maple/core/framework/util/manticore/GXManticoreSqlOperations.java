@@ -7,12 +7,14 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.dto.inner.GXMantiCoreResDto;
 import cn.maple.core.framework.exception.GXManticoreException;
+import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import static cn.maple.core.framework.util.manticore.GXManticoreConfiguration.requireIdentifier;
 import static cn.maple.core.framework.util.manticore.GXManticoreConfiguration.requireNonBlank;
@@ -23,6 +25,10 @@ import static cn.maple.core.framework.util.manticore.GXManticoreConfiguration.to
  * SQL execution, SQL response parsing, and table-management operations.
  */
 public final class GXManticoreSqlOperations {
+    private static final Pattern CREATE_TABLE_PATTERN = Pattern.compile(
+            "^create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?[A-Za-z_][A-Za-z0-9_]*\\s*\\(.*$",
+            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
     private GXManticoreSqlOperations() {
     }
 
@@ -99,7 +105,7 @@ public final class GXManticoreSqlOperations {
     }
 
     public static GXMantiCoreResDto<JSON> createTable(String createTableSql) {
-        return executeSql(createTableSql);
+        return executeSql(validateCreateTableSql(createTableSql));
     }
 
     public static GXMantiCoreResDto<JSON> dropTable(String index, boolean ifExists) {
@@ -125,5 +131,19 @@ public final class GXManticoreSqlOperations {
         for (int i = 0; i < data.size(); i++) {
             rows.add(data.getJSONObject(i));
         }
+    }
+
+    private static String validateCreateTableSql(String createTableSql) {
+        if (StrUtil.isBlank(createTableSql)) {
+            throw new GXSqlInjectionException("CREATE TABLE SQL must not be blank");
+        }
+        String normalized = createTableSql.trim();
+        String lower = normalized.toLowerCase(java.util.Locale.ROOT);
+        if (lower.contains(";") || lower.contains("--") || lower.contains("#")
+                || lower.contains("/*") || lower.contains("*/")
+                || !CREATE_TABLE_PATTERN.matcher(normalized).matches()) {
+            throw new GXSqlInjectionException("Only one CREATE TABLE statement is allowed");
+        }
+        return normalized;
     }
 }

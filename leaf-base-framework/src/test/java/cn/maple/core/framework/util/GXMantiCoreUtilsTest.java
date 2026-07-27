@@ -163,6 +163,36 @@ class GXMantiCoreUtilsTest {
     }
 
     @Test
+    void batchedBulkOperationsRejectNullOrEmptyDocuments() {
+        assertThrows(IllegalArgumentException.class,
+                () -> GXMantiCoreUtils.bulkInsertBatched("articles", null, "id", 100));
+        assertThrows(IllegalArgumentException.class,
+                () -> GXMantiCoreUtils.bulkReplaceBatched("articles", List.of(), "id", 100));
+        assertThrows(IllegalArgumentException.class,
+                () -> GXMantiCoreUtils.bulkUpdateBatched("articles", List.of(), "id", 100));
+    }
+
+    @Test
+    void extractHitsPreservesReservedMetadataWhenSourceContainsSameKeys() {
+        List<Map<String, Object>> hits = GXMantiCoreUtils.extractHits("""
+                {"hits":{"hits":[{"_id":7,"_score":1.5,
+                "_source":{"_id":"document-id","_score":99,"title":"Manticore"}}]}}
+                """);
+
+        assertEquals(7, hits.getFirst().get("_id"));
+        assertEquals(1.5D, ((Number) hits.getFirst().get("_score")).doubleValue());
+        assertEquals("Manticore", hits.getFirst().get("title"));
+    }
+
+    @Test
+    void queryBuildersRejectMalformedArguments() {
+        assertThrows(IllegalArgumentException.class, () -> GXMantiCoreUtils.buildMatchQuery(" ", "manticore"));
+        assertThrows(IllegalArgumentException.class, () -> GXMantiCoreUtils.buildRangeQuery("created_at", null, null));
+        assertThrows(IllegalArgumentException.class, () -> GXMantiCoreUtils.buildHighlight(List.of()));
+        assertThrows(IllegalArgumentException.class, () -> GXMantiCoreUtils.buildSort("id", "descending"));
+    }
+
+    @Test
     void tableManagementRejectsUnsafeIdentifiersBeforeBuildingSql() {
         String injectedIdentifier = "articles; DROP TABLE audit_log";
 
@@ -174,11 +204,48 @@ class GXMantiCoreUtilsTest {
     }
 
     @Test
+    void createTableRejectsNonCreateAndMultiStatementSql() {
+        assertThrows(GXSqlInjectionException.class,
+                () -> GXMantiCoreUtils.createTable("DROP TABLE articles"));
+        assertThrows(GXSqlInjectionException.class,
+                () -> GXMantiCoreUtils.createTable("CREATE TABLE articles(title text); DROP TABLE audit_log"));
+
+        GXMantiCoreUtils.createTable("CREATE TABLE articles(title text)");
+        assertEquals("/sql", requestPath);
+        assertTrue(requestBody.contains("CREATE+TABLE+articles"));
+    }
+
+    @Test
+    void autocompleteRejectsReservedOptionKeys() {
+        assertThrows(IllegalArgumentException.class,
+                () -> GXMantiCoreUtils.autocomplete("articles", "man", Map.of("table", "other")));
+        assertThrows(IllegalArgumentException.class,
+                () -> GXMantiCoreUtils.autocomplete("articles", "man", Map.of("query", "other")));
+    }
+
+    @Test
     void pqOperationsRejectUnsafePathIdentifiers() {
         assertThrows(IllegalArgumentException.class,
                 () -> GXMantiCoreUtils.pqMatchDocument("rules/other", Map.of("title", "A")));
         assertThrows(IllegalArgumentException.class,
                 () -> GXMantiCoreUtils.pqMatchDocuments("rules?target=other", List.of(Map.of("title", "A"))));
+        assertThrows(IllegalArgumentException.class,
+                () -> GXMantiCoreUtils.pqAddRule("rules; DROP TABLE audit_log", 1L,
+                        Map.of("match_all", Map.of()), List.of()));
+    }
+
+    @Test
+    void pqMatchSupportsPagingAndSearchOptions() {
+        GXMantiCoreUtils.pqMatchDocument("rules", Map.of("title", "Manticore"), 5, 10,
+                Map.of("max_matches", 100));
+
+        assertEquals("/pq/rules/search", requestPath);
+        JSONObject body = JSONUtil.parseObj(requestBody);
+        assertEquals(5, body.getInt("offset"));
+        assertEquals(10, body.getInt("limit"));
+        assertEquals(100, body.getJSONObject("options").getInt("max_matches"));
+        assertEquals("Manticore", body.getJSONObject("query").getJSONObject("percolate")
+                .getJSONObject("document").getStr("title"));
     }
 
     @Test
