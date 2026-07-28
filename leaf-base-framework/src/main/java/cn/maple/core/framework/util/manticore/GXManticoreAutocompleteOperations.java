@@ -1,6 +1,6 @@
 package cn.maple.core.framework.util.manticore;
 
-import cn.hutool.json.JSON;
+import cn.hutool.core.lang.Dict;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.dto.inner.GXMantiCoreResDto;
 
@@ -8,26 +8,25 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
-import static cn.maple.core.framework.util.manticore.GXManticoreConfiguration.requireNonBlank;
-import static cn.maple.core.framework.util.manticore.GXManticoreConfiguration.sendPost;
-
 /**
  * Manticore Buddy autocomplete operations.
  */
 public final class GXManticoreAutocompleteOperations {
     private static final Set<String> RESERVED_OPTION_KEYS = Set.of("table", "query");
+    private final GXManticoreClient client;
 
-    private GXManticoreAutocompleteOperations() {
+    GXManticoreAutocompleteOperations(GXManticoreClient client) {
+        this.client = client;
     }
 
-    public static GXMantiCoreResDto<JSON> autocomplete(String table, String query) {
+    public GXMantiCoreResDto<Dict> autocomplete(String table, String query) {
         return autocomplete(table, query, null);
     }
 
-    public static GXMantiCoreResDto<JSON> autocomplete(String table, String query,
-                                                        Map<String, Object> extraOptions) {
-        requireNonBlank(table, "table");
-        requireNonBlank(query, "query");
+    public GXMantiCoreResDto<Dict> autocomplete(String table, String query,
+                                                Map<String, Object> extraOptions) {
+        GXManticoreUtils.requireNonBlank(table, "table");
+        GXManticoreUtils.requireNonBlank(query, "query");
         Map<String, Object> payload = new HashMap<>();
         payload.put("table", table);
         payload.put("query", query);
@@ -37,6 +36,6 @@ public final class GXManticoreAutocompleteOperations {
             }
             payload.putAll(extraOptions);
         }
-        return sendPost("/autocomplete", JSONUtil.toJsonStr(payload), "application/json");
+        return client.sendPost("/autocomplete", JSONUtil.toJsonStr(payload), "application/json");
     }
 }

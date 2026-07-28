@@ -1,6 +1,6 @@
 package cn.maple.core.framework.util.manticore;
 
-import cn.hutool.json.JSON;
+import cn.hutool.core.lang.Dict;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.dto.inner.GXMantiCoreResDto;
 
@@ -8,8 +8,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
-import static cn.maple.core.framework.util.manticore.GXManticoreConfiguration.*;
 
 /**
  * Manticore Search HTTP API utility facade.
@@ -20,7 +18,10 @@ import static cn.maple.core.framework.util.manticore.GXManticoreConfiguration.*;
  * {@code query}; bulk requests use NDJSON.</p>
  */
 public final class GXManticoreDocumentOperations {
-    private GXManticoreDocumentOperations() {
+    private final GXManticoreClient client;
+
+    GXManticoreDocumentOperations(GXManticoreClient client) {
+        this.client = client;
     }
 
     /**
@@ -31,11 +32,11 @@ public final class GXManticoreDocumentOperations {
      * @param doc   文档字段键值对 Map
      * @return 接口响应 JSON 字符串
      */
-    public static GXMantiCoreResDto<JSON> insert(String index, Long id, Map<String, Object> doc) {
+    public GXMantiCoreResDto<Dict> insert(String index, Long id, Map<String, Object> doc) {
         requireNonBlank(index, "index");
         requireNonEmpty(doc, "doc");
         Map<String, Object> payload = new HashMap<>();
-        payload.put(tableFieldName, index);
+        payload.put(client.getTableFieldName(), index);
         if (id != null) {
             payload.put("id", id);
         }
@@ -54,12 +55,12 @@ public final class GXManticoreDocumentOperations {
      * @param doc   需要修改的字段键值对 Map（不能包含全文字段/columnar 属性）
      * @return 接口响应 JSON 字符串
      */
-    public static GXMantiCoreResDto<JSON> update(String index, Long id, Map<String, Object> doc) {
+    public GXMantiCoreResDto<Dict> update(String index, Long id, Map<String, Object> doc) {
         requireNonBlank(index, "index");
         requireNonNull(id, "id");
         requireNonEmpty(doc, "doc");
         Map<String, Object> payload = new HashMap<>();
-        payload.put(tableFieldName, index);
+        payload.put(client.getTableFieldName(), index);
         payload.put("id", id);
         payload.put("doc", doc);
 
@@ -74,12 +75,12 @@ public final class GXManticoreDocumentOperations {
      * @param doc   需要修改的字段键值对 Map
      * @return 接口响应 JSON 字符串
      */
-    public static GXMantiCoreResDto<JSON> updateByQuery(String index, Map<String, Object> query, Map<String, Object> doc) {
+    public GXMantiCoreResDto<Dict> updateByQuery(String index, Map<String, Object> query, Map<String, Object> doc) {
         requireNonBlank(index, "index");
         requireNonEmpty(query, "query");
         requireNonEmpty(doc, "doc");
         Map<String, Object> payload = new HashMap<>();
-        payload.put(tableFieldName, index);
+        payload.put(client.getTableFieldName(), index);
         payload.put("query", query);
         payload.put("doc", doc);
 
@@ -94,11 +95,11 @@ public final class GXManticoreDocumentOperations {
      * @param doc   完整文档字段键值对 Map
      * @return 接口响应 JSON 字符串
      */
-    public static GXMantiCoreResDto<JSON> replace(String index, Long id, Map<String, Object> doc) {
+    public GXMantiCoreResDto<Dict> replace(String index, Long id, Map<String, Object> doc) {
         requireNonBlank(index, "index");
         requireNonEmpty(doc, "doc");
         Map<String, Object> payload = new HashMap<>();
-        payload.put(tableFieldName, index);
+        payload.put(client.getTableFieldName(), index);
         if (id != null) {
             payload.put("id", id);
         }
@@ -114,11 +115,11 @@ public final class GXManticoreDocumentOperations {
      * @param id    要删除的文档 ID
      * @return 接口响应 JSON 字符串
      */
-    public static GXMantiCoreResDto<JSON> deleteById(String index, Long id) {
+    public GXMantiCoreResDto<Dict> deleteById(String index, Long id) {
         requireNonBlank(index, "index");
         requireNonNull(id, "id");
         Map<String, Object> payload = new HashMap<>();
-        payload.put(tableFieldName, index);
+        payload.put(client.getTableFieldName(), index);
         payload.put("id", id);
 
         return sendPost("/delete", JSONUtil.toJsonStr(payload), "application/json");
@@ -133,11 +134,11 @@ public final class GXManticoreDocumentOperations {
      * @param query 删除条件 Map（如 equals 匹配、range 范围等，可用 build* 系列方法构造）
      * @return 接口响应 JSON 字符串
      */
-    public static GXMantiCoreResDto<JSON> deleteByQuery(String index, Map<String, Object> query) {
+    public GXMantiCoreResDto<Dict> deleteByQuery(String index, Map<String, Object> query) {
         requireNonBlank(index, "index");
         requireNonEmpty(query, "query");
         Map<String, Object> payload = new HashMap<>();
-        payload.put(tableFieldName, index);
+        payload.put(client.getTableFieldName(), index);
         payload.put("query", query);
 
         return sendPost("/delete", JSONUtil.toJsonStr(payload), "application/json");
@@ -152,7 +153,7 @@ public final class GXManticoreDocumentOperations {
      * @param idFieldName docMap 中作为主键 id 的字段名称（例如 "id"）；若无需指定可传 null，由 Manticore 自动生成
      * @return 接口响应 JSON 字符串
      */
-    public static GXMantiCoreResDto<JSON> bulkInsert(String index, List<Map<String, Object>> docList, String idFieldName) {
+    public GXMantiCoreResDto<Dict> bulkInsert(String index, List<Map<String, Object>> docList, String idFieldName) {
         return bulkAction("insert", index, docList, idFieldName, false);
     }
 
@@ -164,7 +165,7 @@ public final class GXManticoreDocumentOperations {
      * @param idFieldName docMap 中作为主键 id 的字段名称，必须存在
      * @return 接口响应 JSON 字符串
      */
-    public static GXMantiCoreResDto<JSON> bulkReplace(String index, List<Map<String, Object>> docList, String idFieldName) {
+    public GXMantiCoreResDto<Dict> bulkReplace(String index, List<Map<String, Object>> docList, String idFieldName) {
         return bulkAction("replace", index, docList, idFieldName, true);
     }
 
@@ -176,7 +177,7 @@ public final class GXManticoreDocumentOperations {
      * @param idFieldName docMap 中作为主键 id 的字段名称，必须存在
      * @return 接口响应 JSON 字符串
      */
-    public static GXMantiCoreResDto<JSON> bulkUpdate(String index, List<Map<String, Object>> docList, String idFieldName) {
+    public GXMantiCoreResDto<Dict> bulkUpdate(String index, List<Map<String, Object>> docList, String idFieldName) {
         return bulkAction("update", index, docList, idFieldName, true);
     }
 
@@ -187,7 +188,7 @@ public final class GXManticoreDocumentOperations {
      * @param ids   待删除的文档 ID 列表
      * @return 接口响应 JSON 字符串
      */
-    public static GXMantiCoreResDto<JSON> bulkDeleteByIds(String index, List<Long> ids) {
+    public GXMantiCoreResDto<Dict> bulkDeleteByIds(String index, List<Long> ids) {
         requireNonBlank(index, "index");
         if (ids == null || ids.isEmpty() || ids.stream().anyMatch(id -> id == null)) {
             throw new IllegalArgumentException("ids must contain non-null IDs");
@@ -195,7 +196,7 @@ public final class GXManticoreDocumentOperations {
         StringBuilder ndjson = new StringBuilder();
         for (Long id : ids) {
             Map<String, Object> deleteDetail = new HashMap<>();
-            deleteDetail.put(tableFieldName, index);
+            deleteDetail.put(client.getTableFieldName(), index);
             deleteDetail.put("id", id);
 
             Map<String, Object> line = new HashMap<>();
@@ -212,34 +213,34 @@ public final class GXManticoreDocumentOperations {
      * @param batchSize 每批条数，&lt;=0 时使用默认值
      * @return 每一批请求各自的接口响应 JSON 字符串列表，按发送顺序排列
      */
-    public static List<GXMantiCoreResDto<JSON>> bulkInsertBatched(String index, List<Map<String, Object>> docList,
-                                                                  String idFieldName, int batchSize) {
+    public List<GXMantiCoreResDto<Dict>> bulkInsertBatched(String index, List<Map<String, Object>> docList,
+                                                           String idFieldName, int batchSize) {
         return batchedBulkAction("insert", index, docList, idFieldName, false, batchSize);
     }
 
     /**
      * 自动分批的批量替换，用法同 {@link #bulkInsertBatched(String, List, String, int)}
      */
-    public static List<GXMantiCoreResDto<JSON>> bulkReplaceBatched(String index, List<Map<String, Object>> docList,
-                                                                   String idFieldName, int batchSize) {
+    public List<GXMantiCoreResDto<Dict>> bulkReplaceBatched(String index, List<Map<String, Object>> docList,
+                                                            String idFieldName, int batchSize) {
         return batchedBulkAction("replace", index, docList, idFieldName, true, batchSize);
     }
 
     /**
      * 自动分批的批量更新，用法同 {@link #bulkInsertBatched(String, List, String, int)}
      */
-    public static List<GXMantiCoreResDto<JSON>> bulkUpdateBatched(String index, List<Map<String, Object>> docList,
-                                                                  String idFieldName, int batchSize) {
+    public List<GXMantiCoreResDto<Dict>> bulkUpdateBatched(String index, List<Map<String, Object>> docList,
+                                                           String idFieldName, int batchSize) {
         return batchedBulkAction("update", index, docList, idFieldName, true, batchSize);
     }
 
-    private static List<GXMantiCoreResDto<JSON>> batchedBulkAction(String action, String index, List<Map<String, Object>> docList,
-                                                                   String idFieldName, boolean idRequired, int batchSize) {
+    private List<GXMantiCoreResDto<Dict>> batchedBulkAction(String action, String index, List<Map<String, Object>> docList,
+                                                            String idFieldName, boolean idRequired, int batchSize) {
         if (docList == null || docList.isEmpty()) {
             throw new IllegalArgumentException("docList must contain non-empty documents");
         }
-        int bs = batchSize > 0 ? batchSize : DEFAULT_BULK_BATCH_SIZE;
-        List<GXMantiCoreResDto<JSON>> responses = new ArrayList<>();
+        int bs = batchSize > 0 ? batchSize : client.getDefaultBulkBatchSize();
+        List<GXMantiCoreResDto<Dict>> responses = new ArrayList<>();
         int total = docList.size();
         for (int start = 0; start < total; start += bs) {
             int end = Math.min(start + bs, total);
@@ -251,8 +252,8 @@ public final class GXManticoreDocumentOperations {
 
     // ==================== 查询 ====================
 
-    private static GXMantiCoreResDto<JSON> bulkAction(String action, String index, List<Map<String, Object>> docList,
-                                                      String idFieldName, boolean idRequired) {
+    private GXMantiCoreResDto<Dict> bulkAction(String action, String index, List<Map<String, Object>> docList,
+                                               String idFieldName, boolean idRequired) {
         requireNonBlank(index, "index");
         if (docList == null || docList.isEmpty() || docList.stream().anyMatch(doc -> doc == null || doc.isEmpty())) {
             throw new IllegalArgumentException("docList must contain non-empty documents");
@@ -263,7 +264,7 @@ public final class GXManticoreDocumentOperations {
         StringBuilder ndjson = new StringBuilder();
         for (Map<String, Object> doc : docList) {
             Map<String, Object> detail = new HashMap<>();
-            detail.put(tableFieldName, index);
+            detail.put(client.getTableFieldName(), index);
 
             Object idVal = idFieldName != null ? doc.get(idFieldName) : null;
             if (idVal != null) {
@@ -281,67 +282,24 @@ public final class GXManticoreDocumentOperations {
         return sendPost("/bulk", ndjson.toString(), "application/x-ndjson");
     }
 
-    /**
-     * JSON DSL 查询 (/search)
-     *
-     * @param index  索引/表名称
-     * @param query  查询条件 Map（如 query_string 全文检索、bool 组合条件等，可用 build* 系列方法构造）
-     * @param offset 偏移量/跳过条数 (如 0)
-     * @param limit  获取条数/每页大小 (如 10)
-     * @return 接口响应 JSON 字符串
-     */
-    public static GXMantiCoreResDto<JSON> search(String index, Map<String, Object> query, int offset, int limit) {
-        requireSearchArguments(index, offset, limit);
-        Map<String, Object> payload = new HashMap<>();
-        payload.put(tableFieldName, index);
-        if (query != null) {
-            payload.put("query", query);
-        }
-        payload.put("offset", offset);
-        payload.put("limit", limit);
-
-        return sendPost("/search", JSONUtil.toJsonStr(payload), "application/json");
+    private void requireNonBlank(String value, String name) {
+        GXManticoreUtils.requireNonBlank(value, name);
     }
 
-    /**
-     * JSON DSL 查询 (/search)，并附带查询选项（对应 SQL 的 OPTION 子句），
-     * 如 ranker、max_matches、field_weights、cutoff 等，参考 Manticore 官方文档 Search Options
-     *
-     * @param index   索引/表名称
-     * @param query   查询条件 Map
-     * @param offset  偏移量/跳过条数
-     * @param limit   获取条数/每页大小
-     * @param options 查询选项 Map，如 {"ranker": "bm25", "max_matches": 3000}；传 null 或空则不附带
-     * @return 接口响应 JSON 字符串
-     */
-    public static GXMantiCoreResDto<JSON> search(String index, Map<String, Object> query, int offset, int limit,
-                                                 Map<String, Object> options) {
-        requireSearchArguments(index, offset, limit);
-        Map<String, Object> payload = new HashMap<>();
-        payload.put(tableFieldName, index);
-        if (query != null) {
-            payload.put("query", query);
-        }
-        payload.put("offset", offset);
-        payload.put("limit", limit);
-        if (options != null && !options.isEmpty()) {
-            payload.put("options", options);
-        }
-
-        return sendPost("/search", JSONUtil.toJsonStr(payload), "application/json");
+    private void requireNonEmpty(Map<?, ?> value, String name) {
+        GXManticoreUtils.requireNonEmpty(value, name);
     }
 
-    /**
-     * 完整自定义查询 (/search) —— 当需要 sort / highlight / source / aggs / knn 等
-     * 高级参数时，直接传入完整的请求体 Map（需自行包含表名字段）
-     *
-     * @param fullPayload 完整的 /search 请求体
-     * @return 接口响应 JSON 字符串
-     */
-    public static GXMantiCoreResDto<JSON> search(Map<String, Object> fullPayload) {
+    private void requireNonNull(Object value, String name) {
+        GXManticoreUtils.requireNonNull(value, name);
+    }
 
-        requireNonEmpty(fullPayload, "fullPayload");
-        return sendPost("/search", JSONUtil.toJsonStr(fullPayload), "application/json");
+    private void requireSearchArguments(String index, int offset, int limit) {
+        GXManticoreUtils.requireSearchArguments(index, offset, limit);
+    }
+
+    private GXMantiCoreResDto<Dict> sendPost(String endpoint, String body, String contentType) {
+        return client.sendPost(endpoint, body, contentType);
     }
 
 }

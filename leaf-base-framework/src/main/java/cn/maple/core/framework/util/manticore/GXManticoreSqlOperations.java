@@ -1,7 +1,7 @@
 package cn.maple.core.framework.util.manticore;
 
+import cn.hutool.core.lang.Dict;
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.json.JSON;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
@@ -16,43 +16,40 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import static cn.maple.core.framework.util.manticore.GXManticoreConfiguration.requireIdentifier;
-import static cn.maple.core.framework.util.manticore.GXManticoreConfiguration.requireNonBlank;
-import static cn.maple.core.framework.util.manticore.GXManticoreConfiguration.sendPost;
-import static cn.maple.core.framework.util.manticore.GXManticoreConfiguration.toSqlResponse;
-
 /**
  * SQL execution, SQL response parsing, and table-management operations.
  */
 public final class GXManticoreSqlOperations {
-    private static final Pattern CREATE_TABLE_PATTERN = Pattern.compile(
+    private final Pattern CREATE_TABLE_PATTERN = Pattern.compile(
             "^create\\s+table\\s+(?:if\\s+not\\s+exists\\s+)?[A-Za-z_][A-Za-z0-9_]*\\s*\\(.*$",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private final GXManticoreClient client;
 
-    private GXManticoreSqlOperations() {
+    GXManticoreSqlOperations(GXManticoreClient client) {
+        this.client = client;
     }
 
     /**
      * Executes raw Manticore SQL and returns the structured HTTP response.
      */
-    public static GXMantiCoreResDto<JSON> executeSql(String sql) {
+    public GXMantiCoreResDto<Dict> executeSql(String sql) {
         requireNonBlank(sql, "sql");
         String encodedSql = java.net.URLEncoder.encode(sql, StandardCharsets.UTF_8).replace("*", "%2A");
-        return toSqlResponse(sendPost("/sql?mode=raw", "query=" + encodedSql,
-                "application/x-www-form-urlencoded"));
+        GXMantiCoreResDto<Dict> mantiCoreResDto = sendPost("/sql?mode=raw", "query=" + encodedSql, "application/x-www-form-urlencoded");
+        return toSqlResponse(mantiCoreResDto);
     }
 
     /**
      * Executes one validated, read-only SQL statement.
      */
-    public static GXMantiCoreResDto<JSON> executeReadSql(String sql) {
+    public GXMantiCoreResDto<Dict> executeReadSql(String sql) {
         return executeSql(GXDBStringUtils.normalizeAndValidateRawSqlQuery(sql));
     }
 
     /**
      * Parses the first result set in a SQL response without making a remote request.
      */
-    public static List<Map<String, Object>> parseSqlAsList(String responseJson) {
+    public List<Map<String, Object>> parseSqlAsList(String responseJson) {
         List<Map<String, Object>> result = new ArrayList<>();
         JSONArray resultSets = JSONUtil.parseArray(responseJson);
         if (resultSets.isEmpty()) {
@@ -70,7 +67,7 @@ public final class GXManticoreSqlOperations {
     /**
      * Parses all result sets in a SQL response without making a remote request.
      */
-    public static List<List<Map<String, Object>>> parseSqlMultiAsList(String responseJson) {
+    public List<List<Map<String, Object>>> parseSqlMultiAsList(String responseJson) {
         List<List<Map<String, Object>>> resultSets = new ArrayList<>();
         JSONArray responseSets = JSONUtil.parseArray(responseJson);
         for (int i = 0; i < responseSets.size(); i++) {
@@ -86,45 +83,45 @@ public final class GXManticoreSqlOperations {
         return resultSets;
     }
 
-    public static GXMantiCoreResDto<JSON> flushAttributes() {
+    public GXMantiCoreResDto<Dict> flushAttributes() {
         return executeSql("FLUSH ATTRIBUTES");
     }
 
-    public static GXMantiCoreResDto<JSON> showTables() {
+    public GXMantiCoreResDto<Dict> showTables() {
         return executeSql("SHOW TABLES");
     }
 
-    public static GXMantiCoreResDto<JSON> describeTable(String index) {
+    public GXMantiCoreResDto<Dict> describeTable(String index) {
         requireIdentifier(index, "index");
         return executeSql("DESCRIBE " + index);
     }
 
-    public static GXMantiCoreResDto<JSON> showCreateTable(String index) {
+    public GXMantiCoreResDto<Dict> showCreateTable(String index) {
         requireIdentifier(index, "index");
         return executeSql("SHOW CREATE TABLE " + index);
     }
 
-    public static GXMantiCoreResDto<JSON> createTable(String createTableSql) {
+    public GXMantiCoreResDto<Dict> createTable(String createTableSql) {
         return executeSql(validateCreateTableSql(createTableSql));
     }
 
-    public static GXMantiCoreResDto<JSON> dropTable(String index, boolean ifExists) {
+    public GXMantiCoreResDto<Dict> dropTable(String index, boolean ifExists) {
         requireIdentifier(index, "index");
         String sql = ifExists ? "DROP TABLE IF EXISTS " + index : "DROP TABLE " + index;
         return executeSql(sql);
     }
 
-    public static GXMantiCoreResDto<JSON> truncateTable(String index) {
+    public GXMantiCoreResDto<Dict> truncateTable(String index) {
         requireIdentifier(index, "index");
         return executeSql("TRUNCATE TABLE " + index);
     }
 
-    public static GXMantiCoreResDto<JSON> optimizeTable(String index) {
+    public GXMantiCoreResDto<Dict> optimizeTable(String index) {
         requireIdentifier(index, "index");
         return executeSql("OPTIMIZE INDEX " + index);
     }
 
-    private static void addRows(JSONArray data, List<Map<String, Object>> rows) {
+    private void addRows(JSONArray data, List<Map<String, Object>> rows) {
         if (data == null) {
             return;
         }
@@ -133,7 +130,7 @@ public final class GXManticoreSqlOperations {
         }
     }
 
-    private static String validateCreateTableSql(String createTableSql) {
+    private String validateCreateTableSql(String createTableSql) {
         if (StrUtil.isBlank(createTableSql)) {
             throw new GXSqlInjectionException("CREATE TABLE SQL must not be blank");
         }
@@ -145,5 +142,21 @@ public final class GXManticoreSqlOperations {
             throw new GXSqlInjectionException("Only one CREATE TABLE statement is allowed");
         }
         return normalized;
+    }
+
+    private void requireIdentifier(String value, String name) {
+        GXManticoreUtils.requireIdentifier(value, name);
+    }
+
+    private void requireNonBlank(String value, String name) {
+        GXManticoreUtils.requireNonBlank(value, name);
+    }
+
+    private GXMantiCoreResDto<Dict> sendPost(String endpoint, String body, String contentType) {
+        return client.sendPost(endpoint, body, contentType);
+    }
+
+    private GXMantiCoreResDto<Dict> toSqlResponse(GXMantiCoreResDto<Dict> response) {
+        return client.toSqlResponse(response);
     }
 }
