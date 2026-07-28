@@ -28,7 +28,7 @@ import java.lang.reflect.Type;
 @Slf4j
 @SuppressWarnings("all")
 public class GXMyBatisPlusSaveEntityAspect {
-    @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && execution(* insert(..))")
+    @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && execution(int insert(Object))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();
         if (!isSuccessfulResult(proceed)) {

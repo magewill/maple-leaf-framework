@@ -13,17 +13,20 @@ import cn.maple.core.framework.dto.inner.field.GXUpdateNumberField;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.springframework.context.event.EventListener;
+import org.springframework.aop.aspectj.AspectJExpressionPointcut;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionAttribute;
 
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
@@ -64,6 +67,18 @@ class GXMyBatisListenerAspectRegressionTest {
             eventPublisher.verify(() -> GXEventPublisherUtils.publishEventAfterCommit(any()), Mockito.times(1));
             eventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.never());
         }
+    }
+
+    @Test
+    void saveEntityPointcutExcludesMyBatisPlusBatchInsertOverloads() throws Exception {
+        Around around = GXMyBatisPlusSaveEntityAspect.class
+                .getDeclaredMethod("around", ProceedingJoinPoint.class)
+                .getAnnotation(Around.class);
+        AspectJExpressionPointcut pointcut = new AspectJExpressionPointcut();
+        pointcut.setExpression(around.value().substring(around.value().indexOf("execution")));
+
+        assertTrue(pointcut.matches(InsertTarget.class.getMethod("insert", Object.class), InsertTarget.class));
+        assertTrue(!pointcut.matches(InsertTarget.class.getMethod("insert", Collection.class), InsertTarget.class));
     }
 
     @Test
@@ -270,6 +285,17 @@ class GXMyBatisListenerAspectRegressionTest {
             return 1;
         }
     }
+
+    private static class InsertTarget {
+        public int insert(Object entity) {
+            return 1;
+        }
+
+        public Object insert(Collection<?> entities) {
+            return entities;
+        }
+    }
+
 
     @GXMyBatisListener(listenerClazz = FirstListener.class, runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)
     private interface AsyncSaveMapper {

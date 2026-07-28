@@ -30,7 +30,7 @@ import java.util.List;
 @Slf4j
 @SuppressWarnings("all")
 public class GXMyBatisPlusSaveBatchEntityAspect {
-    @Around("target(com.baomidou.mybatisplus.extension.service.impl.ServiceImpl) && (execution(* saveBatch(..)) || execution(* saveOrUpdateBatch(..)))")
+    @Around("target(com.baomidou.mybatisplus.spring.service.impl.ServiceImpl) && (execution(* saveBatch(..)) || execution(* saveOrUpdateBatch(..)))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();
         if (!isSuccessfulResult(proceed)) {

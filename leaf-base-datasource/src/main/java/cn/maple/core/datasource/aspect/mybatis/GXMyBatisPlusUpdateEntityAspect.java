@@ -51,7 +51,15 @@ public class GXMyBatisPlusUpdateEntityAspect {
             .expireAfterAccess(1, TimeUnit.DAYS)
             .build();
 
-    @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && (execution(* update(..)) || execution(* updateById(..)))")
+    @Around("""
+            target(cn.maple.core.datasource.mapper.GXBaseMapper)
+            && (
+                execution(int com.baomidou.mybatisplus.core.mapper.BaseMapper.update(
+                    Object, com.baomidou.mybatisplus.core.conditions.Wrapper
+                ))
+                || execution(int com.baomidou.mybatisplus.core.mapper.BaseMapper.updateById(Object))
+            )
+            """)
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();
         if (!isSuccessfulResult(proceed)) {
