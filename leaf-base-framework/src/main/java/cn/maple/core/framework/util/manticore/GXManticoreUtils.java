@@ -1,5 +1,6 @@
 package cn.maple.core.framework.util.manticore;
 
+import cn.hutool.core.lang.Dict;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
@@ -40,27 +41,47 @@ public class GXManticoreUtils {
     }
 
     /**
-     * 从 /search 响应中提取指定聚合的分桶结果（aggregations.&lt;aggName&gt;.buckets），
+     * 从 /search 响应中提取指定聚合的分桶结果（aggregations.<aggName>.buckets），
      * 每个桶通常包含 key（分组值）与 doc_count（分组内文档数）
+     *
+     * @param searchResponseJson 搜索响应 JSON 字符串
+     * @param aggName            聚合名称（例如 "by_category"）
+     * @return 分桶 Map 列表
      */
     public static List<Map<String, Object>> extractAggBuckets(String searchResponseJson, String aggName) {
         List<Map<String, Object>> buckets = new ArrayList<>();
-        JSONObject root = JSONUtil.parseObj(searchResponseJson);
-        JSONObject aggregations = root.getJSONObject("aggregations");
-        if (aggregations == null) {
+        if (StrUtil.isBlank(searchResponseJson) || StrUtil.isBlank(aggName)) {
             return buckets;
         }
-        JSONObject agg = aggregations.getJSONObject(aggName);
-        if (agg == null) {
-            return buckets;
+
+        try {
+            JSONObject root = JSONUtil.parseObj(searchResponseJson);
+            JSONObject aggregations = root.getJSONObject("aggregations");
+            if (aggregations == null) {
+                aggregations = root.getJSONObject("aggs");
+            }
+            if (aggregations == null) {
+                return buckets;
+            }
+            JSONObject agg = aggregations.getJSONObject(aggName);
+            if (agg == null) {
+                return buckets;
+            }
+            JSONArray bucketArr = agg.getJSONArray("buckets");
+            if (bucketArr == null) {
+                return buckets;
+            }
+
+            for (int i = 0; i < bucketArr.size(); i++) {
+                JSONObject bucketObj = bucketArr.getJSONObject(i);
+                if (bucketObj != null) {
+                    buckets.add(new HashMap<>(bucketObj));
+                }
+            }
+        } catch (Exception e) {
+            throw new GXBusinessException("Manticore返回的数据格式有误!", e);
         }
-        JSONArray bucketArr = agg.getJSONArray("buckets");
-        if (bucketArr == null) {
-            return buckets;
-        }
-        for (int i = 0; i < bucketArr.size(); i++) {
-            buckets.add(bucketArr.getJSONObject(i));
-        }
+
         return buckets;
     }
 
@@ -181,5 +202,31 @@ public class GXManticoreUtils {
         if (StrUtil.isBlank(value) || !IDENTIFIER_PATTERN.matcher(value).matches()) {
             throw new IllegalArgumentException(name + " must be a valid Manticore identifier");
         }
+    }
+
+    public static Dict parseJson(String responseContentType, String body) {
+        if (StrUtil.isBlank(body)) {
+            return null;
+        }
+        if (!StrUtil.containsIgnoreCase(responseContentType, "json") && JSONUtil.isTypeJSON(body)) {
+            return null;
+        }
+        Dict searchResult = JSONUtil.toBean(body, Dict.class);
+        if (searchResult == null) {
+            return null;
+        }
+        boolean timedOut = searchResult.getBool("timed_out");
+        /*Dict hits = Convert.convert(Dict.class, searchResult.getObj("hits"));
+        Integer total = Convert.convert(Integer.class, hits.getObj("total"));
+        List<Dict> lastSearchResult = JSONUtil.toList(hits.getStr("hits"), Dict.class);
+        List<Dict> records = new ArrayList<>();
+        Dict retData = new Dict();
+        for (Dict d : lastSearchResult) {
+            int id = d.getInt("_id");
+            records.add(Dict.create().set("id", id).set("data", d));
+        }*/
+        List<Map<String, Object>> records = GXManticoreUtils.extractHits(body);
+        long total = GXManticoreUtils.extractTotal(body);
+        return Dict.create().set("timedOut", timedOut).set("total", total).set("records", records);
     }
 }

@@ -1,6 +1,5 @@
 package cn.maple.core.framework.util.manticore;
 
-import cn.hutool.core.lang.Dict;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.dto.inner.GXMantiCoreResDto;
 
@@ -32,7 +31,7 @@ public final class GXManticoreQueryOperations {
      * @param ef          HNSW 检索时的 ef 参数，越大召回越准但越慢；传 <=0 则不设置，使用默认值
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> knnSearch(String index, String knnField, float[] queryVector, int k, int ef) {
+    public String knnSearch(String index, String knnField, float[] queryVector, int k, int ef) {
         GXManticoreUtils.requireNonBlank(index, "index");
         GXManticoreUtils.requireNonBlank(knnField, "knnField");
         if (queryVector == null || queryVector.length == 0 || k <= 0) {
@@ -62,7 +61,7 @@ public final class GXManticoreQueryOperations {
      * @param limit  获取条数/每页大小 (如 10)
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> search(String index, Map<String, Object> query, int offset, int limit) {
+    public String search(String index, Map<String, Object> query, int offset, int limit) {
         GXManticoreUtils.requireSearchArguments(index, offset, limit);
         Map<String, Object> payload = new HashMap<>();
         payload.put(client.getTableFieldName(), index);
@@ -86,8 +85,8 @@ public final class GXManticoreQueryOperations {
      * @param options 查询选项 Map，如 {"ranker": "bm25", "max_matches": 3000}；传 null 或空则不附带
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> search(String index, Map<String, Object> query, int offset, int limit,
-                                          Map<String, Object> options) {
+    public String search(String index, Map<String, Object> query, int offset, int limit,
+                         Map<String, Object> options) {
         GXManticoreUtils.requireSearchArguments(index, offset, limit);
         Map<String, Object> payload = new HashMap<>();
         payload.put(client.getTableFieldName(), index);
@@ -110,8 +109,7 @@ public final class GXManticoreQueryOperations {
      * @param fullPayload 完整的 /search 请求体
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> search(Map<String, Object> fullPayload) {
-
+    public String search(Map<String, Object> fullPayload) {
         GXManticoreUtils.requireNonEmpty(fullPayload, "fullPayload");
         return client.sendPost("/search", JSONUtil.toJsonStr(fullPayload), "application/json");
     }

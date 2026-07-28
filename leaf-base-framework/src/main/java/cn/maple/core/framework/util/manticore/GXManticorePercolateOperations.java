@@ -1,9 +1,7 @@
 package cn.maple.core.framework.util.manticore;
 
-import cn.hutool.core.lang.Dict;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
-import cn.maple.core.framework.dto.inner.GXMantiCoreResDto;
 
 import java.util.HashMap;
 import java.util.List;
@@ -23,17 +21,17 @@ public final class GXManticorePercolateOperations {
     /**
      * Runs a reverse percolate search with the default first page of ten results.
      */
-    public GXMantiCoreResDto<Dict> percolate(String index, List<Map<String, Object>> documents,
-                                             String field) {
+    public String percolate(String index, List<Map<String, Object>> documents,
+                            String field) {
         return percolate(index, documents, field, 0, 10, null);
     }
 
     /**
      * Runs a reverse percolate search with caller-controlled pagination and search options.
      */
-    public GXMantiCoreResDto<Dict> percolate(String index, List<Map<String, Object>> documents,
-                                             String field, int offset, int limit,
-                                             Map<String, Object> options) {
+    public String percolate(String index, List<Map<String, Object>> documents,
+                            String field, int offset, int limit,
+                            Map<String, Object> options) {
         requireNonBlank(index, "index");
         requireNonBlank(field, "field");
         requireSearchArguments(index, offset, limit);
@@ -51,16 +49,16 @@ public final class GXManticorePercolateOperations {
     /**
      * Adds a rule to a percolate table.
      */
-    public GXMantiCoreResDto<Dict> pqAddRule(String pqIndex, Long id, Map<String, Object> query,
-                                             List<String> tags) {
+    public String pqAddRule(String pqIndex, Long id, Map<String, Object> query,
+                            List<String> tags) {
         return pqAddRule(pqIndex, id, query, tags, null);
     }
 
     /**
      * Adds a rule to a percolate table, optionally constrained by attribute filters.
      */
-    public GXMantiCoreResDto<Dict> pqAddRule(String pqIndex, Long id, Map<String, Object> query,
-                                             List<String> tags, String filters) {
+    public String pqAddRule(String pqIndex, Long id, Map<String, Object> query,
+                            List<String> tags, String filters) {
         requireIdentifier(pqIndex, "pqIndex");
         requireNonEmpty(query, "query");
         Map<String, Object> doc = new HashMap<>();
@@ -77,7 +75,7 @@ public final class GXManticorePercolateOperations {
     /**
      * Matches one document against the rules stored in a percolate table.
      */
-    public GXMantiCoreResDto<Dict> pqMatchDocument(String pqIndex, Map<String, Object> document) {
+    public String pqMatchDocument(String pqIndex, Map<String, Object> document) {
         requireIdentifier(pqIndex, "pqIndex");
         requireNonEmpty(document, "document");
         Map<String, Object> percolate = new HashMap<>();
@@ -88,8 +86,8 @@ public final class GXManticorePercolateOperations {
     /**
      * Matches one document against stored rules with caller-controlled pagination and search options.
      */
-    public GXMantiCoreResDto<Dict> pqMatchDocument(String pqIndex, Map<String, Object> document,
-                                                   int offset, int limit, Map<String, Object> options) {
+    public String pqMatchDocument(String pqIndex, Map<String, Object> document,
+                                  int offset, int limit, Map<String, Object> options) {
         requireIdentifier(pqIndex, "pqIndex");
         requireNonEmpty(document, "document");
         requireSearchArguments(pqIndex, offset, limit);
@@ -101,7 +99,7 @@ public final class GXManticorePercolateOperations {
     /**
      * Matches multiple documents against the rules stored in a percolate table.
      */
-    public GXMantiCoreResDto<Dict> pqMatchDocuments(String pqIndex, List<Map<String, Object>> documents) {
+    public String pqMatchDocuments(String pqIndex, List<Map<String, Object>> documents) {
         requireIdentifier(pqIndex, "pqIndex");
         if (documents == null || documents.isEmpty() || documents.stream().anyMatch(doc -> doc == null || doc.isEmpty())) {
             throw new IllegalArgumentException("documents must contain non-empty documents");
@@ -114,8 +112,8 @@ public final class GXManticorePercolateOperations {
     /**
      * Matches multiple documents against stored rules with caller-controlled pagination and search options.
      */
-    public GXMantiCoreResDto<Dict> pqMatchDocuments(String pqIndex, List<Map<String, Object>> documents,
-                                                    int offset, int limit, Map<String, Object> options) {
+    public String pqMatchDocuments(String pqIndex, List<Map<String, Object>> documents,
+                                   int offset, int limit, Map<String, Object> options) {
         requireIdentifier(pqIndex, "pqIndex");
         requireSearchArguments(pqIndex, offset, limit);
         if (documents == null || documents.isEmpty() || documents.stream().anyMatch(doc -> doc == null || doc.isEmpty())) {
@@ -126,7 +124,7 @@ public final class GXManticorePercolateOperations {
         return searchPercolateTable(pqIndex, percolate, offset, limit, options);
     }
 
-    private GXMantiCoreResDto<Dict> searchPercolateTable(String pqIndex, Map<String, Object> percolate) {
+    private String searchPercolateTable(String pqIndex, Map<String, Object> percolate) {
         Map<String, Object> query = new HashMap<>();
         query.put("percolate", percolate);
         Map<String, Object> payload = new HashMap<>();
@@ -134,8 +132,8 @@ public final class GXManticorePercolateOperations {
         return sendPost("/pq/" + pqIndex + "/search", JSONUtil.toJsonStr(payload), "application/json");
     }
 
-    private GXMantiCoreResDto<Dict> searchPercolateTable(String pqIndex, Map<String, Object> percolate,
-                                                         int offset, int limit, Map<String, Object> options) {
+    private String searchPercolateTable(String pqIndex, Map<String, Object> percolate,
+                                        int offset, int limit, Map<String, Object> options) {
         Map<String, Object> query = new HashMap<>();
         query.put("percolate", percolate);
         Map<String, Object> payload = new HashMap<>();
@@ -164,7 +162,7 @@ public final class GXManticorePercolateOperations {
         GXManticoreUtils.requireSearchArguments(index, offset, limit);
     }
 
-    private GXMantiCoreResDto<Dict> sendPost(String endpoint, String body, String contentType) {
+    private String sendPost(String endpoint, String body, String contentType) {
         return client.sendPost(endpoint, body, contentType);
     }
 }

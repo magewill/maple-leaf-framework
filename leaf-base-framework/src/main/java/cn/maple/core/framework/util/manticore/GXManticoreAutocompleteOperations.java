@@ -1,8 +1,6 @@
 package cn.maple.core.framework.util.manticore;
 
-import cn.hutool.core.lang.Dict;
 import cn.hutool.json.JSONUtil;
-import cn.maple.core.framework.dto.inner.GXMantiCoreResDto;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -19,12 +17,12 @@ public final class GXManticoreAutocompleteOperations {
         this.client = client;
     }
 
-    public GXMantiCoreResDto<Dict> autocomplete(String table, String query) {
+    public String autocomplete(String table, String query) {
         return autocomplete(table, query, null);
     }
 
-    public GXMantiCoreResDto<Dict> autocomplete(String table, String query,
-                                                Map<String, Object> extraOptions) {
+    public String autocomplete(String table, String query,
+                               Map<String, Object> extraOptions) {
         GXManticoreUtils.requireNonBlank(table, "table");
         GXManticoreUtils.requireNonBlank(query, "query");
         Map<String, Object> payload = new HashMap<>();

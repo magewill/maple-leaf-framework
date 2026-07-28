@@ -1,6 +1,5 @@
 package cn.maple.core.framework.util.manticore;
 
-import cn.hutool.core.lang.Dict;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.dto.inner.GXMantiCoreResDto;
 
@@ -32,7 +31,7 @@ public final class GXManticoreDocumentOperations {
      * @param doc   文档字段键值对 Map
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> insert(String index, Long id, Map<String, Object> doc) {
+    public String insert(String index, Long id, Map<String, Object> doc) {
         requireNonBlank(index, "index");
         requireNonEmpty(doc, "doc");
         Map<String, Object> payload = new HashMap<>();
@@ -55,7 +54,7 @@ public final class GXManticoreDocumentOperations {
      * @param doc   需要修改的字段键值对 Map（不能包含全文字段/columnar 属性）
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> update(String index, Long id, Map<String, Object> doc) {
+    public String update(String index, Long id, Map<String, Object> doc) {
         requireNonBlank(index, "index");
         requireNonNull(id, "id");
         requireNonEmpty(doc, "doc");
@@ -75,7 +74,7 @@ public final class GXManticoreDocumentOperations {
      * @param doc   需要修改的字段键值对 Map
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> updateByQuery(String index, Map<String, Object> query, Map<String, Object> doc) {
+    public String updateByQuery(String index, Map<String, Object> query, Map<String, Object> doc) {
         requireNonBlank(index, "index");
         requireNonEmpty(query, "query");
         requireNonEmpty(doc, "doc");
@@ -95,7 +94,7 @@ public final class GXManticoreDocumentOperations {
      * @param doc   完整文档字段键值对 Map
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> replace(String index, Long id, Map<String, Object> doc) {
+    public String replace(String index, Long id, Map<String, Object> doc) {
         requireNonBlank(index, "index");
         requireNonEmpty(doc, "doc");
         Map<String, Object> payload = new HashMap<>();
@@ -115,7 +114,7 @@ public final class GXManticoreDocumentOperations {
      * @param id    要删除的文档 ID
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> deleteById(String index, Long id) {
+    public String deleteById(String index, Long id) {
         requireNonBlank(index, "index");
         requireNonNull(id, "id");
         Map<String, Object> payload = new HashMap<>();
@@ -125,8 +124,6 @@ public final class GXManticoreDocumentOperations {
         return sendPost("/delete", JSONUtil.toJsonStr(payload), "application/json");
     }
 
-    // ==================== 批量写入 /bulk（NDJSON） ====================
-
     /**
      * 根据条件批量删除数据 (/delete)
      *
@@ -134,7 +131,7 @@ public final class GXManticoreDocumentOperations {
      * @param query 删除条件 Map（如 equals 匹配、range 范围等，可用 build* 系列方法构造）
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> deleteByQuery(String index, Map<String, Object> query) {
+    public String deleteByQuery(String index, Map<String, Object> query) {
         requireNonBlank(index, "index");
         requireNonEmpty(query, "query");
         Map<String, Object> payload = new HashMap<>();
@@ -153,7 +150,7 @@ public final class GXManticoreDocumentOperations {
      * @param idFieldName docMap 中作为主键 id 的字段名称（例如 "id"）；若无需指定可传 null，由 Manticore 自动生成
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> bulkInsert(String index, List<Map<String, Object>> docList, String idFieldName) {
+    public String bulkInsert(String index, List<Map<String, Object>> docList, String idFieldName) {
         return bulkAction("insert", index, docList, idFieldName, false);
     }
 
@@ -165,7 +162,7 @@ public final class GXManticoreDocumentOperations {
      * @param idFieldName docMap 中作为主键 id 的字段名称，必须存在
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> bulkReplace(String index, List<Map<String, Object>> docList, String idFieldName) {
+    public String bulkReplace(String index, List<Map<String, Object>> docList, String idFieldName) {
         return bulkAction("replace", index, docList, idFieldName, true);
     }
 
@@ -177,7 +174,7 @@ public final class GXManticoreDocumentOperations {
      * @param idFieldName docMap 中作为主键 id 的字段名称，必须存在
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> bulkUpdate(String index, List<Map<String, Object>> docList, String idFieldName) {
+    public String bulkUpdate(String index, List<Map<String, Object>> docList, String idFieldName) {
         return bulkAction("update", index, docList, idFieldName, true);
     }
 
@@ -188,7 +185,7 @@ public final class GXManticoreDocumentOperations {
      * @param ids   待删除的文档 ID 列表
      * @return 接口响应 JSON 字符串
      */
-    public GXMantiCoreResDto<Dict> bulkDeleteByIds(String index, List<Long> ids) {
+    public String bulkDeleteByIds(String index, List<Long> ids) {
         requireNonBlank(index, "index");
         if (ids == null || ids.isEmpty() || ids.stream().anyMatch(id -> id == null)) {
             throw new IllegalArgumentException("ids must contain non-null IDs");
@@ -213,34 +210,34 @@ public final class GXManticoreDocumentOperations {
      * @param batchSize 每批条数，&lt;=0 时使用默认值
      * @return 每一批请求各自的接口响应 JSON 字符串列表，按发送顺序排列
      */
-    public List<GXMantiCoreResDto<Dict>> bulkInsertBatched(String index, List<Map<String, Object>> docList,
-                                                           String idFieldName, int batchSize) {
+    public List<String> bulkInsertBatched(String index, List<Map<String, Object>> docList,
+                                          String idFieldName, int batchSize) {
         return batchedBulkAction("insert", index, docList, idFieldName, false, batchSize);
     }
 
     /**
      * 自动分批的批量替换，用法同 {@link #bulkInsertBatched(String, List, String, int)}
      */
-    public List<GXMantiCoreResDto<Dict>> bulkReplaceBatched(String index, List<Map<String, Object>> docList,
-                                                            String idFieldName, int batchSize) {
+    public List<String> bulkReplaceBatched(String index, List<Map<String, Object>> docList,
+                                           String idFieldName, int batchSize) {
         return batchedBulkAction("replace", index, docList, idFieldName, true, batchSize);
     }
 
     /**
      * 自动分批的批量更新，用法同 {@link #bulkInsertBatched(String, List, String, int)}
      */
-    public List<GXMantiCoreResDto<Dict>> bulkUpdateBatched(String index, List<Map<String, Object>> docList,
-                                                           String idFieldName, int batchSize) {
+    public List<String> bulkUpdateBatched(String index, List<Map<String, Object>> docList,
+                                          String idFieldName, int batchSize) {
         return batchedBulkAction("update", index, docList, idFieldName, true, batchSize);
     }
 
-    private List<GXMantiCoreResDto<Dict>> batchedBulkAction(String action, String index, List<Map<String, Object>> docList,
-                                                            String idFieldName, boolean idRequired, int batchSize) {
+    private List<String> batchedBulkAction(String action, String index, List<Map<String, Object>> docList,
+                                           String idFieldName, boolean idRequired, int batchSize) {
         if (docList == null || docList.isEmpty()) {
             throw new IllegalArgumentException("docList must contain non-empty documents");
         }
         int bs = batchSize > 0 ? batchSize : client.getDefaultBulkBatchSize();
-        List<GXMantiCoreResDto<Dict>> responses = new ArrayList<>();
+        List<String> responses = new ArrayList<>();
         int total = docList.size();
         for (int start = 0; start < total; start += bs) {
             int end = Math.min(start + bs, total);
@@ -250,10 +247,8 @@ public final class GXManticoreDocumentOperations {
         return responses;
     }
 
-    // ==================== 查询 ====================
-
-    private GXMantiCoreResDto<Dict> bulkAction(String action, String index, List<Map<String, Object>> docList,
-                                               String idFieldName, boolean idRequired) {
+    private String bulkAction(String action, String index, List<Map<String, Object>> docList,
+                              String idFieldName, boolean idRequired) {
         requireNonBlank(index, "index");
         if (docList == null || docList.isEmpty() || docList.stream().anyMatch(doc -> doc == null || doc.isEmpty())) {
             throw new IllegalArgumentException("docList must contain non-empty documents");
@@ -298,8 +293,7 @@ public final class GXManticoreDocumentOperations {
         GXManticoreUtils.requireSearchArguments(index, offset, limit);
     }
 
-    private GXMantiCoreResDto<Dict> sendPost(String endpoint, String body, String contentType) {
+    private String sendPost(String endpoint, String body, String contentType) {
         return client.sendPost(endpoint, body, contentType);
     }
-
 }

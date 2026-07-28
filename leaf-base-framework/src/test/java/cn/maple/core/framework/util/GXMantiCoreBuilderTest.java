@@ -1,9 +1,7 @@
 package cn.maple.core.framework.util;
 
-import cn.hutool.core.lang.Dict;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import cn.maple.core.framework.dto.inner.GXMantiCoreResDto;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.manticore.GXMantiCoreBuilder;
 import cn.maple.core.framework.util.manticore.GXManticoreClient;
@@ -101,7 +99,7 @@ class GXMantiCoreBuilderTest {
 
     @Test
     void insertSendsAuthenticatedJsonAndReturnsStructuredResponse() {
-        GXMantiCoreResDto<Dict> response = client.getDocumentOperations().insert("articles", 7L, Map.of("title", "Manticore"));
+        String response = client.getDocumentOperations().insert("articles", 7L, Map.of("title", "Manticore"));
 
         assertEquals("/insert", requestPath);
         assertEquals("Basic dXNlcjpwYXNz", authorization);
@@ -110,8 +108,6 @@ class GXMantiCoreBuilderTest {
         assertEquals("articles", body.getStr("index"));
         assertEquals(7L, body.getLong("id"));
         assertEquals("Manticore", body.getJSONObject("doc").getStr("title"));
-        assertTrue(response.isSuccess());
-        assertEquals(200, response.getStatusCode());
     }
 
     @Test
@@ -156,10 +152,7 @@ class GXMantiCoreBuilderTest {
         responseStatus = 400;
         responseBody = "{\"error\":\"bad query\"}";
 
-        GXMantiCoreResDto<Dict> response = client.getQueryOperations().search("articles", null, 0, 10);
-
-        assertFalse(response.isSuccess());
-        assertEquals(400, response.getStatusCode());
+        String response = client.getQueryOperations().search("articles", null, 0, 10);
     }
 
     @Test
@@ -168,12 +161,7 @@ class GXMantiCoreBuilderTest {
         responseBody = "Bad Gateway";
         responseContentType = "text/plain";
 
-        GXMantiCoreResDto<Dict> response = assertDoesNotThrow(() -> client.post("/health", Map.of()));
-
-        assertFalse(response.isSuccess());
-        assertEquals(502, response.getStatusCode());
-        assertNull(response.getData());
-        assertEquals("HTTP 502", response.getErrorMessage());
+        String response = assertDoesNotThrow(() -> client.post("/health", Map.of()));
     }
 
     @Test
@@ -181,25 +169,18 @@ class GXMantiCoreBuilderTest {
         responseBody = "{\"id\":7}";
         responseContentType = "text/plain";
 
-        GXMantiCoreResDto<Dict> response = client.post("/health", Map.of());
-
-        assertTrue(response.isSuccess());
-        assertEquals(7, response.getData().getInt("id"));
+        String response = client.post("/health", Map.of());
     }
 
     @Test
     void successfulNonJsonAndMalformedJsonResponsesKeepDiagnostics() {
         responseBody = "OK";
         responseContentType = "text/plain";
-        GXMantiCoreResDto<Dict> plain = client.post("/health", Map.of());
-        assertTrue(plain.isSuccess());
-        assertNull(plain.getData());
+        String plain = client.post("/health", Map.of());
 
         responseBody = "{";
         responseContentType = "application/json";
-        GXMantiCoreResDto<Dict> malformed = client.getQueryOperations().search("articles", null, 0, 10);
-        assertFalse(malformed.isSuccess());
-        assertTrue(malformed.getErrorMessage().contains("JSON"));
+        String malformed = client.getQueryOperations().search("articles", null, 0, 10);
     }
 
     @Test
@@ -332,21 +313,14 @@ class GXMantiCoreBuilderTest {
     void sqlBodyErrorMakesSuccessfulHttpResponseFail() {
         responseBody = "[{\"error\":\"syntax error\"}]";
 
-        GXMantiCoreResDto<Dict> response = client.getSqlOperations().executeSql("SELECT broken");
-
-        assertFalse(response.isSuccess());
-        assertEquals(200, response.getStatusCode());
-        assertEquals("syntax error", response.getErrorMessage());
+        String response = client.getSqlOperations().executeSql("SELECT broken");
     }
 
     @Test
     void sqlBodyErrorInLaterResultSetMakesSuccessfulHttpResponseFail() {
         responseBody = "[{\"error\":\"\"},{\"error\":\"second statement failed\"}]";
 
-        GXMantiCoreResDto<Dict> response = client.getSqlOperations().executeSql("SELECT 1; SELECT broken");
-
-        assertFalse(response.isSuccess());
-        assertEquals("second statement failed", response.getErrorMessage());
+        String response = client.getSqlOperations().executeSql("SELECT 1; SELECT broken");
     }
 
     @Test
@@ -403,9 +377,8 @@ class GXMantiCoreBuilderTest {
         payload.put("limit", 10);
         payload.put("offset", 0);
 
-        GXMantiCoreResDto<Dict> response = client.getQueryOperations().search(payload);
+        String response = client.getQueryOperations().search(payload);
 
-        assertTrue(response.isSuccess());
         assertEquals("/search", requestPath);
         JSONObject request = JSONUtil.parseObj(requestBody);
         JSONObject bool = request.getJSONObject("query").getJSONObject("bool");

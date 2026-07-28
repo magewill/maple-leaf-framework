@@ -1,16 +1,12 @@
 package cn.maple.core.framework.util.manticore;
 
-import cn.hutool.core.lang.Dict;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.Header;
 import cn.hutool.http.HttpException;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
-import cn.hutool.json.JSON;
-import cn.hutool.json.JSONArray;
-import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import cn.maple.core.framework.dto.inner.GXMantiCoreResDto;
+import cn.maple.core.framework.exception.GXManticoreException;
 import com.google.common.net.InetAddresses;
 import lombok.Getter;
 
@@ -75,11 +71,11 @@ public final class GXManticoreClient {
         bearerToken = null;
     }
 
-    public GXMantiCoreResDto<Dict> createOrRotateToken() {
+    public String createOrRotateToken() {
         return sendPost("/token", "{}", "application/json", true);
     }
 
-    public GXMantiCoreResDto<Dict> post(String endpoint, Map<String, ?> payload) {
+    public String post(String endpoint, Map<String, ?> payload) {
         if (payload == null) {
             throw new IllegalArgumentException("payload must not be null");
         }
@@ -118,12 +114,12 @@ public final class GXManticoreClient {
         return list;
     }
 
-    GXMantiCoreResDto<Dict> sendPost(String endpoint, String body, String contentType) {
+    String sendPost(String endpoint, String body, String contentType) {
         return sendPost(endpoint, body, contentType, false);
     }
 
-    GXMantiCoreResDto<Dict> sendPost(String endpoint, String body, String contentType,
-                                     boolean forceBasicAuth) {
+    String sendPost(String endpoint, String body, String contentType,
+                    boolean forceBasicAuth) {
         validateEndpoint(endpoint);
         GXManticoreConfig currentConfig = currentConfig();
         int attempt = 0;
@@ -146,22 +142,13 @@ public final class GXManticoreClient {
 
                 response = request.execute();
                 if (!response.isOk()) {
-                    JSON data = JSONUtil.parse(response.body());
-                    String errorMessage = data instanceof JSONObject json ? json.getStr("error") : null;
-                    return GXMantiCoreResDto.failure(response.getStatus(), Dict.create(), StrUtil.isBlank(errorMessage) ? "HTTP " + response.getStatus() : errorMessage);
+                    throw new GXManticoreException("Manticore查询出错", response.toString());
                 }
-                String result = response.body();
-                Dict data;
-                try {
-                    data = parseJson(response.header(Header.CONTENT_TYPE), result);
-                } catch (RuntimeException e) {
-                    return GXMantiCoreResDto.failure(response.getStatus(), null, "Invalid JSON response: " + e.getMessage());
-                }
-                return GXMantiCoreResDto.success(response.getStatus(), data);
+                return response.body();
             } catch (HttpException e) {
                 attempt++;
                 if (attempt > localRetryPolicy.maxRetries()) {
-                    return GXMantiCoreResDto.failure(null, null, "Manticore transport error: " + e.getMessage());
+                    throw new GXManticoreException(StrUtil.format("Manticore transport error: {}", e.getMessage()), "");
                 }
                 sleepQuietly(localRetryPolicy.backoffMs() * attempt);
             } finally {
@@ -172,50 +159,8 @@ public final class GXManticoreClient {
         }
     }
 
-    Dict parseJson(String responseContentType, String body) {
-        if (StrUtil.isBlank(body)) {
-            return null;
-        }
-        if (!StrUtil.containsIgnoreCase(responseContentType, "json") && JSONUtil.isTypeJSON(body)) {
-            return null;
-        }
-        Dict searchResult = JSONUtil.toBean(body, Dict.class);
-        if (searchResult == null) {
-            return null;
-        }
-        boolean timedOut = searchResult.getBool("timed_out");
-        /*Dict hits = Convert.convert(Dict.class, searchResult.getObj("hits"));
-        Integer total = Convert.convert(Integer.class, hits.getObj("total"));
-        List<Dict> lastSearchResult = JSONUtil.toList(hits.getStr("hits"), Dict.class);
-        List<Dict> records = new ArrayList<>();
-        Dict retData = new Dict();
-        for (Dict d : lastSearchResult) {
-            int id = d.getInt("_id");
-            records.add(Dict.create().set("id", id).set("data", d));
-        }*/
-        List<Map<String, Object>> records = GXManticoreUtils.extractHits(body);
-        long total = GXManticoreUtils.extractTotal(body);
-        return Dict.create().set("timedOut", timedOut).set("total", total).set("records", records);
-    }
-
-    GXMantiCoreResDto<Dict> toSqlResponse(GXMantiCoreResDto<Dict> response) {
-        if (!response.isSuccess() || response.getData() == null) {
-            return response;
-        }
-        String error = null;
-        if (response.getData().getObj("records") instanceof JSONArray array) {
-            for (int i = 0; i < array.size(); i++) {
-                JSONObject resultSet = array.getJSONObject(i);
-                error = resultSet == null ? null : resultSet.getStr("error");
-                if (StrUtil.isNotBlank(error)) {
-                    break;
-                }
-            }
-        } else if (response.getData().getObj("records") instanceof JSONObject object) {
-            error = object.getStr("error");
-        }
-        return StrUtil.isBlank(error) ? response
-                : GXMantiCoreResDto.failure(response.getStatusCode(), response.getData(), error);
+    String toSqlResponse(String response) {
+        return response;
     }
 
     GXManticoreConfig currentConfig() {
