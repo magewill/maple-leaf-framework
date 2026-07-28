@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.regex.Pattern;
 
 /**
- * SQL execution, SQL response parsing, and table-management operations.
+ * SQL execution and table-management operations that return the original response body.
  */
 public final class GXManticoreSqlOperations {
     private final Pattern CREATE_TABLE_PATTERN = Pattern.compile(

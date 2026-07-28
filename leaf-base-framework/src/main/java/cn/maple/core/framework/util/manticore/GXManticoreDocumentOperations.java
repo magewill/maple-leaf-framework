@@ -2,10 +2,7 @@ package cn.maple.core.framework.util.manticore;
 
 import cn.hutool.json.JSONUtil;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Document and bulk operations bound to one {@link GXManticoreClient}.
@@ -28,8 +25,8 @@ public final class GXManticoreDocumentOperations {
      * @return 接口响应 JSON 字符串
      */
     public String insert(String index, Long id, Map<String, Object> doc) {
-        requireNonBlank(index, "index");
-        requireNonEmpty(doc, "doc");
+        GXManticoreUtils.requireNonBlank(index, "index");
+        GXManticoreUtils.requireNonEmpty(doc, "doc");
         Map<String, Object> payload = new HashMap<>();
         payload.put(client.getTableFieldName(), index);
         if (id != null) {
@@ -37,7 +34,7 @@ public final class GXManticoreDocumentOperations {
         }
         payload.put("doc", doc);
 
-        return sendPost("/insert", JSONUtil.toJsonStr(payload), "application/json");
+        return client.sendPost("/insert", JSONUtil.toJsonStr(payload), "application/json");
     }
 
     /**
@@ -51,15 +48,15 @@ public final class GXManticoreDocumentOperations {
      * @return 接口响应 JSON 字符串
      */
     public String update(String index, Long id, Map<String, Object> doc) {
-        requireNonBlank(index, "index");
-        requireNonNull(id, "id");
-        requireNonEmpty(doc, "doc");
+        GXManticoreUtils.requireNonBlank(index, "index");
+        GXManticoreUtils.requireNonNull(id, "id");
+        GXManticoreUtils.requireNonEmpty(doc, "doc");
         Map<String, Object> payload = new HashMap<>();
         payload.put(client.getTableFieldName(), index);
         payload.put("id", id);
         payload.put("doc", doc);
 
-        return sendPost("/update", JSONUtil.toJsonStr(payload), "application/json");
+        return client.sendPost("/update", JSONUtil.toJsonStr(payload), "application/json");
     }
 
     /**
@@ -71,15 +68,15 @@ public final class GXManticoreDocumentOperations {
      * @return 接口响应 JSON 字符串
      */
     public String updateByQuery(String index, Map<String, Object> query, Map<String, Object> doc) {
-        requireNonBlank(index, "index");
-        requireNonEmpty(query, "query");
-        requireNonEmpty(doc, "doc");
+        GXManticoreUtils.requireNonBlank(index, "index");
+        GXManticoreUtils.requireNonEmpty(query, "query");
+        GXManticoreUtils.requireNonEmpty(doc, "doc");
         Map<String, Object> payload = new HashMap<>();
         payload.put(client.getTableFieldName(), index);
         payload.put("query", query);
         payload.put("doc", doc);
 
-        return sendPost("/update", JSONUtil.toJsonStr(payload), "application/json");
+        return client.sendPost("/update", JSONUtil.toJsonStr(payload), "application/json");
     }
 
     /**
@@ -91,8 +88,8 @@ public final class GXManticoreDocumentOperations {
      * @return 接口响应 JSON 字符串
      */
     public String replace(String index, Long id, Map<String, Object> doc) {
-        requireNonBlank(index, "index");
-        requireNonEmpty(doc, "doc");
+        GXManticoreUtils.requireNonBlank(index, "index");
+        GXManticoreUtils.requireNonEmpty(doc, "doc");
         Map<String, Object> payload = new HashMap<>();
         payload.put(client.getTableFieldName(), index);
         if (id != null) {
@@ -100,7 +97,7 @@ public final class GXManticoreDocumentOperations {
         }
         payload.put("doc", doc);
 
-        return sendPost("/replace", JSONUtil.toJsonStr(payload), "application/json");
+        return client.sendPost("/replace", JSONUtil.toJsonStr(payload), "application/json");
     }
 
     /**
@@ -111,13 +108,13 @@ public final class GXManticoreDocumentOperations {
      * @return 接口响应 JSON 字符串
      */
     public String deleteById(String index, Long id) {
-        requireNonBlank(index, "index");
-        requireNonNull(id, "id");
+        GXManticoreUtils.requireNonBlank(index, "index");
+        GXManticoreUtils.requireNonNull(id, "id");
         Map<String, Object> payload = new HashMap<>();
         payload.put(client.getTableFieldName(), index);
         payload.put("id", id);
 
-        return sendPost("/delete", JSONUtil.toJsonStr(payload), "application/json");
+        return client.sendPost("/delete", JSONUtil.toJsonStr(payload), "application/json");
     }
 
     /**
@@ -128,13 +125,13 @@ public final class GXManticoreDocumentOperations {
      * @return 接口响应 JSON 字符串
      */
     public String deleteByQuery(String index, Map<String, Object> query) {
-        requireNonBlank(index, "index");
-        requireNonEmpty(query, "query");
+        GXManticoreUtils.requireNonBlank(index, "index");
+        GXManticoreUtils.requireNonEmpty(query, "query");
         Map<String, Object> payload = new HashMap<>();
         payload.put(client.getTableFieldName(), index);
         payload.put("query", query);
 
-        return sendPost("/delete", JSONUtil.toJsonStr(payload), "application/json");
+        return client.sendPost("/delete", JSONUtil.toJsonStr(payload), "application/json");
     }
 
     /**
@@ -182,8 +179,8 @@ public final class GXManticoreDocumentOperations {
      * @return 接口响应 JSON 字符串
      */
     public String bulkDeleteByIds(String index, List<Long> ids) {
-        requireNonBlank(index, "index");
-        if (ids == null || ids.isEmpty() || ids.stream().anyMatch(id -> id == null)) {
+        GXManticoreUtils.requireNonBlank(index, "index");
+        if (ids == null || ids.isEmpty() || ids.stream().anyMatch(Objects::isNull)) {
             throw new IllegalArgumentException("ids must contain non-null IDs");
         }
         StringBuilder ndjson = new StringBuilder();
@@ -196,7 +193,7 @@ public final class GXManticoreDocumentOperations {
             line.put("delete", deleteDetail);
             ndjson.append(JSONUtil.toJsonStr(line)).append("\n");
         }
-        return sendPost("/bulk", ndjson.toString(), "application/x-ndjson");
+        return client.sendPost("/bulk", ndjson.toString(), "application/x-ndjson");
     }
 
     /**
@@ -245,12 +242,12 @@ public final class GXManticoreDocumentOperations {
 
     private String bulkAction(String action, String index, List<Map<String, Object>> docList,
                               String idFieldName, boolean idRequired) {
-        requireNonBlank(index, "index");
+        GXManticoreUtils.requireNonBlank(index, "index");
         if (docList == null || docList.isEmpty() || docList.stream().anyMatch(doc -> doc == null || doc.isEmpty())) {
             throw new IllegalArgumentException("docList must contain non-empty documents");
         }
         if (idRequired) {
-            requireNonBlank(idFieldName, "idFieldName");
+            GXManticoreUtils.requireNonBlank(idFieldName, "idFieldName");
         }
         StringBuilder ndjson = new StringBuilder();
         for (Map<String, Object> doc : docList) {
@@ -270,26 +267,6 @@ public final class GXManticoreDocumentOperations {
             line.put(action, detail);
             ndjson.append(JSONUtil.toJsonStr(line)).append("\n");
         }
-        return sendPost("/bulk", ndjson.toString(), "application/x-ndjson");
-    }
-
-    private void requireNonBlank(String value, String name) {
-        GXManticoreUtils.requireNonBlank(value, name);
-    }
-
-    private void requireNonEmpty(Map<?, ?> value, String name) {
-        GXManticoreUtils.requireNonEmpty(value, name);
-    }
-
-    private void requireNonNull(Object value, String name) {
-        GXManticoreUtils.requireNonNull(value, name);
-    }
-
-    private void requireSearchArguments(String index, int offset, int limit) {
-        GXManticoreUtils.requireSearchArguments(index, offset, limit);
-    }
-
-    private String sendPost(String endpoint, String body, String contentType) {
-        return client.sendPost(endpoint, body, contentType);
+        return client.sendPost("/bulk", ndjson.toString(), "application/x-ndjson");
     }
 }

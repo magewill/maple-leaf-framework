@@ -267,4 +267,12 @@ public class GXManticoreUtils {
         }
         return resultSets;
     }
+
+    public static List<Float> toList(float[] arr) {
+        List<Float> list = new ArrayList<>(arr.length);
+        for (float f : arr) {
+            list.add(f);
+        }
+        return list;
+    }
 }

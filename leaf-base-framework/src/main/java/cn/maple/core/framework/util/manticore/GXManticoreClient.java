@@ -12,8 +12,6 @@ import lombok.Getter;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -23,7 +21,6 @@ import java.util.Map;
  */
 public final class GXManticoreClient {
     private static final int DEFAULT_BULK_BATCH_SIZE = 1000;
-    private static final String QUERY_STRING_SPECIAL_CHARS = "!\"$'()-/<@\\^|~";
     private static final int DEFAULT_CONNECT_TIMEOUT_MS = 5000;
     private static final int DEFAULT_READ_TIMEOUT_MS = 15000;
     private final GXManticoreConfig config;
@@ -37,23 +34,36 @@ public final class GXManticoreClient {
     private final GXManticoreQueryOperations queryOperations;
     @Getter
     private final GXManticoreAutocompleteOperations autocompleteOperations;
-    private volatile String tableFieldName = "index";
+    private final TableField tableField;
     private volatile RetryPolicy retryPolicy = new RetryPolicy(0, 200L);
     private volatile String bearerToken;
 
     public GXManticoreClient(String baseUrl, String username, String password) {
-        this(baseUrl, username, password, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_READ_TIMEOUT_MS);
+        this(baseUrl, username, password, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_READ_TIMEOUT_MS, TableField.INDEX);
     }
 
     public GXManticoreClient(String baseUrl, String username, String password,
                              int connectTimeoutMs, int readTimeoutMs) {
+        this(baseUrl, username, password, connectTimeoutMs, readTimeoutMs, TableField.INDEX);
+    }
+
+    public GXManticoreClient(String baseUrl, String username, String password, TableField tableField) {
+        this(baseUrl, username, password, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_READ_TIMEOUT_MS, tableField);
+    }
+
+    public GXManticoreClient(String baseUrl, String username, String password,
+                             int connectTimeoutMs, int readTimeoutMs, TableField tableField) {
         if (connectTimeoutMs <= 0 || readTimeoutMs <= 0) {
             throw new IllegalArgumentException("connectTimeoutMs and readTimeoutMs must be positive");
+        }
+        if (tableField == null) {
+            throw new IllegalArgumentException("tableField must not be null");
         }
         String normalizedBaseUrl = normalizeBaseUrl(baseUrl);
         validateCredentialTransport(normalizedBaseUrl, StrUtil.isNotBlank(username) && StrUtil.isNotBlank(password));
         config = new GXManticoreConfig(normalizedBaseUrl, username, password,
                 connectTimeoutMs, readTimeoutMs);
+        this.tableField = tableField;
         documentOperations = new GXManticoreDocumentOperations(this);
         sqlOperations = new GXManticoreSqlOperations(this);
         percolateOperations = new GXManticorePercolateOperations(this);
@@ -79,15 +89,18 @@ public final class GXManticoreClient {
         if (payload == null) {
             throw new IllegalArgumentException("payload must not be null");
         }
-        return sendPost(endpoint, JSONUtil.toJsonStr(payload), "application/json", false);
+        return postRaw(endpoint, JSONUtil.toJsonStr(payload), "application/json");
     }
 
-    public void useTableKeyword() {
-        tableFieldName = "table";
-    }
-
-    public void useIndexKeyword() {
-        tableFieldName = "index";
+    /**
+     * Sends a POST request without changing the caller-provided body or content type.
+     */
+    public String postRaw(String endpoint, String body, String contentType) {
+        if (body == null) {
+            throw new IllegalArgumentException("body must not be null");
+        }
+        GXManticoreUtils.requireNonBlank(contentType, "contentType");
+        return sendPost(endpoint, body, contentType, false);
     }
 
     public void setRetryPolicy(int retries, long backoffMs) {
@@ -98,20 +111,8 @@ public final class GXManticoreClient {
         return DEFAULT_BULK_BATCH_SIZE;
     }
 
-    String getQueryStringSpecialChars() {
-        return QUERY_STRING_SPECIAL_CHARS;
-    }
-
     String getTableFieldName() {
-        return tableFieldName;
-    }
-
-    List<Float> toList(float[] arr) {
-        List<Float> list = new ArrayList<>(arr.length);
-        for (float f : arr) {
-            list.add(f);
-        }
-        return list;
+        return tableField.requestFieldName;
     }
 
     String sendPost(String endpoint, String body, String contentType) {
@@ -179,14 +180,24 @@ public final class GXManticoreClient {
         URI uri = URI.create(baseUrl);
         String host = uri.getHost();
 
-        // 如果是 http 协议，且不是 IP 地址，也不是 loopback 主机（即域名），则抛出异常
         if ("http".equalsIgnoreCase(uri.getScheme()) && !isIpAddress(host) && !isLoopbackHost(host)) {
             throw new IllegalArgumentException("credentials require HTTPS unless the host is an IP address or loopback");
         }
     }
 
     boolean isLoopbackHost(String host) {
-        return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host) || "::1".equals(host);
+        return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host)
+                || "::1".equals(host) || "[::1]".equals(host);
+    }
+
+    private boolean isIpAddress(String host) {
+        if (host == null) {
+            return false;
+        }
+        String normalizedHost = host.startsWith("[") && host.endsWith("]")
+                ? host.substring(1, host.length() - 1)
+                : host;
+        return InetAddresses.isInetAddress(normalizedHost);
     }
 
     void validateEndpoint(String endpoint) {
@@ -206,13 +217,20 @@ public final class GXManticoreClient {
         }
     }
 
+    public enum TableField {
+        INDEX("index"),
+        TABLE("table");
+
+        private final String requestFieldName;
+
+        TableField(String requestFieldName) {
+            this.requestFieldName = requestFieldName;
+        }
+    }
+
     /**
      * 判断给定的 host 是否为 IP 地址（IPv4 或 IPv6）
      */
-    private boolean isIpAddress(String host) {
-        return host != null && InetAddresses.isInetAddress(host);
-    }
-
     private record GXManticoreConfig(String baseUrl, String username, String password,
                                      int connectTimeoutMs, int readTimeoutMs) {
         private GXManticoreConfig {

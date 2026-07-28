@@ -1,9 +1,6 @@
 package cn.maple.core.framework.util.manticore;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Stateless Manticore query construction utilities.
@@ -138,12 +135,15 @@ public final class GXManticoreBuilder {
                                                      List<Map<String, Object>> mustNot) {
         Map<String, Object> bool = new HashMap<>();
         if (must != null && !must.isEmpty()) {
+            requireClauses(must, "must");
             bool.put("must", must);
         }
         if (should != null && !should.isEmpty()) {
+            requireClauses(should, "should");
             bool.put("should", should);
         }
         if (mustNot != null && !mustNot.isEmpty()) {
+            requireClauses(mustNot, "mustNot");
             bool.put("must_not", mustNot);
         }
 
@@ -176,10 +176,12 @@ public final class GXManticoreBuilder {
             fieldsMap.put(field, new HashMap<>());
         }
 
-
         Map<String, Object> highlight = new HashMap<>();
         highlight.put("fields", fieldsMap);
         if (globalOptions != null) {
+            if (globalOptions.containsKey("fields")) {
+                throw new IllegalArgumentException("globalOptions must not override fields");
+            }
             highlight.putAll(globalOptions);
         }
         return highlight;
@@ -233,6 +235,18 @@ public final class GXManticoreBuilder {
     public static Map<String, Object> buildJoin(String type, String mainTable, String mainField,
                                                 String joinTable, String joinField,
                                                 Map<String, Object> joinQuery) {
+        GXManticoreUtils.requireNonBlank(type, "type");
+        GXManticoreUtils.requireNonBlank(mainTable, "mainTable");
+        GXManticoreUtils.requireNonBlank(mainField, "mainField");
+        GXManticoreUtils.requireNonBlank(joinTable, "joinTable");
+        GXManticoreUtils.requireNonBlank(joinField, "joinField");
+        if (joinQuery != null && joinQuery.isEmpty()) {
+            throw new IllegalArgumentException("joinQuery must not be empty when specified");
+        }
+        String normalizedType = type.toLowerCase(Locale.ROOT);
+        if (!"inner".equals(normalizedType) && !"left".equals(normalizedType)) {
+            throw new IllegalArgumentException("type must be inner or left");
+        }
         Map<String, Object> left = new HashMap<>();
         left.put("table", mainTable);
         left.put("field", mainField);
@@ -250,7 +264,7 @@ public final class GXManticoreBuilder {
         onList.add(on);
 
         Map<String, Object> join = new HashMap<>();
-        join.put("type", type);
+        join.put("type", normalizedType);
         join.put("table", joinTable);
         if (joinQuery != null) {
             join.put("query", joinQuery);
@@ -264,6 +278,8 @@ public final class GXManticoreBuilder {
      * 等价于 {aggName: {"terms": {"field": field}}}，可直接赋值给完整请求体的 "aggs" 字段
      */
     public static Map<String, Object> buildTermsAgg(String aggName, String field) {
+        GXManticoreUtils.requireNonBlank(aggName, "aggName");
+        GXManticoreUtils.requireNonBlank(field, "field");
         Map<String, Object> terms = new HashMap<>();
         terms.put("field", field);
 
@@ -273,5 +289,11 @@ public final class GXManticoreBuilder {
         Map<String, Object> aggs = new HashMap<>();
         aggs.put(aggName, agg);
         return aggs;
+    }
+
+    private static void requireClauses(List<Map<String, Object>> clauses, String name) {
+        if (clauses.stream().anyMatch(clause -> clause == null || clause.isEmpty())) {
+            throw new IllegalArgumentException(name + " clauses must contain non-empty query objects");
+        }
     }
 }

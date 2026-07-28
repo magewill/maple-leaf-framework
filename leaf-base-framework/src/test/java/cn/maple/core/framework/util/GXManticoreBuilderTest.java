@@ -43,7 +43,6 @@ class GXManticoreBuilderTest {
         server.start();
         client = new GXManticoreClient("http://localhost:" + server.getAddress().getPort() + "/", "user", "pass", 1000, 1000);
         client.clearBearerToken();
-        client.useIndexKeyword();
     }
 
     @AfterEach
@@ -108,6 +107,33 @@ class GXManticoreBuilderTest {
         assertEquals("articles", body.getStr("index"));
         assertEquals(7L, body.getLong("id"));
         assertEquals("Manticore", body.getJSONObject("doc").getStr("title"));
+    }
+
+    @Test
+    void tableFieldKeywordIsConfiguredWhenTheClientIsConstructed() {
+        GXManticoreClient tableClient = new GXManticoreClient(
+                "http://localhost:" + server.getAddress().getPort(), "user", "pass", 1000, 1000,
+                GXManticoreClient.TableField.TABLE);
+
+        tableClient.getDocumentOperations().insert("articles", 7L, Map.of("title", "Manticore"));
+
+        JSONObject body = JSONUtil.parseObj(requestBody);
+        assertEquals("articles", body.getStr("table"));
+        assertFalse(body.containsKey("index"));
+        assertThrows(NoSuchMethodException.class, () -> GXManticoreClient.class.getMethod("useTableKeyword"));
+        assertThrows(NoSuchMethodException.class, () -> GXManticoreClient.class.getMethod("useIndexKeyword"));
+    }
+
+    @Test
+    void postRawSendsCallerProvidedBodyAndContentType() {
+        responseBody = "raw response";
+
+        String response = client.postRaw("/custom", "raw request", "text/plain");
+
+        assertEquals("raw response", response);
+        assertEquals("/custom", requestPath);
+        assertEquals("raw request", requestBody);
+        assertTrue(contentType.startsWith("text/plain"));
     }
 
     @Test
@@ -253,6 +279,20 @@ class GXManticoreBuilderTest {
     }
 
     @Test
+    void queryBuildersRejectReservedOrMalformedCompositeArguments() {
+        assertThrows(IllegalArgumentException.class,
+                () -> GXManticoreBuilder.buildHighlight(List.of("title"), Map.of("fields", Map.of())));
+        assertThrows(IllegalArgumentException.class,
+                () -> GXManticoreBuilder.buildBoolQuery(java.util.Collections.singletonList(null), null, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> GXManticoreBuilder.buildJoin("cross", "articles", "author_id", "authors", "id", null));
+        assertThrows(IllegalArgumentException.class,
+                () -> GXManticoreBuilder.buildJoin("inner", " ", "author_id", "authors", "id", null));
+        assertThrows(IllegalArgumentException.class, () -> GXManticoreBuilder.buildTermsAgg(" ", "category_id"));
+        assertThrows(IllegalArgumentException.class, () -> GXManticoreBuilder.buildTermsAgg("categories", " "));
+    }
+
+    @Test
     void tableManagementRejectsUnsafeIdentifiersBeforeBuildingSql() {
         String injectedIdentifier = "articles; DROP TABLE audit_log";
 
@@ -312,11 +352,16 @@ class GXManticoreBuilderTest {
     void remoteHttpConfigurationRejectsCredentialTransmission() {
         assertThrows(IllegalArgumentException.class,
                 () -> new GXManticoreClient("http://manticore.example:9308", "user", "pass"));
-        assertThrows(IllegalArgumentException.class,
-                () -> new GXManticoreClient("http://192.0.2.1:9308", "user", "pass"));
+        assertDoesNotThrow(() -> new GXManticoreClient("http://192.0.2.1:9308", "user", "pass"));
+        assertDoesNotThrow(() -> new GXManticoreClient("http://[2001:db8::1]:9308", "user", "pass"));
 
         GXManticoreClient remoteClient = new GXManticoreClient("http://manticore.example:9308", null, null);
         assertThrows(IllegalArgumentException.class, () -> remoteClient.useBearerToken("token"));
+    }
+
+    @Test
+    void ipv6LoopbackAllowsLocalCredentialConfiguration() {
+        assertDoesNotThrow(() -> new GXManticoreClient("http://[::1]:9308", "user", "pass"));
     }
 
     @Test

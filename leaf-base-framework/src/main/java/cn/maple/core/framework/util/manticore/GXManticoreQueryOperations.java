@@ -36,7 +36,7 @@ public final class GXManticoreQueryOperations {
         Map<String, Object> knn = new HashMap<>();
         knn.put("field", knnField);
         knn.put("k", k);
-        knn.put("query_vector", client.toList(queryVector));
+        knn.put("query_vector", GXManticoreUtils.toList(queryVector));
         if (ef > 0) {
             knn.put("ef", ef);
         }
