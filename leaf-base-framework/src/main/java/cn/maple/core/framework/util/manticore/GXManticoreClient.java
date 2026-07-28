@@ -141,9 +141,6 @@ public final class GXManticoreClient {
                 }
 
                 response = request.execute();
-                if (!response.isOk()) {
-                    throw new GXManticoreException("Manticore查询出错", response.toString());
-                }
                 return response.body();
             } catch (HttpException e) {
                 attempt++;
@@ -157,10 +154,6 @@ public final class GXManticoreClient {
                 }
             }
         }
-    }
-
-    String toSqlResponse(String response) {
-        return response;
     }
 
     GXManticoreConfig currentConfig() {

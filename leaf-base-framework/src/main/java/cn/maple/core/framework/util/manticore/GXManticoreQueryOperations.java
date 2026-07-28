@@ -1,18 +1,14 @@
 package cn.maple.core.framework.util.manticore;
 
 import cn.hutool.json.JSONUtil;
-import cn.maple.core.framework.dto.inner.GXMantiCoreResDto;
 
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Manticore Search HTTP API utility facade.
+ * Search and KNN operations bound to one {@link GXManticoreClient}.
  *
- * <p>Remote operations return {@link GXMantiCoreResDto}. Configure the facade with
- * during application startup; legacy Spring
- * properties remain available as a fallback. SQL is sent as an UTF-8 form field named
- * {@code query}; bulk requests use NDJSON.</p>
+ * <p>Every remote operation returns the original Manticore response body.</p>
  */
 public final class GXManticoreQueryOperations {
     private final GXManticoreClient client;

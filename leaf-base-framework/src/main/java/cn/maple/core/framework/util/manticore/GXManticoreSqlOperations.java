@@ -1,17 +1,10 @@
 package cn.maple.core.framework.util.manticore;
 
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.json.JSONArray;
-import cn.hutool.json.JSONObject;
-import cn.hutool.json.JSONUtil;
-import cn.maple.core.framework.exception.GXManticoreException;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
 import cn.maple.core.framework.util.GXDBStringUtils;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -33,8 +26,7 @@ public final class GXManticoreSqlOperations {
     public String executeSql(String sql) {
         requireNonBlank(sql, "sql");
         String encodedSql = java.net.URLEncoder.encode(sql, StandardCharsets.UTF_8).replace("*", "%2A");
-        String mantiCoreResDto = sendPost("/sql?mode=raw", "query=" + encodedSql, "application/x-www-form-urlencoded");
-        return toSqlResponse(mantiCoreResDto);
+        return client.sendPost("/sql?mode=raw", "query=" + encodedSql, "application/x-www-form-urlencoded");
     }
 
     /**
@@ -42,43 +34,6 @@ public final class GXManticoreSqlOperations {
      */
     public String executeReadSql(String sql) {
         return executeSql(GXDBStringUtils.normalizeAndValidateRawSqlQuery(sql));
-    }
-
-    /**
-     * Parses the first result set in a SQL response without making a remote request.
-     */
-    public List<Map<String, Object>> parseSqlAsList(String responseJson) {
-        List<Map<String, Object>> result = new ArrayList<>();
-        JSONArray resultSets = JSONUtil.parseArray(responseJson);
-        if (resultSets.isEmpty()) {
-            return result;
-        }
-        JSONObject first = resultSets.getJSONObject(0);
-        String error = first.getStr("error");
-        if (StrUtil.isNotBlank(error)) {
-            throw new GXManticoreException("SQL execution failed: " + error, responseJson);
-        }
-        addRows(first.getJSONArray("data"), result);
-        return result;
-    }
-
-    /**
-     * Parses all result sets in a SQL response without making a remote request.
-     */
-    public List<List<Map<String, Object>>> parseSqlMultiAsList(String responseJson) {
-        List<List<Map<String, Object>>> resultSets = new ArrayList<>();
-        JSONArray responseSets = JSONUtil.parseArray(responseJson);
-        for (int i = 0; i < responseSets.size(); i++) {
-            JSONObject item = responseSets.getJSONObject(i);
-            String error = item.getStr("error");
-            if (StrUtil.isNotBlank(error)) {
-                throw new GXManticoreException("SQL statement " + (i + 1) + " failed: " + error, responseJson);
-            }
-            List<Map<String, Object>> rows = new ArrayList<>();
-            addRows(item.getJSONArray("data"), rows);
-            resultSets.add(rows);
-        }
-        return resultSets;
     }
 
     public String flushAttributes() {
@@ -119,15 +74,6 @@ public final class GXManticoreSqlOperations {
         return executeSql("OPTIMIZE INDEX " + index);
     }
 
-    private void addRows(JSONArray data, List<Map<String, Object>> rows) {
-        if (data == null) {
-            return;
-        }
-        for (int i = 0; i < data.size(); i++) {
-            rows.add(data.getJSONObject(i));
-        }
-    }
-
     private String validateCreateTableSql(String createTableSql) {
         if (StrUtil.isBlank(createTableSql)) {
             throw new GXSqlInjectionException("CREATE TABLE SQL must not be blank");
@@ -150,11 +96,4 @@ public final class GXManticoreSqlOperations {
         GXManticoreUtils.requireNonBlank(value, name);
     }
 
-    private String sendPost(String endpoint, String body, String contentType) {
-        return client.sendPost(endpoint, body, contentType);
-    }
-
-    private String toSqlResponse(String response) {
-        return client.toSqlResponse(response);
-    }
 }

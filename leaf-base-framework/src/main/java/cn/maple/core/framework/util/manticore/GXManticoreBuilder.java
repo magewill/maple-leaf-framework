@@ -1,61 +1,15 @@
 package cn.maple.core.framework.util.manticore;
 
-import cn.hutool.core.util.StrUtil;
-import cn.hutool.json.JSONArray;
-import cn.hutool.json.JSONObject;
-import cn.hutool.json.JSONUtil;
-import cn.maple.core.framework.exception.GXManticoreException;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Stateless Manticore query construction and response parsing utilities.
+ * Stateless Manticore query construction utilities.
  */
-public final class GXMantiCoreBuilder {
-    private GXMantiCoreBuilder() {
-    }
-
-    public static List<Map<String, Object>> parseSqlAsList(String responseJson) {
-        List<Map<String, Object>> result = new ArrayList<>();
-        JSONArray resultSets = JSONUtil.parseArray(responseJson);
-        if (resultSets.isEmpty()) {
-            return result;
-        }
-        JSONObject first = resultSets.getJSONObject(0);
-        String error = first.getStr("error");
-        if (StrUtil.isNotBlank(error)) {
-            throw new GXManticoreException("SQL execution failed: " + error, responseJson);
-        }
-        addRows(first.getJSONArray("data"), result);
-        return result;
-    }
-
-    public static List<List<Map<String, Object>>> parseSqlMultiAsList(String responseJson) {
-        List<List<Map<String, Object>>> resultSets = new ArrayList<>();
-        JSONArray responseSets = JSONUtil.parseArray(responseJson);
-        for (int i = 0; i < responseSets.size(); i++) {
-            JSONObject item = responseSets.getJSONObject(i);
-            String error = item.getStr("error");
-            if (StrUtil.isNotBlank(error)) {
-                throw new GXManticoreException("SQL statement " + (i + 1) + " failed: " + error, responseJson);
-            }
-            List<Map<String, Object>> rows = new ArrayList<>();
-            addRows(item.getJSONArray("data"), rows);
-            resultSets.add(rows);
-        }
-        return resultSets;
-    }
-
-    private static void addRows(JSONArray data, List<Map<String, Object>> rows) {
-        if (data == null) {
-            return;
-        }
-        for (int i = 0; i < data.size(); i++) {
-            rows.add(data.getJSONObject(i));
-        }
+public final class GXManticoreBuilder {
+    private GXManticoreBuilder() {
     }
 
     /**

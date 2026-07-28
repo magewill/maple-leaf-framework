@@ -3,7 +3,7 @@ package cn.maple.core.framework.util;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.exception.GXSqlInjectionException;
-import cn.maple.core.framework.util.manticore.GXMantiCoreBuilder;
+import cn.maple.core.framework.util.manticore.GXManticoreBuilder;
 import cn.maple.core.framework.util.manticore.GXManticoreClient;
 import cn.maple.core.framework.util.manticore.GXManticoreQueryOperations;
 import cn.maple.core.framework.util.manticore.GXManticoreUtils;
@@ -22,7 +22,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class GXMantiCoreBuilderTest {
+class GXManticoreBuilderTest {
     private HttpServer server;
     private GXManticoreClient client;
     private String requestPath;
@@ -148,28 +148,34 @@ class GXMantiCoreBuilderTest {
     }
 
     @Test
-    void nonSuccessfulHttpResponseBecomesFailedStructuredResponse() {
+    void nonSuccessfulHttpResponseReturnsRawResponseBody() {
         responseStatus = 400;
         responseBody = "{\"error\":\"bad query\"}";
 
         String response = client.getQueryOperations().search("articles", null, 0, 10);
+
+        assertEquals(responseBody, response);
     }
 
     @Test
-    void nonJsonHttpErrorReturnsStructuredFailure() {
+    void nonJsonHttpErrorReturnsRawResponseBody() {
         responseStatus = 502;
         responseBody = "Bad Gateway";
         responseContentType = "text/plain";
 
         String response = assertDoesNotThrow(() -> client.post("/health", Map.of()));
+
+        assertEquals(responseBody, response);
     }
 
     @Test
-    void jsonBodyIsParsedWhenResponseContentTypeIsIncorrect() {
+    void jsonBodyIsReturnedWithoutContentTypeBasedParsing() {
         responseBody = "{\"id\":7}";
         responseContentType = "text/plain";
 
         String response = client.post("/health", Map.of());
+
+        assertEquals(responseBody, response);
     }
 
     @Test
@@ -177,10 +183,12 @@ class GXMantiCoreBuilderTest {
         responseBody = "OK";
         responseContentType = "text/plain";
         String plain = client.post("/health", Map.of());
+        assertEquals(responseBody, plain);
 
         responseBody = "{";
         responseContentType = "application/json";
         String malformed = client.getQueryOperations().search("articles", null, 0, 10);
+        assertEquals(responseBody, malformed);
     }
 
     @Test
@@ -238,10 +246,10 @@ class GXMantiCoreBuilderTest {
 
     @Test
     void queryBuildersRejectMalformedArguments() {
-        assertThrows(IllegalArgumentException.class, () -> GXMantiCoreBuilder.buildMatchQuery(" ", "manticore"));
-        assertThrows(IllegalArgumentException.class, () -> GXMantiCoreBuilder.buildRangeQuery("created_at", null, null));
-        assertThrows(IllegalArgumentException.class, () -> GXMantiCoreBuilder.buildHighlight(List.of()));
-        assertThrows(IllegalArgumentException.class, () -> GXMantiCoreBuilder.buildSort("id", "descending"));
+        assertThrows(IllegalArgumentException.class, () -> GXManticoreBuilder.buildMatchQuery(" ", "manticore"));
+        assertThrows(IllegalArgumentException.class, () -> GXManticoreBuilder.buildRangeQuery("created_at", null, null));
+        assertThrows(IllegalArgumentException.class, () -> GXManticoreBuilder.buildHighlight(List.of()));
+        assertThrows(IllegalArgumentException.class, () -> GXManticoreBuilder.buildSort("id", "descending"));
     }
 
     @Test
@@ -304,6 +312,8 @@ class GXMantiCoreBuilderTest {
     void remoteHttpConfigurationRejectsCredentialTransmission() {
         assertThrows(IllegalArgumentException.class,
                 () -> new GXManticoreClient("http://manticore.example:9308", "user", "pass"));
+        assertThrows(IllegalArgumentException.class,
+                () -> new GXManticoreClient("http://192.0.2.1:9308", "user", "pass"));
 
         GXManticoreClient remoteClient = new GXManticoreClient("http://manticore.example:9308", null, null);
         assertThrows(IllegalArgumentException.class, () -> remoteClient.useBearerToken("token"));
@@ -333,37 +343,37 @@ class GXMantiCoreBuilderTest {
 
     @Test
     void buildMatchPhraseQueryCreatesPhraseDsl() {
-        Map<String, Object> query = GXMantiCoreBuilder.buildMatchPhraseQuery("title", "manticore search");
+        Map<String, Object> query = GXManticoreBuilder.buildMatchPhraseQuery("title", "manticore search");
 
         assertEquals("manticore search", ((Map<?, ?>) query.get("match_phrase")).get("title"));
     }
 
     @Test
     void buildMatchAllQueryCreatesEmptyMatchAllClause() {
-        assertEquals(Map.of("match_all", Map.of()), GXMantiCoreBuilder.buildMatchAllQuery());
+        assertEquals(Map.of("match_all", Map.of()), GXManticoreBuilder.buildMatchAllQuery());
     }
 
     @Test
     void buildExistsQueryCreatesFieldExistenceDsl() {
-        Map<String, Object> query = GXMantiCoreBuilder.buildExistsQuery("published_at");
+        Map<String, Object> query = GXManticoreBuilder.buildExistsQuery("published_at");
 
         assertEquals("published_at", ((Map<?, ?>) query.get("exists")).get("field"));
     }
 
     @Test
     void buildCombinationQuery() {
-        Map<String, Object> query = GXMantiCoreBuilder.buildBoolQuery(
+        Map<String, Object> query = GXManticoreBuilder.buildBoolQuery(
                 List.of(
-                        GXMantiCoreBuilder.buildMatchPhraseQuery("_all", "manticore"),
-                        GXMantiCoreBuilder.buildEqualsQuery("tenant_id", 1),
-                        GXMantiCoreBuilder.buildRangeQuery("published_at", "2025-01-01", null)
+                        GXManticoreBuilder.buildMatchPhraseQuery("_all", "manticore"),
+                        GXManticoreBuilder.buildEqualsQuery("tenant_id", 1),
+                        GXManticoreBuilder.buildRangeQuery("published_at", "2025-01-01", null)
                 ),
                 List.of(
-                        GXMantiCoreBuilder.buildMatchQuery("title", "topic"),
-                        GXMantiCoreBuilder.buildQueryString("author:Arendt"),
-                        GXMantiCoreBuilder.buildInQuery("category_id", List.of(10, 20))
+                        GXManticoreBuilder.buildMatchQuery("title", "topic"),
+                        GXManticoreBuilder.buildQueryString("author:Arendt"),
+                        GXManticoreBuilder.buildInQuery("category_id", List.of(10, 20))
                 ),
-                List.of(GXMantiCoreBuilder.buildExistsQuery("top_at"))
+                List.of(GXManticoreBuilder.buildExistsQuery("top_at"))
         );
 
         Map<String, String> sortFields = new LinkedHashMap<>();
@@ -373,7 +383,7 @@ class GXMantiCoreBuilderTest {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("table", "manticore_periodical_articles");
         payload.put("query", query);
-        payload.put("sort", GXMantiCoreBuilder.buildSort(sortFields));
+        payload.put("sort", GXManticoreBuilder.buildSort(sortFields));
         payload.put("limit", 10);
         payload.put("offset", 0);
 

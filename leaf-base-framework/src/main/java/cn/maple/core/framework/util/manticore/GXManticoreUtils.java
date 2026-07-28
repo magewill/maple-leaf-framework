@@ -6,6 +6,7 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
+import cn.maple.core.framework.exception.GXManticoreException;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -216,17 +217,54 @@ public class GXManticoreUtils {
             return null;
         }
         boolean timedOut = searchResult.getBool("timed_out");
-        /*Dict hits = Convert.convert(Dict.class, searchResult.getObj("hits"));
-        Integer total = Convert.convert(Integer.class, hits.getObj("total"));
-        List<Dict> lastSearchResult = JSONUtil.toList(hits.getStr("hits"), Dict.class);
-        List<Dict> records = new ArrayList<>();
-        Dict retData = new Dict();
-        for (Dict d : lastSearchResult) {
-            int id = d.getInt("_id");
-            records.add(Dict.create().set("id", id).set("data", d));
-        }*/
         List<Map<String, Object>> records = GXManticoreUtils.extractHits(body);
         long total = GXManticoreUtils.extractTotal(body);
         return Dict.create().set("timedOut", timedOut).set("total", total).set("records", records);
+    }
+
+    private static void addRows(JSONArray data, List<Map<String, Object>> rows) {
+        if (data == null) {
+            return;
+        }
+        for (int i = 0; i < data.size(); i++) {
+            rows.add(data.getJSONObject(i));
+        }
+    }
+
+    /**
+     * Parses the first result set in a SQL response without making a remote request.
+     */
+    public static List<Map<String, Object>> parseSqlAsList(String responseJson) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        JSONArray resultSets = JSONUtil.parseArray(responseJson);
+        if (resultSets.isEmpty()) {
+            return result;
+        }
+        JSONObject first = resultSets.getJSONObject(0);
+        String error = first.getStr("error");
+        if (StrUtil.isNotBlank(error)) {
+            throw new GXManticoreException("SQL execution failed: " + error, responseJson);
+        }
+        addRows(first.getJSONArray("data"), result);
+        return result;
+    }
+
+    /**
+     * Parses all result sets in a SQL response without making a remote request.
+     */
+    public static List<List<Map<String, Object>>> parseSqlMultiAsList(String responseJson) {
+        List<List<Map<String, Object>>> resultSets = new ArrayList<>();
+        JSONArray responseSets = JSONUtil.parseArray(responseJson);
+        for (int i = 0; i < responseSets.size(); i++) {
+            JSONObject item = responseSets.getJSONObject(i);
+            String error = item.getStr("error");
+            if (StrUtil.isNotBlank(error)) {
+                throw new GXManticoreException("SQL statement " + (i + 1) + " failed: " + error, responseJson);
+            }
+            List<Map<String, Object>> rows = new ArrayList<>();
+            addRows(item.getJSONArray("data"), rows);
+            resultSets.add(rows);
+        }
+        return resultSets;
     }
 }
