@@ -34,6 +34,7 @@
         <module>leaf-base-eureka-server</module>
         <module>leaf-base-eureka-client</module>
         <module>leaf-base-webclient</module>
+        <module>leaf-base-manticore</module>
     </modules>
 
     <!-- 统一管理jar包版本 -->
@@ -80,6 +81,7 @@
         <woodstox-core.version>7.2.1</woodstox-core.version>
         <httpclient.version>4.5.14</httpclient.version>
         <jctools-core.version>4.0.6</jctools-core.version>
+        <jersey-hk2.version>4.0.2</jersey-hk2.version>
     </properties>
 
     <dependencyManagement>
@@ -507,6 +509,18 @@
                 <groupId>org.jctools</groupId>
                 <artifactId>jctools-core</artifactId>
                 <version>${jctools-core.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.glassfish.hk2</groupId>
+                <artifactId>hk2-locator</artifactId>
+                <version>${hk2.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.glassfish.jersey.inject</groupId>
+                <artifactId>jersey-hk2</artifactId>
+                <version>${jersey-hk2.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
