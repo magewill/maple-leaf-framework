@@ -1,7 +1,6 @@
 package cn.maple.core.datasource.config;
 
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.maple.core.datasource.config.GXDynamicDbTypeRegistry;
 import cn.maple.core.datasource.handler.GXDataFilterDataPermissionHandler;
 import cn.maple.core.datasource.interceptor.GXDataFilterInterceptor;
 import cn.maple.core.datasource.properties.GXDataSourceProperties;
@@ -106,10 +105,6 @@ public class GXMyBatisPlusConfig {
     private void addTenantInterceptor(MybatisPlusInterceptor interceptor) {
         Boolean enableTenant = GXCommonUtils.getEnvironmentValue("maple.framework.enable.tenant", Boolean.class, Boolean.FALSE);
         if (Boolean.TRUE.equals(enableTenant)) {
-            GXTenantIdService tenantIdService = GXSpringContextUtils.getBean(GXTenantIdService.class);
-            if (Objects.isNull(tenantIdService)) {
-                throw new GXBusinessException("GXTenantIdService bean is required when tenant plugin is enabled");
-            }
             interceptor.addInnerInterceptor(new TenantLineInnerInterceptor(new GXTenantLineHandler()));
         }
     }

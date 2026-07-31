@@ -2,6 +2,8 @@ package cn.maple.core.datasource.aspect;
 
 import cn.maple.core.datasource.annotation.GXDataSource;
 import cn.maple.core.datasource.config.GXDynamicContextHolder;
+import cn.maple.core.datasource.config.GXDynamicDataSource;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -9,15 +11,28 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Pointcut;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.aop.support.AopUtils;
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.NoSuchBeanDefinitionException;
+import org.springframework.beans.factory.annotation.BeanFactoryAnnotationUtils;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionManager;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.annotation.TransactionManagementConfigurer;
+import org.springframework.transaction.interceptor.TransactionAttribute;
+import org.springframework.transaction.interceptor.TransactionAttributeSource;
+import org.springframework.transaction.support.DefaultTransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.ClassUtils;
 import org.springframework.util.ConcurrentReferenceHashMap;
 import org.springframework.util.StringUtils;
 
 import java.lang.reflect.Method;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Dynamic data source switching aspect.
@@ -27,8 +42,15 @@ import java.util.Map;
 @Order(-1000)
 @Slf4j
 public class GXDataSourceAspect {
+    private static final String ROOT_CONTEXT_CLASS_NAME = "cn.maple.core.datasource.context.RootContext";
     private static final Map<Class<?>, DataSourceCacheEntry> CLASS_ANNOTATION_CACHE = new ConcurrentReferenceHashMap<>();
     private static final Map<MethodCacheKey, DataSourceCacheEntry> METHOD_ANNOTATION_CACHE = new ConcurrentReferenceHashMap<>();
+
+    @Resource
+    private BeanFactory beanFactory;
+
+    @Resource(name = "dynamicDataSource")
+    private GXDynamicDataSource dynamicDataSource;
 
     @Pointcut("@annotation(cn.maple.core.datasource.annotation.GXDataSource) || " +
             "@within(cn.maple.core.datasource.annotation.GXDataSource) || " +
@@ -199,6 +221,16 @@ public class GXDataSourceAspect {
                     log.debug("Thread {} datasource switched from [{}] to [{}]", threadName,
                             (previousDataSource != null ? previousDataSource : "default"), dataSourceValue);
                 }
+
+                boolean springTransactionActive = TransactionSynchronizationManager.isActualTransactionActive();
+                if ((springTransactionActive || hasSeataGlobalTransaction())
+                        && isDifferentDatasource(previousDataSource, dataSourceValue)) {
+                    TransactionAttribute transactionAttribute = getTransactionAttribute(targetClass, method);
+                    if (springTransactionActive && shouldCreateIndependentTransaction(transactionAttribute)) {
+                        return proceedInIndependentTransaction(point, transactionAttribute, targetClass);
+                    }
+                    return proceedWithSuspendedSeataGlobalTransaction(point);
+                }
             }
 
             if (isTraceEnabled) {
@@ -221,7 +253,165 @@ public class GXDataSourceAspect {
         }
     }
 
+    /**
+     * A routing datasource binds its physical connection to the outer transaction. Suspending that transaction
+     * after switching the datasource allows the nested invocation to acquire an independent connection.
+     */
+    private TransactionAttribute getTransactionAttribute(Class<?> targetClass, Method method) {
+        TransactionAttributeSource transactionAttributeSource = beanFactory.getBeanProvider(TransactionAttributeSource.class)
+                .getIfUnique();
+        if (transactionAttributeSource == null) {
+            return null;
+        }
+        Method targetMethod = AopUtils.getMostSpecificMethod(method, targetClass);
+        TransactionAttribute attribute = transactionAttributeSource.getTransactionAttribute(targetMethod, targetClass);
+        if (attribute == null && targetMethod != method) {
+            attribute = transactionAttributeSource.getTransactionAttribute(method, targetClass);
+        }
+        return attribute;
+    }
+
+    private boolean isDifferentDatasource(String previousDataSource, String dataSourceValue) {
+        if (Objects.equals(previousDataSource, dataSourceValue)) {
+            return false;
+        }
+        return previousDataSource != null || !dynamicDataSource.isDefaultDataSource(dataSourceValue);
+    }
+
+    private boolean shouldCreateIndependentTransaction(TransactionAttribute transactionAttribute) {
+        if (transactionAttribute == null) {
+            return true;
+        }
+        int propagation = transactionAttribute.getPropagationBehavior();
+        return propagation != TransactionDefinition.PROPAGATION_REQUIRES_NEW
+                && propagation != TransactionDefinition.PROPAGATION_NOT_SUPPORTED
+                && propagation != TransactionDefinition.PROPAGATION_NEVER;
+    }
+
+    private Object proceedInIndependentTransaction(ProceedingJoinPoint point,
+                                                   TransactionAttribute transactionAttribute,
+                                                   Class<?> targetClass) throws Throwable {
+        DefaultTransactionDefinition definition = transactionAttribute == null
+                ? new DefaultTransactionDefinition()
+                : new DefaultTransactionDefinition(transactionAttribute);
+        definition.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        PlatformTransactionManager transactionManager = resolveTransactionManager(transactionAttribute, targetClass);
+        SeataGlobalTransactionContext seataGlobalTransactionContext = suspendSeataGlobalTransaction();
+        TransactionStatus transactionStatus = null;
+        try {
+            transactionStatus = transactionManager.getTransaction(definition);
+            Object result = point.proceed();
+            transactionManager.commit(transactionStatus);
+            return result;
+        } catch (Throwable throwable) {
+            if (transactionStatus != null) {
+                boolean shouldRollback = transactionAttribute == null || transactionAttribute.rollbackOn(throwable);
+                if (!transactionStatus.isCompleted() && shouldRollback) {
+                    transactionManager.rollback(transactionStatus);
+                } else if (!transactionStatus.isCompleted()) {
+                    transactionManager.commit(transactionStatus);
+                }
+            }
+            throw throwable;
+        } finally {
+            restoreSeataGlobalTransaction(seataGlobalTransactionContext);
+        }
+    }
+
+    /**
+     * A Seata global XID is also thread-bound. It must not leak into the independently committed datasource call.
+     */
+    private SeataGlobalTransactionContext suspendSeataGlobalTransaction() {
+        try {
+            Class<?> rootContextClass = Class.forName(ROOT_CONTEXT_CLASS_NAME);
+            boolean globalLockRequired = Boolean.TRUE.equals(rootContextClass.getMethod("requireGlobalLock").invoke(null));
+            Object xid = rootContextClass.getMethod("unbind").invoke(null);
+            if (globalLockRequired) {
+                rootContextClass.getMethod("unbindGlobalLockFlag").invoke(null);
+            }
+            if (xid instanceof String value && StringUtils.hasText(value) || globalLockRequired) {
+                return new SeataGlobalTransactionContext(rootContextClass, xid instanceof String value ? value : null,
+                        globalLockRequired);
+            }
+            return null;
+        } catch (ClassNotFoundException ignored) {
+            return null;
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Failed to suspend Seata global transaction for nested cross-datasource call", e);
+        }
+    }
+
+    private boolean hasSeataGlobalTransaction() {
+        try {
+            Class<?> rootContextClass = Class.forName(ROOT_CONTEXT_CLASS_NAME);
+            Object xid = rootContextClass.getMethod("getXID").invoke(null);
+            return xid instanceof String value && StringUtils.hasText(value)
+                    || Boolean.TRUE.equals(rootContextClass.getMethod("requireGlobalLock").invoke(null));
+        } catch (ClassNotFoundException ignored) {
+            return false;
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Failed to inspect Seata global transaction for nested cross-datasource call", e);
+        }
+    }
+
+    private Object proceedWithSuspendedSeataGlobalTransaction(ProceedingJoinPoint point) throws Throwable {
+        SeataGlobalTransactionContext seataGlobalTransactionContext = suspendSeataGlobalTransaction();
+        try {
+            return point.proceed();
+        } finally {
+            restoreSeataGlobalTransaction(seataGlobalTransactionContext);
+        }
+    }
+
+    private void restoreSeataGlobalTransaction(SeataGlobalTransactionContext context) {
+        if (context == null) {
+            return;
+        }
+        try {
+            if (StringUtils.hasText(context.xid())) {
+                context.rootContextClass().getMethod("bind", String.class).invoke(null, context.xid());
+            }
+            if (context.globalLockRequired()) {
+                context.rootContextClass().getMethod("bindGlobalLockFlag").invoke(null);
+            }
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Failed to restore Seata global transaction after nested cross-datasource call", e);
+        }
+    }
+
+    private PlatformTransactionManager resolveTransactionManager(TransactionAttribute transactionAttribute, Class<?> targetClass) {
+        String qualifier = transactionAttribute == null ? null : transactionAttribute.getQualifier();
+        if (StringUtils.hasText(qualifier)) {
+            return BeanFactoryAnnotationUtils.qualifiedBeanOfType(beanFactory, PlatformTransactionManager.class, qualifier);
+        }
+
+        String typeQualifier = BeanFactoryAnnotationUtils.getQualifierValue(targetClass);
+        if (StringUtils.hasText(typeQualifier)) {
+            try {
+                return BeanFactoryAnnotationUtils.qualifiedBeanOfType(beanFactory, PlatformTransactionManager.class, typeQualifier);
+            } catch (NoSuchBeanDefinitionException ignored) {
+                // Spring treats a type-level qualifier as optional and falls back to the configured default manager.
+            }
+        }
+
+        TransactionManagementConfigurer configurer = beanFactory
+                .getBeanProvider(TransactionManagementConfigurer.class)
+                .getIfUnique();
+        if (configurer != null) {
+            TransactionManager transactionManager = configurer.annotationDrivenTransactionManager();
+            if (transactionManager instanceof PlatformTransactionManager platformTransactionManager) {
+                return platformTransactionManager;
+            }
+            throw new IllegalStateException("A PlatformTransactionManager is required for nested cross-datasource transactions");
+        }
+
+        return beanFactory.getBean(PlatformTransactionManager.class);
+    }
+
     private record MethodCacheKey(Class<?> targetClass, Method method) {
+    }
+
+    private record SeataGlobalTransactionContext(Class<?> rootContextClass, String xid, boolean globalLockRequired) {
     }
 
     private record DataSourceCacheEntry(boolean needSwitch, String dataSourceValue) {

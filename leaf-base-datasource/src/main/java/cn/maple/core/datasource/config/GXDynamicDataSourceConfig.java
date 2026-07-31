@@ -55,6 +55,7 @@ public class GXDynamicDataSourceConfig extends GXApplicationContextAware {
         GXDynamicDataSource dynamicDataSource = new GXDynamicDataSource();
         dynamicDataSource.setTargetDataSources(dynamicDataSources);
         dynamicDataSource.setDefaultTargetDataSource(dataSource);
+        dynamicDataSource.setDefaultDataSourceName(defaultDataSourceName);
         dynamicDataSource.setManagedDataSources(buildResult.managedDataSources());
         return dynamicDataSource;
     }
