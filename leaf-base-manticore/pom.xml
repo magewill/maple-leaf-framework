@@ -25,7 +25,7 @@
         </dependency>
         <dependency>
             <groupId>com.manticoresearch</groupId>
-            <artifactId>manticoresearch-dev</artifactId>
+            <artifactId>manticoresearch</artifactId>
             <version>${manticoresearch.version}</version>
             <exclusions>
                 <exclusion>
@@ -35,6 +35,10 @@
                 <exclusion>
                     <groupId>org.glassfish.hk2</groupId>
                     <artifactId>hk2-locator</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.glassfish.jersey.connectors</groupId>
+                    <artifactId>jersey-apache-connector</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -47,6 +51,12 @@
         <dependency>
             <groupId>org.glassfish.jersey.inject</groupId>
             <artifactId>jersey-hk2</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.glassfish.jersey.connectors</groupId>
+            <artifactId>jersey-apache-connector</artifactId>
+            <version>${jersey-apache-connector.version}</version>
         </dependency>
     </dependencies>
 </project>

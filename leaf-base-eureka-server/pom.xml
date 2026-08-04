@@ -16,7 +16,6 @@
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <eureka.server.version>5.0.2</eureka.server.version>
-        <jersey-apache-connector.version>3.1.1</jersey-apache-connector.version>
     </properties>
     <dependencies>
         <dependency>

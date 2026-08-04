@@ -48,13 +48,13 @@
         <aspectjweaver.version>1.9.25.1</aspectjweaver.version>
         <guava.version>33.6.0-jre</guava.version>
         <caffeine.version>3.2.4</caffeine.version>
-        <fastjson.version>2.0.63</fastjson.version>
+        <fastjson.version>2.0.64</fastjson.version>
         <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
         <maven-source-plugin.version>3.4.0</maven-source-plugin.version>
         <spring-boot.version>4.1.0</spring-boot.version>
         <spring-framework.version>7.0.8</spring-framework.version>
         <snakeyaml.version>2.6</snakeyaml.version>
-        <objenesis.version>3.5</objenesis.version>
+        <objenesis.version>3.6</objenesis.version>
         <jakarta.json-api.version>2.1.3</jakarta.json-api.version>
         <spring-cloud.version>2025.1.2</spring-cloud.version>
         <spring-cloud-alibaba.version>2025.1.0.0</spring-cloud-alibaba.version>
@@ -78,10 +78,11 @@
         <nullaway.version>0.13.4</nullaway.version>
         <antlr-runtime.version>3.5.3</antlr-runtime.version>
         <hk2.version>4.0.1</hk2.version>
-        <woodstox-core.version>7.2.1</woodstox-core.version>
+        <woodstox-core.version>7.2.2</woodstox-core.version>
         <httpclient.version>4.5.14</httpclient.version>
         <jctools-core.version>4.0.6</jctools-core.version>
         <jersey-hk2.version>4.0.2</jersey-hk2.version>
+        <jersey-apache-connector.version>3.1.12</jersey-apache-connector.version>
     </properties>
 
     <dependencyManagement>
