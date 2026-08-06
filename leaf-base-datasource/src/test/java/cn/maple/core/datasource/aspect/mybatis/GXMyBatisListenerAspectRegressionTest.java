@@ -27,6 +27,7 @@ import org.springframework.transaction.interceptor.TransactionAttribute;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -54,6 +55,33 @@ class GXMyBatisListenerAspectRegressionTest {
             assertDoesNotThrow(() -> saveEntityAspect.around(point));
             eventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(2));
         }
+    }
+
+    @Test
+    void saveEntityFindsListenerConfigurationOnParentMapperInterface() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new ChildAnnotatedMapperImpl(), ChildAnnotatedMapper.class.getMethod("insert", Object.class));
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{Map.of("id", 1)});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            assertDoesNotThrow(() -> saveEntityAspect.around(point));
+            eventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(1));
+        }
+    }
+
+    @Test
+    void saveBatchResolvesMethodLevelListenerConfiguration() throws Exception {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+
+        GXMyBatisListener listener = ReflectionTestUtils.invokeMethod(
+                saveBatchEntityAspect,
+                "resolveListenerConfig",
+                MethodAnnotatedBatchService.class,
+                method,
+                Object.class
+        );
+
+        assertEquals(FirstListener.class, listener.listenerClazz());
     }
 
     @Test
@@ -90,6 +118,21 @@ class GXMyBatisListenerAspectRegressionTest {
         try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
             assertDoesNotThrow(() -> updateFieldAspect.around(point));
             eventPublisher.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    void updateFieldSkipsNullEntriesInUpdatePayload() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new UpdateFieldMapperImpl(), UpdateFieldMapper.class.getMethod("updateFieldByCondition", Object.class, Object.class));
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+                .condition(List.of(new GXConditionEQ(null, "id", 7)))
+                .build();
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{queryParam, Collections.singletonList(null)});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            assertDoesNotThrow(() -> updateFieldAspect.around(point));
+            eventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(1));
         }
     }
 
@@ -158,6 +201,16 @@ class GXMyBatisListenerAspectRegressionTest {
         assertEquals(List.of(60, 80), keyValuePairs.get("score"));
         assertEquals(List.of("A", "B"), keyValuePairs.get("type"));
         assertNull(keyValuePairs.get("deletedAt"));
+    }
+
+    @Test
+    void updateEntityUsesWhereParameterNamesWhenSetValuesWereAddedFirst() {
+        UpdateWrapper<Object> wrapper = new UpdateWrapper<>();
+        wrapper.set("name", "changed").eq("id", 7);
+
+        Dict parsed = ReflectionTestUtils.invokeMethod(updateEntityAspect, "parseWhereSQL", wrapper);
+
+        assertEquals(7, ((Dict) parsed.get("keyValuePairs")).get("id"));
     }
 
     @Test
@@ -263,6 +316,21 @@ class GXMyBatisListenerAspectRegressionTest {
     }
 
     @GXMyBatisListener(listenerClazz = FirstListener.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+    private interface ParentAnnotatedMapper {
+        Object insert(Object entity);
+    }
+
+    private interface ChildAnnotatedMapper extends ParentAnnotatedMapper {
+    }
+
+    private static class ChildAnnotatedMapperImpl implements ChildAnnotatedMapper {
+        @Override
+        public Object insert(Object entity) {
+            return entity;
+        }
+    }
+
+    @GXMyBatisListener(listenerClazz = FirstListener.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
     private interface UpdateFieldMapper {
         Object updateFieldByCondition(Object query, Object updateFields);
     }
@@ -306,6 +374,13 @@ class GXMyBatisListenerAspectRegressionTest {
         @Override
         public Object insert(Object entity) {
             return entity;
+        }
+    }
+
+    private static class MethodAnnotatedBatchService {
+        @GXMyBatisListener(listenerClazz = FirstListener.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+        public Object saveBatch(Collection<?> entities) {
+            return entities;
         }
     }
 

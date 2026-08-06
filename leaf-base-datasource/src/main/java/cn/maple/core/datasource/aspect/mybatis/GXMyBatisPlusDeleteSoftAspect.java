@@ -11,6 +11,7 @@ import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.datasource.event.GXMyBatisModelDeleteSoftEvent;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
+import cn.maple.core.datasource.util.GXMyBatisListenerAnnotationUtils;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
@@ -74,7 +75,7 @@ public class GXMyBatisPlusDeleteSoftAspect {
         Dict conditionFieldData = Dict.create();
         List<GXCondition<?>> conditionList = baseQueryParam.getCondition();
         conditionList.forEach(condition -> {
-            if (condition instanceof GXConditionRaw) {
+            if (condition == null || condition instanceof GXConditionRaw) {
                 return;
             }
             String fieldExpression = condition.getFieldExpression();
@@ -85,8 +86,12 @@ public class GXMyBatisPlusDeleteSoftAspect {
         });
 
         Dict updateFieldData = Dict.create();
-        updateFieldList.forEach(updateField ->
-                updateFieldData.set(CharSequenceUtil.toCamelCase(updateField.getFieldName()), updateField.getFieldValue())
+        updateFieldList.forEach(updateField -> {
+                    if (updateField == null) {
+                        return;
+                    }
+                    updateFieldData.set(CharSequenceUtil.toCamelCase(updateField.getFieldName()), updateField.getFieldValue());
+                }
         );
 
         return Dict.create()
@@ -149,7 +154,7 @@ public class GXMyBatisPlusDeleteSoftAspect {
                 return methodAnno;
             }
         }
-        return AnnotationUtil.getAnnotation(mapperClass, GXMyBatisListener.class);
+        return GXMyBatisListenerAnnotationUtils.findTypeAnnotation(mapperClass);
     }
 
     private Method findMethod(Class<?> mapperClass, Method invokedMethod) {

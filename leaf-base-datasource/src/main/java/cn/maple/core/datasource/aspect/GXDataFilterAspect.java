@@ -22,8 +22,10 @@ import org.springframework.util.ClassUtils;
 import org.springframework.util.ConcurrentReferenceHashMap;
 
 import java.lang.reflect.Method;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 @Aspect
 @Component
@@ -34,16 +36,29 @@ public class GXDataFilterAspect {
     private volatile GXDataScopeService cachedDataScopeService;
 
     @Pointcut("@annotation(cn.maple.core.datasource.annotation.GXDataFilter) || " +
-            "@within(cn.maple.core.datasource.annotation.GXDataFilter)")
+            "@within(cn.maple.core.datasource.annotation.GXDataFilter) || " +
+            "execution(* (@cn.maple.core.datasource.annotation.GXDataFilter *).*(..))")
     public void dataFilterPointCut() {
     }
 
     @Around("dataFilterPointCut()")
     public Object dataFilterAround(ProceedingJoinPoint point) throws Throwable {
+        MethodSignature signature = (MethodSignature) point.getSignature();
+        String methodName = signature.getDeclaringTypeName() + "." + signature.getName();
+        GXDataFilter dataFilter = findDataFilterAnnotation(point);
+        return invokeWithDataFilter(point.getArgs(), methodName, dataFilter, point::proceed);
+    }
+
+    public Object invokeWithDataFilter(Object[] args, String methodName, GXDataFilter dataFilter,
+                                       DataFilterInvocation invocation) throws Throwable {
         GXDataFilterContext oldFilterContext = GXDataFilterThreadLocalUtils.getDataFilterContext();
         boolean hasSetNewFilter = false;
 
         try {
+            if (dataFilter == null) {
+                return invocation.proceed();
+            }
+
             if (cachedDataScopeService == null) {
                 synchronized (this) {
                     if (cachedDataScopeService == null) {
@@ -59,14 +74,12 @@ public class GXDataFilterAspect {
             GXDataScopeService dataScopeService = cachedDataScopeService;
 
             boolean isSuperAdmin = dataScopeService.isSuperAdmin();
-            MethodSignature signature = (MethodSignature) point.getSignature();
-            String methodName = signature.getDeclaringTypeName() + "." + signature.getName();
 
             log.trace("Start data filter handling, method={}", methodName);
 
             if (!isSuperAdmin) {
                 try {
-                    GXDataFilterContext dataFilterContext = resolveDataFilterContext(point, dataScopeService, methodName);
+                    GXDataFilterContext dataFilterContext = resolveDataFilterContext(args, dataScopeService, methodName, dataFilter);
                     String sqlFilter = dataFilterContext.getSqlFilter();
 
                     if (CharSequenceUtil.isEmpty(sqlFilter)) {
@@ -98,7 +111,7 @@ public class GXDataFilterAspect {
                 }
             }
 
-            return point.proceed();
+            return invocation.proceed();
 
         } finally {
             if (hasSetNewFilter) {
@@ -115,7 +128,7 @@ public class GXDataFilterAspect {
         }
     }
 
-    private GXDataFilterContext resolveDataFilterContext(JoinPoint point, GXDataScopeService dataScopeService, String methodName) {
+    private GXDataFilter findDataFilterAnnotation(JoinPoint point) {
         MethodSignature signature = (MethodSignature) point.getSignature();
         Method method = signature.getMethod();
         Object target = point.getTarget();
@@ -124,31 +137,76 @@ public class GXDataFilterAspect {
 
         Method specificMethod = ClassUtils.getMostSpecificMethod(method, targetClass);
 
-        MethodClassKey cacheKey = new MethodClassKey(specificMethod, targetClass);
+        MethodClassKey cacheKey = new MethodClassKey(method, targetClass);
 
         DataFilterCacheEntry cacheEntry = METHOD_ANNOTATION_CACHE.computeIfAbsent(cacheKey, key -> {
             GXDataFilter annotation = AnnotatedElementUtils.findMergedAnnotation(specificMethod, GXDataFilter.class);
             if (annotation != null) {
                 return new DataFilterCacheEntry(true, annotation);
             }
-            if (target != null) {
-                annotation = AnnotatedElementUtils.findMergedAnnotation(targetClass, GXDataFilter.class);
+            if (!specificMethod.equals(method)) {
+                annotation = AnnotatedElementUtils.findMergedAnnotation(method, GXDataFilter.class);
                 if (annotation != null) {
                     return new DataFilterCacheEntry(true, annotation);
                 }
             }
+            annotation = AnnotatedElementUtils.findMergedAnnotation(targetClass, GXDataFilter.class);
+            if (annotation != null) {
+                return new DataFilterCacheEntry(true, annotation);
+            }
+            annotation = findInterfaceAnnotation(targetClass, method, new HashSet<>(), true);
+            if (annotation != null) {
+                return new DataFilterCacheEntry(true, annotation);
+            }
             return new DataFilterCacheEntry(false, null);
         });
 
-        if (!cacheEntry.hasAnnotation() || cacheEntry.annotation() == null) {
-            throw new GXBusinessException("Unable to find @GXDataFilter annotation for the intercepted target.");
-        }
+        return cacheEntry.hasAnnotation() ? cacheEntry.annotation() : null;
+    }
 
-        GXDataFilterContext context = GXDataFilterSqlResolver.resolve(dataScopeService, cacheEntry.annotation(), point, methodName);
+    private GXDataFilter findInterfaceAnnotation(Class<?> targetClass, Method method, Set<Class<?>> visited,
+                                                 boolean includeInterfaceTypeAnnotation) {
+        if (targetClass == null || !visited.add(targetClass)) {
+            return null;
+        }
+        for (Class<?> interfaceClass : targetClass.getInterfaces()) {
+            Method interfaceMethod = ClassUtils.getMethodIfAvailable(interfaceClass, method.getName(), method.getParameterTypes());
+            GXDataFilter annotation = interfaceMethod == null ? null
+                    : AnnotatedElementUtils.findMergedAnnotation(interfaceMethod, GXDataFilter.class);
+            if (annotation != null) {
+                return annotation;
+            }
+            if (includeInterfaceTypeAnnotation) {
+                annotation = AnnotatedElementUtils.findMergedAnnotation(interfaceClass, GXDataFilter.class);
+                if (annotation != null) {
+                    return annotation;
+                }
+            }
+            annotation = findInterfaceAnnotation(interfaceClass, method, visited, includeInterfaceTypeAnnotation);
+            if (annotation != null) {
+                return annotation;
+            }
+        }
+        return findInterfaceAnnotation(targetClass.getSuperclass(), method, visited, includeInterfaceTypeAnnotation);
+    }
+
+    public GXDataFilter findInterfaceMethodAnnotation(Class<?> targetClass, Method method) {
+        return findInterfaceAnnotation(targetClass, method, new HashSet<>(), false);
+    }
+
+    private GXDataFilterContext resolveDataFilterContext(Object[] args, GXDataScopeService dataScopeService,
+                                                         String methodName, GXDataFilter dataFilter) {
+
+        GXDataFilterContext context = GXDataFilterSqlResolver.resolve(dataScopeService, dataFilter, args, methodName);
         log.debug("Resolved SQL filter: {}", context.getSqlFilter());
         return context;
     }
 
     private record DataFilterCacheEntry(boolean hasAnnotation, GXDataFilter annotation) {
+    }
+
+    @FunctionalInterface
+    public interface DataFilterInvocation {
+        Object proceed() throws Throwable;
     }
 }

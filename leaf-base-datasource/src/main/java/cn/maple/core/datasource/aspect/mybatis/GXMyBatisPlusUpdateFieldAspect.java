@@ -11,6 +11,7 @@ import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.datasource.event.GXMyBatisModelUpdateFieldEvent;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
+import cn.maple.core.datasource.util.GXMyBatisListenerAnnotationUtils;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
@@ -72,6 +73,9 @@ public class GXMyBatisPlusUpdateFieldAspect {
 
         Dict updateFieldData = Dict.create();
         updateFieldList.forEach(field -> {
+            if (field == null) {
+                return;
+            }
             String fieldName = field.getFieldName();
             if (CharSequenceUtil.isNotEmpty(fieldName)) {
                 updateFieldData.set(CharSequenceUtil.toCamelCase(fieldName), field.getFieldValue());
@@ -81,7 +85,7 @@ public class GXMyBatisPlusUpdateFieldAspect {
         List<GXCondition<?>> conditionList = baseQueryParam.getCondition();
         Dict conditionFieldData = Dict.create();
         conditionList.forEach(condition -> {
-            if (condition instanceof GXConditionRaw) {
+            if (condition == null || condition instanceof GXConditionRaw) {
                 return;
             }
             String fieldExpression = condition.getFieldExpression();
@@ -151,7 +155,7 @@ public class GXMyBatisPlusUpdateFieldAspect {
                 return methodAnno;
             }
         }
-        return AnnotationUtil.getAnnotation(mapperClass, GXMyBatisListener.class);
+        return GXMyBatisListenerAnnotationUtils.findTypeAnnotation(mapperClass);
     }
 
     private Method findMethod(Class<?> mapperClass, Method invokedMethod) {

@@ -52,6 +52,7 @@ public class GXDataSourceAspect {
 
     @Pointcut("@annotation(cn.maple.core.datasource.annotation.GXDataSource) || " +
             "@within(cn.maple.core.datasource.annotation.GXDataSource) || " +
+            "execution(* (@cn.maple.core.datasource.annotation.GXDataSource *).*(..)) || " +
             "target(cn.maple.core.datasource.repository.GXMyBatisRepository+) || " +
             "target(cn.maple.core.datasource.service.GXMyBatisBaseService+)")
     public void dataSourcePointCut() {
@@ -133,7 +134,7 @@ public class GXDataSourceAspect {
         });
     }
 
-    private GXDataSource findInterfaceMethodAnnotation(Class<?> targetClass, Method method) {
+    public GXDataSource findInterfaceMethodAnnotation(Class<?> targetClass, Method method) {
         for (Class<?> ifc : ClassUtils.getAllInterfacesForClass(targetClass)) {
             Method interfaceMethod = ClassUtils.getMethodIfAvailable(ifc, method.getName(), method.getParameterTypes());
             if (interfaceMethod == null) {
@@ -173,8 +174,12 @@ public class GXDataSourceAspect {
             return point.proceed();
         }
 
+        return around(target, signature.getMethod(), point::proceed);
+    }
+
+    public Object around(Object target, Method method, DataSourceInvocation invocation) throws Throwable {
+
         Class<?> targetClass = target.getClass();
-        Method method = signature.getMethod();
 
         boolean isTraceEnabled = log.isTraceEnabled();
         boolean isDebugEnabled = log.isDebugEnabled();
@@ -225,7 +230,7 @@ public class GXDataSourceAspect {
                     TransactionAttribute transactionAttribute = getTransactionAttribute(targetClass, method);
                     validateCrossDatasourcePropagation(transactionAttribute);
                     if (shouldCreateIndependentTransaction(transactionAttribute)) {
-                        return proceedInIndependentTransaction(point, transactionAttribute, targetClass);
+                        return proceedInIndependentTransaction(invocation, transactionAttribute, targetClass);
                     }
                 }
             }
@@ -233,7 +238,7 @@ public class GXDataSourceAspect {
             if (isTraceEnabled) {
                 log.trace("Thread {} executing method: {}.{}", threadName, className, methodName);
             }
-            Object result = point.proceed();
+            Object result = invocation.proceed();
             if (isTraceEnabled) {
                 log.trace("Thread {} method executed successfully: {}.{}", threadName, className, methodName);
             }
@@ -292,7 +297,7 @@ public class GXDataSourceAspect {
                 + propagation);
     }
 
-    private Object proceedInIndependentTransaction(ProceedingJoinPoint point,
+    private Object proceedInIndependentTransaction(DataSourceInvocation invocation,
                                                    TransactionAttribute transactionAttribute,
                                                    Class<?> targetClass) throws Throwable {
         DefaultTransactionDefinition definition = transactionAttribute == null
@@ -303,7 +308,7 @@ public class GXDataSourceAspect {
         TransactionStatus transactionStatus = null;
         try {
             transactionStatus = transactionManager.getTransaction(definition);
-            Object result = point.proceed();
+            Object result = invocation.proceed();
             transactionManager.commit(transactionStatus);
             return result;
         } catch (Throwable throwable) {
@@ -352,5 +357,10 @@ public class GXDataSourceAspect {
     }
 
     private record DataSourceCacheEntry(boolean needSwitch, String dataSourceValue) {
+    }
+
+    @FunctionalInterface
+    public interface DataSourceInvocation {
+        Object proceed() throws Throwable;
     }
 }

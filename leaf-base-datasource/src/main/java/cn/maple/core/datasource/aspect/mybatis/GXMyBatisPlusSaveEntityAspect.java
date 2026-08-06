@@ -11,6 +11,7 @@ import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.datasource.event.GXMyBatisModelSaveEntityEvent;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
+import cn.maple.core.datasource.util.GXMyBatisListenerAnnotationUtils;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -114,7 +115,7 @@ public class GXMyBatisPlusSaveEntityAspect {
                 return methodAnno;
             }
         }
-        return AnnotationUtil.getAnnotation(mapperClass, GXMyBatisListener.class);
+        return GXMyBatisListenerAnnotationUtils.findTypeAnnotation(mapperClass);
     }
 
     private Method findMethod(Class<?> mapperClass, Method invokedMethod) {

@@ -1,6 +1,7 @@
 package cn.maple.core.datasource.aspect;
 
 import cn.maple.core.datasource.annotation.GXDataSource;
+import cn.maple.core.datasource.aspect.advisor.GXDataSourceInterfaceMethodAdvisor;
 import cn.maple.core.datasource.config.GXDynamicContextHolder;
 import cn.maple.core.datasource.config.GXDynamicDataSource;
 import io.seata.core.context.RootContext;
@@ -75,6 +76,26 @@ class GXDataSourceAspectTest {
 
         assertEquals("ok", result);
         assertNull(GXDynamicContextHolder.peek());
+    }
+
+    @Test
+    void switchesDatasourceFromInterfaceTypeAnnotationThroughCglibProxy() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(TransactionalTestConfig.class)) {
+            InterfaceTypeAnnotatedService service = context.getBean(InterfaceTypeAnnotatedService.class);
+
+            assertEquals("ds2", service.currentDatasource());
+            assertNull(GXDynamicContextHolder.peek());
+        }
+    }
+
+    @Test
+    void switchesDatasourceFromInterfaceMethodAnnotationThroughCglibProxy() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(TransactionalTestConfig.class)) {
+            InterfaceMethodAnnotatedService service = context.getBean(InterfaceMethodAnnotatedService.class);
+
+            assertEquals("interface_method_ds", service.currentDatasource());
+            assertNull(GXDynamicContextHolder.peek());
+        }
     }
 
     @Test
@@ -268,6 +289,30 @@ class GXDataSourceAspectTest {
         }
     }
 
+    @GXDataSource("ds2")
+    private interface InterfaceTypeAnnotatedService {
+        String currentDatasource();
+    }
+
+    static class InterfaceTypeAnnotatedServiceImpl implements InterfaceTypeAnnotatedService {
+        @Override
+        public String currentDatasource() {
+            return GXDynamicContextHolder.peek();
+        }
+    }
+
+    private interface InterfaceMethodAnnotatedService {
+        @GXDataSource("interface_method_ds")
+        String currentDatasource();
+    }
+
+    static class InterfaceMethodAnnotatedServiceImpl implements InterfaceMethodAnnotatedService {
+        @Override
+        public String currentDatasource() {
+            return GXDynamicContextHolder.peek();
+        }
+    }
+
     @GXDataSource("class_ds")
     private static class ClassAnnotatedService {
         public String query() {
@@ -282,6 +327,11 @@ class GXDataSourceAspectTest {
         @Bean
         GXDataSourceAspect gxDataSourceAspect() {
             return new GXDataSourceAspect();
+        }
+
+        @Bean
+        GXDataSourceInterfaceMethodAdvisor gxDataSourceInterfaceMethodAdvisor(GXDataSourceAspect gxDataSourceAspect) {
+            return new GXDataSourceInterfaceMethodAdvisor(gxDataSourceAspect);
         }
 
         @Bean
@@ -330,6 +380,16 @@ class GXDataSourceAspectTest {
         @Bean
         ClassQualifiedInnerService classQualifiedInnerService(TransactionRecorder transactionRecorder) {
             return new ClassQualifiedInnerService(transactionRecorder);
+        }
+
+        @Bean
+        InterfaceTypeAnnotatedService interfaceTypeAnnotatedService() {
+            return new InterfaceTypeAnnotatedServiceImpl();
+        }
+
+        @Bean
+        InterfaceMethodAnnotatedService interfaceMethodAnnotatedService() {
+            return new InterfaceMethodAnnotatedServiceImpl();
         }
     }
 

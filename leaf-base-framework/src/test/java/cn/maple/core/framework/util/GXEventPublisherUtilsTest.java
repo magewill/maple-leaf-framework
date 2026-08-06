@@ -68,7 +68,32 @@ class GXEventPublisherUtilsTest {
 
             assertEquals(0, publishedEvents.get());
             assertEquals(1, TransactionSynchronizationManager.getSynchronizations().size());
-            TransactionSynchronizationManager.getSynchronizations().getFirst().afterCommit();
+            TransactionSynchronizationManager.getSynchronizations().getFirst()
+                    .afterCompletion(TransactionSynchronization.STATUS_COMMITTED);
+        });
+
+        assertEquals(1, publishedEvents.get());
+    }
+
+    @Test
+    void publishEventAfterCommitPublishesEventScheduledDuringAfterCommit() {
+        AtomicInteger publishedEvents = new AtomicInteger();
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+
+        withApplicationContext(event -> publishedEvents.incrementAndGet(), () -> {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    GXEventPublisherUtils.publishEventAfterCommit(new GXBaseEvent<>("event"));
+                }
+            });
+
+            TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
+            assertEquals(0, publishedEvents.get());
+
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(synchronization -> synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
         });
 
         assertEquals(1, publishedEvents.get());
@@ -101,7 +126,7 @@ class GXEventPublisherUtilsTest {
             GXEventPublisherUtils.publishEventAfterCommit(new GXBaseEvent<>("event"));
 
             TransactionSynchronization synchronization = TransactionSynchronizationManager.getSynchronizations().getFirst();
-            assertDoesNotThrow(synchronization::afterCommit);
+            assertDoesNotThrow(() -> synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
         });
     }
 

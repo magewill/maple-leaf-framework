@@ -20,11 +20,15 @@ public final class GXDataFilterSqlResolver {
     }
 
     public static GXDataFilterContext resolve(GXDataScopeService dataScopeService, GXDataFilter dataFilter, JoinPoint point, String methodName) {
+        return resolve(dataScopeService, dataFilter, point == null ? null : point.getArgs(), methodName);
+    }
+
+    public static GXDataFilterContext resolve(GXDataScopeService dataScopeService, GXDataFilter dataFilter, Object[] pointArgs, String methodName) {
         if (dataScopeService.isSuperAdmin()) {
             return new GXDataFilterContext("", dataFilter, methodName, true);
         }
 
-        boolean ignored = checkIgnoreDataFilter(point);
+        boolean ignored = checkIgnoreDataFilter(pointArgs);
         if (ignored) {
             return new GXDataFilterContext("", dataFilter, methodName, true);
         }
@@ -51,8 +55,7 @@ public final class GXDataFilterSqlResolver {
         return new GXDataFilterContext(" (1 = 0) ", dataFilter, methodName, false);
     }
 
-    private static boolean checkIgnoreDataFilter(JoinPoint point) {
-        Object[] pointArgs = point.getArgs();
+    private static boolean checkIgnoreDataFilter(Object[] pointArgs) {
         if (pointArgs == null || pointArgs.length == 0) {
             return false;
         }

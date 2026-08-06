@@ -1,6 +1,5 @@
 package cn.maple.core.datasource.aspect.mybatis;
 
-import cn.hutool.core.annotation.AnnotationUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.TypeReference;
@@ -11,6 +10,7 @@ import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.datasource.event.GXMyBatisModelSaveBatchEntityEvent;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
+import cn.maple.core.datasource.util.GXMyBatisListenerAnnotationUtils;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -21,6 +21,7 @@ import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.stereotype.Component;
 
+import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.util.Collection;
 import java.util.List;
@@ -82,7 +83,9 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
             return;
         }
 
-        GXMyBatisListener listenerConfig = AnnotationUtil.getAnnotation(mapperClass, GXMyBatisListener.class);
+        Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
+        Class<?> targetClass = AopUtils.getTargetClass(point.getTarget());
+        GXMyBatisListener listenerConfig = resolveListenerConfig(targetClass, invokedMethod, mapperClass);
         if (ObjectUtil.isNull(listenerConfig)) {
             return;
         }
@@ -123,6 +126,15 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
     private Class<?> convertTypeToClass(Type type) {
         return Convert.convert(new TypeReference<>() {
         }, type);
+    }
+
+    private GXMyBatisListener resolveListenerConfig(Class<?> targetClass, Method invokedMethod, Class<?> mapperClass) {
+        GXMyBatisListener annotation = GXMyBatisListenerAnnotationUtils.findMethodAnnotation(targetClass, invokedMethod);
+        if (annotation != null) {
+            return annotation;
+        }
+        annotation = GXMyBatisListenerAnnotationUtils.findTypeAnnotation(targetClass);
+        return annotation != null ? annotation : GXMyBatisListenerAnnotationUtils.findTypeAnnotation(mapperClass);
     }
 }
 

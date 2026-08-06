@@ -32,9 +32,9 @@ public class GXEventPublisherUtils {
     /**
      * Publishes an event after a successfully committed transaction, or immediately when no actual transaction exists.
      * <p>
-     * A publishing failure in {@link TransactionSynchronization#afterCommit()} is logged and contained because the
-     * database transaction has already committed at that point. Without a transaction, publishing remains immediate
-     * and preserves the caller-visible exception behavior.
+     * A publishing failure after transaction completion is logged and contained because the database transaction has
+     * already committed at that point. Without a transaction, publishing remains immediate and preserves the
+     * caller-visible exception behavior.
      * <p>
      * This method is not a durable outbox: a process failure between commit and callback can still lose the event.
      * Synchronous listeners that write to the database should use a new transaction propagation.
@@ -44,7 +44,10 @@ public class GXEventPublisherUtils {
                 && TransactionSynchronizationManager.isActualTransactionActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
-                public void afterCommit() {
+                public void afterCompletion(int status) {
+                    if (status != TransactionSynchronization.STATUS_COMMITTED) {
+                        return;
+                    }
                     try {
                         publishEvent(event);
                     } catch (RuntimeException exception) {

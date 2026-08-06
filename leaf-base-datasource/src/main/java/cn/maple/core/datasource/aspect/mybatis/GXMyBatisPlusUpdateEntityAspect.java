@@ -11,6 +11,7 @@ import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.datasource.event.GXMyBatisModelUpdateEntityEvent;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
+import cn.maple.core.datasource.util.GXMyBatisListenerAnnotationUtils;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Constants;
@@ -40,6 +41,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Aspect
 @Component
@@ -50,6 +53,9 @@ public class GXMyBatisPlusUpdateEntityAspect {
             .maximumSize(2048)
             .expireAfterAccess(1, TimeUnit.DAYS)
             .build();
+    private static final Pattern WHERE_PARAM_NAME_PATTERN = Pattern.compile(
+            "#\\{[^}]*?\\.(" + Constants.WRAPPER_PARAM + "\\d+)(?:[,}])"
+    );
 
     @Around("""
             target(cn.maple.core.datasource.mapper.GXBaseMapper)
@@ -166,7 +172,7 @@ public class GXMyBatisPlusUpdateEntityAspect {
                 return methodAnno;
             }
         }
-        return AnnotationUtil.getAnnotation(mapperClass, GXMyBatisListener.class);
+        return GXMyBatisListenerAnnotationUtils.findTypeAnnotation(mapperClass);
     }
 
     private Method findMethod(Class<?> mapperClass, Method invokedMethod) {
@@ -200,14 +206,16 @@ public class GXMyBatisPlusUpdateEntityAspect {
         }
 
         ConditionParseResult conditionParseResult = WHERE_SQL_CONDITION_CACHE.get(whereSQL, this::extractConditionTokens);
+        List<String> whereParamNames = extractWhereParamNames(updateWrapper.getSqlSegment());
         if (ObjectUtil.isEmpty(paramNameValuePairs)
                 || ObjectUtil.isNull(conditionParseResult)
                 || !conditionParseResult.lossless()
-                || ObjectUtil.isEmpty(conditionParseResult.conditionTokens())) {
+                || ObjectUtil.isEmpty(conditionParseResult.conditionTokens())
+                || !hasMatchingWhereParameters(conditionParseResult.conditionTokens(), whereParamNames, paramNameValuePairs)) {
             return result.set("rawWhereSql", whereSQL);
         }
 
-        int paramIndex = 1;
+        int paramNameIndex = 0;
         for (ConditionToken token : conditionParseResult.conditionTokens()) {
             keyOperatorPairs.set(token.field(), token.operator());
             if (token.paramCount() <= 0) {
@@ -215,19 +223,38 @@ public class GXMyBatisPlusUpdateEntityAspect {
                 continue;
             }
             if (token.paramCount() == 1) {
-                String paramName = Constants.WRAPPER_PARAM + paramIndex++;
+                String paramName = whereParamNames.get(paramNameIndex++);
                 keyValuePairs.set(token.field(), paramNameValuePairs.get(paramName));
                 continue;
             }
             List<Object> values = new ArrayList<>(token.paramCount());
             for (int i = 0; i < token.paramCount(); i++) {
-                String paramName = Constants.WRAPPER_PARAM + paramIndex++;
+                String paramName = whereParamNames.get(paramNameIndex++);
                 values.add(paramNameValuePairs.get(paramName));
             }
             keyValuePairs.set(token.field(), values);
         }
 
         return result.set("rawWhereSql", whereSQL);
+    }
+
+    private List<String> extractWhereParamNames(String whereSqlSegment) {
+        List<String> paramNames = new ArrayList<>();
+        if (CharSequenceUtil.isBlank(whereSqlSegment)) {
+            return paramNames;
+        }
+        Matcher matcher = WHERE_PARAM_NAME_PATTERN.matcher(whereSqlSegment);
+        while (matcher.find()) {
+            paramNames.add(matcher.group(1));
+        }
+        return paramNames;
+    }
+
+    private boolean hasMatchingWhereParameters(List<ConditionToken> conditionTokens, List<String> whereParamNames,
+                                                Map<String, Object> paramNameValuePairs) {
+        int expectedParamCount = conditionTokens.stream().mapToInt(ConditionToken::paramCount).sum();
+        return expectedParamCount == whereParamNames.size()
+                && whereParamNames.stream().allMatch(paramNameValuePairs::containsKey);
     }
 
     private ConditionParseResult extractConditionTokens(String whereSQL) {
