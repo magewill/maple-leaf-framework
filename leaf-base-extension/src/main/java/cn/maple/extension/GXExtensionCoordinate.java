@@ -1,5 +1,7 @@
 package cn.maple.extension;
 
+import lombok.Getter;
+
 import java.io.Serial;
 import java.io.Serializable;
 import java.util.Objects;
@@ -11,9 +13,12 @@ public class GXExtensionCoordinate implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
 
+    @Getter
     private final String extensionPointName;
+    @Getter
     private final String bizScenarioUniqueIdentity;
     private final Class<?> extensionPointClass;
+    @Getter
     private final GXBizScenario bizScenario;
     private final int hashCode;
 
@@ -73,21 +78,6 @@ public class GXExtensionCoordinate implements Serializable {
     @SuppressWarnings("unchecked")
     public <T> Class<T> getExtensionPointClass() {
         return (Class<T>) extensionPointClass;
-    }
-
-    @SuppressWarnings("unchecked")
-    public GXBizScenario getBizScenario() {
-        return bizScenario;
-    }
-
-    @SuppressWarnings("unchecked")
-    public String getExtensionPointName() {
-        return extensionPointName;
-    }
-
-    @SuppressWarnings("unchecked")
-    public String getBizScenarioUniqueIdentity() {
-        return bizScenarioUniqueIdentity;
     }
 
     @Override
