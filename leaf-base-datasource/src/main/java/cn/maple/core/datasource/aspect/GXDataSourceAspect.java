@@ -32,7 +32,6 @@ import org.springframework.util.StringUtils;
 
 import java.lang.reflect.Method;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * Dynamic data source switching aspect.
@@ -42,7 +41,6 @@ import java.util.Objects;
 @Order(-1000)
 @Slf4j
 public class GXDataSourceAspect {
-    private static final String ROOT_CONTEXT_CLASS_NAME = "cn.maple.core.datasource.context.RootContext";
     private static final Map<Class<?>, DataSourceCacheEntry> CLASS_ANNOTATION_CACHE = new ConcurrentReferenceHashMap<>();
     private static final Map<MethodCacheKey, DataSourceCacheEntry> METHOD_ANNOTATION_CACHE = new ConcurrentReferenceHashMap<>();
 
@@ -223,13 +221,12 @@ public class GXDataSourceAspect {
                 }
 
                 boolean springTransactionActive = TransactionSynchronizationManager.isActualTransactionActive();
-                if ((springTransactionActive || hasSeataGlobalTransaction())
-                        && isDifferentDatasource(previousDataSource, dataSourceValue)) {
+                if (springTransactionActive && isDifferentDatasource(previousDataSource, dataSourceValue)) {
                     TransactionAttribute transactionAttribute = getTransactionAttribute(targetClass, method);
-                    if (springTransactionActive && shouldCreateIndependentTransaction(transactionAttribute)) {
+                    validateCrossDatasourcePropagation(transactionAttribute);
+                    if (shouldCreateIndependentTransaction(transactionAttribute)) {
                         return proceedInIndependentTransaction(point, transactionAttribute, targetClass);
                     }
-                    return proceedWithSuspendedSeataGlobalTransaction(point);
                 }
             }
 
@@ -272,20 +269,27 @@ public class GXDataSourceAspect {
     }
 
     private boolean isDifferentDatasource(String previousDataSource, String dataSourceValue) {
-        if (Objects.equals(previousDataSource, dataSourceValue)) {
-            return false;
-        }
-        return previousDataSource != null || !dynamicDataSource.isDefaultDataSource(dataSourceValue);
+        return !dynamicDataSource.isSameDataSource(previousDataSource, dataSourceValue);
     }
 
     private boolean shouldCreateIndependentTransaction(TransactionAttribute transactionAttribute) {
+        return transactionAttribute == null
+                || transactionAttribute.getPropagationBehavior() == TransactionDefinition.PROPAGATION_REQUIRED;
+    }
+
+    private void validateCrossDatasourcePropagation(TransactionAttribute transactionAttribute) {
         if (transactionAttribute == null) {
-            return true;
+            return;
         }
         int propagation = transactionAttribute.getPropagationBehavior();
-        return propagation != TransactionDefinition.PROPAGATION_REQUIRES_NEW
-                && propagation != TransactionDefinition.PROPAGATION_NOT_SUPPORTED
-                && propagation != TransactionDefinition.PROPAGATION_NEVER;
+        if (propagation == TransactionDefinition.PROPAGATION_REQUIRED
+                || propagation == TransactionDefinition.PROPAGATION_REQUIRES_NEW
+                || propagation == TransactionDefinition.PROPAGATION_NOT_SUPPORTED
+                || propagation == TransactionDefinition.PROPAGATION_NEVER) {
+            return;
+        }
+        throw new IllegalStateException("Cannot switch physical datasource within an active transaction using propagation "
+                + propagation);
     }
 
     private Object proceedInIndependentTransaction(ProceedingJoinPoint point,
@@ -296,7 +300,6 @@ public class GXDataSourceAspect {
                 : new DefaultTransactionDefinition(transactionAttribute);
         definition.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         PlatformTransactionManager transactionManager = resolveTransactionManager(transactionAttribute, targetClass);
-        SeataGlobalTransactionContext seataGlobalTransactionContext = suspendSeataGlobalTransaction();
         TransactionStatus transactionStatus = null;
         try {
             transactionStatus = transactionManager.getTransaction(definition);
@@ -313,69 +316,6 @@ public class GXDataSourceAspect {
                 }
             }
             throw throwable;
-        } finally {
-            restoreSeataGlobalTransaction(seataGlobalTransactionContext);
-        }
-    }
-
-    /**
-     * A Seata global XID is also thread-bound. It must not leak into the independently committed datasource call.
-     */
-    private SeataGlobalTransactionContext suspendSeataGlobalTransaction() {
-        try {
-            Class<?> rootContextClass = Class.forName(ROOT_CONTEXT_CLASS_NAME);
-            boolean globalLockRequired = Boolean.TRUE.equals(rootContextClass.getMethod("requireGlobalLock").invoke(null));
-            Object xid = rootContextClass.getMethod("unbind").invoke(null);
-            if (globalLockRequired) {
-                rootContextClass.getMethod("unbindGlobalLockFlag").invoke(null);
-            }
-            if (xid instanceof String value && StringUtils.hasText(value) || globalLockRequired) {
-                return new SeataGlobalTransactionContext(rootContextClass, xid instanceof String value ? value : null,
-                        globalLockRequired);
-            }
-            return null;
-        } catch (ClassNotFoundException ignored) {
-            return null;
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("Failed to suspend Seata global transaction for nested cross-datasource call", e);
-        }
-    }
-
-    private boolean hasSeataGlobalTransaction() {
-        try {
-            Class<?> rootContextClass = Class.forName(ROOT_CONTEXT_CLASS_NAME);
-            Object xid = rootContextClass.getMethod("getXID").invoke(null);
-            return xid instanceof String value && StringUtils.hasText(value)
-                    || Boolean.TRUE.equals(rootContextClass.getMethod("requireGlobalLock").invoke(null));
-        } catch (ClassNotFoundException ignored) {
-            return false;
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("Failed to inspect Seata global transaction for nested cross-datasource call", e);
-        }
-    }
-
-    private Object proceedWithSuspendedSeataGlobalTransaction(ProceedingJoinPoint point) throws Throwable {
-        SeataGlobalTransactionContext seataGlobalTransactionContext = suspendSeataGlobalTransaction();
-        try {
-            return point.proceed();
-        } finally {
-            restoreSeataGlobalTransaction(seataGlobalTransactionContext);
-        }
-    }
-
-    private void restoreSeataGlobalTransaction(SeataGlobalTransactionContext context) {
-        if (context == null) {
-            return;
-        }
-        try {
-            if (StringUtils.hasText(context.xid())) {
-                context.rootContextClass().getMethod("bind", String.class).invoke(null, context.xid());
-            }
-            if (context.globalLockRequired()) {
-                context.rootContextClass().getMethod("bindGlobalLockFlag").invoke(null);
-            }
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("Failed to restore Seata global transaction after nested cross-datasource call", e);
         }
     }
 
@@ -409,9 +349,6 @@ public class GXDataSourceAspect {
     }
 
     private record MethodCacheKey(Class<?> targetClass, Method method) {
-    }
-
-    private record SeataGlobalTransactionContext(Class<?> rootContextClass, String xid, boolean globalLockRequired) {
     }
 
     private record DataSourceCacheEntry(boolean needSwitch, String dataSourceValue) {

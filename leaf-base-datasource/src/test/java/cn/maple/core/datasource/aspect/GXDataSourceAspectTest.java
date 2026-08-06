@@ -3,24 +3,20 @@ package cn.maple.core.datasource.aspect;
 import cn.maple.core.datasource.annotation.GXDataSource;
 import cn.maple.core.datasource.config.GXDynamicContextHolder;
 import cn.maple.core.datasource.config.GXDynamicDataSource;
+import io.seata.core.context.RootContext;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
-import cn.maple.core.datasource.context.GXSeataRootContext;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.context.annotation.AnnotationConfigApplicationContext;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.EnableAspectJAutoProxy;
-import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.*;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.transaction.TransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.TransactionManagementConfigurer;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.DefaultTransactionStatus;
 
 import javax.sql.DataSource;
@@ -126,6 +122,32 @@ class GXDataSourceAspectTest {
     }
 
     @Test
+    void samePhysicalDatasourceAliasDoesNotCreateIndependentTransaction() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(TransactionalTestConfig.class)) {
+            OuterService outerService = context.getBean(OuterService.class);
+            TransactionFixture fixture = context.getBean(TransactionFixture.class);
+
+            assertThrows(OuterTransactionFailure.class, outerService::runWithDefaultDatasourceAlias);
+
+            assertEquals(List.of("ds1", "ds1", "ds1"), fixture.usedDataSources());
+            assertTrue(fixture.ds1Connection().rolledBack());
+            assertFalse(fixture.ds1Connection().committed());
+        }
+    }
+
+    @Test
+    void mandatoryPropagationRejectsCrossDatasourceCall() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(TransactionalTestConfig.class)) {
+            OuterService outerService = context.getBean(OuterService.class);
+            TransactionFixture fixture = context.getBean(TransactionFixture.class);
+
+            assertThrows(IllegalStateException.class, outerService::runWithMandatoryInnerTransaction);
+
+            assertTrue(fixture.usedDataSources().isEmpty());
+        }
+    }
+
+    @Test
     void nestedDatasourceUsesTransactionManagerQualifiedOnInnerMethod() {
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(TransactionalTestConfig.class)) {
             OuterService outerService = context.getBean(OuterService.class);
@@ -170,58 +192,58 @@ class GXDataSourceAspectTest {
     }
 
     @Test
-    void nestedDatasourceSuspendsSeataGlobalTransactionAndRestoresOuterContext() {
-        GXSeataRootContext.bind("xid-1");
-        GXSeataRootContext.bindGlobalLockFlag();
+    void nestedDatasourceRetainsSeataGlobalTransactionContext() {
+        RootContext.bind("xid-1");
+        RootContext.bindGlobalLockFlag();
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(TransactionalTestConfig.class)) {
             OuterService outerService = context.getBean(OuterService.class);
             TransactionFixture fixture = context.getBean(TransactionFixture.class);
 
             assertThrows(OuterTransactionFailure.class, outerService::runWithSeataGlobalTransaction);
 
-            assertEquals(Arrays.asList("xid-1", null, "xid-1"), fixture.seataXids());
-            assertEquals(List.of(true, false, true), fixture.seataGlobalLockFlags());
+            assertEquals(Arrays.asList("xid-1", "xid-1", "xid-1"), fixture.seataXids());
+            assertEquals(List.of(true, true, true), fixture.seataGlobalLockFlags());
             assertTrue(fixture.ds1Connection().rolledBack());
             assertTrue(fixture.ds2Connection().committed());
         } finally {
-            GXSeataRootContext.unbind();
-            GXSeataRootContext.unbindGlobalLockFlag();
+            RootContext.unbind();
+            RootContext.unbindGlobalLockFlag();
         }
     }
 
     @Test
-    void requiresNewDatasourceSuspendsSeataGlobalTransactionAndRestoresOuterContext() {
-        GXSeataRootContext.bind("xid-2");
+    void requiresNewDatasourceRetainsSeataGlobalTransactionContext() {
+        RootContext.bind("xid-2");
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(TransactionalTestConfig.class)) {
             OuterService outerService = context.getBean(OuterService.class);
             TransactionFixture fixture = context.getBean(TransactionFixture.class);
 
             assertThrows(OuterTransactionFailure.class, outerService::runWithSeataGlobalTransactionAndRequiresNew);
 
-            assertEquals(Arrays.asList("xid-2", null, "xid-2"), fixture.seataXids());
+            assertEquals(Arrays.asList("xid-2", "xid-2", "xid-2"), fixture.seataXids());
             assertTrue(fixture.ds1Connection().rolledBack());
             assertTrue(fixture.ds2Connection().committed());
         } finally {
-            GXSeataRootContext.unbind();
+            RootContext.unbind();
         }
     }
 
     @Test
-    void datasourceWithOnlySeataGlobalContextSuspendsAndRestoresIt() {
-        GXSeataRootContext.bind("xid-3");
-        GXSeataRootContext.bindGlobalLockFlag();
+    void datasourceWithOnlySeataGlobalContextRetainsIt() {
+        RootContext.bind("xid-3");
+        RootContext.bindGlobalLockFlag();
         try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(TransactionalTestConfig.class)) {
             OuterService outerService = context.getBean(OuterService.class);
             TransactionFixture fixture = context.getBean(TransactionFixture.class);
 
             outerService.runWithSeataGlobalContextOnly();
 
-            assertEquals(Arrays.asList("xid-3", null, "xid-3"), fixture.seataXids());
-            assertEquals(List.of(true, false, true), fixture.seataGlobalLockFlags());
+            assertEquals(Arrays.asList("xid-3", "xid-3", "xid-3"), fixture.seataXids());
+            assertEquals(List.of(true, true, true), fixture.seataGlobalLockFlags());
             assertTrue(fixture.ds2Connection().committed());
         } finally {
-            GXSeataRootContext.unbind();
-            GXSeataRootContext.unbindGlobalLockFlag();
+            RootContext.unbind();
+            RootContext.unbindGlobalLockFlag();
         }
     }
 
@@ -354,6 +376,21 @@ class GXDataSourceAspectTest {
 
         @GXDataSource("ds1")
         @Transactional
+        public void runWithDefaultDatasourceAlias() {
+            transactionRecorder.recordCurrentDataSource();
+            innerService.getFromDefaultDatasource();
+            transactionRecorder.recordCurrentDataSource();
+            throw new OuterTransactionFailure();
+        }
+
+        @GXDataSource("ds1")
+        @Transactional
+        public void runWithMandatoryInnerTransaction() {
+            innerService.getListWithMandatoryTransaction();
+        }
+
+        @GXDataSource("ds1")
+        @Transactional
         public void runUsingQualifiedTransactionManager() {
             innerService.getListWithQualifiedTransactionManager();
         }
@@ -429,6 +466,12 @@ class GXDataSourceAspectTest {
         }
 
         @GXDataSource("ds2")
+        @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+        public void getListWithMandatoryTransaction() {
+            transactionRecorder.recordCurrentDataSource();
+        }
+
+        @GXDataSource("ds2")
         @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
         public void getListInNewTransactionAndRecordSeataXid() {
             transactionRecorder.recordCurrentDataSource();
@@ -439,18 +482,18 @@ class GXDataSourceAspectTest {
     private record TransactionRecorder(DataSource dataSource, TransactionFixture fixture) {
 
         private void recordCurrentDataSource() {
-                try {
-                    fixture.record(DataSourceUtils.getConnection(dataSource));
-                } catch (Exception e) {
-                    throw new IllegalStateException(e);
-                }
+            try {
+                fixture.record(DataSourceUtils.getConnection(dataSource));
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
             }
+        }
 
         private void recordSeataXid() {
-            fixture.recordSeataXid(GXSeataRootContext.getXID());
-            fixture.recordSeataGlobalLockFlag(GXSeataRootContext.requireGlobalLock());
+            fixture.recordSeataXid(RootContext.getXID());
+            fixture.recordSeataGlobalLockFlag(RootContext.requireGlobalLock());
         }
-        }
+    }
 
     private static class TransactionFixture {
         private final RecordingDataSource ds1 = new RecordingDataSource();

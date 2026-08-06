@@ -154,11 +154,6 @@ public class GXMyBatisPlusConfig {
         }
 
         @Override
-        public String getTenantIdColumn() {
-            return "tenant_id";
-        }
-
-        @Override
         public boolean ignoreTable(String tableName) {
             if (CharSequenceUtil.isBlank(tableName)) {
                 return true;

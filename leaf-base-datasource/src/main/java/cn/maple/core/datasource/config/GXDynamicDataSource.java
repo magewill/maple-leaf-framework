@@ -40,6 +40,18 @@ public class GXDynamicDataSource extends AbstractRoutingDataSource implements Di
         return defaultDataSource != null && defaultDataSource == getResolvedDataSources().get(dataSourceName);
     }
 
+    public boolean isSameDataSource(String firstDataSourceName, String secondDataSourceName) {
+        return resolveDataSource(firstDataSourceName) == resolveDataSource(secondDataSourceName);
+    }
+
+    private DataSource resolveDataSource(String dataSourceName) {
+        if (dataSourceName == null) {
+            return getResolvedDefaultDataSource();
+        }
+        DataSource dataSource = getResolvedDataSources().get(dataSourceName);
+        return dataSource != null ? dataSource : getResolvedDefaultDataSource();
+    }
+
     @Override
     public void destroy() {
         for (DruidDataSource dataSource : managedDataSources) {
