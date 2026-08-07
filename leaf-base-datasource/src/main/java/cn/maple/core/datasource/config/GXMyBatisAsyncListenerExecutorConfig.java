@@ -12,7 +12,6 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.RejectedExecutionHandler;
-import java.util.concurrent.ThreadPoolExecutor;
 
 @Log4j2
 @Configuration
@@ -58,7 +57,7 @@ public class GXMyBatisAsyncListenerExecutorConfig {
         int normalizedAwaitTerminationSeconds = Math.max(0, awaitTerminationSeconds);
 
         if (virtualThreadsEnabled) {
-            return createVirtualThreadExecutor(maxPoolSize, normalizedAwaitTerminationSeconds);
+            return createVirtualThreadExecutor("event", "maple-framework-mybatis-event-virtual-", maxPoolSize, normalizedAwaitTerminationSeconds);
         }
 
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -80,16 +79,25 @@ public class GXMyBatisAsyncListenerExecutorConfig {
         return executor;
     }
 
-    private AsyncTaskExecutor createVirtualThreadExecutor(int maxPoolSize, int normalizedAwaitTerminationSeconds) {
-        SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor("maple-framework-mybatis-event-virtual-");
+    @Bean("myBatisValidationAsyncTaskExecutor")
+    public AsyncTaskExecutor myBatisValidationAsyncTaskExecutor() {
+        int cpuCores = Math.max(1, Runtime.getRuntime().availableProcessors());
+        int corePoolSize = Math.max(1, (int) Math.ceil(cpuCores * normalizeFactor(corePoolSizeFactor, DEFAULT_CORE_POOL_SIZE_FACTOR)));
+        int maxPoolSize = Math.max(corePoolSize, (int) Math.ceil(corePoolSize * normalizeFactor(maxPoolSizeFactor, DEFAULT_MAX_POOL_SIZE_FACTOR)));
+        int normalizedAwaitTerminationSeconds = Math.max(0, awaitTerminationSeconds);
+        return createVirtualThreadExecutor("validation", "maple-framework-mybatis-validation-virtual-", maxPoolSize, normalizedAwaitTerminationSeconds);
+    }
+
+    private AsyncTaskExecutor createVirtualThreadExecutor(String executorType, String threadNamePrefix, int maxPoolSize, int normalizedAwaitTerminationSeconds) {
+        SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor(threadNamePrefix);
         executor.setVirtualThreads(true);
         executor.setTaskDecorator(createTaskDecorator());
         executor.setTaskTerminationTimeout(toMillis(normalizedAwaitTerminationSeconds));
         executor.setCancelRemainingTasksOnClose(false);
-        executor.setRejectTasksWhenLimitReached(false);
+        executor.setRejectTasksWhenLimitReached(true);
         executor.setConcurrencyLimit(resolveVirtualConcurrencyLimit(maxPoolSize));
-        log.info("MyBatis event async executor initialized with virtual threads: concurrencyLimit={}, taskTerminationTimeoutSeconds={}",
-                executor.getConcurrencyLimit(), normalizedAwaitTerminationSeconds);
+        log.info("MyBatis {} async executor initialized with virtual threads: concurrencyLimit={}, taskTerminationTimeoutSeconds={}",
+                executorType, executor.getConcurrencyLimit(), normalizedAwaitTerminationSeconds);
         return executor;
     }
 
@@ -119,11 +127,7 @@ public class GXMyBatisAsyncListenerExecutorConfig {
             if (pool.isShutdown()) {
                 throw new RejectedExecutionException("MyBatis event executor has been shut down");
             }
-            try {
-                new ThreadPoolExecutor.CallerRunsPolicy().rejectedExecution(runnable, pool);
-            } catch (RuntimeException e) {
-                throw new RejectedExecutionException("Failed to run rejected MyBatis event task", e);
-            }
+            throw new RejectedExecutionException("MyBatis event executor is saturated");
         };
     }
 

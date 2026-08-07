@@ -13,7 +13,8 @@ import cn.maple.core.datasource.event.GXMyBatisModelUpdateEntityEvent;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
 import cn.maple.core.datasource.util.GXMyBatisListenerAnnotationUtils;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
-import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.AbstractWrapper;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.toolkit.Constants;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -28,6 +29,7 @@ import net.sf.jsqlparser.expression.operators.relational.ExpressionList;
 import net.sf.jsqlparser.expression.operators.relational.InExpression;
 import net.sf.jsqlparser.expression.operators.relational.IsNullExpression;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.schema.Column;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -90,13 +92,16 @@ public class GXMyBatisPlusUpdateEntityAspect {
 
     private Dict handlePointArgs(ProceedingJoinPoint point) {
         Object[] args = point.getArgs();
-        if (ObjectUtil.isEmpty(args) || ObjectUtil.isNull(args[0])) {
+        if (ObjectUtil.isEmpty(args)) {
             return Dict.create();
         }
 
         Object entity = args[0];
         String operation = ((MethodSignature) point.getSignature()).getName();
         if (CharSequenceUtil.equals(operation, "updateById")) {
+            if (ObjectUtil.isNull(entity)) {
+                return Dict.create();
+            }
             return Dict.create()
                     .set("operation", operation)
                     .set("entityData", Convert.convert(Dict.class, entity))
@@ -108,13 +113,14 @@ public class GXMyBatisPlusUpdateEntityAspect {
         }
         Object objectWrapper = args[1];
         Dict updateCondition = handleUpdateWrapper(objectWrapper);
-        Dict entityData = Convert.convert(Dict.class, entity);
+        Dict entityData = ObjectUtil.isNull(entity) ? Dict.create() : Convert.convert(Dict.class, entity);
 
         return Dict.create()
                 .set("operation", operation)
                 .set("entityData", entityData)
                 .set("keyOperatorPairs", updateCondition.get("keyOperatorPairs"))
-                .set("keyValuePairs", updateCondition.get("keyValuePairs"));
+                .set("keyValuePairs", updateCondition.get("keyValuePairs"))
+                .set("rawWhereSql", updateCondition.getStr("rawWhereSql"));
     }
 
     private void publishEvent(ProceedingJoinPoint point) {
@@ -184,12 +190,21 @@ public class GXMyBatisPlusUpdateEntityAspect {
     }
 
     private <T> Dict handleUpdateWrapper(Object objectWrapper) {
-        UpdateWrapper<T> updateWrapper = Convert.convert(new TypeReference<>() {
-        }, objectWrapper);
-        return parseWhereSQL(updateWrapper);
+        if (objectWrapper instanceof AbstractWrapper<?, ?, ?> updateWrapper) {
+            return parseWhereSQL(updateWrapper);
+        }
+        if (objectWrapper instanceof Wrapper<?> wrapper) {
+            return Dict.create()
+                    .set("keyOperatorPairs", Dict.create())
+                    .set("keyValuePairs", Dict.create())
+                    .set("rawWhereSql", wrapper.getTargetSql());
+        }
+        return Dict.create()
+                .set("keyOperatorPairs", Dict.create())
+                .set("keyValuePairs", Dict.create());
     }
 
-    private <T> Dict parseWhereSQL(UpdateWrapper<T> updateWrapper) {
+    private Dict parseWhereSQL(AbstractWrapper<?, ?, ?> updateWrapper) {
         Dict keyValuePairs = Dict.create();
         Dict keyOperatorPairs = Dict.create();
         Dict result = Dict.create()
@@ -207,7 +222,7 @@ public class GXMyBatisPlusUpdateEntityAspect {
 
         ConditionParseResult conditionParseResult = WHERE_SQL_CONDITION_CACHE.get(whereSQL, this::extractConditionTokens);
         List<String> whereParamNames = extractWhereParamNames(updateWrapper.getSqlSegment());
-        if (ObjectUtil.isEmpty(paramNameValuePairs)
+        if (ObjectUtil.isNull(paramNameValuePairs)
                 || ObjectUtil.isNull(conditionParseResult)
                 || !conditionParseResult.lossless()
                 || ObjectUtil.isEmpty(conditionParseResult.conditionTokens())
@@ -224,13 +239,13 @@ public class GXMyBatisPlusUpdateEntityAspect {
             }
             if (token.paramCount() == 1) {
                 String paramName = whereParamNames.get(paramNameIndex++);
-                keyValuePairs.set(token.field(), paramNameValuePairs.get(paramName));
+                keyValuePairs.set(token.field(), snapshotValue(paramNameValuePairs.get(paramName)));
                 continue;
             }
             List<Object> values = new ArrayList<>(token.paramCount());
             for (int i = 0; i < token.paramCount(); i++) {
                 String paramName = whereParamNames.get(paramNameIndex++);
-                values.add(paramNameValuePairs.get(paramName));
+                values.add(snapshotValue(paramNameValuePairs.get(paramName)));
             }
             keyValuePairs.set(token.field(), values);
         }
@@ -284,25 +299,25 @@ public class GXMyBatisPlusUpdateEntityAspect {
 
                 @Override
                 public <S> Void visit(Between between, S context) {
-                    appendToken(between.getLeftExpression().toString(), between.isNot() ? "not between" : "between", 2);
+                    appendToken(between.getLeftExpression(), between.isNot() ? "not between" : "between", 2);
                     return null;
                 }
 
                 @Override
                 public <S> Void visit(InExpression inExpression, S context) {
-                    appendToken(inExpression.getLeftExpression().toString(), inExpression.isNot() ? "not in" : "in", countExpressionValues(inExpression.getRightExpression()));
+                    appendToken(inExpression.getLeftExpression(), inExpression.isNot() ? "not in" : "in", countExpressionValues(inExpression.getRightExpression()));
                     return null;
                 }
 
                 @Override
                 public <S> Void visit(IsNullExpression isNullExpression, S context) {
-                    appendToken(isNullExpression.getLeftExpression().toString(), isNullExpression.isNot() ? "is not null" : "is null", 0);
+                    appendToken(isNullExpression.getLeftExpression(), isNullExpression.isNot() ? "is not null" : "is null", 0);
                     return null;
                 }
 
                 @Override
                 protected <S> Void visitBinaryExpression(BinaryExpression binaryExpression, S context) {
-                    appendToken(binaryExpression.getLeftExpression().toString(), binaryExpression.getStringExpression(), 1);
+                    appendToken(binaryExpression.getLeftExpression(), binaryExpression.getStringExpression(), 1);
                     return null;
                 }
 
@@ -319,8 +334,12 @@ public class GXMyBatisPlusUpdateEntityAspect {
                     return null;
                 }
 
-                private void appendToken(String leftExpression, String operator, int paramCount) {
-                    String field = CharSequenceUtil.toCamelCase(leftExpression);
+                private void appendToken(Expression leftExpression, String operator, int paramCount) {
+                    if (!(leftExpression instanceof Column column)) {
+                        lossless[0] = false;
+                        return;
+                    }
+                    String field = CharSequenceUtil.toCamelCase(column.getColumnName());
                     if (conditionTokens.stream().anyMatch(token -> CharSequenceUtil.equals(token.field(), field))) {
                         lossless[0] = false;
                     }
@@ -343,6 +362,10 @@ public class GXMyBatisPlusUpdateEntityAspect {
             return expressionList.getExpressions().size();
         }
         return 1;
+    }
+
+    private Object snapshotValue(Object value) {
+        return ObjectUtil.cloneIfPossible(value);
     }
 
     private Class<?> convertTypeToClass(Type type) {

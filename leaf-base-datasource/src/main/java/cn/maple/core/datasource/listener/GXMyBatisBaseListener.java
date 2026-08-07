@@ -40,7 +40,7 @@ interface GXMyBatisBaseListener {
         Dict keyOperatorPairs = convertToDict(source.get("keyOperatorPairs"));
         Dict keyValuePairs = convertToDict(source.get("keyValuePairs"));
 
-        listener.updateEntityListener(entityData, keyValuePairs, keyOperatorPairs);
+        listener.updateEntityListener(entityData, keyValuePairs, keyOperatorPairs, source.getStr("rawWhereSql"));
     }
 
     default void listenerUpdateField(GXMyBatisModelUpdateFieldEvent<Dict> updateFieldEvent) {

@@ -11,6 +11,8 @@ import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
 import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
 import cn.maple.core.framework.dto.inner.field.GXUpdateNumberField;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
@@ -28,8 +30,10 @@ import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -211,6 +215,113 @@ class GXMyBatisListenerAspectRegressionTest {
         Dict parsed = ReflectionTestUtils.invokeMethod(updateEntityAspect, "parseWhereSQL", wrapper);
 
         assertEquals(7, ((Dict) parsed.get("keyValuePairs")).get("id"));
+    }
+
+    @Test
+    void updateEntityParsesLambdaUpdateWrapper() {
+        LambdaUpdateWrapper<Object> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.setSql("status = {0}", "changed").apply("id = {0}", 7L);
+
+        Dict parsed = ReflectionTestUtils.invokeMethod(updateEntityAspect, "handleUpdateWrapper", wrapper);
+
+        assertEquals(7L, ((Dict) parsed.get("keyValuePairs")).get("id"));
+    }
+
+    @Test
+    void updateEntityRecordsWrapperOnlyUpdate() {
+        UpdateWrapper<Object> wrapper = new UpdateWrapper<>();
+        wrapper.set("status", "enabled").eq("id", 7);
+        ProceedingJoinPoint point = Mockito.mock(ProceedingJoinPoint.class);
+        MethodSignature signature = Mockito.mock(MethodSignature.class);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{null, wrapper});
+        Mockito.when(point.getSignature()).thenReturn(signature);
+        Mockito.when(signature.getName()).thenReturn("update");
+
+        Dict source = ReflectionTestUtils.invokeMethod(updateEntityAspect, "handlePointArgs", point);
+
+        assertEquals("update", source.get("operation"));
+        assertEquals(Dict.create(), source.get("entityData"));
+        assertEquals(7, ((Dict) source.get("keyValuePairs")).get("id"));
+    }
+
+    @Test
+    void updateEntityPreservesRawWhereSqlWhenConditionsCannotBeLosslesslyParsed() {
+        UpdateWrapper<Object> wrapper = new UpdateWrapper<>();
+        wrapper.eq("id", 7).or().eq("name", "maple");
+        ProceedingJoinPoint point = Mockito.mock(ProceedingJoinPoint.class);
+        MethodSignature signature = Mockito.mock(MethodSignature.class);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{null, wrapper});
+        Mockito.when(point.getSignature()).thenReturn(signature);
+        Mockito.when(signature.getName()).thenReturn("update");
+
+        Dict source = ReflectionTestUtils.invokeMethod(updateEntityAspect, "handlePointArgs", point);
+
+        assertEquals(wrapper.getTargetSql(), source.getStr("rawWhereSql"));
+    }
+
+    @Test
+    void updateEntityPreservesTargetSqlForNonAbstractWrapper() {
+        @SuppressWarnings("unchecked")
+        Wrapper<Object> wrapper = Mockito.mock(Wrapper.class);
+        Mockito.when(wrapper.getTargetSql()).thenReturn("id = 7");
+
+        Dict parsed = ReflectionTestUtils.invokeMethod(updateEntityAspect, "handleUpdateWrapper", wrapper);
+
+        assertEquals("id = 7", parsed.getStr("rawWhereSql"));
+        assertEquals(Dict.create(), parsed.get("keyOperatorPairs"));
+        assertEquals(Dict.create(), parsed.get("keyValuePairs"));
+    }
+
+    @Test
+    void updateEntityListenerWithRawWhereSqlDelegatesToLegacyListener() {
+        AtomicReference<String> receivedData = new AtomicReference<>();
+        GXMybatisListenerService<String> listener = new GXMybatisListenerService<>() {
+            @Override
+            public void updateEntityListener(String data, Dict keyValuePairs, Dict keyOperatorPairs) {
+                receivedData.set(data);
+            }
+        };
+
+        assertDoesNotThrow(() -> GXMybatisListenerService.class
+                .getMethod("updateEntityListener", Object.class, Dict.class, Dict.class, String.class)
+                .invoke(listener, "entity", Dict.create(), Dict.create(), "id = 7"));
+
+        assertEquals("entity", receivedData.get());
+    }
+
+    @Test
+    void updateEntityParsesParameterlessNullCondition() {
+        UpdateWrapper<Object> wrapper = new UpdateWrapper<>();
+        wrapper.isNull("deleted_at");
+
+        Dict parsed = ReflectionTestUtils.invokeMethod(updateEntityAspect, "parseWhereSQL", wrapper);
+
+        assertEquals("is null", ((Dict) parsed.get("keyOperatorPairs")).get("deletedAt"));
+        assertTrue(((Dict) parsed.get("keyValuePairs")).containsKey("deletedAt"));
+    }
+
+    @Test
+    void updateEntityFallsBackToRawSqlForComputedConditionFields() {
+        UpdateWrapper<Object> wrapper = new UpdateWrapper<>();
+        wrapper.apply("DATE(created_at) = {0}", "2026-08-07");
+
+        Dict parsed = ReflectionTestUtils.invokeMethod(updateEntityAspect, "parseWhereSQL", wrapper);
+
+        assertEquals(Dict.create(), parsed.get("keyOperatorPairs"));
+        assertEquals(Dict.create(), parsed.get("keyValuePairs"));
+        assertEquals(wrapper.getTargetSql(), parsed.getStr("rawWhereSql"));
+    }
+
+    @Test
+    void updateEntitySnapshotsMutableWhereValues() {
+        Date updatedAt = new Date(1_000L);
+        UpdateWrapper<Object> wrapper = new UpdateWrapper<>();
+        wrapper.eq("updated_at", updatedAt);
+
+        Dict parsed = ReflectionTestUtils.invokeMethod(updateEntityAspect, "parseWhereSQL", wrapper);
+        updatedAt.setTime(2_000L);
+
+        assertEquals(new Date(1_000L), ((Dict) parsed.get("keyValuePairs")).get("updatedAt"));
     }
 
     @Test
@@ -403,4 +514,5 @@ class GXMyBatisListenerAspectRegressionTest {
 
     private static class SecondListener implements GXMybatisListenerService<Object> {
     }
+
 }

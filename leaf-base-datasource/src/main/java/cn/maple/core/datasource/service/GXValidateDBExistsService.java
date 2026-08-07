@@ -13,7 +13,7 @@ import java.util.concurrent.*;
 
 public interface GXValidateDBExistsService {
     private static Executor resolveAsyncExecutor() {
-        Executor executor = GXSpringContextUtils.getBean("myBatisEventAsyncTaskExecutor", Executor.class);
+        Executor executor = GXSpringContextUtils.getBean("myBatisValidationAsyncTaskExecutor", Executor.class);
         return executor != null ? executor : ForkJoinPool.commonPool();
     }
 
