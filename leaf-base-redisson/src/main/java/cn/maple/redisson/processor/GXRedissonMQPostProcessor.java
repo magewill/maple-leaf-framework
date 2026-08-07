@@ -70,59 +70,78 @@ public class GXRedissonMQPostProcessor implements BeanPostProcessor, DisposableB
         try {
             listener.registerRedissonListener();
         } catch (Exception e) {
+            Set<String> partiallyRegisteredKeys = recordNewListeners(beforeListeners);
+            if (!partiallyRegisteredKeys.isEmpty()) {
+                int cleanupFailures = unsubscribeListeners(partiallyRegisteredKeys);
+                if (cleanupFailures > 0) {
+                    log.error("Failed to compensate partial Redisson MQ listener registration, bean={}, failed={}",
+                            beanName, cleanupFailures);
+                }
+            }
             registeredBeans.remove(beanName);
             throw new IllegalStateException("Failed to register Redisson MQ listener bean [" + beanName + "]", e);
         }
 
-        Map<String, String> afterListeners = GXRedissonMQUtils.getAllLocalListeners();
-        Set<String> beforeKeys = new HashSet<>(beforeListeners.keySet());
-        int newListenerCount = 0;
-        for (Map.Entry<String, String> entry : afterListeners.entrySet()) {
-            if (!beforeKeys.contains(entry.getKey())) {
-                registeredListeners.put(entry.getKey(), entry.getValue());
-                newListenerCount++;
-                log.debug("Recorded Redisson MQ listener, key={}, listenerId={}", entry.getKey(), entry.getValue());
-            }
-        }
-
-        if (newListenerCount == 0) {
+        Set<String> newListenerKeys = recordNewListeners(beforeListeners);
+        if (newListenerKeys.isEmpty()) {
             log.warn("Redisson MQ listener bean [{}] did not register a new listener. It may already be registered.", beanName);
             return;
         }
         successCount.incrementAndGet();
-        log.info("Registered Redisson MQ listener bean [{}], newListenerCount={}", beanName, newListenerCount);
+        log.info("Registered Redisson MQ listener bean [{}], newListenerCount={}", beanName, newListenerKeys.size());
+    }
+
+    private Set<String> recordNewListeners(Map<String, String> beforeListeners) {
+        Map<String, String> afterListeners = GXRedissonMQUtils.getAllLocalListeners();
+        Set<String> beforeKeys = new HashSet<>(beforeListeners.keySet());
+        Set<String> newListenerKeys = new HashSet<>();
+        for (Map.Entry<String, String> entry : afterListeners.entrySet()) {
+            if (!beforeKeys.contains(entry.getKey())) {
+                registeredListeners.put(entry.getKey(), entry.getValue());
+                newListenerKeys.add(entry.getKey());
+                log.debug("Recorded Redisson MQ listener, key={}, listenerId={}", entry.getKey(), entry.getValue());
+            }
+        }
+        return newListenerKeys;
     }
 
     @Override
     public void destroy() {
-        if (registeredListeners.isEmpty()) {
+        int listenerCount = registeredListeners.size();
+        if (listenerCount == 0) {
             log.info("No Redisson MQ listeners need to be unsubscribed");
-            GXRedissonMQUtils.clearLocalCache();
-            clearLocalState();
-            return;
         }
 
-        int unsubscribeSuccessCount = 0;
+        int unsubscribeFailCount = unsubscribeListeners(new HashSet<>(registeredListeners.keySet()));
+        int unsubscribeSuccessCount = listenerCount - unsubscribeFailCount;
+        if (GXRedissonMQUtils.getAllLocalListeners().isEmpty()) {
+            GXRedissonMQUtils.clearLocalCache();
+        } else {
+            log.warn("Retaining local Redisson MQ listener cache because subscriptions remain after shutdown, count={}",
+                    GXRedissonMQUtils.getAllLocalListeners().size());
+        }
+
+        log.info("Redisson MQ listener unsubscribe finished, success={}, failed={}, registeredBeans={}, registeredListenerBeans={}",
+                unsubscribeSuccessCount, unsubscribeFailCount, registeredBeans.size(), successCount.get());
+        clearLocalState();
+    }
+
+    private int unsubscribeListeners(Set<String> cacheKeys) {
         int unsubscribeFailCount = 0;
-        for (String cacheKey : registeredListeners.keySet()) {
+        for (String cacheKey : cacheKeys) {
             try {
                 GXRedissonMQUtils.unsubscribeByCacheKey(cacheKey);
-                unsubscribeSuccessCount++;
+                registeredListeners.remove(cacheKey);
             } catch (Exception e) {
                 unsubscribeFailCount++;
                 log.error("Failed to unsubscribe Redisson MQ listener, cacheKey={}", cacheKey, e);
             }
         }
-
-        log.info("Redisson MQ listener unsubscribe finished, success={}, failed={}, registeredBeans={}, registeredListenerBeans={}",
-                unsubscribeSuccessCount, unsubscribeFailCount, registeredBeans.size(), successCount.get());
-        GXRedissonMQUtils.clearLocalCache();
-        clearLocalState();
+        return unsubscribeFailCount;
     }
 
     private void clearLocalState() {
         interfaceImplementationCache.clear();
-        registeredListeners.clear();
         registeredBeans.clear();
     }
 

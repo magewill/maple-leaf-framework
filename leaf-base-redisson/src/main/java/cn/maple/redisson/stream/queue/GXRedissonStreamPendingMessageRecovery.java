@@ -74,9 +74,10 @@ public class GXRedissonStreamPendingMessageRecovery {
     private void recover() {
         if (!running) return;
 
-        RLock lock = redissonMQClient.getLock(RECOVERY_LOCK_KEY);
+        RLock lock = null;
         boolean locked = false;
         try {
+            lock = redissonMQClient.getLock(RECOVERY_LOCK_KEY);
             locked = lock.tryLock(0, TimeUnit.MILLISECONDS);
             if (!locked) {
                 log.debug("Stream pending recovery lock is held by another instance");
@@ -91,9 +92,17 @@ public class GXRedissonStreamPendingMessageRecovery {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            log.error("Failed to run stream pending recovery", e);
         } finally {
-            if (locked && lock.isHeldByCurrentThread()) {
-                lock.unlock();
+            if (locked && lock != null) {
+                try {
+                    if (lock.isHeldByCurrentThread()) {
+                        lock.unlock();
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to release stream pending recovery lock", e);
+                }
             }
         }
     }

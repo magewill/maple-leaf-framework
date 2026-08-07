@@ -104,6 +104,7 @@ public class GXRedissonStreamDelayedMQ {
         String msgJson = objectMapper.writeValueAsString(message);
         String hashKey = delayHashKey(message.getTopic());
         RMap<String, String> hash = redissonMQClient.getMap(hashKey);
+        RScoredSortedSet<String> transferSet = redissonMQClient.getScoredSortedSet(transferKey(message.getTopic()));
 
         try {
             hash.put(message.getMessageId(), msgJson);
@@ -112,7 +113,7 @@ public class GXRedissonStreamDelayedMQ {
         } catch (Exception e) {
             zset.remove(message.getMessageId());
             hash.remove(message.getMessageId());
-            delayedTopics().remove(message.getTopic());
+            cleanupTopicIfEmpty(message.getTopic(), zset, transferSet, hash);
             throw e;
         }
 

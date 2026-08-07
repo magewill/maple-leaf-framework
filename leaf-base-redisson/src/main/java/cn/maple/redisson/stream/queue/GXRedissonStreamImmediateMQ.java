@@ -181,8 +181,14 @@ public class GXRedissonStreamImmediateMQ {
             message = objectMapper.readValue(msgJson, GXRedissonStreamMessageDto.class);
             message.setStreamMessageId(streamId.toString());
         } catch (Exception e) {
-            log.error("Failed to parse stream message, ack skipped entry, streamId={}", streamId, e);
+            try {
+                sendToDlq(topic, msgJson);
+            } catch (Exception dlqException) {
+                log.error("Failed to move malformed stream message to DLQ, streamId={}", streamId, dlqException);
+                return;
+            }
             stream.ack(groupName, streamId);
+            log.error("Malformed stream message sent to DLQ, streamId={}", streamId, e);
             return;
         }
 
@@ -297,13 +303,17 @@ public class GXRedissonStreamImmediateMQ {
     }
 
     private void sendToDlq(GXRedissonStreamMessageDto message) {
-        String dlqKey = props.getDlqPrefix() + message.getTopic();
+        sendToDlq(message.getTopic(), objectMapper.writeValueAsString(message));
+        log.warn("Stream message sent to DLQ, topic={}, msgId={}", message.getTopic(), message.getMessageId());
+    }
+
+    private void sendToDlq(String topic, String msgJson) {
+        String dlqKey = props.getDlqPrefix() + topic;
         RStream<String, String> dlq = redissonMQClient.getStream(dlqKey);
-        dlq.add(StreamAddArgs.entry(FIELD_MESSAGE, objectMapper.writeValueAsString(message))
+        dlq.add(StreamAddArgs.entry(FIELD_MESSAGE, msgJson)
                 .trimNonStrict()
                 .maxLen(props.streamMaxLenAsInt())
                 .noLimit());
-        log.warn("Stream message sent to DLQ, topic={}, msgId={}", message.getTopic(), message.getMessageId());
     }
 
     private boolean isProcessed(String topic, String messageId) {
