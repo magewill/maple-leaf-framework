@@ -15,6 +15,7 @@ import org.springframework.cloud.openfeign.FeignAutoConfiguration;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.cloud.openfeign.FeignClientSpecification;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.bind.annotation.GetMapping;
 
@@ -109,6 +110,13 @@ class GXFeignConfigTest {
     }
 
     @Test
+    void frameworkAuthTokenAspectCanBeDisabledWhenAspectPackageIsComponentScanned() {
+        contextRunner.withUserConfiguration(FeignAspectComponentScanConfig.class)
+                .withPropertyValues("maple.framework.feign.auth-token-aspect.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(GXFeignAuthTokenAspect.class));
+    }
+
+    @Test
     void loggerLevelCanBeDisabled() {
         contextRunner.withPropertyValues("maple.framework.feign.logger-level.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(Logger.Level.class));
@@ -153,6 +161,11 @@ class GXFeignConfigTest {
         GXFeignRequestInterceptor customFrameworkRequestInterceptor() {
             return REQUEST_INTERCEPTOR;
         }
+    }
+
+    @Configuration
+    @ComponentScan(basePackageClasses = GXFeignAuthTokenAspect.class)
+    static class FeignAspectComponentScanConfig {
     }
 
     @Configuration

@@ -22,6 +22,7 @@ class GXFeignCircuitBreakerFallbackTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(
                     FeignAutoConfiguration.class,
+                    GXFeignConfig.class,
                     GXCircuitBreakerConfig.class,
                     FrameworkRetryAutoConfiguration.class))
             .withPropertyValues(

@@ -2,13 +2,14 @@ package cn.maple.extension;
 
 import lombok.Getter;
 
+import java.io.Serializable;
 import java.util.Objects;
 
 /**
  * Business scenario identifier: bizId + useCase + scenario.
  */
 @Getter
-public final class GXBizScenario {
+public final class GXBizScenario implements Serializable {
     public static final String DEFAULT_BIZ_ID = "#defaultBizId#";
     public static final String DEFAULT_USE_CASE = "#defaultUseCase#";
     public static final String DEFAULT_SCENARIO = "#defaultScenario#";

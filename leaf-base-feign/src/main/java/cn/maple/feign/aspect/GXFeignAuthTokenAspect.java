@@ -16,7 +16,6 @@ import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
 import java.util.Objects;
@@ -29,7 +28,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Method-level annotations take precedence over class-level annotations.</p>
  */
 @Aspect
-@Component
 @Slf4j
 @Order(100)
 public class GXFeignAuthTokenAspect {
