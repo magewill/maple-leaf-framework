@@ -29,6 +29,32 @@ class GXExtensionExecutorTest {
     }
 
     @Test
+    void executePrefersExactScenarioExtension() {
+        register(GXBizScenario.newDefault(), new TestDefaultExtension("global-default"));
+        register(GXBizScenario.valueOf("bizA", "useCaseA"), new TestDefaultExtension("default-scenario"));
+        register(GXBizScenario.valueOf("bizA", "useCaseA", "scenarioA"), new TestDefaultExtension("exact"));
+
+        String result = extensionExecutor.execute(TestDefaultExtPoint.class,
+                GXBizScenario.valueOf("bizA", "useCaseA", "scenarioA"),
+                TestDefaultExtPoint::name);
+
+        assertEquals("exact", result);
+    }
+
+    @Test
+    void executeFallsBackToDefaultScenarioBeforeOtherDefaults() {
+        register(GXBizScenario.newDefault(), new TestDefaultExtension("global-default"));
+        register(GXBizScenario.valueOf("bizA"), new TestDefaultExtension("biz-default"));
+        register(GXBizScenario.valueOf("bizA", "useCaseA"), new TestDefaultExtension("default-scenario"));
+
+        String result = extensionExecutor.execute(TestDefaultExtPoint.class,
+                GXBizScenario.valueOf("bizA", "useCaseA", "scenarioA"),
+                TestDefaultExtPoint::name);
+
+        assertEquals("default-scenario", result);
+    }
+
+    @Test
     void executePrefersBizDefaultExtensionBeforeGlobalDefaultExtension() {
         register(GXBizScenario.newDefault(), new TestDefaultExtension("global-default"));
         register(GXBizScenario.valueOf("bizA"), new TestDefaultExtension("biz-default"));

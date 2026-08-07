@@ -44,6 +44,21 @@ class GXExtensionRegisterTest {
     }
 
     @Test
+    void registrationExtensionsRegistersEveryCartesianCoordinate() {
+        extensionRegister.doRegistrationExtensions(new CartesianExtension());
+
+        assertEquals(8, extensionRepository.size());
+        assertCartesianCoordinate("cartA", "useCaseA", "scenarioA");
+        assertCartesianCoordinate("cartA", "useCaseA", "scenarioB");
+        assertCartesianCoordinate("cartA", "useCaseB", "scenarioA");
+        assertCartesianCoordinate("cartA", "useCaseB", "scenarioB");
+        assertCartesianCoordinate("cartB", "useCaseA", "scenarioA");
+        assertCartesianCoordinate("cartB", "useCaseA", "scenarioB");
+        assertCartesianCoordinate("cartB", "useCaseB", "scenarioA");
+        assertCartesianCoordinate("cartB", "useCaseB", "scenarioB");
+    }
+
+    @Test
     void duplicateRegistrationFailsFast() {
         FirstDuplicateExtension first = new FirstDuplicateExtension();
 
@@ -76,6 +91,13 @@ class GXExtensionRegisterTest {
                 extensionRepository.findExtension(coordinate(bizScenario)).orElseThrow().getClass());
     }
 
+    private void assertCartesianCoordinate(String bizId, String useCase, String scenario) {
+        assertEquals(CartesianExtension.class,
+                extensionRepository.findExtension(coordinate(GXBizScenario.valueOf(bizId, useCase, scenario)))
+                        .orElseThrow()
+                        .getClass());
+    }
+
     private GXExtensionCoordinate coordinate(GXBizScenario bizScenario) {
         return new GXExtensionCoordinate(RegisterTestExtPoint.class, bizScenario);
     }
@@ -91,6 +113,14 @@ class GXExtensionRegisterTest {
             @GXExtension(bizId = "bizB", useCase = "useCaseB", scenario = "scenarioB")
     })
     private static class MultiValueExtension implements RegisterTestExtPoint {
+    }
+
+    @GXExtensions(
+            bizId = {"cartA", "cartB"},
+            useCase = {"useCaseA", "useCaseB"},
+            scenario = {"scenarioA", "scenarioB"}
+    )
+    private static class CartesianExtension implements RegisterTestExtPoint {
     }
 
     @GXExtension(bizId = "dup")

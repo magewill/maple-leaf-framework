@@ -2,7 +2,6 @@ package cn.maple.extension.register;
 
 import cn.maple.extension.GXBizScenario;
 import cn.maple.extension.GXExtensionCoordinate;
-import cn.maple.extension.GXExtensionPoint;
 
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -14,11 +13,11 @@ public abstract class GXAbstractComponentExecutor {
     /**
      * Executes an extension method and returns its result.
      *
-     * @param targetClz extension point interface
+     * @param targetClz   extension point interface
      * @param bizScenario business scenario
      * @param exeFunction extension invocation
-     * @param <R> result type
-     * @param <T> extension point type
+     * @param <R>         result type
+     * @param <T>         extension point type
      * @return invocation result
      */
     public <R, T> R execute(Class<T> targetClz, GXBizScenario bizScenario, Function<T, R> exeFunction) {
@@ -33,9 +32,9 @@ public abstract class GXAbstractComponentExecutor {
      * Executes an extension method using an extension coordinate.
      *
      * @param extensionCoordinate extension coordinate
-     * @param exeFunction extension invocation
-     * @param <R> result type
-     * @param <T> extension point type
+     * @param exeFunction         extension invocation
+     * @param <R>                 result type
+     * @param <T>                 extension point type
      * @return invocation result
      */
     public <R, T> R execute(GXExtensionCoordinate extensionCoordinate, Function<T, R> exeFunction) {
@@ -53,10 +52,10 @@ public abstract class GXAbstractComponentExecutor {
     /**
      * Executes an extension method without a return value.
      *
-     * @param targetClz extension point interface
-     * @param context business scenario
+     * @param targetClz   extension point interface
+     * @param context     business scenario
      * @param exeFunction extension invocation
-     * @param <T> extension point type
+     * @param <T>         extension point type
      */
     public <T> void executeVoid(Class<T> targetClz, GXBizScenario context, Consumer<T> exeFunction) {
         if (targetClz == null || context == null || exeFunction == null) {
@@ -70,8 +69,8 @@ public abstract class GXAbstractComponentExecutor {
      * Executes an extension method without a return value using an extension coordinate.
      *
      * @param extensionCoordinate extension coordinate
-     * @param exeFunction extension invocation
-     * @param <T> extension point type
+     * @param exeFunction         extension invocation
+     * @param <T>                 extension point type
      */
     public <T> void executeVoid(GXExtensionCoordinate extensionCoordinate, Consumer<T> exeFunction) {
         if (extensionCoordinate == null || exeFunction == null) {
@@ -90,8 +89,8 @@ public abstract class GXAbstractComponentExecutor {
      * Locates an extension implementation by interface and scenario.
      *
      * @param targetClz extension point interface
-     * @param context business scenario
-     * @param <C> extension point type
+     * @param context   business scenario
+     * @param <C>       extension point type
      * @return extension implementation
      */
     protected abstract <C> C locateComponent(Class<C> targetClz, GXBizScenario context);
@@ -99,9 +98,9 @@ public abstract class GXAbstractComponentExecutor {
     /**
      * Locates an extension implementation by string coordinate.
      *
-     * @param extensionPointName extension point interface name
+     * @param extensionPointName        extension point interface name
      * @param bizScenarioUniqueIdentity business scenario identity
-     * @param <C> extension point type
+     * @param <C>                       extension point type
      * @return extension implementation
      */
     protected <C> C locateComponent(String extensionPointName, String bizScenarioUniqueIdentity) {
