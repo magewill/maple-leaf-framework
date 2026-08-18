@@ -46,7 +46,7 @@
         <lombok.version>1.18.46</lombok.version>
         <hutool.version>5.8.47</hutool.version>
         <aspectjweaver.version>1.9.25.1</aspectjweaver.version>
-        <guava.version>33.6.0-jre</guava.version>
+        <guava.version>33.7.1-jre</guava.version>
         <caffeine.version>3.2.4</caffeine.version>
         <fastjson.version>2.0.64</fastjson.version>
         <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
@@ -77,7 +77,7 @@
         <error-prone.version>2.50.0</error-prone.version>
         <nullaway.version>0.13.4</nullaway.version>
         <antlr-runtime.version>3.5.3</antlr-runtime.version>
-        <hk2.version>4.0.1</hk2.version>
+        <hk2.version>4.0.2</hk2.version>
         <woodstox-core.version>7.2.2</woodstox-core.version>
         <httpclient.version>4.5.14</httpclient.version>
         <jctools-core.version>4.0.7</jctools-core.version>
