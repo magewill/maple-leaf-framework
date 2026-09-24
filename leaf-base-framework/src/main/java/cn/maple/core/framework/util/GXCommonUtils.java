@@ -566,16 +566,16 @@ public class GXCommonUtils {
         if (!JSONUtil.isTypeJSON(str)) {
             return null;
         }
-        if (ReUtil.isMatch(MAP_STR_FORMAT_REGULAR, str)) {
-            Map<String, Object> tmpMap = Arrays.stream(str.replace("{", "").replace("}", "").split(",")).map(arrayData -> arrayData.split("=")).collect(Collectors.toMap(d -> d[0].trim(), d -> d[1].trim()));
-            return Convert.convert(targetClazz, tmpMap);
-        }
         try {
             return JSONUtil.toBean(str, targetClazz);
         } catch (ConvertException ex) {
             LOG.error("数据转换失败!错误信息 : {}", ex.getMessage());
-            return null;
         }
+        if (ReUtil.isMatch(MAP_STR_FORMAT_REGULAR, str)) {
+            Map<String, Object> tmpMap = Arrays.stream(str.replace("{", "").replace("}", "").split(",")).map(arrayData -> arrayData.split("=")).collect(Collectors.toMap(d -> d[0].trim(), d -> d[1].trim()));
+            return Convert.convert(targetClazz, tmpMap);
+        }
+        return null;
     }
 
     /**
