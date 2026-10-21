@@ -251,3 +251,10 @@ T026 (GXExtensionAutoConfigurationTest.java)  ║  T027 (GXExtensionBootstrapTes
 - [x] T034 在 `leaf-base-extension/src/test/java/cn/maple/extension/GXExtensionExecutorTest.java` 补"请求场景恰为全局默认占位符"用例：仅注册全局默认实现时解析 `GXBizScenario.newDefault()` 命中该实现，并用计数仓库断言查找次数仍 ≤ 4（覆盖四次查找退化为同一键的边界，结果正确且无重复副作用） per Edge Cases: 默认占位符场景 (partial)
 - [x] T035 更新 `specs/002-extension-point-hardening/quickstart.md` 场景 9 的命令与报告路径为 `GXExtensionCustomerSpringBootTest` 与 `cn.maple.extension.GXExtensionCustomerSpringBootTest.txt`，与 T019 的类名迁移保持一致 per quickstart 场景 9 + SC-005 (partial)
 - [x] T036 在 `GXBizScenario.validateUniqueIdentity` 的 Javadoc 与 PR 描述中说明该包级方法的引入理由（坐标构造期复用校验、避免为校验创建场景对象），并补一条用例断言坐标构造失败的"实际段数/非法段"信息与 `fromUniqueIdentity` 完全一致，消除与 plan"仅新增 2 个方法"及 T005"改用 `fromUniqueIdentity` 校验"表述的偏差 per plan: Structure Decision + T005 (unrequested)
+
+---
+
+## Phase 10: Convergence
+
+- [x] T037 把 `GXExtensionExecutor.locate` 改回调用公共 `extensionRepository.findExtension(String, String).orElse(null)`，并让 `GXExtensionRepository.findExtension(String, String)` 重新委派到可覆盖的 `findExtension(GXExtensionCoordinate)`，删除包级 `findExtensionOrNull`；两个计数仓库替身改回覆盖公共方法；补一条用例断言"自定义仓库覆盖 `findExtension(String, String)` / `findExtension(GXExtensionCoordinate)` 后执行器解析走覆盖实现"；复跑性能门禁，若实测超出 `research.md` R13 记录区间则同步更新 per FR-017 + contracts/autoconfiguration.md §2 + Constitution II (contradicts)
+- [x] T038 在 `GXExtensionRegister` 中对 `describeDeclaration` 回显的注解属性值（含 `GXExtensions` 三个数组与 `GXExtension` 三个字段）做 ASCII 安全化（非 ASCII 与不可打印字符转义为 `\uXXXX`），并补一条"非 ASCII `bizId` 声明失败"的用例断言异常消息全为 ASCII per FR-010 (partial)

@@ -75,7 +75,7 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
     }
 
     private <E> E locate(String extensionPointName, String uniqueIdentity) {
-        return cast(extensionRepository.findExtensionOrNull(extensionPointName, uniqueIdentity));
+        return cast(extensionRepository.findExtension(extensionPointName, uniqueIdentity).orElse(null));
     }
 
     @SuppressWarnings("unchecked")

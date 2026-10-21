@@ -174,6 +174,16 @@ class GXExtensionRegisterTest {
     }
 
     @Test
+    void nonAsciiAttributeValueIsEscapedInFailureMessage() {
+        GXExtensionException failure = assertThrows(GXExtensionException.class,
+                () -> extensionRegister.doRegistration(new NonAsciiAttributeExtension()));
+
+        assertTrue(failure.getMessage().contains(NonAsciiAttributeExtension.class.getName()));
+        assertTrue(failure.getMessage().contains("\\u"));
+        assertTrue(isAscii(failure.getMessage()));
+    }
+
+    @Test
     void duplicateRegistrationMessageCarriesCoordinateAndBothImplementations() {
         extensionRegister.doRegistration(new FirstDuplicateExtension());
 
@@ -276,6 +286,10 @@ class GXExtensionRegisterTest {
 
     @GXExtensions(bizId = {" "})
     private static class BlankCartesianAttributeExtension implements RegisterTestExtPoint {
+    }
+
+    @GXExtension(bizId = "订单.明细")
+    private static class NonAsciiAttributeExtension implements RegisterTestExtPoint {
     }
 
     @GXExtension(bizId = "inherit")

@@ -6,6 +6,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.Optional;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -200,6 +202,23 @@ class GXExtensionExecutorTest {
         assertEquals(0, countingRepository.lookups());
     }
 
+    @Test
+    void customRepositoryLookupOverridesAreHonoredByResolution() {
+        GXBizScenario requested = GXBizScenario.valueOf("bizA", "useCaseA", "scenarioA");
+        OverridingStringLookupRepository stringOverrides = new OverridingStringLookupRepository();
+        ReflectionTestUtils.setField(extensionExecutor, "extensionRepository", stringOverrides);
+
+        assertEquals("custom-string-lookup",
+                extensionExecutor.execute(TestDefaultExtPoint.class, requested, TestDefaultExtPoint::name));
+
+        OverridingCoordinateLookupRepository coordinateOverrides = new OverridingCoordinateLookupRepository();
+        ReflectionTestUtils.setField(extensionExecutor, "extensionRepository", coordinateOverrides);
+
+        assertEquals("custom-coordinate-lookup",
+                extensionExecutor.execute(stringCoordinate("bizA", "useCaseA", "scenarioA"),
+                        (TestDefaultExtPoint extension) -> extension.name()));
+    }
+
     private GXExtensionCoordinate stringCoordinate(String bizId, String useCase, String scenario) {
         return GXExtensionCoordinate.valueOf(TestDefaultExtPoint.class.getName(),
                 GXBizScenario.valueOf(bizId, useCase, scenario).getUniqueIdentity());
@@ -220,13 +239,27 @@ class GXExtensionExecutorTest {
         private int lookups;
 
         @Override
-        GXExtensionPoint findExtensionOrNull(String extensionPoint, String bizScenario) {
+        public Optional<GXExtensionPoint> findExtension(String extensionPoint, String bizScenario) {
             lookups++;
-            return super.findExtensionOrNull(extensionPoint, bizScenario);
+            return super.findExtension(extensionPoint, bizScenario);
         }
 
         private int lookups() {
             return lookups;
+        }
+    }
+
+    private static class OverridingStringLookupRepository extends GXExtensionRepository {
+        @Override
+        public Optional<GXExtensionPoint> findExtension(String extensionPoint, String bizScenario) {
+            return Optional.of(new TestDefaultExtension("custom-string-lookup"));
+        }
+    }
+
+    private static class OverridingCoordinateLookupRepository extends GXExtensionRepository {
+        @Override
+        public Optional<GXExtensionPoint> findExtension(GXExtensionCoordinate coordinate) {
+            return Optional.of(new TestDefaultExtension("custom-coordinate-lookup"));
         }
     }
 }

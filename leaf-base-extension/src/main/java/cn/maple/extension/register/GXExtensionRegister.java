@@ -18,6 +18,7 @@ import org.springframework.util.ClassUtils;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
@@ -99,7 +100,7 @@ public class GXExtensionRegister {
         } catch (IllegalArgumentException invalidAttribute) {
             throw new GXExtensionException("Invalid extension coordinate declaration for " + extensionClz.getName()
                     + ", declaration=" + describeDeclaration(extensionClz, container)
-                    + ", detail=" + invalidAttribute.getMessage(),
+                    + ", detail=" + asciiSafe(String.valueOf(invalidAttribute.getMessage())),
                     HttpStatus.HTTP_INTERNAL_ERROR, invalidAttribute);
         }
 
@@ -112,16 +113,35 @@ public class GXExtensionRegister {
 
     private String describeDeclaration(Class<?> extensionClz, GXExtensions container) {
         if (container != null) {
-            return "GXExtensions(bizId=" + Arrays.toString(container.bizId())
-                    + ", useCase=" + Arrays.toString(container.useCase())
-                    + ", scenario=" + Arrays.toString(container.scenario()) + ")";
+            return "GXExtensions(bizId=" + asciiSafe(Arrays.toString(container.bizId()))
+                    + ", useCase=" + asciiSafe(Arrays.toString(container.useCase()))
+                    + ", scenario=" + asciiSafe(Arrays.toString(container.scenario())) + ")";
         }
         GXExtension single = AnnotatedElementUtils.findMergedAnnotation(extensionClz, GXExtension.class);
         if (single != null) {
-            return "GXExtension(bizId=[" + single.bizId() + "], useCase=[" + single.useCase()
-                    + "], scenario=[" + single.scenario() + "])";
+            return "GXExtension(bizId=[" + asciiSafe(single.bizId()) + "], useCase=[" + asciiSafe(single.useCase())
+                    + "], scenario=[" + asciiSafe(single.scenario()) + "])";
         }
         return "GXExtension/GXExtensions(absent)";
+    }
+
+    /**
+     * Escapes non printable and non ASCII characters so failure messages stay ASCII (FR-010).
+     *
+     * @param value declared attribute value, never {@code null}
+     * @return ASCII only representation
+     */
+    private String asciiSafe(String value) {
+        StringBuilder builder = new StringBuilder(value.length());
+        for (int index = 0; index < value.length(); index++) {
+            char character = value.charAt(index);
+            if (character < 0x20 || character > 0x7E) {
+                builder.append(String.format(Locale.ROOT, "\\u%04x", (int) character));
+            } else {
+                builder.append(character);
+            }
+        }
+        return builder.toString();
     }
 
     private Class<?> getExtensionClass(GXExtensionPoint extensionObject) {

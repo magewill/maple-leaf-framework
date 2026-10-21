@@ -3,6 +3,7 @@ package cn.maple.extension;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -199,9 +200,9 @@ class GXExtensionExecutorBenchmarkTest {
         private int lookups;
 
         @Override
-        GXExtensionPoint findExtensionOrNull(String extensionPoint, String bizScenario) {
+        public Optional<GXExtensionPoint> findExtension(String extensionPoint, String bizScenario) {
             lookups++;
-            return super.findExtensionOrNull(extensionPoint, bizScenario);
+            return super.findExtension(extensionPoint, bizScenario);
         }
 
         private int lookups() {

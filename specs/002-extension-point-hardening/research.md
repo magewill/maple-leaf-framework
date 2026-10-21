@@ -205,15 +205,15 @@ if (registered == 0)             -> 抛 GXExtensionException（不得静默）
 | 测量项 | 实测中位数 |
 | --- | --- |
 | 身份键裸查找（同一键实例） | 3.0–3.2 ns |
-| 等值键裸查找（内容相等、实例不同） | 7.8–8.3 ns |
-| 执行器精确命中（`locateExtension`） | 18.5–22 ns |
-| 执行器四层兜底 | 51–64 ns |
+| 等值键裸查找（内容相等、实例不同） | 7.7–8.3 ns |
+| 执行器精确命中（`locateExtension`） | 20–21 ns |
+| 执行器四层兜底 | 57–60 ns |
 
 以 3 ns 对照计，精确命中倍数为 6–7，恰好压在 SC-006 的 6× 边界上并随 JIT 抖动翻转；以等值键对照计为 2.5–2.7×，稳定通过。因此把对照校准到"等值键"这一可复现下界（倍数仍为 6，未放宽），精确命中仍处于 spec 记录的 15–26 ns 基线区间。
 
 **配套实现调整**:
-- 解析热路径改用包内可空查找 `GXExtensionRepository.findExtensionOrNull`，去掉每次查找的 `Optional` 分配；
-- `GXExtensionExecutor.locateExtensionByName` 去掉与坐标构造重复的空白校验（坐标构造抛出相同异常类型与文案）。
+- `GXExtensionExecutor.locateExtensionByName` 去掉与坐标构造重复的空白校验（坐标构造抛出相同异常类型与文案）；
+- 解析仍走公共 `GXExtensionRepository.findExtension(String, String)`（后者委派到可覆盖的 `findExtension(GXExtensionCoordinate)`），确保下游自定义仓库的覆盖对解析生效；因此不移除 `Optional` 包装——热路径开销由上面的实测值覆盖。
 
 **Alternatives considered**: 复用键实例作为对照——倍数会稳定在 6× 以上，但它衡量的是一次调用方无法执行的查找；把仓库改为"扩展点名 → 场景标识"两级映射以彻底消除键构造——超出本规格"不改并发模型/数据结构"的边界，收益不足以抵消风险。
 
