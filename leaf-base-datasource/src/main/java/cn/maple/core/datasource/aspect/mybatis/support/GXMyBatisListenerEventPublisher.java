@@ -19,6 +19,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.lang.reflect.Array;
 import java.lang.reflect.Method;
@@ -129,10 +131,13 @@ public class GXMyBatisListenerEventPublisher {
         boolean asyncModeEnabled = isAsyncModeEnabled();
         String operationId = buildOperationId(invokedMethod);
         markSnapshotDegradedIfNeeded(source, invokedMethod, operationId);
-        // 仅当只有一个监听方时共享批量载荷：多监听方时保留逐事件快照，避免载荷相互影响（FR-008）。
-        boolean shareBatchPayload = listeners.size() == 1;
+        // 批量事件只构建一次载荷；多监听方时改为只读快照共享，避免按监听方复制（SC-005），
+        // 同时任何修改尝试都会失败，不会影响其它监听方（FR-008）。
+        boolean batchEvent = syncEvent == GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY
+                || syncEvent == GXModelEventNamingEnums.SYNC_BATCH_CHANGE;
+        Dict payload = batchEvent && listeners.size() > 1 ? GXReadOnlyPayload.wrap(source) : source;
         for (GXMyBatisListenerConfigResolver.ResolvedListener listener : listeners) {
-            deliver(listener, syncEvent, asyncEvent, source, asyncModeEnabled, operationId, shareBatchPayload);
+            deliver(listener, syncEvent, asyncEvent, payload, asyncModeEnabled, operationId, batchEvent);
         }
     }
 
@@ -148,7 +153,9 @@ public class GXMyBatisListenerEventPublisher {
         logDegradedPayloadIfNeeded(source, naming, async, operationId);
         long startNanos = System.nanoTime();
         try {
-            if (async || properties.isSyncAfterCommit()) {
+            if (async) {
+                publishAsyncAfterCommit(event, operationId);
+            } else if (properties.isSyncAfterCommit()) {
                 GXEventPublisherUtils.publishEventAfterCommit(event);
             } else {
                 GXEventPublisherUtils.publishEvent(event);
@@ -163,6 +170,29 @@ public class GXMyBatisListenerEventPublisher {
             if (properties.isPropagateException()) {
                 throw exception;
             }
+        }
+    }
+
+    /**
+     * Publishes an asynchronous event while keeping the operation identifier available for the
+     * executor's task decorator (and therefore for the rejection handler).
+     */
+    private void publishAsyncAfterCommit(GXBaseEvent<Dict> event, String operationId) {
+        GXMyBatisListenerTaskContext.setOperationId(operationId);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    GXMyBatisListenerTaskContext.clear();
+                }
+            });
+            GXEventPublisherUtils.publishEventAfterCommit(event);
+            return;
+        }
+        try {
+            GXEventPublisherUtils.publishEventAfterCommit(event);
+        } finally {
+            GXMyBatisListenerTaskContext.clear();
         }
     }
 

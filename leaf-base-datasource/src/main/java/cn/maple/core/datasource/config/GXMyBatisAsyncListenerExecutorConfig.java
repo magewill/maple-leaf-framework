@@ -1,6 +1,7 @@
 package cn.maple.core.datasource.config;
 
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerMetrics;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerTaskContext;
 import cn.maple.core.datasource.util.GXDataFilterThreadLocalUtils;
 import cn.maple.core.framework.util.GXMdcThreadUtils;
 import jakarta.annotation.PreDestroy;
@@ -163,7 +164,8 @@ public class GXMyBatisAsyncListenerExecutorConfig {
         return (runnable, pool) -> {
             GXMyBatisListenerMetrics.recordRejected();
             GXMyBatisListenerMetrics.updateQueueSize(pool.getQueue().size());
-            log.error("MyBatis event task rejected: activeCount={}, queueSize={}, poolSize={}, corePoolSize={}, maximumPoolSize={}, shutdown={}",
+            log.error("MyBatis event task rejected: operationId={}, activeCount={}, queueSize={}, poolSize={}, corePoolSize={}, maximumPoolSize={}, shutdown={}",
+                    GXMyBatisListenerTaskContext.operationIdOf(runnable),
                     pool.getActiveCount(), pool.getQueue().size(), pool.getPoolSize(),
                     pool.getCorePoolSize(), pool.getMaximumPoolSize(), pool.isShutdown());
             if (pool.isShutdown()) {
@@ -176,11 +178,12 @@ public class GXMyBatisAsyncListenerExecutorConfig {
     private TaskDecorator createTaskDecorator() {
         long longTaskThresholdMs = properties.getLongTaskThresholdMs();
         return runnable -> {
+            String operationId = GXMyBatisListenerTaskContext.currentOperationId();
             Runnable wrappedRunnable = GXMdcThreadUtils.wrap(
                     GXDynamicContextHolder.wrap(GXDataFilterThreadLocalUtils.wrap(runnable)),
                     MDC.getCopyOfContextMap()
             );
-            return () -> {
+            Runnable task = () -> {
                 long startTime = System.nanoTime();
                 boolean success = false;
                 GXMyBatisListenerMetrics.taskStarted();
@@ -211,6 +214,7 @@ public class GXMyBatisAsyncListenerExecutorConfig {
                     }
                 }
             };
+            return GXMyBatisListenerTaskContext.label(operationId, task);
         };
     }
 

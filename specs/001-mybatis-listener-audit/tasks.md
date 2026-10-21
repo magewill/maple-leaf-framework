@@ -196,6 +196,25 @@ description: "Task list for MyBatis-Plus 操作监听加固"
 
 ---
 
+## Phase 11: Convergence
+
+**Purpose**: 收敛 2026-10-21 四次复核发现的多监听方场景缺口与拒绝日志可定位性缺口。
+
+- [X] T065 **MEDIUM** 让批量事件的"一次性载荷"在多监听方场景也成立：`GXMyBatisListenerEventPublisher` 当前仅在 `listeners.size() == 1` 时复用载荷，多监听方时每个监听方各做一次全量 `GXBaseEvent` 快照（1 万条 × 2 监听方约为载荷的 5 倍），SC-005 的 2 倍上限在受支持的多监听方场景不成立；改为构建一次不可变载荷（只读 `Dict`/`List`）供所有监听方共享，或明确把 SC-005 限定为单监听方并补多监听方实测数据 per SC-005 (partial)
+- [X] T066 **LOW** 在 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/config/GXMyBatisAsyncListenerExecutorConfig.java` 的拒绝日志中补事件标识：当前只输出线程池统计（`activeCount`/`queueSize`/`poolSize`），无法把被拒绝事件关联到具体写操作；通过 `TaskDecorator` 包装的 `Runnable` 携带 `operationId`（或写入 MDC）并在拒绝日志输出，补对应断言 per SC-006 (partial)
+
+---
+
+## Phase 12: Convergence
+
+**Purpose**: 收敛 2026-10-21 五次复核发现的契约登记缺口与两处验证/封装缺口。
+
+- [X] T067 **MEDIUM** 显式声明多监听方批量载荷只读这一可观察行为变更：`contracts/event-payload.md` 未出现"只读/不可变"任何表述，`docs/leaf-base-datasource开发手册.md` 的"升级说明（4.3.0）"也未列出该变更与迁移方式；按宪法 II 需补充变更说明、受影响场景（多监听方的批量事件）与兼容策略（先复制再修改）per Constitution II (partial)
+- [X] T068 **LOW** 补齐只读载荷的旁路：`GXReadOnlyPayload.ReadOnlyDict` 仅覆写 `put/remove/clear/compute*` 等方法，`entrySet()`/`keySet()`/`values()` 返回的视图仍可绕过（如 `values().remove(...)`、`entry.setValue(...)`）实际修改共享载荷；需返回不可修改视图并补旁路修改断言 per FR-008 (partial)
+- [X] T069 **LOW** 补事务内异步投递的 `operationId` 验证：`publishAsyncAfterCommit` 在同步活跃时通过注册 `afterCompletion` 清理上下文，但现有用例只覆盖"无事务立即提交"路径；需用 `TransactionTemplate` 触发真实 afterCommit，断言任务上下文携带 `operationId` 且事务结束后清理 per FR-020 (partial)
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

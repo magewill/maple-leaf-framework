@@ -139,6 +139,33 @@ class GXMyBatisListenerOverheadTest {
         }
     }
 
+    @Test
+    @EnabledIfSystemProperty(named = "maple.perf.enabled", matches = "true")
+    void multiListenerBatchPayloadAllocationWithinTwiceThePayloadSize() throws Exception {
+        GXMyBatisListenerEventPublisher publisher = publisher(new GXMyBatisListenerProperties());
+        Method method = DualBatchMapperImpl.class.getMethod("insert", Object.class);
+        com.sun.management.ThreadMXBean memoryBean =
+                (com.sun.management.ThreadMXBean) ManagementFactory.getThreadMXBean();
+
+        try (MockedStatic<GXEventPublisherUtils> ignored = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            long payloadStart = memoryBean.getCurrentThreadAllocatedBytes();
+            Dict source = buildBatchPayload();
+            long payloadBytes = memoryBean.getCurrentThreadAllocatedBytes() - payloadStart;
+
+            long publishStart = memoryBean.getCurrentThreadAllocatedBytes();
+            publisher.publish(new DualBatchMapperImpl(), null, method,
+                    GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY, GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY,
+                    source);
+            long publishBytes = memoryBean.getCurrentThreadAllocatedBytes() - publishStart;
+
+            System.out.printf("MyBatis multi-listener batch allocation: payload=%d bytes, publish=%d bytes, ratio=%.2f%n",
+                    payloadBytes, publishBytes, payloadBytes == 0L ? 0D : (double) publishBytes / payloadBytes);
+            assertTrue(publishBytes <= payloadBytes * 2L + 65_536L,
+                    () -> "Multi-listener batch snapshot allocated " + publishBytes + " bytes for "
+                            + payloadBytes + " bytes of payload");
+        }
+    }
+
     private Dict buildBatchPayload() {
         List<Dict> entities = new ArrayList<>(BATCH_SIZE);
         for (int index = 0; index < BATCH_SIZE; index++) {
@@ -221,5 +248,28 @@ class GXMyBatisListenerOverheadTest {
     }
 
     private static class PlainListener implements GXMybatisListenerService<Object> {
+    }
+
+    @GXMyBatisListener(listenerClazz = MultiListenerOne.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+    private interface DualBatchMapperOne {
+        Object insert(Object entity);
+    }
+
+    @GXMyBatisListener(listenerClazz = MultiListenerTwo.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+    private interface DualBatchMapperTwo {
+        Object insert(Object entity);
+    }
+
+    private static class DualBatchMapperImpl implements DualBatchMapperOne, DualBatchMapperTwo {
+        @Override
+        public Object insert(Object entity) {
+            return entity;
+        }
+    }
+
+    private static class MultiListenerOne implements GXMybatisListenerService<Object> {
+    }
+
+    private static class MultiListenerTwo implements GXMybatisListenerService<Object> {
     }
 }

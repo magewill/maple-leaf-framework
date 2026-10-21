@@ -911,7 +911,11 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 
 **可观测性**
 
-`GXMyBatisListenerMetricsService#snapshot()` 提供 `delivered` / `failed` / `rejected` / `cancelled` / `degraded` / `skipped` / `activeTasks` / `queueSize` 八项只读计数，进程内单调递增、重启归零。队列饱和、停机未执行、条件降级都会输出带事件类型与监听器名的结构化日志；投递失败、慢回调、降级三类日志还包含 `operationId`（方法名 + 自增序号）与运行模式，便于把一次写操作的所有回调串起来排查。
+`GXMyBatisListenerMetricsService#snapshot()` 提供 `delivered` / `failed` / `rejected` / `cancelled` / `degraded` / `skipped` / `activeTasks` / `queueSize` 八项只读计数，进程内单调递增、重启归零。队列饱和、停机未执行、条件降级都会输出带事件类型与监听器名的结构化日志；投递失败、慢回调、降级、队列拒绝四类日志还包含 `operationId`（方法名 + 自增序号）与运行模式，便于把一次写操作的所有回调与拒绝记录串起来排查。
+
+**批量载荷与监听方隔离**
+
+批量事件只构建一次载荷：只有一个监听方时直接复用该载荷；存在多个监听方时，共享同一份**只读快照**——任何修改尝试都会抛 `UnsupportedOperationException`，因此既不会让监听方互相影响，也不会让内存随监听方数量线性增长。监听方如需加工数据，请先复制为新的 `Dict`。
 
 `degraded` 的计数口径：更新条件无法无损还原（含 `OR`、函数左侧、重复字段、参数不匹配、解析失败）时按事件计一次；`strict-snapshot=true` 时，载荷中出现不可克隆值再计一次。
 
@@ -921,6 +925,7 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 - 同一监听器在同一写操作中只投递一次；此前多接口继承同一声明会重复投递。确需旧行为时设置 `maple.framework.mybatis.listener.deduplicate=false`。
 - 异步执行器的键名与默认值保持不变，但虚拟线程模式下 `concurrency-limit=0` 现在明确表示"取最大池化线程数"，`-1` 表示不限制；校验用执行器不再无条件使用虚拟线程，而是与 `virtual.enabled` 保持一致。
 - 新增的 `maple.framework.enable.mybatis-listener` 默认开启，与升级前"注解即生效"的行为一致。
+- 多监听方的批量事件载荷改为**只读共享快照**：此前每个监听方各拿到一份可变副本，现在共享同一份只读载荷，任何修改都会抛 `UnsupportedOperationException`。需要加工数据的监听器请先复制为新 `Dict`；只有一个监听方的批量事件与单条事件不受影响。受影响模块：`leaf-base-datasource`。
 
 **集成验证（可选）**
 

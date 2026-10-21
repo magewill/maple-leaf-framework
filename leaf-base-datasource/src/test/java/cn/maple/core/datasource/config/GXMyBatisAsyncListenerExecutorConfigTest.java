@@ -1,6 +1,7 @@
 package cn.maple.core.datasource.config;
 
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerMetrics;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerTaskContext;
 import cn.maple.core.datasource.dto.GXDataFilterContext;
 import cn.maple.core.datasource.util.GXDataFilterThreadLocalUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
@@ -153,6 +154,49 @@ class GXMyBatisAsyncListenerExecutorConfigTest {
             assertNull(nextTaskFilter.get(), "Data filter context must not leak into the next task");
         } finally {
             GXDataFilterThreadLocalUtils.cleanDataFilterContext();
+            executor.shutdown();
+        }
+    }
+
+    @Test
+    void rejectedTaskLogCarriesOperationId() throws Exception {
+        GXMyBatisAsyncListenerExecutorConfig config = configuredWithQueue(1);
+        ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) config.myBatisEventAsyncTaskExecutor();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        java.util.List<String> messages = new java.util.concurrent.CopyOnWriteArrayList<>();
+        org.apache.logging.log4j.core.appender.AbstractAppender appender =
+                new org.apache.logging.log4j.core.appender.AbstractAppender("executor-log-capture", null,
+                        org.apache.logging.log4j.core.layout.PatternLayout.createDefaultLayout(), false,
+                        org.apache.logging.log4j.core.config.Property.EMPTY_ARRAY) {
+                    @Override
+                    public void append(org.apache.logging.log4j.core.LogEvent event) {
+                        messages.add(event.getMessage().getFormattedMessage());
+                    }
+                };
+        appender.start();
+        org.apache.logging.log4j.core.Logger logger = (org.apache.logging.log4j.core.Logger)
+                org.apache.logging.log4j.LogManager.getLogger(GXMyBatisAsyncListenerExecutorConfig.class);
+        org.apache.logging.log4j.Level previousLevel = logger.getLevel();
+        logger.setLevel(org.apache.logging.log4j.Level.WARN);
+        logger.addAppender(appender);
+        try {
+            executor.execute(() -> await(started, release));
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            executor.execute(() -> await(new CountDownLatch(0), release));
+
+            GXMyBatisListenerTaskContext.setOperationId("it-op-1");
+            assertThrows(RejectedExecutionException.class, () -> executor.execute(() -> {
+            }));
+
+            assertTrue(messages.stream().anyMatch(message -> message.contains("operationId=it-op-1")),
+                    () -> "Rejection log must carry the operation id: " + messages);
+        } finally {
+            GXMyBatisListenerTaskContext.clear();
+            logger.removeAppender(appender);
+            logger.setLevel(previousLevel);
+            appender.stop();
+            release.countDown();
             executor.shutdown();
         }
     }

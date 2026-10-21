@@ -513,6 +513,37 @@ class GXMyBatisListenerAspectRegressionTest {
     }
 
     @Test
+    void multipleListenersShareOneReadOnlyBatchPayload() throws Exception {
+        Method method = DualBatchService.class.getMethod("saveBatch", Collection.class);
+        List<Dict> entities = List.of(Dict.create().set("id", 1L), Dict.create().set("id", 2L));
+        Dict source = Dict.create().set("operation", "saveBatch").set("batchEntities", entities);
+        List<GXBaseEvent<?>> events = new java.util.ArrayList<>();
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisherMock.when(() -> GXEventPublisherUtils.publishEvent(any())).thenAnswer(invocation -> {
+                events.add(invocation.getArgument(0));
+                return null;
+            });
+            eventPublisher.publish(new DualBatchService(), null, method,
+                    GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY, GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY,
+                    source);
+        }
+
+        assertEquals(2, events.size());
+        Dict sharedPayload = (Dict) events.get(0).getSource();
+        assertSame(sharedPayload, events.get(1).getSource(), "Both listeners must share one snapshot");
+        assertThrows(UnsupportedOperationException.class, () -> sharedPayload.set("operation", "hacked"));
+        assertThrows(UnsupportedOperationException.class, () -> sharedPayload.values().remove("operation"));
+        assertThrows(UnsupportedOperationException.class, () -> sharedPayload.keySet().remove("operation"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> sharedPayload.entrySet().iterator().next().setValue("hacked"));
+        @SuppressWarnings("unchecked")
+        List<Dict> sharedEntities = (List<Dict>) sharedPayload.get("batchEntities");
+        assertThrows(UnsupportedOperationException.class, () -> sharedEntities.getFirst().set("id", 99L));
+        assertEquals("saveBatch", source.getStr("operation"), "Original payload must stay untouched");
+    }
+
+    @Test
     void strictSnapshotMarksUnsnapshotableValuesAndCountsDegrade() throws Exception {
         GXMyBatisListenerProperties properties = new GXMyBatisListenerProperties();
         properties.setStrictSnapshot(true);
@@ -717,6 +748,29 @@ class GXMyBatisListenerAspectRegressionTest {
         public Object saveBatch(Collection<?> entities) {
             return entities;
         }
+    }
+
+    @GXMyBatisListener(listenerClazz = SharedBatchListenerOne.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+    private interface BatchSharedMapperOne {
+        Object saveBatch(Collection<?> entities);
+    }
+
+    @GXMyBatisListener(listenerClazz = SharedBatchListenerTwo.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+    private interface BatchSharedMapperTwo {
+        Object saveBatch(Collection<?> entities);
+    }
+
+    private static class DualBatchService implements BatchSharedMapperOne, BatchSharedMapperTwo {
+        @Override
+        public Object saveBatch(Collection<?> entities) {
+            return entities;
+        }
+    }
+
+    private static class SharedBatchListenerOne implements GXMybatisListenerService<Object> {
+    }
+
+    private static class SharedBatchListenerTwo implements GXMybatisListenerService<Object> {
     }
 
     @GXMyBatisListener(listenerClazz = FirstListener.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)

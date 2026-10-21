@@ -4,6 +4,7 @@ import cn.hutool.core.lang.Dict;
 import cn.maple.core.datasource.annotation.GXMyBatisListener;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerConfigResolver;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerTaskContext;
 import cn.maple.core.datasource.config.GXMyBatisListenerProperties;
 import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
@@ -23,11 +24,16 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.springframework.core.env.StandardEnvironment;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 
@@ -130,6 +136,63 @@ class GXMyBatisListenerLoggingTest {
         assertTrue(slowLog.contains("mode=sync"), slowLog);
     }
 
+    @Test
+    void asyncDeliveryLabelsTaskContextWithOperationId() throws Exception {
+        GXMyBatisListenerEventPublisher publisher = publisher(new GXMyBatisListenerProperties());
+        Method method = AsyncLogMapper.class.getMethod("insert", Object.class);
+        List<String> captured = new CopyOnWriteArrayList<>();
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisher.when(() -> GXEventPublisherUtils.publishEventAfterCommit(any())).thenAnswer(invocation -> {
+                String operationId = GXMyBatisListenerTaskContext.currentOperationId();
+                captured.add(operationId == null ? "null" : operationId);
+                return null;
+            });
+            publisher.publish(new AsyncLogMapperImpl(), method,
+                    GXModelEventNamingEnums.SYNC_SAVE_ENTITY, GXModelEventNamingEnums.ASYNC_SAVE_ENTITY,
+                    Dict.create().set("id", 1));
+        }
+
+        assertEquals(1, captured.size());
+        assertTrue(captured.getFirst().startsWith("insert#"), captured.getFirst());
+        assertNull(GXMyBatisListenerTaskContext.currentOperationId(),
+                "Operation id must be cleared after the immediate async submission");
+    }
+
+    @Test
+    void transactionalAsyncDeliveryKeepsOperationIdUntilAfterCompletion() throws Exception {
+        GXMyBatisListenerEventPublisher publisher = publisher(new GXMyBatisListenerProperties());
+        Method method = AsyncLogMapper.class.getMethod("insert", Object.class);
+        List<String> captured = new CopyOnWriteArrayList<>();
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+                eventPublisher.when(() -> GXEventPublisherUtils.publishEventAfterCommit(any())).thenAnswer(invocation -> {
+                    captured.add(GXMyBatisListenerTaskContext.currentOperationId());
+                    return null;
+                });
+                publisher.publish(new AsyncLogMapperImpl(), method,
+                        GXModelEventNamingEnums.SYNC_SAVE_ENTITY, GXModelEventNamingEnums.ASYNC_SAVE_ENTITY,
+                        Dict.create().set("id", 1));
+            }
+
+            assertEquals(1, captured.size());
+            assertNotNull(captured.getFirst());
+            assertTrue(captured.getFirst().startsWith("insert#"), captured.getFirst());
+            assertNotNull(GXMyBatisListenerTaskContext.currentOperationId(),
+                    "Operation id must stay available for the after-commit submission");
+
+            TransactionSynchronizationManager.getSynchronizations().forEach(
+                    synchronization -> synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
+
+            assertNull(GXMyBatisListenerTaskContext.currentOperationId(),
+                    "Operation id must be cleared when the transaction completes");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            GXMyBatisListenerTaskContext.clear();
+        }
+    }
+
     private String firstMessageContaining(String token) {
         return messages.stream()
                 .filter(message -> message.contains(token))
@@ -155,5 +218,17 @@ class GXMyBatisListenerLoggingTest {
     }
 
     private static class LogListener implements GXMybatisListenerService<Object> {
+    }
+
+    @GXMyBatisListener(listenerClazz = LogListener.class, runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)
+    private interface AsyncLogMapper {
+        Object insert(Object entity);
+    }
+
+    private static class AsyncLogMapperImpl implements AsyncLogMapper {
+        @Override
+        public Object insert(Object entity) {
+            return entity;
+        }
     }
 }
