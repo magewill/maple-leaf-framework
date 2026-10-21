@@ -96,9 +96,13 @@ class MultiDataSourceIT {
         Map<?, ?> resolvedDataSources = (Map<?, ?>) ReflectionTestUtils.getField(dynamicDataSource, "resolvedDataSources");
 
         assertEquals(2, Objects.requireNonNull(resolvedDataSources).size());
-        resolvedDataSources.forEach((name, dataSource) -> assertTrue(
-                dataSource.getClass().getName().contains("DataSourceProxy"),
-                () -> "Datasource " + name + " is not wrapped by Seata DataSourceProxy: " + dataSource.getClass().getName()));
+        resolvedDataSources.forEach((name, dataSource) -> {
+            assertTrue(dataSource instanceof org.apache.seata.rm.datasource.SeataDataSourceProxy,
+                    () -> "Datasource " + name + " does not implement SeataDataSourceProxy: "
+                            + dataSource.getClass().getName());
+            assertEquals("org.apache.seata.rm.datasource.DataSourceProxy", dataSource.getClass().getName(),
+                    () -> "Datasource " + name + " must use the Seata 2.x namespace");
+        });
     }
 
     @Test

@@ -4,6 +4,9 @@ import cn.maple.core.datasource.config.GXDynamicDataSource;
 import com.baomidou.mybatisplus.autoconfigure.SqlSessionFactoryBeanCustomizer;
 import com.baomidou.mybatisplus.spring.MybatisSqlSessionFactoryBean;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.SmartInitializingSingleton;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
+import org.springframework.context.annotation.Bean;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import javax.sql.DataSource;
@@ -19,8 +22,11 @@ class GXSeataDynamicDataSourceConfigTest {
     @Test
     void customizerInjectsDynamicDataSourceIntoMybatisPlusFactoryBean() {
         GXDynamicDataSource dynamicDataSource = new GXDynamicDataSource();
-        SqlSessionFactoryBeanCustomizer customizer =
-                new GXSeataDynamicDataSourceConfig().seataDynamicDataSourceCustomizer(dynamicDataSource);
+        DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
+        beanFactory.registerSingleton("dynamicDataSource", dynamicDataSource);
+
+        SqlSessionFactoryBeanCustomizer customizer = new GXSeataDynamicDataSourceConfig()
+                .seataDynamicDataSourceCustomizer(beanFactory.getBeanProvider(GXDynamicDataSource.class));
         MybatisSqlSessionFactoryBean factoryBean = new MybatisSqlSessionFactoryBean();
 
         customizer.customize(factoryBean);
@@ -30,14 +36,18 @@ class GXSeataDynamicDataSourceConfigTest {
     }
 
     @Test
-    void configDoesNotDeclareDataSourceProxyWrapperBean() {
-        List<String> beanMethodNames = Stream.of(GXSeataDynamicDataSourceConfig.class.getDeclaredMethods())
+    void configDeclaresOnlyCustomizerAndVerifierBeans() {
+        List<String> beanMethodTypes = Stream.of(GXSeataDynamicDataSourceConfig.class.getDeclaredMethods())
                 .filter(method -> Modifier.isPublic(method.getModifiers()))
-                .map(method -> method.getReturnType().getName() + "#" + method.getName())
+                .filter(method -> method.isAnnotationPresent(Bean.class))
+                .map(method -> method.getReturnType().getName())
                 .toList();
 
-        assertThat(beanMethodNames)
-                .containsExactly("com.baomidou.mybatisplus.autoconfigure.SqlSessionFactoryBeanCustomizer#seataDynamicDataSourceCustomizer");
+        assertThat(beanMethodTypes).containsExactlyInAnyOrder(
+                SqlSessionFactoryBeanCustomizer.class.getName(),
+                SmartInitializingSingleton.class.getName());
+        assertThat(beanMethodTypes).noneMatch(type -> type.contains("DataSourceProxy"));
+        assertThat(beanMethodTypes).noneMatch(type -> type.equals(DataSource.class.getName()));
     }
 
     @Test

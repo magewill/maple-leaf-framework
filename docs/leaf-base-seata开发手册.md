@@ -147,6 +147,21 @@ seata:
 
 **Nacos 中的 `seata.yml` 文件内容示例与本地配置章节中的示例相同。**
 
+### 2.3 严格模式与可观测性
+
+| 开关 | 默认 | 行为 |
+| --- | --- | --- |
+| `maple.framework.enable.seata-strict` | `false` | `true` 时：启动期发现任一物理数据源未被 Seata 代理则启动失败；`false` 时：输出 WARN 并继续启动 |
+
+启动日志（全部 ASCII，前缀 `[Seata]`）：
+
+- 全部已代理：`[Seata] enabled=true, config-source=local|nacos, datasources=[...], proxied=[...]`
+- 存在未代理：`[Seata] datasource '<name>' is NOT wrapped by Seata; branches on it will not join global transactions`
+- 无动态数据源 bean：`[Seata] GXDynamicDataSource is absent, skip MyBatis-Plus datasource customization`
+- 两套配置入口同时命中：额外 WARN，并按 `nacos` 记录 `config-source=nacos`
+
+注意：仅引入 `leaf-base-datasource`、类路径没有 Seata 时属正常形态，数据源侧只记录 DEBUG，不会产生告警。
+
 ## 3. 核心组件
 
 本章节将详细介绍 `leaf-base-seata` 模块中的核心组件及其作用。
@@ -155,28 +170,27 @@ seata:
 
 `cn.maple.seata.config.GXSeataDynamicDataSourceConfig` 是本模块的核心配置类，主要负责整合 Seata 分布式事务与框架的动态数据源功能。其主要职责和特性包括：
 
-- **条件化加载**：通过 `@ConditionalOnClass(value = {DruidDataSource.class, GXDynamicDataSourceConfig.class}, name = {"io.seata.rm.datasource.DataSourceProxy"})` 注解，确保只有在项目中同时存在 Druid 数据源、框架动态数据源配置以及 Seata 数据源代理类时，此配置才会生效。
-- **优先加载**：使用 `@AutoConfigureBefore(DataSourceAutoConfiguration.class)` 注解，确保本配置在 Spring Boot 默认的数据源自动配置之前加载，从而接管数据源的创建和配置。
-- **MyBatis-Plus 集成**：
-    - 创建 `MybatisSqlSessionFactoryBean` 实例替代标准的 `SqlSessionFactoryBean`，以确保 MyBatis-Plus 的特性（如 Mapper 扫描、插件等）在 Seata 环境下能够正确工作。
-    - 将框架提供的动态数据源 `GXDynamicDataSource` 注入到 `MybatisSqlSessionFactoryBean` 中。
-    - 配置 `SpringManagedTransactionFactory` 作为事务工厂。
-    - 应用 `MybatisPlusProperties` 中的配置，并集成 `MybatisPlusInterceptor`（例如，用于分页）。
-    - 集成 `GXAutoFillMetaObjectHandler`，实现实体类中如创建时间、更新时间等字段的自动填充。
-
-通过这个配置类，开发者可以在使用 Seata 进行分布式事务管理的同时，继续享受动态数据源带来的灵活性。
+- **条件化加载**：通过 `@ConditionalOnClass(value = {DruidDataSource.class, GXDynamicDataSourceConfig.class}, name = "org.apache.seata.rm.datasource.SeataDataSourceProxy")` 注解，确保只有在项目中同时存在 Druid 数据源、框架动态数据源配置以及 **Seata 2.6.0 新命名空间**的代理接口时才生效。禁止回退到已弃用的 `io.seata.*` 兼容类。
+- **MyBatis-Plus 集成**：注册一个 `SqlSessionFactoryBeanCustomizer`，把 `GXDynamicDataSource` 注入 MyBatis-Plus 的 `SqlSessionFactory` 构建流程。数据源通过 `ObjectProvider` 惰性解析：容器中没有 `GXDynamicDataSource` 时只输出 WARN 并跳过注入，不会导致启动失败。
+- **启动期代理校验**：注册 `SmartInitializingSingleton`，在全部单例创建后遍历 `GXDynamicDataSource#getResolvedDataSources()`，逐个判断目标数据源是否实现了 `SeataDataSourceProxy`：
+    - 全部已代理：输出单条 INFO `[Seata] enabled=true, config-source=..., datasources=[...], proxied=[...]`；
+    - 存在未代理：逐个输出 WARN（含数据源名称），启动继续；
+    - 严格模式下：抛 `GXBusinessException`，启动失败。
+- **不重复代理**：物理数据源由 `GXDynamicDataSourceConfig` 在创建时包装，本类**不会**再对路由数据源包装 `DataSourceProxy`。
 
 ### 3.2 Seata 属性配置类
 
 为了灵活加载 Seata 的配置参数，模块提供了两个属性配置类：
 
 - **`cn.maple.seata.properties.GXLocalSeataProperties`**：
-    - 通过 `@ConditionalOnMissingClass({"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})` 注解，当项目中不存在 Nacos 配置相关类时，此类生效。
-    - 使用 `@PropertySource(value = {"classpath:/${spring.profiles.active}/seata.yml"}, factory = GXYamlPropertySourceFactory.class, ignoreResourceNotFound = false)` 从类路径下当前激活环境对应的 `seata.yml` 文件加载配置。
+    - 通过 `@ConditionalOnMissingClass("com.alibaba.cloud.nacos.NacosConfigManager")` 注解，当项目中**未接入 Spring Cloud Alibaba Nacos 配置中心**时此类生效。
+    - 使用 `@PropertySource(value = "classpath:/${spring.profiles.active}/seata.yml", factory = GXYamlPropertySourceFactory.class, ignoreResourceNotFound = false)` 从类路径下当前激活环境对应的 `seata.yml` 文件加载配置。
+    - **路径约定**：文件必须位于类路径的 `<profile>/seata.yml`（通常放在 `src/main/resources/<profile>/seata.yml`）。仓库根目录的 `config/<profile>/seata.yml` 只有在被加入类路径（例如通过 `spring.config.additional-location` 或构建时打包）时才会生效。
+    - **失败语义**：`spring.profiles.active` 未设置，或该 profile 下文件缺失时，启动直接失败，错误信息包含未解析占位符或缺失的资源路径。这是刻意保留的显式保护，不会自动跳过 Seata。
     - 这是一个标记类，实际的 Seata 配置属性由 Seata 自身的 `@ConfigurationProperties` 机制处理。
 
 - **`cn.maple.seata.properties.GXNacosSeataProperties`**：
-    - 通过 `@ConditionalOnClass(name = {"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})` 注解，当项目中存在 Nacos 配置相关类时，此类生效。
+    - 通过 `@ConditionalOnClass(name = {"com.alibaba.cloud.nacos.NacosConfigManager", "com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})` 注解，当项目已接入 Spring Cloud Alibaba Nacos 配置中心时此类生效；此时本地入口不装配。
     - 使用 `@NacosConfigurationProperties` 注解，从 Nacos 配置中心拉取 `seata.yml` 的配置内容。
         - `dataId`: 默认为 `seata.yml`。
         - `groupId`: 默认为 `${spring.cloud.nacos.config.group:${nacos.config.group:}}`。
@@ -190,7 +204,7 @@ seata:
 
 `leaf-base-seata` 模块主要关注于 Seata 与框架其他部分的整合，Seata 自身的核心组件如 `GlobalTransactionScanner`、`DataSourceProxy` 等由 Seata Starter 自动配置和管理。
 
-- **`DataSourceProxy`**：Seata 会自动将应用程序中配置的（动态）数据源包装成 `io.seata.rm.datasource.DataSourceProxy`。这样，所有通过该数据源执行的 SQL 操作都会被 Seata 拦截和管理，以实现分布式事务的 AT 模式。
+- **`DataSourceProxy`**：由 `GXDynamicDataSourceConfig` 在创建每个**物理数据源**时包装成 `org.apache.seata.rm.datasource.DataSourceProxy`（新命名空间），从而让 SQL 进入 Seata 的 AT 管理。注意两点：①代理构造器会立即获取连接并校验 `undo_log` 表，业务库缺少回滚日志表时启动即失败；②路由数据源 `GXDynamicDataSource` 本身不会被包装，每个物理数据源最多一层代理。
 - **`GlobalTransactionScanner`**：用于扫描带有 `@GlobalTransactional`（全局事务发起者）和 `@Transactional`（分支事务参与者，在 Seata 环境下通常与 `@GlobalTransactional` 配合使用，或用于本地事务）注解的方法，并为这些方法创建事务代理，从而启动或加入全局事务。
 
 ## 4. 使用指南
@@ -202,7 +216,7 @@ seata:
 ```java
 package com.example.service;
 
-import io.seata.spring.annotation.GlobalTransactional;
+import org.apache.seata.spring.annotation.GlobalTransactional;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 // 假设存在 OrderMapper, InventoryServiceFeignClient, AccountServiceFeignClient
@@ -279,7 +293,7 @@ public class OrderService {
 package com.example.service;
 
 import cn.maple.core.datasource.annotation.DS; // 假设 @DS 是框架的动态数据源切换注解
-import io.seata.spring.annotation.GlobalTransactional;
+import org.apache.seata.spring.annotation.GlobalTransactional;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 // 假设有 MasterDbMapper 和 SlaveDbMapper

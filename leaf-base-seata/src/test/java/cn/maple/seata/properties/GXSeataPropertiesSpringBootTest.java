@@ -38,6 +38,29 @@ class GXSeataPropertiesSpringBootTest {
     }
 
     @Test
+    void localSeataPropertiesFailsWhenProfileIsMissing() {
+        contextRunner
+                .withClassLoader(new FilteredClassLoader("com.alibaba.cloud.nacos.NacosConfigManager"))
+                .withUserConfiguration(GXLocalSeataProperties.class)
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasStackTraceContaining("spring.profiles.active");
+                });
+    }
+
+    @Test
+    void localSeataPropertiesFailsWhenProfileResourceIsMissing() {
+        contextRunner
+                .withClassLoader(new FilteredClassLoader("com.alibaba.cloud.nacos.NacosConfigManager"))
+                .withUserConfiguration(GXLocalSeataProperties.class)
+                .withPropertyValues("spring.profiles.active=missing-profile")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasStackTraceContaining("missing-profile");
+                });
+    }
+
+    @Test
     void localSeataPropertiesKeepsProfileSeataYamlAsRequiredSource() {
         PropertySource propertySource = GXLocalSeataProperties.class.getAnnotation(PropertySource.class);
 

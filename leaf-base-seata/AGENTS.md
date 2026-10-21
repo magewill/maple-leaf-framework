@@ -77,14 +77,17 @@
 1. 任何功能改动都必须覆盖成功路径、失败路径、异常路径和边界条件。
 2. 如果改动影响以下内容，至少补充对应测试：
    - `GXSeataDynamicDataSourceConfig` 的条件装配是否生效。
-   - `seataDynamicDataSourceCustomizer` 是否将 `GXDynamicDataSource` 注入到 `SqlSessionFactoryBean`。
-   - 本地配置与 Nacos 配置的互斥装配是否正确。
+   - `seataDynamicDataSourceCustomizer` 是否将 `GXDynamicDataSource` 注入到 `SqlSessionFactoryBean`；无 `GXDynamicDataSource` bean 时必须跳过而不是启动失败。
+   - 启动期代理校验的三态：全部已代理（INFO）、存在未代理（WARN）、严格开关开启（`GXBusinessException`）。
+   - 未启用 Seata（类路径无代理类型）时数据源侧只记录 DEBUG，不得出现 WARN。
+   - 本地配置与 Nacos 配置的互斥装配是否正确；profile 缺失/资源缺失的失败信息是否含 profile 与期望路径。
    - Nacos 配置项表达式是否仍能正确绑定到 `seata.yml`。
    - 日志内容是否保持 ASCII。
-3. 如果功能需要在 Spring Boot 应用真实启动后才能验证，例如条件注解、自动配置、Bean 注入、配置源切换、MyBatis-Plus 集成行为，测试用例必须模拟真实 Spring Boot 应用启动后的运行形态。优先使用 `@SpringBootTest`、`ApplicationContextRunner` 或等价方式，不能只写纯单元测试。
-4. 当前模块没有现成测试时，触及相关能力的修改不能以“暂无测试”为理由跳过验证，必须为本次改动建立最小可维护测试基线。
-5. 测试应尽量避免依赖真实外部 Seata Server 或 Nacos Server；除非变更目标就是外部集成验证，否则优先通过 Spring 上下文、条件装配和配置绑定测试验证模块契约。
-6. 模块级最小验证命令为 `mvn -pl leaf-base-seata test`。
+3. 测试禁止构造真实 `org.apache.seata.rm.datasource.DataSourceProxy`：其构造器会 `getConnection()` 并校验 `undo_log` 表，无库环境必然失败。代理类只做"类名/接口/构造器"反射契约测试，包装行为用实现 `SeataDataSourceProxy` 的桩对象验证，禁止 `getClass()` 断言。
+4. 如果功能需要在 Spring Boot 应用真实启动后才能验证，例如条件注解、自动配置、Bean 注入、配置源切换、MyBatis-Plus 集成行为，测试用例必须模拟真实 Spring Boot 应用启动后的运行形态。优先使用 `@SpringBootTest`、`ApplicationContextRunner` 或等价方式，不能只写纯单元测试。
+5. 当前模块没有现成测试时，触及相关能力的修改不能以“暂无测试”为理由跳过验证，必须为本次改动建立最小可维护测试基线。
+6. 测试应尽量避免依赖真实外部 Seata Server 或 Nacos Server；除非变更目标就是外部集成验证，否则优先通过 Spring 上下文、条件装配和配置绑定测试验证模块契约。
+7. 模块级最小验证命令为 `mvn -pl leaf-base-seata test`。
 
 ## 5. 变更前检查清单
 
@@ -96,7 +99,7 @@
 3. 是否引入了对 `DataSourceProxy` 的重复代理风险。
 4. 是否影响本地 `seata.yml` 与 Nacos `seata.yml` 的加载优先级或互斥关系。
 5. 是否影响 Nacos 自动刷新行为。
-6. 是否引入了非 ASCII 日志文本。
+6. 是否引入了非 ASCII 日志文本；`maple.framework.enable.seata-strict` 默认值是否仍为 `false`；未启用 Seata 的路径是否仍为 DEBUG。
 7. 是否进行了不必要的方法或类抽取。
 8. 是否清理了冗余注释和冗余 Javadoc，并仅为复杂逻辑补充了必要 Javadoc 或示例。
 9. 是否检查并补齐了与改动点匹配的测试。

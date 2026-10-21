@@ -1,0 +1,10 @@
+{
+  "properties": [
+    {
+      "name": "maple.framework.enable.seata-strict",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Fail startup when a physical datasource is not wrapped by Seata. When false (default), a warning is logged and startup continues."
+    }
+  ]
+}

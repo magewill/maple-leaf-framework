@@ -26,6 +26,10 @@ import java.util.*;
 @Slf4j
 public class GXDynamicDataSourceConfig extends GXApplicationContextAware {
     private static final String DEFAULT_DATA_SOURCE_NAME = "framework";
+    /**
+     * Seata 2.6.0 新命名空间下的数据源代理类。禁止回退到已弃用的 {@code io.seata.*} 兼容类。
+     */
+    static final String SEATA_DATASOURCE_PROXY_CLASS = "org.apache.seata.rm.datasource.DataSourceProxy";
 
     @Resource
     private GXDynamicDataSourceProperties dynamicDataSourceProperties;
@@ -77,8 +81,15 @@ public class GXDynamicDataSourceConfig extends GXApplicationContextAware {
     }
 
     private DataSource wrapSeataDataSource(DataSource dataSource) {
+        return wrapSeataDataSource(dataSource, GXDynamicDataSourceConfig.class.getClassLoader());
+    }
+
+    /**
+     * 包级可见以便测试用受限类加载器验证"Seata 未启用"的降级路径。类缺失属正常形态，只记 debug。
+     */
+    DataSource wrapSeataDataSource(DataSource dataSource, ClassLoader classLoader) {
         try {
-            Class<?> proxyClass = Class.forName("io.seata.rm.datasource.DataSourceProxy");
+            Class<?> proxyClass = Class.forName(SEATA_DATASOURCE_PROXY_CLASS, false, classLoader);
             Constructor<?> constructor = proxyClass.getConstructor(DataSource.class);
             Object proxy = constructor.newInstance(dataSource);
             log.info("Datasource wrapped with Seata DataSourceProxy");
