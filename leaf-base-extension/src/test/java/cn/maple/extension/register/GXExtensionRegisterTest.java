@@ -150,6 +150,30 @@ class GXExtensionRegisterTest {
     }
 
     @Test
+    void blankSingleAnnotationAttributeFailsWithImplementationContext() {
+        GXExtensionException failure = assertThrows(GXExtensionException.class,
+                () -> extensionRegister.doRegistration(new BlankSingleAttributeExtension()));
+
+        assertTrue(failure.getMessage().contains(BlankSingleAttributeExtension.class.getName()));
+        assertTrue(failure.getMessage().contains("GXExtension"));
+        assertTrue(failure.getMessage().contains("bizId"));
+        assertTrue(isAscii(failure.getMessage()));
+        assertEquals(0, extensionRepository.size());
+    }
+
+    @Test
+    void blankContainerAttributeFailsWithImplementationContext() {
+        GXExtensionException failure = assertThrows(GXExtensionException.class,
+                () -> extensionRegister.doRegistration(new BlankCartesianAttributeExtension()));
+
+        assertTrue(failure.getMessage().contains(BlankCartesianAttributeExtension.class.getName()));
+        assertTrue(failure.getMessage().contains("GXExtensions(bizId="));
+        assertTrue(failure.getMessage().contains("bizId"));
+        assertTrue(isAscii(failure.getMessage()));
+        assertEquals(0, extensionRepository.size());
+    }
+
+    @Test
     void duplicateRegistrationMessageCarriesCoordinateAndBothImplementations() {
         extensionRegister.doRegistration(new FirstDuplicateExtension());
 
@@ -244,6 +268,14 @@ class GXExtensionRegisterTest {
 
     @GXExtensions(bizId = {})
     private static class EmptyContainerExtension implements RegisterTestExtPoint {
+    }
+
+    @GXExtension(bizId = " ")
+    private static class BlankSingleAttributeExtension implements RegisterTestExtPoint {
+    }
+
+    @GXExtensions(bizId = {" "})
+    private static class BlankCartesianAttributeExtension implements RegisterTestExtPoint {
     }
 
     @GXExtension(bizId = "inherit")

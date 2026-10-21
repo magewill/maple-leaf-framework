@@ -5,6 +5,7 @@ import cn.maple.extension.exception.GXExtensionException;
 import cn.maple.extension.register.GXAbstractComponentExecutor;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
@@ -56,10 +57,6 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
     }
 
     private <E> E locateExtensionByName(String extensionPointName, GXBizScenario bizScenario) {
-        if (extensionPointName == null || extensionPointName.isBlank()) {
-            throw new IllegalArgumentException("Extension point name cannot be blank");
-        }
-
         E extension = locate(extensionPointName, bizScenario.getUniqueIdentity());
         if (extension == null) {
             extension = locate(extensionPointName, bizScenario.getIdentityWithDefaultScenario());
@@ -78,11 +75,11 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
     }
 
     private <E> E locate(String extensionPointName, String uniqueIdentity) {
-        return cast(extensionRepository.findExtension(extensionPointName, uniqueIdentity).orElse(null));
+        return cast(extensionRepository.findExtensionOrNull(extensionPointName, uniqueIdentity));
     }
 
     @SuppressWarnings("unchecked")
-    private <E> E cast(GXExtensionPoint extension) {
+    private <E> E cast(@Nullable GXExtensionPoint extension) {
         return (E) extension;
     }
 

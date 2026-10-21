@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GXExtensionCoordinateTest {
     @Test
@@ -24,6 +25,20 @@ class GXExtensionCoordinateTest {
         assertThrows(IllegalArgumentException.class, () -> GXExtensionCoordinate.valueOf("ext", "biz.useCase"));
         assertThrows(IllegalArgumentException.class, () -> GXExtensionCoordinate.valueOf("ext", "biz.useCase.scenario.extra"));
         assertThrows(IllegalArgumentException.class, () -> GXExtensionCoordinate.valueOf("ext", "biz..scenario"));
+    }
+
+    @Test
+    void invalidIdentityDiagnosticsMatchScenarioFactory() {
+        IllegalArgumentException fromScenario = assertThrows(IllegalArgumentException.class,
+                () -> GXBizScenario.fromUniqueIdentity("biz..scenario"));
+        IllegalArgumentException fromCoordinate = assertThrows(IllegalArgumentException.class,
+                () -> GXExtensionCoordinate.valueOf("ext", "biz..scenario"));
+
+        assertEquals(fromScenario.getMessage(), fromCoordinate.getMessage());
+
+        IllegalArgumentException wrongSegments = assertThrows(IllegalArgumentException.class,
+                () -> GXExtensionCoordinate.valueOf("ext", "biz.useCase"));
+        assertTrue(wrongSegments.getMessage().contains("actual=2"));
     }
 
     @Test

@@ -112,8 +112,8 @@ mvn -pl leaf-base-extension test -Dtest=GXExtensionBootstrapTest,GXExtensionAuto
 ## 场景 9：端到端示例真实执行（对应 FR-015、SC-005）
 
 ```powershell
-mvn -pl leaf-base-extension test -Dtest=ExtensionTest
-Get-Content leaf-base-extension/target/surefire-reports/cn.maple.extension.ExtensionTest.txt
+mvn -pl leaf-base-extension test -Dtest=GXExtensionCustomerSpringBootTest
+Get-Content leaf-base-extension/target/surefire-reports/cn.maple.extension.GXExtensionCustomerSpringBootTest.txt
 ```
 
 期望：报告存在且 `Tests run: 3, Failures: 0, Errors: 0`（改造前该文件不存在，用例零执行）。三个用例覆盖"精确场景""默认场景""默认用例"三层兜底在真实 Spring 上下文中的选实现结果。

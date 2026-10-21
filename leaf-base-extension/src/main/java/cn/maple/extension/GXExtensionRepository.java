@@ -1,6 +1,7 @@
 package cn.maple.extension;
 
 import org.jspecify.annotations.NullMarked;
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -26,9 +27,21 @@ public class GXExtensionRepository {
         return Optional.ofNullable(extensionRepo.get(coordinate));
     }
 
+    /**
+     * Looks up an implementation without wrapping the result, for the hot resolution path.
+     *
+     * @param extensionPoint extension point interface name
+     * @param bizScenario    scenario identity
+     * @return matching implementation, or {@code null} when the coordinate is not registered
+     */
+    @Nullable
+    GXExtensionPoint findExtensionOrNull(String extensionPoint, String bizScenario) {
+        return extensionRepo.get(GXExtensionCoordinate.valueOf(extensionPoint, bizScenario));
+    }
+
     @NullMarked
     public Optional<GXExtensionPoint> findExtension(String extensionPoint, String bizScenario) {
-        return findExtension(GXExtensionCoordinate.valueOf(extensionPoint, bizScenario));
+        return Optional.ofNullable(findExtensionOrNull(extensionPoint, bizScenario));
     }
 
     public void registerExtension(GXExtensionCoordinate coordinate, GXExtensionPoint extension) {

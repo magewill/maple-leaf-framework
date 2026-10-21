@@ -68,9 +68,12 @@ public final class GXBizScenario implements Serializable {
     }
 
     /**
-     * Validates an identity without building a scenario instance; used by coordinate construction.
+     * Validates an identity without building a scenario instance.
      * <p>
-     * Produces the same failure messages as {@link #fromUniqueIdentity(String)}.
+     * Coordinate construction calls this instead of {@link #fromUniqueIdentity(String)}: a coordinate
+     * only needs the validation, so building a scenario would allocate three derived identities on a
+     * path executed once per lookup. Both entry points share {@code validateSegments}, therefore the
+     * failure messages are identical.
      *
      * @param uniqueIdentity three dot separated segments: bizId.useCase.scenario
      * @throws IllegalArgumentException when the identity is not exactly three non-blank segments

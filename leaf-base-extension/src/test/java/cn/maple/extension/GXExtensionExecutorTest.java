@@ -6,8 +6,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -144,6 +142,21 @@ class GXExtensionExecutorTest {
     }
 
     @Test
+    void defaultScenarioRequestResolvesGlobalDefaultWithSingleLookup() {
+        CountingRepository countingRepository = new CountingRepository();
+        countingRepository.registerExtension(
+                new GXExtensionCoordinate(TestDefaultExtPoint.class, GXBizScenario.newDefault()),
+                new TestDefaultExtension("global-default"));
+        ReflectionTestUtils.setField(extensionExecutor, "extensionRepository", countingRepository);
+
+        String result = extensionExecutor.execute(TestDefaultExtPoint.class, GXBizScenario.newDefault(),
+                TestDefaultExtPoint::name);
+
+        assertEquals("global-default", result);
+        assertEquals(1, countingRepository.lookups());
+    }
+
+    @Test
     void missingExtensionFailsWithNotFoundCodeAndRequestContext() {
         GXBizScenario requested = GXBizScenario.valueOf("bizA", "useCaseA", "scenarioA");
 
@@ -207,9 +220,9 @@ class GXExtensionExecutorTest {
         private int lookups;
 
         @Override
-        public Optional<GXExtensionPoint> findExtension(String extensionPoint, String bizScenario) {
+        GXExtensionPoint findExtensionOrNull(String extensionPoint, String bizScenario) {
             lookups++;
-            return super.findExtension(extensionPoint, bizScenario);
+            return super.findExtensionOrNull(extensionPoint, bizScenario);
         }
 
         private int lookups() {

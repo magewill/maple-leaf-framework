@@ -82,30 +82,44 @@ public class GXExtensionRegister {
         GXExtensions container = AnnotatedElementUtils.findMergedAnnotation(extensionClz, GXExtensions.class);
 
         List<GXBizScenario> bizScenarios = new ArrayList<>(repeatable.size() + 1);
-        for (GXExtension extension : repeatable) {
-            bizScenarios.add(GXBizScenario.valueOf(extension.bizId(), extension.useCase(), extension.scenario()));
-        }
+        try {
+            for (GXExtension extension : repeatable) {
+                bizScenarios.add(GXBizScenario.valueOf(extension.bizId(), extension.useCase(), extension.scenario()));
+            }
 
-        if (container != null && container.value().length == 0) {
-            for (String bizId : container.bizId()) {
-                for (String useCase : container.useCase()) {
-                    for (String scenario : container.scenario()) {
-                        bizScenarios.add(GXBizScenario.valueOf(bizId, useCase, scenario));
+            if (container != null && container.value().length == 0) {
+                for (String bizId : container.bizId()) {
+                    for (String useCase : container.useCase()) {
+                        for (String scenario : container.scenario()) {
+                            bizScenarios.add(GXBizScenario.valueOf(bizId, useCase, scenario));
+                        }
                     }
                 }
             }
+        } catch (IllegalArgumentException invalidAttribute) {
+            throw new GXExtensionException("Invalid extension coordinate declaration for " + extensionClz.getName()
+                    + ", declaration=" + describeDeclaration(extensionClz, container)
+                    + ", detail=" + invalidAttribute.getMessage(),
+                    HttpStatus.HTTP_INTERNAL_ERROR, invalidAttribute);
         }
 
         if (bizScenarios.isEmpty()) {
             throw new GXExtensionException("No extension coordinate resolved for " + extensionClz.getName()
-                    + ", declaration=" + describeDeclaration(container), HttpStatus.HTTP_INTERNAL_ERROR);
+                    + ", declaration=" + describeDeclaration(extensionClz, container), HttpStatus.HTTP_INTERNAL_ERROR);
         }
         return bizScenarios;
     }
 
-    private String describeDeclaration(GXExtensions container) {
+    private String describeDeclaration(Class<?> extensionClz, GXExtensions container) {
         if (container != null) {
-            return "GXExtensions(bizId/useCase/scenario)";
+            return "GXExtensions(bizId=" + Arrays.toString(container.bizId())
+                    + ", useCase=" + Arrays.toString(container.useCase())
+                    + ", scenario=" + Arrays.toString(container.scenario()) + ")";
+        }
+        GXExtension single = AnnotatedElementUtils.findMergedAnnotation(extensionClz, GXExtension.class);
+        if (single != null) {
+            return "GXExtension(bizId=[" + single.bizId() + "], useCase=[" + single.useCase()
+                    + "], scenario=[" + single.scenario() + "])";
         }
         return "GXExtension/GXExtensions(absent)";
     }

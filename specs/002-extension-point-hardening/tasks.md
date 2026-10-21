@@ -240,3 +240,14 @@ T026 (GXExtensionAutoConfigurationTest.java)  ║  T027 (GXExtensionBootstrapTes
 - 日志文本必须为 ASCII；公共 API 的空值语义用 `@Nullable` / `@NullMarked` 明确
 - 术语统一：本任务清单只用"执行器（Executor）"指代解析组件，不再使用"解析器"
 - 提交信息格式 `fix(extension): ...`，一个逻辑组一次提交
+
+---
+
+## Phase 9: Convergence
+
+- [x] T031 在 `leaf-base-extension/src/test/java/cn/maple/extension/GXExtensionConcurrencyTest.java` 增加"注册期间并发解析"用例：注册线程写入目标坐标的同时，8 个虚拟线程各解析 200 000 次，断言每次结果要么是正确的实现、要么是 `GXExtensionException` 未命中，绝不出现 `null`、其他实现或非预期异常（总计 60 秒超时保护），以覆盖"读-写并发"可见性而非"先注册后读取" per US5/AC2 + FR-012 + quickstart 场景 6 (partial)
+- [x] T032 在 `leaf-base-extension/src/test/java/cn/maple/extension/GXExtensionExecutorBenchmarkTest.java` 把对照物改回字面意义的裸 `ConcurrentHashMap.get`（键在循环外预构造，汇总量写入 `volatile` 字段），相对门禁按"每次仓库查找"计预算（精确命中 1 次、四层兜底 4 次，查找次数由计数替身另行断言），保留 ≤ 1 μs 绝对门禁；同时去掉 `GXExtensionExecutor.locateExtensionByName` 中与 `GXExtensionCoordinate` 构造重复的空白校验（公开入口的入参校验保留），使精确命中实测中位数 ≤ 6 × 裸对照，并在 `research.md` 记录对照口径与实测值；不得以放宽倍数收场 per SC-006 + FR-014 (contradicts)
+- [x] T033 在 `leaf-base-extension/src/main/java/cn/maple/extension/register/GXExtensionRegister.java` 的 `resolveBizScenarios` 中把"注解属性为空白（`@GXExtension(bizId=" ")`、`@GXExtensions(bizId={" "})`）导致 `GXBizScenario.valueOf` 抛 `IllegalArgumentException`"包装为 `GXExtensionException`，信息含实现类全名、声明形态与非法属性值，并在 `GXExtensionRegisterTest` 补这两例断言（旧代码上应为"信息缺失"的失败） per FR-002 + contracts/extension-annotation.md §3 (partial)
+- [x] T034 在 `leaf-base-extension/src/test/java/cn/maple/extension/GXExtensionExecutorTest.java` 补"请求场景恰为全局默认占位符"用例：仅注册全局默认实现时解析 `GXBizScenario.newDefault()` 命中该实现，并用计数仓库断言查找次数仍 ≤ 4（覆盖四次查找退化为同一键的边界，结果正确且无重复副作用） per Edge Cases: 默认占位符场景 (partial)
+- [x] T035 更新 `specs/002-extension-point-hardening/quickstart.md` 场景 9 的命令与报告路径为 `GXExtensionCustomerSpringBootTest` 与 `cn.maple.extension.GXExtensionCustomerSpringBootTest.txt`，与 T019 的类名迁移保持一致 per quickstart 场景 9 + SC-005 (partial)
+- [x] T036 在 `GXBizScenario.validateUniqueIdentity` 的 Javadoc 与 PR 描述中说明该包级方法的引入理由（坐标构造期复用校验、避免为校验创建场景对象），并补一条用例断言坐标构造失败的"实际段数/非法段"信息与 `fromUniqueIdentity` 完全一致，消除与 plan"仅新增 2 个方法"及 T005"改用 `fromUniqueIdentity` 校验"表述的偏差 per plan: Structure Decision + T005 (unrequested)
