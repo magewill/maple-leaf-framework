@@ -185,6 +185,17 @@ description: "Task list for MyBatis-Plus 操作监听加固"
 
 ---
 
+## Phase 10: Convergence
+
+**Purpose**: 收敛 2026-10-21 三次复核发现的验证覆盖缺口（均为 LOW 级，行为已实现但缺少自动化证据）。
+
+- [X] T061 **LOW** 在 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/config/GXMyBatisAsyncListenerExecutorConfigTest.java` 补数据权限上下文断言：调用方设置 `GXDataFilterThreadLocalUtils.setDataFilterContext(...)` 后提交任务，断言任务内读到同一上下文、任务结束后清理且不残留（当前只验证了数据源与 TraceId）per FR-014 (partial)
+- [X] T062 **LOW** 为结构化日志补自动化断言：用 LogCaptor 或 Logback `ListAppender` 捕获 `GXMyBatisListenerEventPublisher` 日志，验证失败/降级/慢回调三类日志均包含 `operationId`、`mode`、`eventType`、`reason` 字段（当前仅人工核对）per US4/AC1 (partial)
+- [X] T063 **LOW** 在 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/perf/GXMyBatisListenerOverheadTest.java` 增加"开关关闭"性能回退测量：同一夹具下比较 `maple.framework.enable.mybatis-listener=false` 与无声明路径的 P95 差异在测量误差内，覆盖 SC-007 的性能部分（当前只验证行为不产生事件）per SC-007 (partial)
+- [X] T064 **LOW** 通过真实 Spring 上下文关闭验证停机计数：构建含排队任务的上下文后调用 `close()`，断言 `cancelled` 增量等于未执行任务数且输出告警日志（当前仅直接调用 `recordUnexecutedTasksOnShutdown()`，未覆盖 `@PreDestroy` 与执行器销毁顺序）per FR-017 (partial)
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

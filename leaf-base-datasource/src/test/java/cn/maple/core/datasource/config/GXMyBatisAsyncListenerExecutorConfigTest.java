@@ -1,6 +1,8 @@
 package cn.maple.core.datasource.config;
 
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerMetrics;
+import cn.maple.core.datasource.dto.GXDataFilterContext;
+import cn.maple.core.datasource.util.GXDataFilterThreadLocalUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -117,6 +119,82 @@ class GXMyBatisAsyncListenerExecutorConfigTest {
         } finally {
             GXDynamicContextHolder.clear();
             executor.shutdown();
+        }
+    }
+
+    @Test
+    void asyncTaskInheritsDataFilterContextAndClearsItAfterwards() throws Exception {
+        GXMyBatisAsyncListenerExecutorConfig config = configuredWithQueue(4);
+        ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) config.myBatisEventAsyncTaskExecutor();
+        try {
+            GXDataFilterThreadLocalUtils.setDataFilterContext(new GXDataFilterContext("tenant_id = 1"));
+            CountDownLatch firstRun = new CountDownLatch(1);
+            java.util.concurrent.atomic.AtomicReference<String> capturedFilter =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            executor.execute(() -> {
+                GXDataFilterContext context = GXDataFilterThreadLocalUtils.getDataFilterContext();
+                capturedFilter.set(context == null ? null : context.getSqlFilter());
+                firstRun.countDown();
+            });
+            assertTrue(firstRun.await(2, TimeUnit.SECONDS));
+            awaitIdle(executor);
+            assertEquals("tenant_id = 1", capturedFilter.get());
+
+            GXDataFilterThreadLocalUtils.cleanDataFilterContext();
+            CountDownLatch secondRun = new CountDownLatch(1);
+            java.util.concurrent.atomic.AtomicReference<String> nextTaskFilter =
+                    new java.util.concurrent.atomic.AtomicReference<>("unset");
+            executor.execute(() -> {
+                GXDataFilterContext context = GXDataFilterThreadLocalUtils.getDataFilterContext();
+                nextTaskFilter.set(context == null ? null : context.getSqlFilter());
+                secondRun.countDown();
+            });
+            assertTrue(secondRun.await(2, TimeUnit.SECONDS));
+            assertNull(nextTaskFilter.get(), "Data filter context must not leak into the next task");
+        } finally {
+            GXDataFilterThreadLocalUtils.cleanDataFilterContext();
+            executor.shutdown();
+        }
+    }
+
+    @Test
+    void contextCloseCountsUnexecutedTasks() throws Exception {
+        GXMyBatisAsyncListenerProperties properties = defaultProperties();
+        properties.setCorePoolSizeFactor(0.001D);
+        properties.setMaxPoolSizeFactor(0.001D);
+        properties.setQueueCapacity(8);
+        properties.setKeepAliveSeconds(0);
+        properties.setLongTaskThresholdMs(0L);
+        properties.setAwaitTerminationSeconds(1);
+        properties.getVirtual().setEnabled(false);
+
+        AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
+        context.registerBean(GXMyBatisAsyncListenerProperties.class, () -> properties);
+        context.register(GXMyBatisAsyncListenerExecutorConfig.class);
+        context.refresh();
+        ThreadPoolTaskExecutor executor =
+                context.getBean("myBatisEventAsyncTaskExecutor", ThreadPoolTaskExecutor.class);
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        long cancelledBefore = GXMyBatisListenerMetrics.snapshot().cancelled();
+        try {
+            executor.execute(() -> await(started, release));
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            executor.execute(() -> {
+            });
+            executor.execute(() -> {
+            });
+            assertEquals(2, executor.getThreadPoolExecutor().getQueue().size());
+
+            context.close();
+
+            assertTrue(GXMyBatisListenerMetrics.snapshot().cancelled() - cancelledBefore >= 2L,
+                    "Closing the context must count the queued tasks as cancelled");
+        } finally {
+            release.countDown();
+            if (context.isActive()) {
+                context.close();
+            }
         }
     }
 

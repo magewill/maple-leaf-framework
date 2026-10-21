@@ -147,6 +147,26 @@ class GXMyBatisListenerOverheadTest {
         return Dict.create().set("operation", "saveBatch").set("batchEntities", entities);
     }
 
+    @Test
+    @EnabledIfSystemProperty(named = "maple.perf.enabled", matches = "true")
+    void disabledSwitchMatchesNoDeclarationPathWithinMeasurementError() throws Exception {
+        Method method = PlainMapper.class.getMethod("insert", Object.class);
+        Dict payload = Dict.create().set("id", 1);
+        try (MockedStatic<GXEventPublisherUtils> ignored = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            MockEnvironment disabledEnvironment = new MockEnvironment()
+                    .withProperty(GXMyBatisListenerEventPublisher.ENABLED_KEY, "false");
+            long disabledP95 = measureP95(publisher(new GXMyBatisListenerProperties(), disabledEnvironment),
+                    new PlainMapperImpl(), method, payload);
+            long noDeclarationP95 = measureP95(publisher(new GXMyBatisListenerProperties()), new PlainMapperImpl(),
+                    method, payload);
+            long delta = Math.abs(noDeclarationP95 - disabledP95);
+
+            System.out.printf("MyBatis listener switch-off baseline: disabled p95=%.3f us, no-declaration p95=%.3f us, delta=%.3f us%n",
+                    disabledP95 / 1_000.0D, noDeclarationP95 / 1_000.0D, delta / 1_000.0D);
+            assertTrue(delta <= 10_000L, () -> "Switch-off baseline deviates by " + delta + " ns");
+        }
+    }
+
     private long measureP95(GXMyBatisListenerEventPublisher publisher, Object target, Method method, Dict payload) {
         for (int index = 0; index < WARMUP_ITERATIONS; index++) {
             publisher.publish(target, method, GXModelEventNamingEnums.SYNC_SAVE_ENTITY,

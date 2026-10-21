@@ -129,7 +129,6 @@ public class GXMyBatisListenerEventPublisher {
         boolean asyncModeEnabled = isAsyncModeEnabled();
         String operationId = buildOperationId(invokedMethod);
         markSnapshotDegradedIfNeeded(source, invokedMethod, operationId);
-        logDegradedPayloadIfNeeded(source, invokedMethod, operationId);
         // 仅当只有一个监听方时共享批量载荷：多监听方时保留逐事件快照，避免载荷相互影响（FR-008）。
         boolean shareBatchPayload = listeners.size() == 1;
         for (GXMyBatisListenerConfigResolver.ResolvedListener listener : listeners) {
@@ -146,6 +145,7 @@ public class GXMyBatisListenerEventPublisher {
                 .set("listenerClazzName", listener.listenerClazz().getSimpleName())
                 .set("listenerClazz", listener.listenerClazz());
         GXBaseEvent<Dict> event = createEvent(naming, source, eventParam, shareBatchPayload);
+        logDegradedPayloadIfNeeded(source, naming, async, operationId);
         long startNanos = System.nanoTime();
         try {
             if (async || properties.isSyncAfterCommit()) {
@@ -204,13 +204,13 @@ public class GXMyBatisListenerEventPublisher {
                 operationId, Objects.isNull(invokedMethod) ? null : invokedMethod.getName());
     }
 
-    private void logDegradedPayloadIfNeeded(Dict source, @Nullable Method invokedMethod, String operationId) {
+    private void logDegradedPayloadIfNeeded(Dict source, GXModelEventNamingEnums naming, boolean async, String operationId) {
         Object reasons = source.get(DEGRADE_REASONS);
         if (!(reasons instanceof Collection<?> collection) || collection.isEmpty()) {
             return;
         }
-        log.warn("MyBatis listener payload degraded: operationId={}, method={}, reasons={}",
-                operationId, Objects.isNull(invokedMethod) ? null : invokedMethod.getName(), collection);
+        log.warn("MyBatis listener payload degraded: operationId={}, eventType={}, mode={}, reasons={}",
+                operationId, naming.getEventType(), async ? "async" : "sync", collection);
     }
 
     private boolean containsUnsnapshotableValue(Dict source) {
