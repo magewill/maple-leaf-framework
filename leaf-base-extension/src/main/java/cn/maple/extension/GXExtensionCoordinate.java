@@ -1,6 +1,7 @@
 package cn.maple.extension;
 
 import lombok.Getter;
+import org.jspecify.annotations.Nullable;
 
 import java.io.Serial;
 import java.io.Serializable;
@@ -17,8 +18,10 @@ public class GXExtensionCoordinate implements Serializable {
     private final String extensionPointName;
     @Getter
     private final String bizScenarioUniqueIdentity;
+    @Nullable
     private final Class<?> extensionPointClass;
     @Getter
+    @Nullable
     private final GXBizScenario bizScenario;
     private final int hashCode;
 
@@ -40,6 +43,7 @@ public class GXExtensionCoordinate implements Serializable {
     public GXExtensionCoordinate(String extensionPoint, String bizScenario) {
         validateText(extensionPoint, "Extension point name");
         validateText(bizScenario, "Biz scenario unique identity");
+        GXBizScenario.validateUniqueIdentity(bizScenario);
 
         this.extensionPointName = extensionPoint;
         this.bizScenarioUniqueIdentity = bizScenario;
@@ -76,7 +80,7 @@ public class GXExtensionCoordinate implements Serializable {
     }
 
     @SuppressWarnings("unchecked")
-    public <T> Class<T> getExtensionPointClass() {
+    public <T> @Nullable Class<T> getExtensionPointClass() {
         return (Class<T>) extensionPointClass;
     }
 

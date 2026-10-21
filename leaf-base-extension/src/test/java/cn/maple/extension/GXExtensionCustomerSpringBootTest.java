@@ -7,15 +7,13 @@ import cn.maple.extension.test.customer.client.CustomerService;
 import cn.maple.extension.test.customer.client.GXConstants;
 import cn.maple.extension.test.customer.domain.CustomerType;
 import jakarta.annotation.Resource;
-import org.junit.Assert;
-import org.junit.Test;
-import org.junit.runner.RunWith;
+import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
 
-@RunWith(SpringJUnit4ClassRunner.class)
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
 @SpringBootTest(classes = ExtTestApplication.class)
-public class ExtensionTest {
+public class GXExtensionCustomerSpringBootTest {
     @Resource
     private CustomerService customerService;
 
@@ -35,7 +33,7 @@ public class ExtensionTest {
         GXResultUtils<String> response = customerService.addCustomer(addCustomerCmd);
 
         //3. Expect Success
-        Assert.assertNotNull(response);
+        assertNotNull(response);
     }
 
     @Test
@@ -54,7 +52,7 @@ public class ExtensionTest {
         GXResultUtils<String> response = customerService.addCustomer(addCustomerCmd);
 
         //3. Expect Success
-        Assert.assertNotNull(response);
+        assertNotNull(response);
     }
 
     @Test
@@ -73,6 +71,6 @@ public class ExtensionTest {
         GXResultUtils<String> response = customerService.addCustomer(addCustomerCmd);
 
         //3. Expect Success
-        Assert.assertNotNull(response);
+        assertNotNull(response);
     }
 }

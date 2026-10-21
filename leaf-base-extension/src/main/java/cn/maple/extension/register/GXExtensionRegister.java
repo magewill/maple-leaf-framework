@@ -1,25 +1,31 @@
 package cn.maple.extension.register;
 
-import cn.hutool.core.collection.CollUtil;
-import cn.maple.core.framework.exception.GXBusinessException;
+import cn.hutool.http.HttpStatus;
 import cn.maple.extension.GXBizScenario;
 import cn.maple.extension.GXExtension;
 import cn.maple.extension.GXExtensionCoordinate;
 import cn.maple.extension.GXExtensionPoint;
 import cn.maple.extension.GXExtensionRepository;
 import cn.maple.extension.GXExtensions;
+import cn.maple.extension.exception.GXExtensionException;
 import jakarta.annotation.Resource;
+import org.jspecify.annotations.NullMarked;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.ClassUtils;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Registers extension point implementations into {@link GXExtensionRepository}.
+ * <p>
+ * Both entry points resolve coordinates through {@link #resolveBizScenarios(Class)}, so a single
+ * implementation class always registers every coordinate it declares, whichever entry point is used.
  */
 @Component
 public class GXExtensionRegister {
@@ -29,40 +35,79 @@ public class GXExtensionRegister {
     private GXExtensionRepository extensionRepository;
 
     public void doRegistration(GXExtensionPoint extensionObject) {
-        Objects.requireNonNull(extensionObject, "Extension object cannot be null");
-
-        Class<?> extensionClz = getExtensionClass(extensionObject);
-        GXExtension extensionAnn = AnnotatedElementUtils.findMergedAnnotation(extensionClz, GXExtension.class);
-        if (Objects.nonNull(extensionAnn)) {
-            GXBizScenario bizScenario = GXBizScenario.valueOf(extensionAnn.bizId(), extensionAnn.useCase(), extensionAnn.scenario());
-            registerExtension(extensionClz, bizScenario, extensionObject);
-        }
+        doRegistrations(extensionObject);
     }
 
     public void doRegistrationExtensions(GXExtensionPoint extensionObject) {
+        doRegistrations(extensionObject);
+    }
+
+    private void doRegistrations(GXExtensionPoint extensionObject) {
         Objects.requireNonNull(extensionObject, "Extension object cannot be null");
 
         Class<?> extensionClz = getExtensionClass(extensionObject);
-        GXExtensions extensionsAnnotation = AnnotatedElementUtils.findMergedAnnotation(extensionClz, GXExtensions.class);
-        Objects.requireNonNull(extensionsAnnotation, "GXExtensions annotation not found on " + extensionClz.getName());
+        List<GXBizScenario> bizScenarios = resolveBizScenarios(extensionClz);
+        String extensionPointName = calculateExtensionPoint(extensionClz);
 
-        GXExtension[] extensions = extensionsAnnotation.value();
-        if (extensions.length > 0) {
-            for (GXExtension extensionAnn : extensions) {
-                GXBizScenario bizScenario = GXBizScenario.valueOf(extensionAnn.bizId(), extensionAnn.useCase(), extensionAnn.scenario());
-                registerExtension(extensionClz, bizScenario, extensionObject);
-            }
-            return;
+        for (GXBizScenario bizScenario : bizScenarios) {
+            GXExtensionCoordinate extensionCoordinate =
+                    GXExtensionCoordinate.valueOf(extensionPointName, bizScenario.getUniqueIdentity());
+            extensionRepository.registerExtensionIfAbsent(extensionCoordinate, extensionObject)
+                    .ifPresent(registeredExtension -> {
+                        throw new GXExtensionException("Duplicate extension registration for " + extensionCoordinate
+                                + ", existing=" + registeredExtension.getClass().getName()
+                                + ", duplicate=" + extensionObject.getClass().getName(),
+                                HttpStatus.HTTP_INTERNAL_ERROR);
+                    });
+        }
+    }
+
+    /**
+     * Resolves every scenario coordinate declared by an implementation class.
+     * <p>
+     * Supports a single {@link GXExtension}, repeated {@link GXExtension} annotations, an explicit
+     * {@link GXExtensions#value()} list, the cartesian product of {@link GXExtensions} arrays, and a
+     * mix of a single annotation with a container. Returns at least one coordinate or fails.
+     *
+     * @param extensionClz implementation class, never {@code null}
+     * @return declared coordinates in declaration order
+     * @throws GXExtensionException when no coordinate can be resolved
+     */
+    @NullMarked
+    protected List<GXBizScenario> resolveBizScenarios(Class<?> extensionClz) {
+        Objects.requireNonNull(extensionClz, "Extension class cannot be null");
+
+        Set<GXExtension> repeatable =
+                AnnotatedElementUtils.findMergedRepeatableAnnotations(extensionClz, GXExtension.class);
+        GXExtensions container = AnnotatedElementUtils.findMergedAnnotation(extensionClz, GXExtensions.class);
+
+        List<GXBizScenario> bizScenarios = new ArrayList<>(repeatable.size() + 1);
+        for (GXExtension extension : repeatable) {
+            bizScenarios.add(GXBizScenario.valueOf(extension.bizId(), extension.useCase(), extension.scenario()));
         }
 
-        for (String bizId : extensionsAnnotation.bizId()) {
-            for (String useCase : extensionsAnnotation.useCase()) {
-                for (String scenario : extensionsAnnotation.scenario()) {
-                    GXBizScenario bizScenario = GXBizScenario.valueOf(bizId, useCase, scenario);
-                    registerExtension(extensionClz, bizScenario, extensionObject);
+        if (container != null && container.value().length == 0) {
+            for (String bizId : container.bizId()) {
+                for (String useCase : container.useCase()) {
+                    for (String scenario : container.scenario()) {
+                        bizScenarios.add(GXBizScenario.valueOf(bizId, useCase, scenario));
+                    }
                 }
             }
         }
+
+        if (bizScenarios.isEmpty()) {
+            throw new GXExtensionException("No extension coordinate resolved for " + extensionClz.getName()
+                    + ", declaration=" + describeDeclaration(container), HttpStatus.HTTP_INTERNAL_ERROR);
+        }
+        return bizScenarios;
+    }
+
+    private String describeDeclaration(GXExtensions container) {
+        if (container != null) {
+            return "GXExtensions(bizId/useCase/scenario)";
+        }
+        return "GXExtension/GXExtensions(absent)";
     }
 
     private Class<?> getExtensionClass(GXExtensionPoint extensionObject) {
@@ -72,22 +117,13 @@ public class GXExtensionRegister {
         return extensionObject.getClass();
     }
 
-    private void registerExtension(Class<?> extensionClz, GXBizScenario bizScenario, GXExtensionPoint extensionObject) {
-        GXExtensionCoordinate extensionCoordinate = new GXExtensionCoordinate(calculateExtensionPoint(extensionClz), bizScenario.getUniqueIdentity());
-        extensionRepository.registerExtensionIfAbsent(extensionCoordinate, extensionObject)
-                .ifPresent(registeredExtension -> {
-                    throw new GXBusinessException("Duplicate extension registration for " + extensionCoordinate
-                            + ", existing=" + registeredExtension.getClass().getName()
-                            + ", duplicate=" + extensionObject.getClass().getName());
-                });
-    }
-
     private String calculateExtensionPoint(Class<?> targetClz) {
         Objects.requireNonNull(targetClz, "Target class cannot be null");
 
         Class<?>[] interfaces = ClassUtils.getAllInterfacesForClass(targetClz);
-        if (CollUtil.isEmpty(Arrays.asList(interfaces))) {
-            throw new GXBusinessException("Please assign a extension point interface for " + targetClz);
+        if (interfaces.length == 0) {
+            throw new GXExtensionException("Please assign a extension point interface for " + targetClz,
+                    HttpStatus.HTTP_INTERNAL_ERROR);
         }
         List<Class<?>> extensionPointInterfaces = Arrays.stream(interfaces)
                 .filter(clazz -> clazz != GXExtensionPoint.class)
@@ -98,10 +134,10 @@ public class GXExtensionRegister {
             return extensionPointInterfaces.getFirst().getName();
         }
         if (extensionPointInterfaces.size() > 1) {
-            throw new GXBusinessException("Only one extension point interface is allowed for " + targetClz
-                    + ", found " + extensionPointInterfaces);
+            throw new GXExtensionException("Only one extension point interface is allowed for " + targetClz
+                    + ", found " + extensionPointInterfaces, HttpStatus.HTTP_INTERNAL_ERROR);
         }
-        throw new GXBusinessException("Your name of ExtensionPoint for " + targetClz
-                + " is not valid, must contain '" + EXTENSION_EXT_PT_NAMING + "'");
+        throw new GXExtensionException("Your name of ExtensionPoint for " + targetClz
+                + " is not valid, must contain '" + EXTENSION_EXT_PT_NAMING + "'", HttpStatus.HTTP_INTERNAL_ERROR);
     }
 }

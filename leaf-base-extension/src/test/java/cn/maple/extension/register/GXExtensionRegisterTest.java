@@ -7,6 +7,7 @@ import cn.maple.extension.GXExtensionCoordinate;
 import cn.maple.extension.GXExtensionPoint;
 import cn.maple.extension.GXExtensionRepository;
 import cn.maple.extension.GXExtensions;
+import cn.maple.extension.exception.GXExtensionException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.annotation.AliasFor;
@@ -21,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GXExtensionRegisterTest {
     private GXExtensionRepository extensionRepository;
@@ -86,6 +88,105 @@ class GXExtensionRegisterTest {
                 extensionRepository.findExtension(coordinate(GXBizScenario.valueOf("aliasBiz"))).orElseThrow().getClass());
     }
 
+    @Test
+    void singleEntryRegistrationRegistersRepeatedCoordinates() {
+        extensionRegister.doRegistration(new RepeatedAnnotationExtension());
+
+        assertEquals(2, extensionRepository.size());
+        assertSame(RepeatedAnnotationExtension.class,
+                extensionRepository.findExtension(coordinate(GXBizScenario.valueOf("repeatA"))).orElseThrow().getClass());
+        assertSame(RepeatedAnnotationExtension.class,
+                extensionRepository.findExtension(coordinate(GXBizScenario.valueOf("repeatB"))).orElseThrow().getClass());
+    }
+
+    @Test
+    void singleEntryRegistrationRegistersExplicitContainerCoordinates() {
+        extensionRegister.doRegistration(new MultiValueExtension());
+
+        assertEquals(2, extensionRepository.size());
+        assertRegistered(GXBizScenario.valueOf("bizA", "useCaseA", "scenarioA"));
+        assertRegistered(GXBizScenario.valueOf("bizB", "useCaseB", "scenarioB"));
+    }
+
+    @Test
+    void singleEntryRegistrationRegistersCartesianProduct() {
+        extensionRegister.doRegistration(new CartesianExtension());
+
+        assertEquals(8, extensionRepository.size());
+        assertCartesianCoordinate("cartA", "useCaseA", "scenarioA");
+        assertCartesianCoordinate("cartB", "useCaseB", "scenarioB");
+    }
+
+    @Test
+    void singleEntryRegistrationRegistersMixedDeclarations() {
+        extensionRegister.doRegistration(new MixedDeclarationExtension());
+
+        assertEquals(2, extensionRepository.size());
+        assertSame(MixedDeclarationExtension.class, extensionRepository
+                .findExtension(coordinate(GXBizScenario.valueOf("mixedA"))).orElseThrow().getClass());
+        assertSame(MixedDeclarationExtension.class, extensionRepository
+                .findExtension(coordinate(GXBizScenario.valueOf("mixedB"))).orElseThrow().getClass());
+    }
+
+    @Test
+    void emptyContainerDeclarationFailsFastWithDeclarationContext() {
+        GXExtensionException failure = assertThrows(GXExtensionException.class,
+                () -> extensionRegister.doRegistration(new EmptyContainerExtension()));
+
+        assertTrue(failure.getMessage().contains(EmptyContainerExtension.class.getName()));
+        assertTrue(failure.getMessage().contains("GXExtensions"));
+        assertEquals(0, extensionRepository.size());
+    }
+
+    @Test
+    void parentAndChildDeclaringSameCoordinateFailFast() {
+        extensionRegister.doRegistration(new ParentExtension());
+
+        GXExtensionException failure = assertThrows(GXExtensionException.class,
+                () -> extensionRegister.doRegistration(new ChildExtension()));
+
+        assertTrue(failure.getMessage().contains(ParentExtension.class.getName()));
+        assertTrue(failure.getMessage().contains(ChildExtension.class.getName()));
+    }
+
+    @Test
+    void duplicateRegistrationMessageCarriesCoordinateAndBothImplementations() {
+        extensionRegister.doRegistration(new FirstDuplicateExtension());
+
+        GXExtensionException failure = assertThrows(GXExtensionException.class,
+                () -> extensionRegister.doRegistration(new SecondDuplicateExtension()));
+
+        assertTrue(failure.getMessage().contains(GXBizScenario.valueOf("dup").getUniqueIdentity()));
+        assertTrue(failure.getMessage().contains(FirstDuplicateExtension.class.getName()));
+        assertTrue(failure.getMessage().contains(SecondDuplicateExtension.class.getName()));
+        assertTrue(isAscii(failure.getMessage()));
+    }
+
+    @Test
+    void multipleExtensionPointInterfacesMessageListsAllCandidates() {
+        GXExtensionException failure = assertThrows(GXExtensionException.class,
+                () -> extensionRegister.doRegistration(new MultiExtPointExtension()));
+
+        assertTrue(failure.getMessage().contains(MultiExtPointExtension.class.getName()));
+        assertTrue(failure.getMessage().contains(RegisterTestExtPoint.class.getName()));
+        assertTrue(failure.getMessage().contains(AnotherRegisterTestExtPoint.class.getName()));
+        assertTrue(isAscii(failure.getMessage()));
+    }
+
+    @Test
+    void namingViolationMessageCarriesImplementationAndConvention() {
+        GXExtensionException failure = assertThrows(GXExtensionException.class,
+                () -> extensionRegister.doRegistration(new MarkerOnlyExtension()));
+
+        assertTrue(failure.getMessage().contains(MarkerOnlyExtension.class.getName()));
+        assertTrue(failure.getMessage().contains(GXExtensionRegister.EXTENSION_EXT_PT_NAMING));
+        assertTrue(isAscii(failure.getMessage()));
+    }
+
+    private boolean isAscii(String text) {
+        return text.chars().allMatch(character -> character < 128);
+    }
+
     private void assertRegistered(GXBizScenario bizScenario) {
         assertEquals(MultiValueExtension.class,
                 extensionRepository.findExtension(coordinate(bizScenario)).orElseThrow().getClass());
@@ -129,6 +230,28 @@ class GXExtensionRegisterTest {
 
     @GXExtension(bizId = "dup")
     private static class SecondDuplicateExtension implements RegisterTestExtPoint {
+    }
+
+    @GXExtension(bizId = "repeatA")
+    @GXExtension(bizId = "repeatB")
+    private static class RepeatedAnnotationExtension implements RegisterTestExtPoint {
+    }
+
+    @GXExtension(bizId = "mixedA")
+    @GXExtensions({@GXExtension(bizId = "mixedB")})
+    private static class MixedDeclarationExtension implements RegisterTestExtPoint {
+    }
+
+    @GXExtensions(bizId = {})
+    private static class EmptyContainerExtension implements RegisterTestExtPoint {
+    }
+
+    @GXExtension(bizId = "inherit")
+    private static class ParentExtension implements RegisterTestExtPoint {
+    }
+
+    @GXExtension(bizId = "inherit")
+    private static class ChildExtension extends ParentExtension {
     }
 
     @GXExtension(bizId = "marker")

@@ -3,6 +3,7 @@ package cn.maple.extension;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class GXExtensionCoordinateTest {
@@ -16,6 +17,21 @@ class GXExtensionCoordinateTest {
 
         assertEquals(classCoordinate, stringCoordinate);
         assertEquals(classCoordinate.hashCode(), stringCoordinate.hashCode());
+    }
+
+    @Test
+    void rejectsStringCoordinateWithInvalidIdentityFormat() {
+        assertThrows(IllegalArgumentException.class, () -> GXExtensionCoordinate.valueOf("ext", "biz.useCase"));
+        assertThrows(IllegalArgumentException.class, () -> GXExtensionCoordinate.valueOf("ext", "biz.useCase.scenario.extra"));
+        assertThrows(IllegalArgumentException.class, () -> GXExtensionCoordinate.valueOf("ext", "biz..scenario"));
+    }
+
+    @Test
+    void stringCoordinateExposesNullableTypeAndScenario() {
+        GXExtensionCoordinate coordinate = GXExtensionCoordinate.valueOf("ext", "biz.useCase.scenario");
+
+        assertNull(coordinate.getExtensionPointClass());
+        assertNull(coordinate.getBizScenario());
     }
 
     @Test

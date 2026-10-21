@@ -31,11 +31,11 @@ public class GXExtensionException extends GXBusinessException {
     }
 
     public GXExtensionException(String msg, Throwable e) {
-        this(msg, HttpStatus.HTTP_OK, e);
+        this(msg, HttpStatus.HTTP_NOT_FOUND, e);
     }
 
     public GXExtensionException(String msg) {
-        super(msg, HttpStatus.HTTP_OK, Dict.create(), null);
+        super(msg, HttpStatus.HTTP_NOT_FOUND, Dict.create(), null);
     }
     
     public GXExtensionException(GXResultStatusCode resultCode) {

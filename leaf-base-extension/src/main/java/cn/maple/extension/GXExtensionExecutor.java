@@ -7,10 +7,13 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.Objects;
+
 /**
  * Executes extension point implementations by business scenario.
  * <p>
- * Lookup order: full scenario, default scenario, default use case, then global default.
+ * Lookup order: full scenario, default scenario, default use case, then global default. Both entry
+ * points (extension point type and extension point name) share the same order.
  */
 @Component
 @Slf4j
@@ -22,93 +25,70 @@ public class GXExtensionExecutor extends GXAbstractComponentExecutor {
 
     @Override
     protected <C> C locateComponent(Class<C> targetClz, GXBizScenario bizScenario) {
-        if (targetClz == null) {
-            throw new NullPointerException("Target class cannot be null");
-        }
+        Objects.requireNonNull(targetClz, "targetClz cannot be null");
         C extension = locateExtension(targetClz, bizScenario);
-        log.debug("[Located Extension]: {}", extension.getClass().getSimpleName());
+        logLocated(extension);
         return extension;
     }
 
     @Override
     protected <C> C locateComponent(String extensionPointName, String bizScenarioUniqueIdentity) {
-        C extension = locate(extensionPointName, bizScenarioUniqueIdentity);
-        if (extension == null) {
-            String errMessage = "Can not find extension with ExtensionPoint: " + extensionPointName
-                    + " BizScenario:" + bizScenarioUniqueIdentity;
-            throw new GXExtensionException(errMessage, HttpStatus.HTTP_NOT_FOUND);
-        }
-        log.debug("[Located Extension]: {}", extension.getClass().getSimpleName());
+        Objects.requireNonNull(extensionPointName, "extensionPointName cannot be null");
+        Objects.requireNonNull(bizScenarioUniqueIdentity, "bizScenarioUniqueIdentity cannot be null");
+        C extension = locateExtensionByName(extensionPointName,
+                GXBizScenario.fromUniqueIdentity(bizScenarioUniqueIdentity));
+        logLocated(extension);
         return extension;
     }
 
     /**
      * Locates an extension by applying the scenario fallback order.
+     *
+     * @param targetClz   extension point interface
+     * @param bizScenario requested business scenario
+     * @return matching implementation, never {@code null}
+     * @throws GXExtensionException when no coordinate matches
      */
     protected <E> E locateExtension(Class<E> targetClz, GXBizScenario bizScenario) {
-        checkNull(bizScenario);
+        Objects.requireNonNull(targetClz, "targetClz cannot be null");
+        Objects.requireNonNull(bizScenario, "bizScenario cannot be null");
+        return locateExtensionByName(targetClz.getName(), bizScenario);
+    }
 
-        E extension;
-        String extensionPointName = targetClz.getName();
-
-        log.debug("BizScenario in locateExtension is : {}", bizScenario.getUniqueIdentity());
-
-        // 1、 first try with full namespace
-        extension = firstTry(extensionPointName, bizScenario);
-        if (extension != null) {
-            return extension;
+    private <E> E locateExtensionByName(String extensionPointName, GXBizScenario bizScenario) {
+        if (extensionPointName == null || extensionPointName.isBlank()) {
+            throw new IllegalArgumentException("Extension point name cannot be blank");
         }
 
-        // 2、 second try with default scenario
-        extension = secondTry(extensionPointName, bizScenario);
-        if (extension != null) {
-            return extension;
+        E extension = locate(extensionPointName, bizScenario.getUniqueIdentity());
+        if (extension == null) {
+            extension = locate(extensionPointName, bizScenario.getIdentityWithDefaultScenario());
         }
-
-        // 3、 third try with default use case + default scenario
-        extension = defaultUseCaseTry(extensionPointName, bizScenario);
-        if (extension != null) {
-            return extension;
+        if (extension == null) {
+            extension = locate(extensionPointName, bizScenario.getIdentityWithDefaultUseCase());
         }
-
-        // 4. fourth try with default biz id + default use case + default scenario
-        extension = defaultBizIdTry(extensionPointName);
-        if (extension != null) {
-            return extension;
+        if (extension == null) {
+            extension = locate(extensionPointName, DEFAULT_BIZ_SCENARIO_IDENTITY);
         }
-
-        String errMessage = "Can not find extension with ExtensionPoint: " + targetClz + " BizScenario:" + bizScenario.getUniqueIdentity();
-        throw new GXExtensionException(errMessage, HttpStatus.HTTP_NOT_FOUND);
+        if (extension == null) {
+            throw new GXExtensionException("Can not find extension with ExtensionPoint: " + extensionPointName
+                    + " BizScenario:" + bizScenario.getUniqueIdentity(), HttpStatus.HTTP_NOT_FOUND);
+        }
+        return extension;
     }
 
-    private <E> E firstTry(String extensionPointName, GXBizScenario bizScenario) {
-        log.debug("First trying with {}", bizScenario.getUniqueIdentity());
-        return locate(extensionPointName, bizScenario.getUniqueIdentity());
+    private <E> E locate(String extensionPointName, String uniqueIdentity) {
+        return cast(extensionRepository.findExtension(extensionPointName, uniqueIdentity).orElse(null));
     }
 
-    private <E> E secondTry(String extensionPointName, GXBizScenario bizScenario) {
-        log.debug("Second trying with {}", bizScenario.getIdentityWithDefaultScenario());
-        return locate(extensionPointName, bizScenario.getIdentityWithDefaultScenario());
+    @SuppressWarnings("unchecked")
+    private <E> E cast(GXExtensionPoint extension) {
+        return (E) extension;
     }
 
-    private <E> E defaultUseCaseTry(String extensionPointName, GXBizScenario bizScenario) {
-        log.debug("Third trying with {}", bizScenario.getIdentityWithDefaultUseCase());
-        return locate(extensionPointName, bizScenario.getIdentityWithDefaultUseCase());
-    }
-
-    private <E> E defaultBizIdTry(String extensionPointName) {
-        log.debug("Fourth trying with {}", DEFAULT_BIZ_SCENARIO_IDENTITY);
-        return locate(extensionPointName, DEFAULT_BIZ_SCENARIO_IDENTITY);
-    }
-
-    @SuppressWarnings("all")
-    private <E> E locate(String name, String uniqueIdentity) {
-        return (E) extensionRepository.findExtension(name, uniqueIdentity).orElse(null);
-    }
-
-    private void checkNull(GXBizScenario bizScenario) {
-        if (bizScenario == null) {
-            throw new IllegalArgumentException("BizScenario cannot be null for extension");
+    private void logLocated(Object extension) {
+        if (log.isDebugEnabled()) {
+            log.debug("[Located Extension]: {}", extension.getClass().getSimpleName());
         }
     }
 }

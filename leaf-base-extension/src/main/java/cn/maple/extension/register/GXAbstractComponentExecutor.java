@@ -97,6 +97,10 @@ public abstract class GXAbstractComponentExecutor {
 
     /**
      * Locates an extension implementation by string coordinate.
+     * <p>
+     * The default implementation rejects string coordinates; subclasses that can resolve an
+     * extension point name to an implementation (for example {@code GXExtensionExecutor}) should
+     * override it to support the same fallback order as the typed entry point.
      *
      * @param extensionPointName        extension point interface name
      * @param bizScenarioUniqueIdentity business scenario identity

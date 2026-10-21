@@ -8,7 +8,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
@@ -47,6 +49,20 @@ class GXExtensionAutoConfigurationTest {
     }
 
     @Test
+    void componentScanAndAutoConfigurationShareSingleBeans() {
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(GXExtensionAutoConfiguration.class))
+                .withUserConfiguration(ScannedComponentsConfig.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(GXExtensionBootstrap.class);
+                    assertThat(context).hasSingleBean(GXExtensionRepository.class);
+                    assertThat(context).hasSingleBean(GXExtensionExecutor.class);
+                    assertThat(context).hasSingleBean(GXExtensionRegister.class);
+                });
+    }
+
+    @Test
     void customRepositoryIsUsedByDefaultRegisterAndExecutor() {
         contextRunner.withUserConfiguration(CustomRepositoryConfig.class)
                 .run(context -> {
@@ -58,6 +74,14 @@ class GXExtensionAutoConfigurationTest {
                     assertThat(ReflectionTestUtils.getField(register, "extensionRepository")).isSameAs(repository);
                     assertThat(ReflectionTestUtils.getField(executor, "extensionRepository")).isSameAs(repository);
                 });
+    }
+
+    @Configuration
+    @ComponentScan(basePackageClasses = GXExtensionExecutor.class, useDefaultFilters = false,
+            includeFilters = @ComponentScan.Filter(type = FilterType.REGEX,
+                    pattern = "(cn\\.maple\\.extension\\.GXExtension(Repository|Executor)"
+                            + "|cn\\.maple\\.extension\\.register\\.GXExtension(Bootstrap|Register))"))
+    static class ScannedComponentsConfig {
     }
 
     @Configuration
