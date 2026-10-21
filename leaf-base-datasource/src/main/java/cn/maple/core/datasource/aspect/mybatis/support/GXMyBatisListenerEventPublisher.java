@@ -8,6 +8,7 @@ import cn.maple.core.datasource.enums.GXMyBatisListenerDegradeReasonEnums;
 import cn.maple.core.datasource.event.GXMyBatisModelDeleteEvent;
 import cn.maple.core.datasource.event.GXMyBatisModelDeleteSoftEvent;
 import cn.maple.core.datasource.event.GXMyBatisModelSaveBatchEntityEvent;
+import cn.maple.core.datasource.event.GXMyBatisModelSaveBatchEntitySnapshotEvent;
 import cn.maple.core.datasource.event.GXMyBatisModelSaveEntityEvent;
 import cn.maple.core.datasource.event.GXMyBatisModelUpdateEntityEvent;
 import cn.maple.core.datasource.event.GXMyBatisModelUpdateFieldEvent;
@@ -19,6 +20,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
+import java.lang.reflect.Array;
 import java.lang.reflect.Method;
 import java.time.temporal.Temporal;
 import java.util.ArrayList;
@@ -45,6 +47,8 @@ public class GXMyBatisListenerEventPublisher {
     private static final String DEGRADE_REASONS = "degradeReasons";
     private static final String SNAPSHOT_DEGRADED = "snapshotDegraded";
     private static final AtomicLong OPERATION_SEQUENCE = new AtomicLong();
+    private static final int MAX_SNAPSHOT_SCAN_DEPTH = 8;
+    private static final int MAX_SNAPSHOT_SCAN_NODES = 4096;
 
     private final GXMyBatisListenerConfigResolver resolver;
     private final GXMyBatisListenerProperties properties;
@@ -126,20 +130,22 @@ public class GXMyBatisListenerEventPublisher {
         String operationId = buildOperationId(invokedMethod);
         markSnapshotDegradedIfNeeded(source, invokedMethod, operationId);
         logDegradedPayloadIfNeeded(source, invokedMethod, operationId);
+        // 仅当只有一个监听方时共享批量载荷：多监听方时保留逐事件快照，避免载荷相互影响（FR-008）。
+        boolean shareBatchPayload = listeners.size() == 1;
         for (GXMyBatisListenerConfigResolver.ResolvedListener listener : listeners) {
-            deliver(listener, syncEvent, asyncEvent, source, asyncModeEnabled, operationId);
+            deliver(listener, syncEvent, asyncEvent, source, asyncModeEnabled, operationId, shareBatchPayload);
         }
     }
 
     private void deliver(GXMyBatisListenerConfigResolver.ResolvedListener listener,
                          GXModelEventNamingEnums syncEvent, GXModelEventNamingEnums asyncEvent,
-                         Dict source, boolean asyncModeEnabled, String operationId) {
+                         Dict source, boolean asyncModeEnabled, String operationId, boolean shareBatchPayload) {
         boolean async = listener.async() && asyncModeEnabled;
         GXModelEventNamingEnums naming = async ? asyncEvent : syncEvent;
         Dict eventParam = Dict.create()
                 .set("listenerClazzName", listener.listenerClazz().getSimpleName())
                 .set("listenerClazz", listener.listenerClazz());
-        GXBaseEvent<Dict> event = createEvent(naming, source, eventParam);
+        GXBaseEvent<Dict> event = createEvent(naming, source, eventParam, shareBatchPayload);
         long startNanos = System.nanoTime();
         try {
             if (async || properties.isSyncAfterCommit()) {
@@ -208,20 +214,47 @@ public class GXMyBatisListenerEventPublisher {
     }
 
     private boolean containsUnsnapshotableValue(Dict source) {
-        for (Map.Entry<String, Object> entry : source.entrySet()) {
-            if (isUnsnapshotableValue(entry.getValue())) {
-                return true;
-            }
-        }
-        return false;
+        return containsUnsnapshotableValue(source, 0, new int[]{0});
     }
 
-    private boolean isUnsnapshotableValue(@Nullable Object value) {
+    private boolean containsUnsnapshotableValue(@Nullable Object value, int depth, int[] visitedNodes) {
         if (ObjectUtil.isNull(value)
-                || value instanceof CharSequence || value instanceof Number || value instanceof Boolean
+                || depth > MAX_SNAPSHOT_SCAN_DEPTH
+                || ++visitedNodes[0] > MAX_SNAPSHOT_SCAN_NODES) {
+            return false;
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (Object nested : map.values()) {
+                if (containsUnsnapshotableValue(nested, depth + 1, visitedNodes)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (value instanceof Collection<?> collection) {
+            for (Object nested : collection) {
+                if (containsUnsnapshotableValue(nested, depth + 1, visitedNodes)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (value.getClass().isArray()) {
+            int length = Array.getLength(value);
+            for (int index = 0; index < length; index++) {
+                if (containsUnsnapshotableValue(Array.get(value, index), depth + 1, visitedNodes)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return isUnsnapshotableLeaf(value);
+    }
+
+    private boolean isUnsnapshotableLeaf(Object value) {
+        if (value instanceof CharSequence || value instanceof Number || value instanceof Boolean
                 || value instanceof Character || value instanceof Enum<?> || value instanceof UUID
-                || value instanceof Temporal || value instanceof Date || value instanceof Calendar
-                || value instanceof Collection<?> || value instanceof Map<?, ?> || value.getClass().isArray()) {
+                || value instanceof Temporal || value instanceof Date || value instanceof Calendar) {
             return false;
         }
         try {
@@ -258,7 +291,8 @@ public class GXMyBatisListenerEventPublisher {
         }
     }
 
-    private GXBaseEvent<Dict> createEvent(GXModelEventNamingEnums naming, Dict source, Dict eventParam) {
+    private GXBaseEvent<Dict> createEvent(GXModelEventNamingEnums naming, Dict source, Dict eventParam,
+                                         boolean shareBatchPayload) {
         String eventType = naming.getEventType();
         String eventName = naming.getEventName();
         return switch (naming) {
@@ -273,7 +307,9 @@ public class GXMyBatisListenerEventPublisher {
             case SYNC_DELETE, ASYNC_DELETE ->
                     new GXMyBatisModelDeleteEvent<>(source, eventType, eventParam, eventName);
             case SYNC_SAVE_BATCH_ENTITY, ASYNC_SAVE_BATCH_ENTITY, SYNC_BATCH_CHANGE, ASYNC_BATCH_CHANGE ->
-                    new GXMyBatisModelSaveBatchEntityEvent<>(source, eventType, eventParam, eventName);
+                    shareBatchPayload
+                            ? new GXMyBatisModelSaveBatchEntitySnapshotEvent<>(source, eventType, eventParam, eventName)
+                            : new GXMyBatisModelSaveBatchEntityEvent<>(source, eventType, eventParam, eventName);
         };
     }
 

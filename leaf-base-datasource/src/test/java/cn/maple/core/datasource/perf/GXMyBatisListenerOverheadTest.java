@@ -39,6 +39,7 @@ class GXMyBatisListenerOverheadTest {
     private static final int ITERATIONS = 2_000;
     private static final int WARMUP_ITERATIONS = 10_000;
     private static final int BATCH_SIZE = 10_000;
+    private static final long TYPICAL_WRITE_NANOS = 1_000_000L;
 
     @Test
     void unannotatedWritePathDoesNotPublishAnEvent() throws Exception {
@@ -89,8 +90,10 @@ class GXMyBatisListenerOverheadTest {
 
             System.out.printf("MyBatis listener no-declaration path: p95=%.3f us, disabled-baseline p95=%.3f us, ratio=%.2f%n",
                     noDeclarationP95 / 1_000.0D, disabledP95 / 1_000.0D, ratio);
-            assertTrue(noDeclarationP95 < 50_000L, () -> "No-declaration path exceeded 50 us: " + noDeclarationP95 + " ns");
-            assertTrue(ratio <= 10.0D, () -> "No-declaration path is " + ratio + "x slower than the disabled baseline");
+            // SC-003 以“相对无能力基线不超过 2%”表述，但进程内无法真正移除能力；
+            // 这里改用可执行的绝对判据：典型 1 ms 写入的 2% = 20 us，并保留开关关闭基线作为趋势参考。
+            assertTrue(noDeclarationP95 <= TYPICAL_WRITE_NANOS / 50L,
+                    () -> "No-declaration path exceeded 2% of a 1 ms write (20 us): " + noDeclarationP95 + " ns");
         }
     }
 
@@ -129,10 +132,9 @@ class GXMyBatisListenerOverheadTest {
             System.out.printf("MyBatis batch payload allocation: payload=%d bytes, publish=%d bytes, ratio=%.2f%n",
                     payloadBytes, publishBytes, payloadBytes == 0L ? 0D : (double) publishBytes / payloadBytes);
             assertEquals(BATCH_SIZE, ((List<?>) source.get("batchEntities")).size());
-            // 两次拷贝是设计使然：实体 -> Dict（监听契约）与 GXBaseEvent 的防御性快照。
-            // 当前实测约 2.3x（Dict 默认容量导致快照略大于构造），门槛取 2.5 以覆盖 JVM 抖动；
-            // 若要达到 SC-005 的 2x，需要框架层在快照时复用已有 Dict 容量。
-            assertTrue(publishBytes <= payloadBytes * 5L / 2L + 65_536L,
+            // 批量事件复用一次性构建的载荷（GXMyBatisModelSaveBatchEntitySnapshotEvent），
+            // 不再由 GXBaseEvent 二次快照，因此发布分配量应不超过载荷构造量（含 64 KB 抖动余量）。
+            assertTrue(publishBytes <= payloadBytes * 2L + 65_536L,
                     () -> "Batch payload snapshot allocated " + publishBytes + " bytes for " + payloadBytes + " bytes of payload");
         }
     }

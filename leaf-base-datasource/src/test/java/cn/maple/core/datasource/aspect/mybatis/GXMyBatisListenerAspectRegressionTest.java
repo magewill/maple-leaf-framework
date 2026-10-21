@@ -9,6 +9,7 @@ import cn.maple.core.datasource.config.GXMyBatisListenerProperties;
 import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.datasource.enums.GXMyBatisListenerDegradeReasonEnums;
+import cn.maple.core.datasource.event.GXMyBatisModelSaveBatchEntitySnapshotEvent;
 import cn.maple.core.datasource.listener.GXMyBatisSyncListener;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
@@ -45,7 +46,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -489,6 +492,27 @@ class GXMyBatisListenerAspectRegressionTest {
     }
 
     @Test
+    void batchEventReusesPayloadWhenSingleListenerIsDeclared() throws Exception {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        List<Dict> payload = List.of(Dict.create().set("id", 1L), Dict.create().set("id", 2L));
+        Dict source = Dict.create().set("operation", "saveBatch").set("batchEntities", payload);
+        AtomicReference<GXBaseEvent<?>> captured = new AtomicReference<>();
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisherMock.when(() -> GXEventPublisherUtils.publishEvent(any())).thenAnswer(invocation -> {
+                captured.set(invocation.getArgument(0));
+                return null;
+            });
+            eventPublisher.publish(new MethodAnnotatedBatchService(), null, method,
+                    GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY, GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY,
+                    source);
+        }
+
+        assertInstanceOf(GXMyBatisModelSaveBatchEntitySnapshotEvent.class, captured.get());
+        assertSame(source, captured.get().getSource(), "Single-listener batch event must reuse the built payload");
+    }
+
+    @Test
     void strictSnapshotMarksUnsnapshotableValuesAndCountsDegrade() throws Exception {
         GXMyBatisListenerProperties properties = new GXMyBatisListenerProperties();
         properties.setStrictSnapshot(true);
@@ -512,6 +536,61 @@ class GXMyBatisListenerAspectRegressionTest {
         assertTrue(((List<?>) captured.get().get("degradeReasons"))
                 .contains(GXMyBatisListenerDegradeReasonEnums.UNSNAPSHOTABLE_VALUE));
         assertEquals(degradedBefore + 1L, GXMyBatisListenerMetrics.snapshot().degraded());
+    }
+
+    @Test
+    void strictSnapshotDetectsNestedUnsnapshotableValues() throws Exception {
+        GXMyBatisListenerProperties properties = new GXMyBatisListenerProperties();
+        properties.setStrictSnapshot(true);
+        GXMyBatisListenerEventPublisher strictPublisher = newEventPublisher(properties);
+        long degradedBefore = GXMyBatisListenerMetrics.snapshot().degraded();
+        Object customValue = new Object();
+        Dict source = Dict.create()
+                .set("entityData", Dict.create().set("payload", customValue))
+                .set("conditionFieldData", Dict.create().set("custom", customValue))
+                .set("batchEntities", List.of(Dict.create().set("payload", customValue)));
+        AtomicReference<Dict> captured = new AtomicReference<>();
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisherMock.when(() -> GXEventPublisherUtils.publishEvent(any())).thenAnswer(invocation -> {
+                GXBaseEvent<?> event = invocation.getArgument(0);
+                captured.set((Dict) event.getSource());
+                return null;
+            });
+            strictPublisher.publish(new ChildAnnotatedMapperImpl(),
+                    ChildAnnotatedMapper.class.getMethod("insert", Object.class),
+                    GXModelEventNamingEnums.SYNC_SAVE_ENTITY, GXModelEventNamingEnums.ASYNC_SAVE_ENTITY, source);
+        }
+
+        assertEquals(Boolean.TRUE, captured.get().getBool("snapshotDegraded"),
+                "Nested unsnapshotable values must be detected");
+        assertTrue(((List<?>) captured.get().get("degradeReasons"))
+                .contains(GXMyBatisListenerDegradeReasonEnums.UNSNAPSHOTABLE_VALUE));
+        assertEquals(degradedBefore + 1L, GXMyBatisListenerMetrics.snapshot().degraded());
+    }
+
+    @Test
+    void strictSnapshotIgnoresNestedSnapshotableValues() throws Exception {
+        GXMyBatisListenerProperties properties = new GXMyBatisListenerProperties();
+        properties.setStrictSnapshot(true);
+        GXMyBatisListenerEventPublisher strictPublisher = newEventPublisher(properties);
+        Dict source = Dict.create()
+                .set("entityData", Dict.create().set("updatedAt", new Date(1_000L)).set("name", "alpha"))
+                .set("batchEntities", List.of(Dict.create().set("id", 1L)));
+        AtomicReference<Dict> captured = new AtomicReference<>();
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisherMock.when(() -> GXEventPublisherUtils.publishEvent(any())).thenAnswer(invocation -> {
+                GXBaseEvent<?> event = invocation.getArgument(0);
+                captured.set((Dict) event.getSource());
+                return null;
+            });
+            strictPublisher.publish(new ChildAnnotatedMapperImpl(),
+                    ChildAnnotatedMapper.class.getMethod("insert", Object.class),
+                    GXModelEventNamingEnums.SYNC_SAVE_ENTITY, GXModelEventNamingEnums.ASYNC_SAVE_ENTITY, source);
+        }
+
+        assertNull(captured.get().get("snapshotDegraded"));
     }
 
     @Test

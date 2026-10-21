@@ -175,6 +175,16 @@ description: "Task list for MyBatis-Plus 操作监听加固"
 
 ---
 
+## Phase 9: Convergence
+
+**Purpose**: 收敛 2026-10-21 二次复核发现的剩余差距（严格快照的嵌套覆盖、批量内存口径、无监听基线口径）。
+
+- [X] T058 **HIGH** 将 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerEventPublisher.java` 的 `containsUnsnapshotableValue` 由"仅扫描顶层"改为有界递归（受深度/节点上限保护）：当前 `entityData`（更新）、`conditionFieldData`（删除/软删除）、`batchEntities`（批量）作为 Map/Collection 被整体视为可快照，导致 `strict-snapshot=true` 对 6 类写操作中的 4 类失效；同时补嵌套载荷用例（实体字段、条件字段、批次元素各含不可克隆对象）per FR-008 (partial)
+- [X] T059 **MEDIUM** 消除批量事件的二次全量拷贝，使 1 万条批量载荷分配比回落到 ≤2×：当前 `batchEntities` 先由实体转换为 `List<Dict>`，`GXBaseEvent` 构造时再逐元素递归快照，实测 2.31×（夹具阈值已放宽到 2.5×）；可在本模块内改用一次性快照的批量事件载体（复用已构建的不可变载荷，避免 `GXBaseEvent` 二次拷贝）per SC-005 (partial)
+- [X] T060 **LOW** 修正性能夹具的基线口径：`GXMyBatisListenerOverheadTest` 当前以"开关关闭"作为无能力基线（实测无声明路径 5.91×，阈值放宽到 10×），与 SC-003 的 2% 口径不可直接比对；需引入可复现的无能力基线（或改为"绝对开销占典型 DB 写入耗时比例"）并同步 `quickstart.md` 的判据说明 per SC-003 (partial)
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
