@@ -67,10 +67,14 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
         }
         Collection<Dict> entityData = Convert.convert(new TypeReference<List<Dict>>() {
         }, entities);
+        List<Dict> nonNullEntities = entityData.stream().filter(ObjectUtil::isNotNull).toList();
+        if (ObjectUtil.isEmpty(nonNullEntities)) {
+            return Dict.create();
+        }
         return Dict.create()
                 .set("operation", ((MethodSignature) point.getSignature()).getName())
-                .set("entityData", entityData)
-                .set("batchEntities", entityData);
+                .set("entityData", nonNullEntities)
+                .set("batchEntities", nonNullEntities);
     }
 
     private void publishEvent(ProceedingJoinPoint point) {

@@ -891,7 +891,7 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 
 - 条件可被无损还原时，回调可读到 `conditionFields` 与对应操作符。
 - 含 `OR`、函数/表达式左侧、重复字段、占位符不匹配或解析失败时，结构化条件为空，只提供原始条件文本，并通过 `degradeReasons` 标记原因；**不会伪造字段值或错位填充**。
-- 取值不可克隆时保留引用，并标记 `snapshotDegraded`；监听方必须把载荷视为只读。
+- 取值不可克隆时保留引用，并标记 `snapshotDegraded`；监听方必须把载荷视为只读。标记发生在 `strict-snapshot=true` 时，同时追加 `UNSNAPSHOTABLE_VALUE` 降级原因并计入 `degraded`；关闭时保持历史行为（保留引用、不扫描），以维持无监听路径的零开销。
 
 **异常与开关**
 
@@ -911,7 +911,9 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 
 **可观测性**
 
-`GXMyBatisListenerMetricsService#snapshot()` 提供 `delivered` / `failed` / `rejected` / `cancelled` / `degraded` / `skipped` / `activeTasks` / `queueSize` 八项只读计数，进程内单调递增、重启归零。队列饱和、停机未执行、条件降级都会输出带事件类型与监听器名的结构化日志。
+`GXMyBatisListenerMetricsService#snapshot()` 提供 `delivered` / `failed` / `rejected` / `cancelled` / `degraded` / `skipped` / `activeTasks` / `queueSize` 八项只读计数，进程内单调递增、重启归零。队列饱和、停机未执行、条件降级都会输出带事件类型与监听器名的结构化日志；投递失败、慢回调、降级三类日志还包含 `operationId`（方法名 + 自增序号）与运行模式，便于把一次写操作的所有回调串起来排查。
+
+`degraded` 的计数口径：更新条件无法无损还原（含 `OR`、函数左侧、重复字段、参数不匹配、解析失败）时按事件计一次；`strict-snapshot=true` 时，载荷中出现不可克隆值再计一次。
 
 **升级说明（4.3.0）**
 

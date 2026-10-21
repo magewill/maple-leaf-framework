@@ -1,5 +1,7 @@
 package cn.maple.core.datasource.config;
 
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerMetrics;
+import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.core.env.StandardEnvironment;
@@ -17,6 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GXMyBatisAsyncListenerExecutorConfigTest {
     @Test
     void rejectsSaturatedPlatformThreadTasksInsteadOfRunningThemOnTheCaller() throws Exception {
-        GXMyBatisAsyncListenerExecutorConfig config = configured(false);
+        GXMyBatisAsyncListenerExecutorConfig config = configuredWithQueue(1);
         ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) config.myBatisEventAsyncTaskExecutor();
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
@@ -32,6 +35,8 @@ class GXMyBatisAsyncListenerExecutorConfigTest {
         try {
             executor.execute(() -> await(started, release));
             assertTrue(started.await(1, TimeUnit.SECONDS));
+            executor.execute(() -> await(new CountDownLatch(0), release));
+            assertEquals(1, executor.getThreadPoolExecutor().getQueue().size());
 
             assertThrows(RejectedExecutionException.class, () -> executor.execute(() -> rejectedTaskRan.set(true)));
             assertFalse(rejectedTaskRan.get());
@@ -84,7 +89,7 @@ class GXMyBatisAsyncListenerExecutorConfigTest {
 
     @Test
     void asyncTaskInheritsDatasourceContextAndClearsItAfterwards() throws Exception {
-        GXMyBatisAsyncListenerExecutorConfig config = configured(false);
+        GXMyBatisAsyncListenerExecutorConfig config = configuredWithQueue(4);
         ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) config.myBatisEventAsyncTaskExecutor();
         try {
             GXDynamicContextHolder.push("slave1");
@@ -111,6 +116,86 @@ class GXMyBatisAsyncListenerExecutorConfigTest {
             assertNull(nextTaskContext.get());
         } finally {
             GXDynamicContextHolder.clear();
+            executor.shutdown();
+        }
+    }
+
+    @Test
+    void asyncTaskInheritsMdcAndTraceIdThenClearsThem() throws Exception {
+        GXMyBatisAsyncListenerExecutorConfig config = configuredWithQueue(4);
+        ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) config.myBatisEventAsyncTaskExecutor();
+        try {
+            GXTraceIdContextUtils.putTraceId("trace-myb-1");
+            CountDownLatch firstRun = new CountDownLatch(1);
+            java.util.concurrent.atomic.AtomicReference<String> capturedTraceId =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            executor.execute(() -> {
+                capturedTraceId.set(GXTraceIdContextUtils.getNullableTraceId());
+                firstRun.countDown();
+            });
+            assertTrue(firstRun.await(2, TimeUnit.SECONDS));
+            awaitIdle(executor);
+            assertEquals("trace-myb-1", capturedTraceId.get());
+
+            GXTraceIdContextUtils.removeTraceId();
+            CountDownLatch secondRun = new CountDownLatch(1);
+            java.util.concurrent.atomic.AtomicReference<String> nextTaskTraceId =
+                    new java.util.concurrent.atomic.AtomicReference<>("unset");
+            executor.execute(() -> {
+                nextTaskTraceId.set(GXTraceIdContextUtils.getNullableTraceId());
+                secondRun.countDown();
+            });
+            assertTrue(secondRun.await(2, TimeUnit.SECONDS));
+            assertNotEquals("trace-myb-1", nextTaskTraceId.get(), "Trace id must not leak into the next task");
+        } finally {
+            GXTraceIdContextUtils.clearTraceId();
+            executor.shutdown();
+        }
+    }
+
+    @Test
+    void rejectedTasksAreCounted() throws Exception {
+        GXMyBatisAsyncListenerExecutorConfig config = configuredWithQueue(1);
+        ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) config.myBatisEventAsyncTaskExecutor();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        long rejectedBefore = GXMyBatisListenerMetrics.snapshot().rejected();
+        try {
+            executor.execute(() -> await(started, release));
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            executor.execute(() -> await(new CountDownLatch(0), release));
+
+            assertThrows(RejectedExecutionException.class, () -> executor.execute(() -> {
+            }));
+            assertEquals(rejectedBefore + 1L, GXMyBatisListenerMetrics.snapshot().rejected());
+        } finally {
+            release.countDown();
+            executor.shutdown();
+        }
+    }
+
+    @Test
+    void unexecutedQueuedTasksAreCountedOnShutdown() throws Exception {
+        GXMyBatisAsyncListenerExecutorConfig config = configuredWithQueue(8);
+        ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) config.myBatisEventAsyncTaskExecutor();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        long cancelledBefore = GXMyBatisListenerMetrics.snapshot().cancelled();
+        try {
+            executor.execute(() -> await(started, release));
+            assertTrue(started.await(2, TimeUnit.SECONDS));
+            executor.execute(() -> {
+            });
+            executor.execute(() -> {
+            });
+            int queuedTasks = executor.getThreadPoolExecutor().getQueue().size();
+            assertEquals(2, queuedTasks);
+
+            config.recordUnexecutedTasksOnShutdown();
+
+            assertEquals(cancelledBefore + queuedTasks, GXMyBatisListenerMetrics.snapshot().cancelled());
+        } finally {
+            release.countDown();
             executor.shutdown();
         }
     }
@@ -150,6 +235,18 @@ class GXMyBatisAsyncListenerExecutorConfigTest {
         properties.setAwaitTerminationSeconds(1);
         properties.getVirtual().setEnabled(virtualThreadsEnabled);
         properties.getVirtual().setConcurrencyLimit(1);
+        return new GXMyBatisAsyncListenerExecutorConfig(properties, new StandardEnvironment());
+    }
+
+    private GXMyBatisAsyncListenerExecutorConfig configuredWithQueue(int queueCapacity) {
+        GXMyBatisAsyncListenerProperties properties = defaultProperties();
+        properties.setCorePoolSizeFactor(0.001D);
+        properties.setMaxPoolSizeFactor(0.001D);
+        properties.setQueueCapacity(queueCapacity);
+        properties.setKeepAliveSeconds(0);
+        properties.setLongTaskThresholdMs(0L);
+        properties.setAwaitTerminationSeconds(1);
+        properties.getVirtual().setEnabled(false);
         return new GXMyBatisAsyncListenerExecutorConfig(properties, new StandardEnvironment());
     }
 

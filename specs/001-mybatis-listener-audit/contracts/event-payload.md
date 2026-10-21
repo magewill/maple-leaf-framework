@@ -26,22 +26,25 @@
 
 ## 载荷字段
 
-| 字段 | 类型 | 空值语义 | 说明 |
-| --- | --- | --- | --- |
-| `entityData` | 键值映射 | 空映射 | 实体字段快照；键为驼峰属性名 |
-| `updateFields` | 键值映射 | 空映射 | 被修改字段及新值 |
-| `conditionFields` | 键值映射 | 空映射 | 条件字段及取值；`in`/`between` 为列表，`is null` 为 `null` |
-| `conditionOperators` | 键值映射 | 空映射 | 与 `conditionFields` 键集合一致 |
-| `rawConditionSql` | 字符串 | 空串 | 原始条件文本；降级时唯一可靠信息 |
-| `conditionLossless` | 布尔 | `false` | 结构化条件是否完整 |
-| `degradeReasons` | 枚举集合 | 空集合 | 见下 |
-| `batchEntities` | 列表 | 空列表 | 批次载荷，保持原顺序 |
-| `snapshotDegraded` | 布尔 | `false` | 是否保留了不可克隆值的引用 |
+| 字段 | 实现键 | 类型 | 空值语义 | 说明 |
+| --- | --- | --- | --- | --- |
+| `entityData` | `entityData` | 键值映射 | 空映射 | 实体字段快照；键为驼峰属性名 |
+| `updateFields` | `updateFieldData` | 键值映射 | 空映射 | 被修改字段及新值 |
+| `conditionFields` | `conditionFieldData` / `keyValuePairs` | 键值映射 | 空映射 | 条件字段及取值；`in`/`between` 为列表，`is null` 为 `null`；更新回调沿用历史参数名 `keyValuePairs` |
+| `conditionOperators` | `keyOperatorPairs` | 键值映射 | 空映射 | 与条件字段键集合一致；更新回调沿用历史参数名 |
+| `rawConditionSql` | `rawConditionSql` / `rawWhereSql` | 字符串 | 空串 | 原始条件文本；降级时唯一可靠信息；更新回调沿用历史参数名 |
+| `conditionLossless` | `conditionLossless` | 布尔 | `false` | 结构化条件是否完整 |
+| `degradeReasons` | `degradeReasons` | 枚举集合 | 空集合 | 见下 |
+| `batchEntities` | `batchEntities` | 列表 | 空列表 | 批次载荷，保持原顺序 |
+| `snapshotDegraded` | `snapshotDegraded` | 布尔 | `false` | 是否保留了不可克隆值的引用 |
+
+**命名说明**：`实现键` 列为载荷中的实际键名。历史回调参数（`keyValuePairs`、`keyOperatorPairs`、`rawWhereSql`）属于已发布契约，保持不变；新代码统一按 `实现键` 读取，语义与左侧契约字段一一对应。
 
 ## 快照规则
 
 - 支持防御性复制的类型：映射、集合、数组、日期、日历；复制后监听方修改无效。
 - 不支持的类型：保留引用，并置 `snapshotDegraded=true`、追加 `UNSNAPSHOTABLE_VALUE` 降级原因。
+- 检测时机：`maple.framework.mybatis.listener.strict-snapshot=true` 时，发布前扫描载荷并对不可克隆值置位、计数与告警；关闭时保持历史行为（保留引用但不标记），以维持无监听路径的零扫描开销。
 - 明确禁止：依赖 Java 序列化或反射克隆任意对象（见项目宪法 V）。
 - 批量事件对整个批次只做一次快照，不重复复制。
 

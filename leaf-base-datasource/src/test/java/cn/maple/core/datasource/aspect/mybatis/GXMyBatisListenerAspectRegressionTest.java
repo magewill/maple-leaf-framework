@@ -4,6 +4,7 @@ import cn.hutool.core.lang.Dict;
 import cn.maple.core.datasource.annotation.GXMyBatisListener;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerConfigResolver;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerMetrics;
 import cn.maple.core.datasource.config.GXMyBatisListenerProperties;
 import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
@@ -14,7 +15,9 @@ import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
 import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
 import cn.maple.core.framework.dto.inner.field.GXUpdateNumberField;
+import cn.maple.core.framework.event.GXBaseEvent;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
+import com.baomidou.mybatisplus.core.conditions.AbstractWrapper;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
@@ -345,6 +348,41 @@ class GXMyBatisListenerAspectRegressionTest {
         assertEquals(Dict.create(), parsed.get("keyOperatorPairs"));
         assertEquals(Dict.create(), parsed.get("keyValuePairs"));
         assertEquals(wrapper.getTargetSql(), parsed.getStr("rawWhereSql"));
+        assertEquals(Boolean.FALSE, parsed.get("conditionLossless"));
+        assertEquals(wrapper.getTargetSql(), parsed.getStr("rawConditionSql"));
+        assertEquals(List.of(GXMyBatisListenerDegradeReasonEnums.NON_COLUMN_LEFT), parsed.get("degradeReasons"));
+    }
+
+    @Test
+    void updateEntityMarksDuplicateFieldDegrade() {
+        UpdateWrapper<Object> wrapper = new UpdateWrapper<>();
+        wrapper.eq("status", "enabled").eq("status", "disabled");
+
+        Dict parsed = ReflectionTestUtils.invokeMethod(updateEntityAspect, "parseWhereSQL", wrapper);
+
+        assertEquals(Boolean.FALSE, parsed.get("conditionLossless"));
+        assertEquals(wrapper.getTargetSql(), parsed.getStr("rawConditionSql"));
+        assertEquals(List.of(GXMyBatisListenerDegradeReasonEnums.DUPLICATE_FIELD), parsed.get("degradeReasons"));
+        assertTrue(((Dict) parsed.get("keyValuePairs")).isEmpty());
+        assertTrue(((Dict) parsed.get("keyOperatorPairs")).isEmpty());
+    }
+
+    @Test
+    void updateEntityMarksParameterMismatchDegrade() {
+        @SuppressWarnings("unchecked")
+        AbstractWrapper<Object, ?, ?> wrapper = Mockito.mock(AbstractWrapper.class);
+        Mockito.when(wrapper.getTargetSql()).thenReturn(
+                "id = #{ew.paramNameValuePairs.MPGENVAL1} AND name = #{ew.paramNameValuePairs.MPGENVAL2}");
+        Mockito.when(wrapper.getSqlSegment()).thenReturn(
+                "id = #{ew.paramNameValuePairs.MPGENVAL1} AND name = #{ew.paramNameValuePairs.MPGENVAL2}");
+        Mockito.when(wrapper.getParamNameValuePairs()).thenReturn(Map.of("MPGENVAL1", 1L));
+
+        Dict parsed = ReflectionTestUtils.invokeMethod(updateEntityAspect, "parseWhereSQL", wrapper);
+
+        assertEquals(Boolean.FALSE, parsed.get("conditionLossless"));
+        assertEquals(wrapper.getTargetSql(), parsed.getStr("rawWhereSql"));
+        assertEquals(List.of(GXMyBatisListenerDegradeReasonEnums.PARAM_MISMATCH), parsed.get("degradeReasons"));
+        assertTrue(((Dict) parsed.get("keyValuePairs")).isEmpty());
     }
 
     @Test
@@ -406,6 +444,77 @@ class GXMyBatisListenerAspectRegressionTest {
     }
 
     @Test
+    void saveBatchSkipsPublishForEmptyBatch() throws Throwable {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of()});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            assertDoesNotThrow(() -> saveBatchEntityAspect.around(point));
+            eventPublisherMock.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    void saveBatchSkipsPublishWhenAllEntitiesAreNull() throws Throwable {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{Arrays.asList(null, null)});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            assertDoesNotThrow(() -> saveBatchEntityAspect.around(point));
+            eventPublisherMock.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    void saveBatchKeepsEntityOrderInPayload() throws Exception {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        List<Map<String, Object>> entities = List.of(
+                Map.of("username", "alpha"),
+                Map.of("username", "beta"),
+                Map.of("username", "gamma")
+        );
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{entities});
+
+        Dict source = ReflectionTestUtils.invokeMethod(saveBatchEntityAspect, "handlePointArgs", point);
+
+        @SuppressWarnings("unchecked")
+        List<Dict> batchEntities = (List<Dict>) source.get("batchEntities");
+        assertEquals(List.of("alpha", "beta", "gamma"),
+                batchEntities.stream().map(entity -> entity.getStr("username")).toList());
+    }
+
+    @Test
+    void strictSnapshotMarksUnsnapshotableValuesAndCountsDegrade() throws Exception {
+        GXMyBatisListenerProperties properties = new GXMyBatisListenerProperties();
+        properties.setStrictSnapshot(true);
+        GXMyBatisListenerEventPublisher strictPublisher = newEventPublisher(properties);
+        long degradedBefore = GXMyBatisListenerMetrics.snapshot().degraded();
+        Dict source = Dict.create().set("id", 1).set("payload", new Object());
+        AtomicReference<Dict> captured = new AtomicReference<>();
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisherMock.when(() -> GXEventPublisherUtils.publishEvent(any())).thenAnswer(invocation -> {
+                GXBaseEvent<?> event = invocation.getArgument(0);
+                captured.set((Dict) event.getSource());
+                return null;
+            });
+            strictPublisher.publish(new ChildAnnotatedMapperImpl(),
+                    ChildAnnotatedMapper.class.getMethod("insert", Object.class),
+                    GXModelEventNamingEnums.SYNC_SAVE_ENTITY, GXModelEventNamingEnums.ASYNC_SAVE_ENTITY, source);
+        }
+
+        assertEquals(Boolean.TRUE, captured.get().getBool("snapshotDegraded"));
+        assertTrue(((List<?>) captured.get().get("degradeReasons"))
+                .contains(GXMyBatisListenerDegradeReasonEnums.UNSNAPSHOTABLE_VALUE));
+        assertEquals(degradedBefore + 1L, GXMyBatisListenerMetrics.snapshot().degraded());
+    }
+
+    @Test
     void updateEntityCapturesUpdateByIdWithoutInventingACondition() {
         ProceedingJoinPoint point = Mockito.mock(ProceedingJoinPoint.class);
         Mockito.when(point.getArgs()).thenReturn(new Object[]{Map.of("id", 7, "status", "enabled")});
@@ -441,6 +550,7 @@ class GXMyBatisListenerAspectRegressionTest {
         Mockito.when(point.getTarget()).thenReturn(target);
         Mockito.when(point.getSignature()).thenReturn(signature);
         Mockito.when(signature.getMethod()).thenReturn(method);
+        Mockito.when(signature.getName()).thenReturn(method.getName());
         return point;
     }
 

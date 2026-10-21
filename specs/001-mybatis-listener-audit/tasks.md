@@ -156,6 +156,25 @@ description: "Task list for MyBatis-Plus 操作监听加固"
 
 ---
 
+## Phase 8: Convergence
+
+**Purpose**: 收敛 2026-10-21 复核发现的剩余差距；按 CRITICAL → HIGH → MEDIUM → LOW 排列。
+
+- [X] T046 **CRITICAL** 在 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/config/GXMyBatisAsyncListenerExecutorConfig.java` 的 `TaskDecorator` 中接入既有 `GXMdcWrapper`/TraceId 包装能力（当前仅包装数据源与数据权限上下文），确保异步回调继承调用方 MDC 与 TraceId 并在任务结束后恢复 per Constitution V (contradicts)
+- [X] T047 **HIGH** 落地 `strictSnapshot` 语义：在载荷构造路径对不可克隆值置 `snapshotDegraded=true` 并追加 `UNSNAPSHOTABLE_VALUE`（当前 `GXMyBatisListenerProperties.strictSnapshot` 全库零引用，保存/删除/批量路径对不可克隆对象静默保留引用）per FR-008 (contradicts)
+- [X] T048 **HIGH** 在 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisPlusUpdateEntityAspect.java` 检测到降级时调用 `GXMyBatisListenerMetrics.recordDegraded()`（当前该计数恒为 0），并在发布器日志中输出 `degradeReasons` per FR-020 (missing)
+- [X] T049 **HIGH** 扩展 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisListenerAspectRegressionTest.java` 的条件降级断言：补齐 `NON_COLUMN_LEFT`、`DUPLICATE_FIELD`、`PARAM_MISMATCH` 三类场景的 `conditionLossless=false`、`rawConditionSql` 非空、`degradeReasons` 命中且字段值不错配（现有用例只断言原始 SQL，未校验原因）per T013/SC-008 (partial)
+- [X] T050 **HIGH** 将 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisListenerConcurrencyTest.java` 由"直接调用发布器 + 单一 save 事件"扩展为经六个切面的 7 类写操作 × 200 线程，断言错配/重复/丢失均为 0 per SC-002 (partial)
+- [X] T051 **HIGH** 重做 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/perf/GXMyBatisListenerOverheadTest.java`：≥5 轮采样取 P95、以"无监听 vs 有监听"比值判定 ≤2% 与 ≤1 ms、断言无声明路径事件构造 0 次、测量 1 万条批量峰值内存 ≤2 倍（当前仅单轮计时且只断言 <1 ms）per SC-003/SC-004/SC-005 (partial)
+- [X] T052 **MEDIUM** 在 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/config/GXMyBatisAsyncListenerExecutorConfigTest.java` 断言队列饱和后 `rejected` 递增、停机未执行任务计入 `cancelled`、饱和期间业务写操作仍成功 per FR-016/SC-006 (partial)
+- [X] T053 **MEDIUM** 在 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerEventPublisher.java` 的结构化日志中补齐操作标识（事件类型 + 方法名 + 自增序号或 TraceId）与 `mode` 字段，覆盖失败/降级/慢回调三类日志 per FR-020/T036 (partial)
+- [X] T054 **MEDIUM** 在 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisListenerAspectRegressionTest.java` 补空批次不投递用例（`saveBatch` 空集合、全 `null` 元素集合）per FR-011 (missing)
+- [X] T055 **LOW** 在批量保存用例中断言 `batchEntities` 顺序与输入顺序一致 per FR-011 (partial)
+- [X] T056 **LOW** 对齐 `specs/001-mybatis-listener-audit/contracts/event-payload.md` 与实现键：为 `conditionFieldData`/`keyValuePairs`/`keyOperatorPairs`/`updateFieldData` 登记别名映射，或统一命名（契约表格中的 `conditionFields`/`updateFields` 在实现中不存在）per contracts/event-payload (partial)
+- [X] T057 **LOW** 在 `GXMyBatisListenerEventPublisher` 初始化时对 `enable.mybatis-listener-async=false` 输出一次提示日志（当前无启动期提示）per T035 (missing)
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

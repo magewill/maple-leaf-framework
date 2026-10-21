@@ -2,8 +2,10 @@ package cn.maple.core.datasource.config;
 
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerMetrics;
 import cn.maple.core.datasource.util.GXDataFilterThreadLocalUtils;
+import cn.maple.core.framework.util.GXMdcThreadUtils;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.log4j.Log4j2;
+import org.slf4j.MDC;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -174,7 +176,10 @@ public class GXMyBatisAsyncListenerExecutorConfig {
     private TaskDecorator createTaskDecorator() {
         long longTaskThresholdMs = properties.getLongTaskThresholdMs();
         return runnable -> {
-            Runnable wrappedRunnable = GXDynamicContextHolder.wrap(GXDataFilterThreadLocalUtils.wrap(runnable));
+            Runnable wrappedRunnable = GXMdcThreadUtils.wrap(
+                    GXDynamicContextHolder.wrap(GXDataFilterThreadLocalUtils.wrap(runnable)),
+                    MDC.getCopyOfContextMap()
+            );
             return () -> {
                 long startTime = System.nanoTime();
                 boolean success = false;

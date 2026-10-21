@@ -5,6 +5,7 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerMetrics;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.datasource.enums.GXMyBatisListenerDegradeReasonEnums;
 import com.baomidou.mybatisplus.core.conditions.AbstractWrapper;
@@ -149,8 +150,19 @@ public class GXMyBatisPlusUpdateEntityAspect {
         if (ObjectUtil.isEmpty(source)) {
             return;
         }
+        if (isDegradedPayload(source)) {
+            GXMyBatisListenerMetrics.recordDegraded();
+        }
         eventPublisher.publish(point.getTarget(), invokedMethod,
                 GXModelEventNamingEnums.SYNC_UPDATE_ENTITY, GXModelEventNamingEnums.ASYNC_UPDATE_ENTITY, source);
+    }
+
+    private boolean isDegradedPayload(Dict source) {
+        if (Boolean.TRUE.equals(source.getBool(SNAPSHOT_DEGRADED))) {
+            return true;
+        }
+        Object reasons = source.get(DEGRADE_REASONS);
+        return reasons instanceof java.util.Collection<?> collection && !collection.isEmpty();
     }
 
     private <T> Dict handleUpdateWrapper(Object objectWrapper) {
