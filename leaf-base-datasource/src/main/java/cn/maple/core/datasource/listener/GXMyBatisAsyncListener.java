@@ -3,12 +3,14 @@ package cn.maple.core.datasource.listener;
 import cn.hutool.core.lang.Dict;
 import cn.maple.core.datasource.event.*;
 import lombok.extern.log4j.Log4j2;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 @Component
 @Log4j2
+@ConditionalOnProperty(name = "maple.framework.enable.mybatis-listener", havingValue = "true", matchIfMissing = true)
 @SuppressWarnings("all")
 @Async(value = "myBatisEventAsyncTaskExecutor")
 public class GXMyBatisAsyncListener implements GXMyBatisBaseListener {

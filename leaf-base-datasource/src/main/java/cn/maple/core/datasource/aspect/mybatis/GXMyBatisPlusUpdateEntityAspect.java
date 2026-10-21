@@ -1,18 +1,12 @@
 package cn.maple.core.datasource.aspect.mybatis;
 
-import cn.hutool.core.annotation.AnnotationUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
-import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
-import cn.maple.core.datasource.annotation.GXMyBatisListener;
-import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
-import cn.maple.core.datasource.event.GXMyBatisModelUpdateEntityEvent;
-import cn.maple.core.datasource.service.GXMybatisListenerService;
-import cn.maple.core.datasource.util.GXMyBatisListenerAnnotationUtils;
-import cn.maple.core.framework.util.GXEventPublisherUtils;
+import cn.maple.core.datasource.enums.GXMyBatisListenerDegradeReasonEnums;
 import com.baomidou.mybatisplus.core.conditions.AbstractWrapper;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.toolkit.Constants;
@@ -34,14 +28,15 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
-import org.springframework.aop.support.AopUtils;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
-import java.lang.reflect.Type;
+import java.time.temporal.Temporal;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -58,6 +53,21 @@ public class GXMyBatisPlusUpdateEntityAspect {
     private static final Pattern WHERE_PARAM_NAME_PATTERN = Pattern.compile(
             "#\\{[^}]*?\\.(" + Constants.WRAPPER_PARAM + "\\d+)(?:[,}])"
     );
+    private static final String OPERATION = "operation";
+    private static final String ENTITY_DATA = "entityData";
+    private static final String KEY_OPERATOR_PAIRS = "keyOperatorPairs";
+    private static final String KEY_VALUE_PAIRS = "keyValuePairs";
+    private static final String RAW_WHERE_SQL = "rawWhereSql";
+    private static final String RAW_CONDITION_SQL = "rawConditionSql";
+    private static final String CONDITION_LOSSLESS = "conditionLossless";
+    private static final String DEGRADE_REASONS = "degradeReasons";
+    private static final String SNAPSHOT_DEGRADED = "snapshotDegraded";
+
+    private final GXMyBatisListenerEventPublisher eventPublisher;
+
+    public GXMyBatisPlusUpdateEntityAspect(GXMyBatisListenerEventPublisher eventPublisher) {
+        this.eventPublisher = eventPublisher;
+    }
 
     @Around("""
             target(cn.maple.core.datasource.mapper.GXBaseMapper)
@@ -103,10 +113,13 @@ public class GXMyBatisPlusUpdateEntityAspect {
                 return Dict.create();
             }
             return Dict.create()
-                    .set("operation", operation)
-                    .set("entityData", Convert.convert(Dict.class, entity))
-                    .set("keyOperatorPairs", Dict.create())
-                    .set("keyValuePairs", Dict.create());
+                    .set(OPERATION, operation)
+                    .set(ENTITY_DATA, Convert.convert(Dict.class, entity))
+                    .set(KEY_OPERATOR_PAIRS, Dict.create())
+                    .set(KEY_VALUE_PAIRS, Dict.create())
+                    .set(CONDITION_LOSSLESS, Boolean.TRUE)
+                    .set(DEGRADE_REASONS, List.of())
+                    .set(RAW_CONDITION_SQL, "");
         }
         if (args.length < 2) {
             return Dict.create();
@@ -116,77 +129,28 @@ public class GXMyBatisPlusUpdateEntityAspect {
         Dict entityData = ObjectUtil.isNull(entity) ? Dict.create() : Convert.convert(Dict.class, entity);
 
         return Dict.create()
-                .set("operation", operation)
-                .set("entityData", entityData)
-                .set("keyOperatorPairs", updateCondition.get("keyOperatorPairs"))
-                .set("keyValuePairs", updateCondition.get("keyValuePairs"))
-                .set("rawWhereSql", updateCondition.getStr("rawWhereSql"));
+                .set(OPERATION, operation)
+                .set(ENTITY_DATA, entityData)
+                .set(KEY_OPERATOR_PAIRS, updateCondition.get(KEY_OPERATOR_PAIRS))
+                .set(KEY_VALUE_PAIRS, updateCondition.get(KEY_VALUE_PAIRS))
+                .set(RAW_WHERE_SQL, updateCondition.getStr(RAW_WHERE_SQL))
+                .set(RAW_CONDITION_SQL, updateCondition.getStr(RAW_CONDITION_SQL))
+                .set(CONDITION_LOSSLESS, Convert.toBool(updateCondition.get(CONDITION_LOSSLESS), Boolean.FALSE))
+                .set(DEGRADE_REASONS, updateCondition.get(DEGRADE_REASONS))
+                .set(SNAPSHOT_DEGRADED, Convert.toBool(updateCondition.get(SNAPSHOT_DEGRADED), Boolean.FALSE));
     }
 
     private void publishEvent(ProceedingJoinPoint point) {
-        if (ObjectUtil.isNull(point) || ObjectUtil.isNull(point.getTarget())) {
-            return;
-        }
-
-        Type[] mapperTypes = AopUtils.getTargetClass(point.getTarget()).getInterfaces();
         Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
-        if (ObjectUtil.isEmpty(mapperTypes)) {
+        if (!eventPublisher.hasListener(point.getTarget(), invokedMethod)) {
             return;
         }
-
         Dict source = handlePointArgs(point);
         if (ObjectUtil.isEmpty(source)) {
             return;
         }
-
-        for (Type type : mapperTypes) {
-            Class<?> mapperClass = convertTypeToClass(type);
-            if (ObjectUtil.isNull(mapperClass)) {
-                continue;
-            }
-
-            GXMyBatisListener listenerConfig = resolveListenerConfig(mapperClass, invokedMethod);
-            if (ObjectUtil.isNull(listenerConfig)) {
-                continue;
-            }
-
-            Class<? extends GXMybatisListenerService> listenerClass = listenerConfig.listenerClazz();
-            String eventType = GXModelEventNamingEnums.SYNC_UPDATE_ENTITY.getEventType();
-            String eventName = GXModelEventNamingEnums.SYNC_UPDATE_ENTITY.getEventName();
-            if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
-                eventType = GXModelEventNamingEnums.ASYNC_UPDATE_ENTITY.getEventType();
-                eventName = GXModelEventNamingEnums.ASYNC_UPDATE_ENTITY.getEventName();
-            }
-
-            Dict eventParam = Dict.create()
-                    .set("listenerClazzName", listenerClass.getSimpleName())
-                    .set("listenerClazz", listenerClass);
-            GXMyBatisModelUpdateEntityEvent<Dict> event = new GXMyBatisModelUpdateEntityEvent<>(source, eventType, eventParam, eventName);
-            if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
-                GXEventPublisherUtils.publishEventAfterCommit(event);
-            } else {
-                GXEventPublisherUtils.publishEvent(event);
-            }
-        }
-    }
-
-    private GXMyBatisListener resolveListenerConfig(Class<?> mapperClass, Method invokedMethod) {
-        Method mapperMethod = findMethod(mapperClass, invokedMethod);
-        if (ObjectUtil.isNotNull(mapperMethod)) {
-            GXMyBatisListener methodAnno = AnnotationUtil.getAnnotation(mapperMethod, GXMyBatisListener.class);
-            if (ObjectUtil.isNotNull(methodAnno)) {
-                return methodAnno;
-            }
-        }
-        return GXMyBatisListenerAnnotationUtils.findTypeAnnotation(mapperClass);
-    }
-
-    private Method findMethod(Class<?> mapperClass, Method invokedMethod) {
-        try {
-            return mapperClass.getMethod(invokedMethod.getName(), invokedMethod.getParameterTypes());
-        } catch (NoSuchMethodException e) {
-            return null;
-        }
+        eventPublisher.publish(point.getTarget(), invokedMethod,
+                GXModelEventNamingEnums.SYNC_UPDATE_ENTITY, GXModelEventNamingEnums.ASYNC_UPDATE_ENTITY, source);
     }
 
     private <T> Dict handleUpdateWrapper(Object objectWrapper) {
@@ -194,42 +158,71 @@ public class GXMyBatisPlusUpdateEntityAspect {
             return parseWhereSQL(updateWrapper);
         }
         if (objectWrapper instanceof Wrapper<?> wrapper) {
-            return Dict.create()
-                    .set("keyOperatorPairs", Dict.create())
-                    .set("keyValuePairs", Dict.create())
-                    .set("rawWhereSql", wrapper.getTargetSql());
+            return degradedPayload(wrapper.getTargetSql(), GXMyBatisListenerDegradeReasonEnums.NON_ABSTRACT_WRAPPER);
         }
+        return degradedPayload("", GXMyBatisListenerDegradeReasonEnums.NON_ABSTRACT_WRAPPER);
+    }
+
+    private Dict degradedPayload(String rawSql, GXMyBatisListenerDegradeReasonEnums reason) {
         return Dict.create()
-                .set("keyOperatorPairs", Dict.create())
-                .set("keyValuePairs", Dict.create());
+                .set(KEY_OPERATOR_PAIRS, Dict.create())
+                .set(KEY_VALUE_PAIRS, Dict.create())
+                .set(RAW_WHERE_SQL, rawSql)
+                .set(RAW_CONDITION_SQL, rawSql)
+                .set(CONDITION_LOSSLESS, Boolean.FALSE)
+                .set(DEGRADE_REASONS, List.of(reason))
+                .set(SNAPSHOT_DEGRADED, Boolean.FALSE);
     }
 
     private Dict parseWhereSQL(AbstractWrapper<?, ?, ?> updateWrapper) {
         Dict keyValuePairs = Dict.create();
         Dict keyOperatorPairs = Dict.create();
         Dict result = Dict.create()
-                .set("keyOperatorPairs", keyOperatorPairs)
-                .set("keyValuePairs", keyValuePairs);
+                .set(KEY_OPERATOR_PAIRS, keyOperatorPairs)
+                .set(KEY_VALUE_PAIRS, keyValuePairs);
         if (ObjectUtil.isNull(updateWrapper)) {
-            return result;
+            return degradedPayload("", GXMyBatisListenerDegradeReasonEnums.NON_ABSTRACT_WRAPPER);
         }
 
         String whereSQL = updateWrapper.getTargetSql();
         Map<String, Object> paramNameValuePairs = updateWrapper.getParamNameValuePairs();
         if (CharSequenceUtil.isBlank(whereSQL)) {
-            return result.set("rawWhereSql", whereSQL);
+            return result
+                    .set(RAW_WHERE_SQL, whereSQL)
+                    .set(RAW_CONDITION_SQL, whereSQL)
+                    .set(CONDITION_LOSSLESS, Boolean.FALSE)
+                    .set(DEGRADE_REASONS, List.of())
+                    .set(SNAPSHOT_DEGRADED, Boolean.FALSE);
         }
 
         ConditionParseResult conditionParseResult = WHERE_SQL_CONDITION_CACHE.get(whereSQL, this::extractConditionTokens);
+        if (ObjectUtil.isNull(conditionParseResult)) {
+            return degradedPayload(whereSQL, GXMyBatisListenerDegradeReasonEnums.PARSE_ERROR);
+        }
         List<String> whereParamNames = extractWhereParamNames(updateWrapper.getSqlSegment());
+        List<GXMyBatisListenerDegradeReasonEnums> degradeReasons = new ArrayList<>(conditionParseResult.degradeReasons());
         if (ObjectUtil.isNull(paramNameValuePairs)
-                || ObjectUtil.isNull(conditionParseResult)
                 || !conditionParseResult.lossless()
                 || ObjectUtil.isEmpty(conditionParseResult.conditionTokens())
                 || !hasMatchingWhereParameters(conditionParseResult.conditionTokens(), whereParamNames, paramNameValuePairs)) {
-            return result.set("rawWhereSql", whereSQL);
+            if (!conditionParseResult.lossless() || ObjectUtil.isEmpty(conditionParseResult.conditionTokens())) {
+                return result
+                        .set(RAW_WHERE_SQL, whereSQL)
+                        .set(RAW_CONDITION_SQL, whereSQL)
+                        .set(CONDITION_LOSSLESS, Boolean.FALSE)
+                        .set(DEGRADE_REASONS, List.copyOf(degradeReasons))
+                        .set(SNAPSHOT_DEGRADED, Boolean.FALSE);
+            }
+            degradeReasons.add(GXMyBatisListenerDegradeReasonEnums.PARAM_MISMATCH);
+            return result
+                    .set(RAW_WHERE_SQL, whereSQL)
+                    .set(RAW_CONDITION_SQL, whereSQL)
+                    .set(CONDITION_LOSSLESS, Boolean.FALSE)
+                    .set(DEGRADE_REASONS, List.copyOf(degradeReasons))
+                    .set(SNAPSHOT_DEGRADED, Boolean.FALSE);
         }
 
+        boolean snapshotDegraded = false;
         int paramNameIndex = 0;
         for (ConditionToken token : conditionParseResult.conditionTokens()) {
             keyOperatorPairs.set(token.field(), token.operator());
@@ -239,18 +232,30 @@ public class GXMyBatisPlusUpdateEntityAspect {
             }
             if (token.paramCount() == 1) {
                 String paramName = whereParamNames.get(paramNameIndex++);
-                keyValuePairs.set(token.field(), snapshotValue(paramNameValuePairs.get(paramName)));
+                Object rawValue = paramNameValuePairs.get(paramName);
+                snapshotDegraded |= isUnsnapshotable(rawValue);
+                keyValuePairs.set(token.field(), snapshotValue(rawValue));
                 continue;
             }
             List<Object> values = new ArrayList<>(token.paramCount());
             for (int i = 0; i < token.paramCount(); i++) {
                 String paramName = whereParamNames.get(paramNameIndex++);
-                values.add(snapshotValue(paramNameValuePairs.get(paramName)));
+                Object rawValue = paramNameValuePairs.get(paramName);
+                snapshotDegraded |= isUnsnapshotable(rawValue);
+                values.add(snapshotValue(rawValue));
             }
             keyValuePairs.set(token.field(), values);
         }
+        if (snapshotDegraded) {
+            degradeReasons.add(GXMyBatisListenerDegradeReasonEnums.UNSNAPSHOTABLE_VALUE);
+        }
 
-        return result.set("rawWhereSql", whereSQL);
+        return result
+                .set(RAW_WHERE_SQL, whereSQL)
+                .set(RAW_CONDITION_SQL, whereSQL)
+                .set(CONDITION_LOSSLESS, Boolean.TRUE)
+                .set(DEGRADE_REASONS, List.copyOf(degradeReasons))
+                .set(SNAPSHOT_DEGRADED, snapshotDegraded);
     }
 
     private List<String> extractWhereParamNames(String whereSqlSegment) {
@@ -266,7 +271,7 @@ public class GXMyBatisPlusUpdateEntityAspect {
     }
 
     private boolean hasMatchingWhereParameters(List<ConditionToken> conditionTokens, List<String> whereParamNames,
-                                                Map<String, Object> paramNameValuePairs) {
+                                               Map<String, Object> paramNameValuePairs) {
         int expectedParamCount = conditionTokens.stream().mapToInt(ConditionToken::paramCount).sum();
         return expectedParamCount == whereParamNames.size()
                 && whereParamNames.stream().allMatch(paramNameValuePairs::containsKey);
@@ -274,8 +279,9 @@ public class GXMyBatisPlusUpdateEntityAspect {
 
     private ConditionParseResult extractConditionTokens(String whereSQL) {
         List<ConditionToken> conditionTokens = new ArrayList<>(8);
+        List<GXMyBatisListenerDegradeReasonEnums> degradeReasons = new ArrayList<>(2);
         if (CharSequenceUtil.isBlank(whereSQL)) {
-            return new ConditionParseResult(List.copyOf(conditionTokens), false);
+            return new ConditionParseResult(List.copyOf(conditionTokens), false, List.copyOf(degradeReasons));
         }
 
         boolean[] lossless = {true};
@@ -292,6 +298,7 @@ public class GXMyBatisPlusUpdateEntityAspect {
                 @Override
                 public <S> Void visit(OrExpression orExpression, S context) {
                     lossless[0] = false;
+                    degradeReasons.add(GXMyBatisListenerDegradeReasonEnums.OR_EXPRESSION);
                     orExpression.getLeftExpression().accept(this, context);
                     orExpression.getRightExpression().accept(this, context);
                     return null;
@@ -337,21 +344,32 @@ public class GXMyBatisPlusUpdateEntityAspect {
                 private void appendToken(Expression leftExpression, String operator, int paramCount) {
                     if (!(leftExpression instanceof Column column)) {
                         lossless[0] = false;
+                        addReason(GXMyBatisListenerDegradeReasonEnums.NON_COLUMN_LEFT);
                         return;
                     }
                     String field = CharSequenceUtil.toCamelCase(column.getColumnName());
                     if (conditionTokens.stream().anyMatch(token -> CharSequenceUtil.equals(token.field(), field))) {
                         lossless[0] = false;
+                        addReason(GXMyBatisListenerDegradeReasonEnums.DUPLICATE_FIELD);
                     }
                     conditionTokens.add(new ConditionToken(field, operator, Math.max(0, paramCount)));
+                }
+
+                private void addReason(GXMyBatisListenerDegradeReasonEnums reason) {
+                    if (!degradeReasons.contains(reason)) {
+                        degradeReasons.add(reason);
+                    }
                 }
             }, null);
         } catch (Exception e) {
             log.warn("Failed to parse update wrapper conditions, fallback to raw sql only: {}", whereSQL, e);
             lossless[0] = false;
+            if (!degradeReasons.contains(GXMyBatisListenerDegradeReasonEnums.PARSE_ERROR)) {
+                degradeReasons.add(GXMyBatisListenerDegradeReasonEnums.PARSE_ERROR);
+            }
         }
 
-        return new ConditionParseResult(List.copyOf(conditionTokens), lossless[0]);
+        return new ConditionParseResult(List.copyOf(conditionTokens), lossless[0], List.copyOf(degradeReasons));
     }
 
     private int countExpressionValues(Expression expression) {
@@ -364,18 +382,34 @@ public class GXMyBatisPlusUpdateEntityAspect {
         return 1;
     }
 
-    private Object snapshotValue(Object value) {
-        return ObjectUtil.cloneIfPossible(value);
+    private boolean isUnsnapshotable(Object value) {
+        if (ObjectUtil.isNull(value)) {
+            return false;
+        }
+        if (value instanceof CharSequence || value instanceof Number || value instanceof Boolean
+                || value instanceof Character || value instanceof Enum<?> || value instanceof UUID
+                || value instanceof Temporal) {
+            return false;
+        }
+        try {
+            return ObjectUtil.cloneIfPossible(value) == value;
+        } catch (RuntimeException exception) {
+            return true;
+        }
     }
 
-    private Class<?> convertTypeToClass(Type type) {
-        return Convert.convert(new TypeReference<>() {
-        }, type);
+    private Object snapshotValue(Object value) {
+        try {
+            return ObjectUtil.cloneIfPossible(value);
+        } catch (RuntimeException exception) {
+            return value;
+        }
     }
 
     private record ConditionToken(String field, String operator, int paramCount) {
     }
 
-    private record ConditionParseResult(List<ConditionToken> conditionTokens, boolean lossless) {
+    private record ConditionParseResult(List<ConditionToken> conditionTokens, boolean lossless,
+                                        List<GXMyBatisListenerDegradeReasonEnums> degradeReasons) {
     }
 }

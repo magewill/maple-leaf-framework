@@ -857,6 +857,173 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 }
 ```
 
+#### 3.3.3 监听语义、能力边界与开关
+
+**触发时机**
+
+| 声明 `runType` | 执行线程 | 事务状态 |
+| --- | --- | --- |
+| `MYBATIS_SYNC_EVENT`（默认） | 业务调用方线程 | 若存在事务，**事务尚未提交** |
+| `MYBATIS_ASYNC_EVENT` | `myBatisEventAsyncTaskExecutor` | 已提交；无事务时立即执行 |
+
+同步回调里读到的是本事务尚未提交的数据，不要假设数据已对外可见；需要强一致语义时可开启 `sync-after-commit`。
+
+**声明优先级与去重**
+
+1. 方法级声明优先于类型级声明，类型级优先于父接口/父类上的声明。
+2. 一次写操作对同一监听器只投递一次；多个接口声明不同监听器时各投递一次，顺序按接口全限定名排序，结果可复现。
+3. `deduplicate=false` 可恢复旧的多接口重复投递行为，仅用于兼容验证。
+
+**能力覆盖边界**
+
+| 操作 | 是否产生事件 | 说明 |
+| --- | --- | --- |
+| 单条插入 | 是 | 仅当影响行数 > 0 |
+| 按条件更新 / 按主键更新 | 是 | 按主键更新无结构化条件，只有实体快照 |
+| 指定字段更新 | 是 | 需提供更新字段列表 |
+| 条件软删除 | 是 | 含条件字段与更新字段 |
+| **按条件物理删除** | 是 | 仅拦截 `deleteCondition` |
+| **按主键物理删除** | **否** | 可能被配置为逻辑删除，无法判定真实语义 |
+| 通用服务层批量保存/批量新增或更新 | 是 | 整批一个事件 |
+| 自定义批量、原生批量 SQL | **否** | 不经过被拦截的调用路径 |
+
+**条件还原与降级**
+
+- 条件可被无损还原时，回调可读到 `conditionFields` 与对应操作符。
+- 含 `OR`、函数/表达式左侧、重复字段、占位符不匹配或解析失败时，结构化条件为空，只提供原始条件文本，并通过 `degradeReasons` 标记原因；**不会伪造字段值或错位填充**。
+- 取值不可克隆时保留引用，并标记 `snapshotDegraded`；监听方必须把载荷视为只读。
+
+**异常与开关**
+
+| 配置键 | 默认值 | 作用 |
+| --- | --- | --- |
+| `maple.framework.enable.mybatis-listener` | `true` | 整体开关；关闭后不解析声明、不构造事件 |
+| `maple.framework.enable.mybatis-listener-async` | `true` | 关闭后异步声明退化为同步执行 |
+| `maple.framework.mybatis.listener.deduplicate` | `true` | 同一监听器同操作去重 |
+| `maple.framework.mybatis.listener.propagate-exception` | `false` | 是否把回调异常抛回业务调用方（旧行为） |
+| `maple.framework.mybatis.listener.sync-after-commit` | `false` | 同步回调延后到提交后 |
+| `maple.framework.mybatis.listener.strict-snapshot` | `false` | 严格快照模式，记录不可克隆值的降级 |
+| `maple.framework.mybatis.listener.metadata-cache-size` | `2048` | 声明解析缓存容量 |
+| `maple.framework.mybatis.listener.metadata-cache-expire-seconds` | `3600` | 声明解析缓存空闲过期（秒） |
+| `maple.framework.mybatis.listener.slow-callback-threshold-ms` | `30000` | 同步回调长耗时告警阈值 |
+
+默认情况下单个监听器异常会被隔离并计入失败计数，业务写操作保持成功。需要用旧行为（异常向调用方传播）时设置 `propagate-exception=true`。
+
+**可观测性**
+
+`GXMyBatisListenerMetricsService#snapshot()` 提供 `delivered` / `failed` / `rejected` / `cancelled` / `degraded` / `skipped` / `activeTasks` / `queueSize` 八项只读计数，进程内单调递增、重启归零。队列饱和、停机未执行、条件降级都会输出带事件类型与监听器名的结构化日志。
+
+**升级说明（4.3.0）**
+
+- 同步监听回调抛出的异常不再向业务调用方传播，而是被隔离并计入 `failed`。这是缺陷修复：此前一个监听器异常可能让已成功的写操作连带回滚。需要旧行为的项目请设置 `maple.framework.mybatis.listener.propagate-exception=true`。
+- 同一监听器在同一写操作中只投递一次；此前多接口继承同一声明会重复投递。确需旧行为时设置 `maple.framework.mybatis.listener.deduplicate=false`。
+- 异步执行器的键名与默认值保持不变，但虚拟线程模式下 `concurrency-limit=0` 现在明确表示"取最大池化线程数"，`-1` 表示不限制；校验用执行器不再无条件使用虚拟线程，而是与 `virtual.enabled` 保持一致。
+- 新增的 `maple.framework.enable.mybatis-listener` 默认开启，与升级前"注解即生效"的行为一致。
+
+**集成验证（可选）**
+
+`leaf-base-datasource` 提供了两个连真实 MySQL 的监听链路集成测试，默认不执行：
+
+- `MyBatisListenerIT`：单表增删改 + 多表事务
+- `MyBatisListenerSyncAfterCommitIT`：`sync-after-commit=true` 下的多表事务
+
+需要以下表：
+
+- `t_listener_user`：`id`、`username`、`score`、`status`、`created_at`、`updated_at`、`created_by`、`updated_by`、`is_deleted`、`deleted_at`、`ext`
+- `t_listener_order`：`id`、`order_no`（唯一）、`amount`
+- `t_listener_order_item`：`id`、`order_id`、`sku`、`qty`
+- `undo_log`：本模块测试类路径包含 Seata，数据源会被包装为 `DataSourceProxy`，缺少该表会导致启动失败
+
+执行方式（凭据只通过命令行传入，不落盘）：
+
+```bash
+mvn -pl leaf-base-datasource -am test \
+  -Dtest=MyBatisListenerIT,MyBatisListenerSyncAfterCommitIT \
+  -Dmaple.it.enabled=true \
+  -DIT_DB_URL=jdbc:mysql://<host>:3306/test \
+  -DIT_DB_USER=<user> \
+  -DIT_DB_PASSWORD=<password>
+```
+
+覆盖场景：
+
+1. 单表：插入回调载荷、`update(wrapper)` 条件还原、`updateById` 不伪造条件、条件物理删除、条件软删除。
+2. 异步提交后投递：校验执行线程名前缀 `maple-framework-mybatis-event-async-`；事务回滚不投递。
+3. 多表事务提交：订单 + 明细同事务提交后，两个表的异步事件各 1 次，且订单回调发生时明细已可见（证明是提交后投递）。
+4. 多表事务失败回滚：第二张表写入违反唯一键后整体回滚，两张表均无残留，异步事件 0 次。
+5. 同步语义（`sync-after-commit=false`）：两张表同事务写入后回滚，同步回调仍会各触发 1 次，且订单回调时明细尚未插入——这是"同步=事务内"的既定语义，不能当作提交成功信号。
+6. `sync-after-commit=true`：提交场景回调延后到提交后且能看到完整数据；回滚场景同步回调 0 次。
+
+**多数据源切换验证**
+
+`MultiDataSourceIT` 使用两个真实库（`test` / `test1`），配置见 `src/test/resources/dev/datasource-multi.yml`：
+
+```bash
+mvn -pl leaf-base-datasource -am test -Dtest=MultiDataSourceIT \
+  -Dmaple.it.enabled=true \
+  -DIT_DB_URL=jdbc:mysql://<host>:3306/test \
+  -DIT_DB1_URL=jdbc:mysql://<host>:3306/test1 \
+  -DIT_DB_USER=<user> \
+  -DIT_DB_PASSWORD=<password>
+```
+
+需要 `test` 与 `test1` 各有一份 `t_listener_account`、`t_listener_order`，以及各自的 `undo_log`。已验证：
+
+1. `@GXDataSource("slave1")` 的写入只落在 `test1`，默认方法只落在 `test`。
+2. `GXDynamicContextHolder.executeOn` 嵌套切换后能恢复外层数据源，方法退出后上下文为 `null`。
+3. 切换块抛异常时不残留上下文键。
+4. `framework` 与 `slave1` 两个目标数据源均被 Seata `DataSourceProxy` 包装。
+5. **本地事务不跨数据源**：`@Transactional` 内先写 `framework`、再切到 `slave1`，实际 SQL 会复用事务已绑定的连接（回查时在 `framework` 看到该行），回滚后两侧都为 0。这正是 `@GXDataSource` 与声明式事务混用的已知限制，跨库原子性必须交给 Seata 全局事务。
+
+**Seata 分布式事务（已在本地 TC 上完成端到端验证）**
+
+`SeataGlobalTransactionIT` 使用 `@GlobalTransactional` 同时写 `test` 与 `test1`，验证全局提交与全局回滚：
+
+```bash
+mvn -pl leaf-base-datasource -am test -Dtest=SeataGlobalTransactionIT \
+  -Dmaple.it.enabled=true -Dmaple.it.seata.enabled=true \
+  -DIT_DB_URL=jdbc:mysql://<host>:3306/test \
+  -DIT_DB1_URL=jdbc:mysql://<host>:3306/test1 \
+  -DIT_DB_USER=<user> -DIT_DB_PASSWORD=<password>
+```
+
+前置条件：本地 TC（`127.0.0.1:8091`）已启动；`test` 与 `test1` 均有与实体匹配的业务表和 `undo_log`。
+
+关键配置（测试上下文 `SeataMultiDataSourceITApplication` 已内置）：
+
+```yaml
+seata:
+  enabled: true
+  application-id: maple-leaf-it
+  tx-service-group: maple_it_tx_group
+  enable-auto-data-source-proxy: false   # 框架已手动包装 DataSourceProxy，避免重复代理
+  config:
+    type: file
+  registry:
+    type: file
+  client:
+    undo:
+      log-serialization: fastjson2       # 默认解析器在本项目依赖组合下不可用，必须显式指定
+  service:
+    vgroup-mapping:
+      maple_it_tx_group: default
+    grouplist:
+      default: 127.0.0.1:8091
+```
+
+实测结果：
+
+| 场景 | 事务内可见 | 事务结束后 | undo_log |
+| --- | --- | --- | --- |
+| 全局提交（两侧各写 1 行） | — | `test` 1 行、`test1` 1 行 | 两侧均清空 |
+| 全局回滚（两侧各写 1 行后抛异常） | `test` 1 行、`test1` 1 行 | 两侧均 0 行 | 两侧均清空 |
+
+说明：
+
+1. 回滚用例先断言"事务内两侧各 1 行"，再断言"事务后两侧 0 行"，证明数据确实被写入后再由 Seata 撤销，而不是从未写入。
+2. `undo_log` 的清理由 TC 通知 RM 异步完成，测试以最长 5 秒轮询等待。
+3. 若改用其他序列化器：`jackson` 需保证 `com.fasterxml.jackson.core:jackson-databind` 2.x 在类路径；`kryo` 还需额外引入 `de.javakaffee:kryo-serializers`。本项目依赖组合下 `fastjson2` 可直接使用。
+
 ### 3.4 JSON与Java对象类型处理
 
 ### 3.5 数据校验

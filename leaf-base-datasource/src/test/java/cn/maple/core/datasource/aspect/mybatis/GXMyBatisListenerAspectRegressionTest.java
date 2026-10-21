@@ -2,8 +2,12 @@ package cn.maple.core.datasource.aspect.mybatis;
 
 import cn.hutool.core.lang.Dict;
 import cn.maple.core.datasource.annotation.GXMyBatisListener;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerConfigResolver;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
+import cn.maple.core.datasource.config.GXMyBatisListenerProperties;
 import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
+import cn.maple.core.datasource.enums.GXMyBatisListenerDegradeReasonEnums;
 import cn.maple.core.datasource.listener.GXMyBatisSyncListener;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
@@ -22,6 +26,7 @@ import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.springframework.context.event.EventListener;
 import org.springframework.aop.aspectj.AspectJExpressionPointcut;
+import org.springframework.core.env.StandardEnvironment;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionAttribute;
@@ -38,16 +43,23 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 
 class GXMyBatisListenerAspectRegressionTest {
-    private final GXMyBatisPlusSaveEntityAspect saveEntityAspect = new GXMyBatisPlusSaveEntityAspect();
-    private final GXMyBatisPlusUpdateFieldAspect updateFieldAspect = new GXMyBatisPlusUpdateFieldAspect();
-    private final GXMyBatisPlusDeleteSoftAspect deleteSoftAspect = new GXMyBatisPlusDeleteSoftAspect();
-    private final GXMyBatisPlusUpdateEntityAspect updateEntityAspect = new GXMyBatisPlusUpdateEntityAspect();
-    private final GXMyBatisPlusSaveBatchEntityAspect saveBatchEntityAspect = new GXMyBatisPlusSaveBatchEntityAspect();
-    private final GXMyBatisPlusDeleteAspect deleteAspect = new GXMyBatisPlusDeleteAspect();
+    private final GXMyBatisListenerEventPublisher eventPublisher = newEventPublisher(new GXMyBatisListenerProperties());
+    private final GXMyBatisPlusSaveEntityAspect saveEntityAspect = new GXMyBatisPlusSaveEntityAspect(eventPublisher);
+    private final GXMyBatisPlusUpdateFieldAspect updateFieldAspect = new GXMyBatisPlusUpdateFieldAspect(eventPublisher);
+    private final GXMyBatisPlusDeleteSoftAspect deleteSoftAspect = new GXMyBatisPlusDeleteSoftAspect(eventPublisher);
+    private final GXMyBatisPlusUpdateEntityAspect updateEntityAspect = new GXMyBatisPlusUpdateEntityAspect(eventPublisher);
+    private final GXMyBatisPlusSaveBatchEntityAspect saveBatchEntityAspect = new GXMyBatisPlusSaveBatchEntityAspect(eventPublisher);
+    private final GXMyBatisPlusDeleteAspect deleteAspect = new GXMyBatisPlusDeleteAspect(eventPublisher);
+
+    private static GXMyBatisListenerEventPublisher newEventPublisher(GXMyBatisListenerProperties properties) {
+        GXMyBatisListenerConfigResolver resolver = new GXMyBatisListenerConfigResolver(properties);
+        return new GXMyBatisListenerEventPublisher(resolver, properties, new StandardEnvironment());
+    }
 
     @Test
     void saveEntityPublishesEveryMatchedMapperConfiguration() throws Throwable {
@@ -76,16 +88,37 @@ class GXMyBatisListenerAspectRegressionTest {
     @Test
     void saveBatchResolvesMethodLevelListenerConfiguration() throws Exception {
         Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        GXMyBatisListenerConfigResolver resolver = new GXMyBatisListenerConfigResolver(new GXMyBatisListenerProperties());
 
-        GXMyBatisListener listener = ReflectionTestUtils.invokeMethod(
-                saveBatchEntityAspect,
-                "resolveListenerConfig",
-                MethodAnnotatedBatchService.class,
-                method,
-                Object.class
-        );
+        List<GXMyBatisListenerConfigResolver.ResolvedListener> listeners =
+                resolver.resolve(resolver.serviceCandidateTypes(new MethodAnnotatedBatchService(), null), method);
 
-        assertEquals(FirstListener.class, listener.listenerClazz());
+        assertEquals(1, listeners.size());
+        assertEquals(FirstListener.class, listeners.getFirst().listenerClazz());
+    }
+
+    @Test
+    void saveEntitySkipsPublishWhenNoRowsAffected() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new ChildAnnotatedMapperImpl(), ChildAnnotatedMapper.class.getMethod("insert", Object.class));
+        Mockito.when(point.proceed()).thenReturn(0);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{Map.of("id", 1)});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            assertDoesNotThrow(() -> saveEntityAspect.around(point));
+            eventPublisher.verifyNoInteractions();
+        }
+    }
+
+    @Test
+    void saveEntitySkipsPublishWhenProceedThrows() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new ChildAnnotatedMapperImpl(), ChildAnnotatedMapper.class.getMethod("insert", Object.class));
+        Mockito.when(point.proceed()).thenThrow(new IllegalStateException("write failed"));
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{Map.of("id", 1)});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            assertThrows(IllegalStateException.class, () -> saveEntityAspect.around(point));
+            eventPublisher.verifyNoInteractions();
+        }
     }
 
     @Test
@@ -257,6 +290,8 @@ class GXMyBatisListenerAspectRegressionTest {
         Dict source = ReflectionTestUtils.invokeMethod(updateEntityAspect, "handlePointArgs", point);
 
         assertEquals(wrapper.getTargetSql(), source.getStr("rawWhereSql"));
+        assertEquals(Boolean.FALSE, source.get("conditionLossless"));
+        assertEquals(List.of(GXMyBatisListenerDegradeReasonEnums.OR_EXPRESSION), source.get("degradeReasons"));
     }
 
     @Test

@@ -1,0 +1,58 @@
+{
+  "properties": [
+    {
+      "name": "maple.framework.enable.mybatis-listener",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Enable MyBatis write-operation listeners. When false, declarations are neither resolved nor delivered."
+    },
+    {
+      "name": "maple.framework.enable.mybatis-listener-async",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Enable after-commit asynchronous delivery. When false, async declarations are executed synchronously."
+    },
+    {
+      "name": "maple.framework.mybatis.listener.deduplicate",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Invoke the same listener at most once per write operation. Disable to restore legacy multi-interface delivery."
+    },
+    {
+      "name": "maple.framework.mybatis.listener.propagate-exception",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Rethrow listener exceptions to the business caller. Default isolates failures so committed writes are not rolled back."
+    },
+    {
+      "name": "maple.framework.mybatis.listener.sync-after-commit",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Defer synchronous listener callbacks until the surrounding transaction commits."
+    },
+    {
+      "name": "maple.framework.mybatis.listener.strict-snapshot",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Report values that cannot be cloned as degraded snapshots instead of silently keeping references."
+    },
+    {
+      "name": "maple.framework.mybatis.listener.metadata-cache-size",
+      "type": "java.lang.Integer",
+      "defaultValue": 2048,
+      "description": "Maximum number of cached listener declaration resolutions."
+    },
+    {
+      "name": "maple.framework.mybatis.listener.metadata-cache-expire-seconds",
+      "type": "java.lang.Long",
+      "defaultValue": 3600,
+      "description": "Idle expiration in seconds for the listener declaration resolution cache."
+    },
+    {
+      "name": "maple.framework.mybatis.listener.slow-callback-threshold-ms",
+      "type": "java.lang.Long",
+      "defaultValue": 30000,
+      "description": "Threshold in milliseconds above which a synchronous listener callback is logged as slow."
+    }
+  ]
+}

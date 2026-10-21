@@ -1,32 +1,25 @@
 package cn.maple.core.datasource.aspect.mybatis;
 
-import cn.hutool.core.annotation.AnnotationUtil;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
-import cn.maple.core.datasource.annotation.GXMyBatisListener;
-import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
-import cn.maple.core.datasource.event.GXMyBatisModelUpdateFieldEvent;
-import cn.maple.core.datasource.service.GXMybatisListenerService;
-import cn.maple.core.datasource.util.GXMyBatisListenerAnnotationUtils;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
 import cn.maple.core.framework.dto.inner.field.GXUpdateField;
-import cn.maple.core.framework.util.GXEventPublisherUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
-import org.springframework.aop.support.AopUtils;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
-import java.lang.reflect.Type;
+import java.util.ArrayList;
 import java.util.List;
 
 @Aspect
@@ -34,6 +27,12 @@ import java.util.List;
 @Slf4j
 @SuppressWarnings("all")
 public class GXMyBatisPlusUpdateFieldAspect {
+    private final GXMyBatisListenerEventPublisher eventPublisher;
+
+    public GXMyBatisPlusUpdateFieldAspect(GXMyBatisListenerEventPublisher eventPublisher) {
+        this.eventPublisher = eventPublisher;
+    }
+
     @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && execution(* updateFieldByCondition(..))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();
@@ -82,10 +81,19 @@ public class GXMyBatisPlusUpdateFieldAspect {
             }
         });
 
-        List<GXCondition<?>> conditionList = baseQueryParam.getCondition();
+        List<String> rawConditions = new ArrayList<>();
         Dict conditionFieldData = Dict.create();
+        List<GXCondition<?>> conditionList = baseQueryParam.getCondition();
         conditionList.forEach(condition -> {
-            if (condition == null || condition instanceof GXConditionRaw) {
+            if (condition == null) {
+                return;
+            }
+            if (condition instanceof GXConditionRaw rawCondition) {
+                try {
+                    rawConditions.add(rawCondition.whereString());
+                } catch (RuntimeException exception) {
+                    log.warn("Raw condition skipped from listener payload: {}", exception.getMessage());
+                }
                 return;
             }
             String fieldExpression = condition.getFieldExpression();
@@ -97,77 +105,22 @@ public class GXMyBatisPlusUpdateFieldAspect {
 
         return Dict.create()
                 .set("updateFieldData", updateFieldData)
-                .set("conditionFieldData", conditionFieldData);
+                .set("conditionFieldData", conditionFieldData)
+                .set("conditionLossless", Boolean.TRUE)
+                .set("degradeReasons", List.of())
+                .set("rawConditionSql", String.join(" AND ", rawConditions));
     }
 
     private void publishEvent(ProceedingJoinPoint point) {
-        if (ObjectUtil.isNull(point) || ObjectUtil.isNull(point.getTarget())) {
-            return;
-        }
-
-        Type[] mapperTypes = AopUtils.getTargetClass(point.getTarget()).getInterfaces();
         Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
-        if (ObjectUtil.isEmpty(mapperTypes)) {
+        if (!eventPublisher.hasListener(point.getTarget(), invokedMethod)) {
             return;
         }
-
         Dict source = handlePointArgs(point);
         if (ObjectUtil.isEmpty(source)) {
             return;
         }
-
-        for (Type type : mapperTypes) {
-            Class<?> mapperClass = convertTypeToClass(type);
-            if (ObjectUtil.isNull(mapperClass)) {
-                continue;
-            }
-
-            GXMyBatisListener listenerConfig = resolveListenerConfig(mapperClass, invokedMethod);
-            if (ObjectUtil.isNull(listenerConfig)) {
-                continue;
-            }
-
-            Class<? extends GXMybatisListenerService> listenerClass = listenerConfig.listenerClazz();
-            String eventType = GXModelEventNamingEnums.SYNC_UPDATE_FIELD.getEventType();
-            String eventName = GXModelEventNamingEnums.SYNC_UPDATE_FIELD.getEventName();
-            if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
-                eventType = GXModelEventNamingEnums.ASYNC_UPDATE_FIELD.getEventType();
-                eventName = GXModelEventNamingEnums.ASYNC_UPDATE_FIELD.getEventName();
-            }
-
-            Dict eventParam = Dict.create()
-                    .set("listenerClazzName", listenerClass.getSimpleName())
-                    .set("listenerClazz", listenerClass);
-            GXMyBatisModelUpdateFieldEvent<Dict> event = new GXMyBatisModelUpdateFieldEvent<>(source, eventType, eventParam, eventName);
-            if (CharSequenceUtil.equals(listenerConfig.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)) {
-                GXEventPublisherUtils.publishEventAfterCommit(event);
-            } else {
-                GXEventPublisherUtils.publishEvent(event);
-            }
-        }
-    }
-
-    private GXMyBatisListener resolveListenerConfig(Class<?> mapperClass, Method invokedMethod) {
-        Method mapperMethod = findMethod(mapperClass, invokedMethod);
-        if (ObjectUtil.isNotNull(mapperMethod)) {
-            GXMyBatisListener methodAnno = AnnotationUtil.getAnnotation(mapperMethod, GXMyBatisListener.class);
-            if (ObjectUtil.isNotNull(methodAnno)) {
-                return methodAnno;
-            }
-        }
-        return GXMyBatisListenerAnnotationUtils.findTypeAnnotation(mapperClass);
-    }
-
-    private Method findMethod(Class<?> mapperClass, Method invokedMethod) {
-        try {
-            return mapperClass.getMethod(invokedMethod.getName(), invokedMethod.getParameterTypes());
-        } catch (NoSuchMethodException e) {
-            return null;
-        }
-    }
-
-    private Class<?> convertTypeToClass(Type type) {
-        return Convert.convert(new TypeReference<>() {
-        }, type);
+        eventPublisher.publish(point.getTarget(), invokedMethod,
+                GXModelEventNamingEnums.SYNC_UPDATE_FIELD, GXModelEventNamingEnums.ASYNC_UPDATE_FIELD, source);
     }
 }
