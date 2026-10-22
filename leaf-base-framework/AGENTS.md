@@ -31,6 +31,16 @@
 5. 配置类应保持可读、可覆盖、可观测，避免硬编码环境值。
 6. 禁止提交真实密钥、令牌、生产地址或密码。
 
+### 当前实现边界（2026-10-22 审查登记）
+
+以下为审查确认的现状。新增代码不得假设相反的行为；修复落地后必须同步本节，并在 `specs/005-framework-module-audit/review-report.md` 记录。
+
+1. `@Async` 使用 `GXAsyncConfig#getAsyncExecutor` 返回的 `SimpleAsyncTaskExecutor`（虚拟线程），**未接入** `GXMdcWrapper*` 或 `TaskDecorator`，MDC/TraceId 不会自动传播。
+2. `GXBaseRequestLoggingFilter` 在请求结束时只恢复 `X-B3-TraceId` 一个键，其它 MDC 键不会清理；业务代码自行写入 MDC 时必须在自己的 `finally` 中清理。
+3. `GXMdcWrapperForkJoinPool` 仅包装 `execute` / `submit(Runnable|Callable)` / `invokeAll`；`submit(ForkJoinTask)` 与 `invoke(ForkJoinTask)` 不传播上下文。
+4. `GXDynamicCallMethodServiceImpl#call(String, ...)` 不校验类名前缀，白名单只在 `GXParseDynamicCallParamServiceImpl` 一侧生效。
+5. 事件载荷快照仅覆盖 `Map` / `Collection` / `Set` / 数组 / `Date` / `Calendar`；自定义对象按引用传递，订阅方需自行保证不可变。
+
 ## 测试要求
 
 1. 需要完整的单元测试。涉及行为变更时，测试必须覆盖成功、失败、异常、空值、边界和回归场景。
