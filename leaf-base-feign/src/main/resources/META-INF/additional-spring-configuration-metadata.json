@@ -1,0 +1,76 @@
+{
+  "properties": [
+    {
+      "name": "maple.framework.feign.logger-level.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Register the framework default Feign logger level (BASIC)."
+    },
+    {
+      "name": "maple.framework.feign.error-decoder.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Register the framework Feign error decoder. Disabled by default; enable it explicitly to map remote statuses to business exceptions."
+    },
+    {
+      "name": "maple.framework.feign.request-interceptor.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Register the framework Feign request interceptor that propagates auth token, platform and trace id."
+    },
+    {
+      "name": "maple.framework.feign.auth-token-aspect.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Register the aspect that validates inbound Feign auth tokens for annotated methods."
+    },
+    {
+      "name": "maple.framework.feign.auth-token.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Generate and inject the Feign auth token. When false, token generation is skipped and a warning is logged."
+    },
+    {
+      "name": "maple.framework.feign.fallback-config.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Register the default Feign fallback specification."
+    },
+    {
+      "name": "maple.framework.feign.circuit-breaker.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Register the framework retry circuit breaker customizer."
+    },
+    {
+      "name": "maple.framework.feign.circuit-breaker.max-retries",
+      "type": "java.lang.Integer",
+      "defaultValue": 0,
+      "description": "Maximum retries performed by the framework retry circuit breaker. 0 disables retries; client side business errors are never retried."
+    },
+    {
+      "name": "maple.framework.feign.circuit-breaker.backoff",
+      "type": "java.time.Duration",
+      "defaultValue": "100ms",
+      "description": "Initial delay between retries."
+    },
+    {
+      "name": "maple.framework.feign.circuit-breaker.backoff-multiplier",
+      "type": "java.lang.Double",
+      "defaultValue": 2.0,
+      "description": "Multiplier applied to the backoff delay between retries."
+    },
+    {
+      "name": "maple.framework.feign.circuit-breaker.open-timeout",
+      "type": "java.time.Duration",
+      "defaultValue": "20s",
+      "description": "How long the circuit stays open before transitioning to half-open."
+    },
+    {
+      "name": "maple.framework.feign.circuit-breaker.reset-timeout",
+      "type": "java.time.Duration",
+      "defaultValue": "5s",
+      "description": "How long to wait after a failure before resetting the circuit breaker state."
+    }
+  ]
+}

@@ -42,8 +42,18 @@ public class GXFeignConfig {
         return new GXFeignCustomErrorDecoder();
     }
 
+    /**
+     * Registers the framework default Feign specification. Spring Cloud already provides
+     * an equivalent default configuration, so the specification can be disabled when an
+     * application wants to rely on the upstream defaults only.
+     */
     @Bean(name = "default.mapleFeignFallback.FeignClientSpecification")
     @ConditionalOnMissingBean(name = "default.mapleFeignFallback.FeignClientSpecification")
+    @ConditionalOnProperty(
+            prefix = "maple.framework.feign.fallback-config",
+            name = "enabled",
+            havingValue = "true",
+            matchIfMissing = true)
     public FeignClientSpecification mapleFeignFallbackSpecification() {
         return new FeignClientSpecification(
                 "default.mapleFeignFallback",

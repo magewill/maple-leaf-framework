@@ -12,6 +12,14 @@ import org.springframework.cloud.openfeign.support.HttpMessageConverterCustomize
 import org.springframework.cloud.openfeign.support.SpringEncoder;
 import org.springframework.context.annotation.Bean;
 
+/**
+ * Default Feign specification applied to every client.
+ *
+ * <p>Feign clients registered through {@code @EnableFeignClients} do not receive
+ * Spring Cloud's {@code FeignClientsConfiguration} by default, therefore this
+ * specification is the one that supplies the message converters and the fallback
+ * encoder. Both beans back off as soon as the application declares its own.</p>
+ */
 class GXFeignFallbackConfig {
     @Bean
     @ConditionalOnMissingBean(FeignHttpMessageConverters.class)

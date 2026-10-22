@@ -32,9 +32,10 @@ import java.util.concurrent.ConcurrentHashMap;
 @Order(100)
 public class GXFeignAuthTokenAspect {
     /**
-     * Cache resolved method names for stable application method sets.
+     * Caches the diagnostic method name per method. The key set is bounded by the number
+     * of annotated methods declared by the application.
      */
-    private static final ConcurrentHashMap<String, String> METHOD_SIGNATURE_CACHE = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Method, String> METHOD_SIGNATURE_CACHE = new ConcurrentHashMap<>();
 
     @Pointcut("@annotation(cn.maple.core.framework.annotation.GXHttpInvokerAuthToken) || " +
             "@within(cn.maple.core.framework.annotation.GXHttpInvokerAuthToken) ")
@@ -105,10 +106,8 @@ public class GXFeignAuthTokenAspect {
      * Returns a stable method name for diagnostics and exception messages.
      */
     private String getMethodSignature(JoinPoint point) {
-        String signatureKey = point.getSignature().toString();
-        return METHOD_SIGNATURE_CACHE.computeIfAbsent(signatureKey, key -> {
-            MethodSignature signature = (MethodSignature) point.getSignature();
-            return signature.getDeclaringTypeName() + "." + signature.getName();
-        });
+        MethodSignature signature = (MethodSignature) point.getSignature();
+        return METHOD_SIGNATURE_CACHE.computeIfAbsent(signature.getMethod(),
+                method -> signature.getDeclaringTypeName() + "." + signature.getName());
     }
 }

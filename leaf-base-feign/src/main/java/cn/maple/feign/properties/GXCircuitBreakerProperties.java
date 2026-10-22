@@ -8,7 +8,7 @@ import java.time.Duration;
 @Getter
 @ConfigurationProperties(prefix = "maple.framework.feign.circuit-breaker")
 public class GXCircuitBreakerProperties {
-    private int maxRetries = 3;
+    private int maxRetries = 0;
 
     private Duration backoff = Duration.ofMillis(100);
 

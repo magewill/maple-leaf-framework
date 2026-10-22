@@ -21,15 +21,15 @@ bot:
       cn.maple.core.framework.exception.GXBusinessException
 
 maple:
-  feign:
-    circuit-breaker:
-      enabled: true
-      max-retries: 3
-      backoff: 100ms
-      backoff-multiplier: 2.0
-      open-timeout: 20s
-      reset-timeout: 5s
   framework:
+    feign:
+      circuit-breaker:
+        enabled: true
+        max-retries: 0
+        backoff: 100ms
+        backoff-multiplier: 2.0
+        open-timeout: 20s
+        reset-timeout: 5s
     web:
       client:
         timeout-seconds: 30

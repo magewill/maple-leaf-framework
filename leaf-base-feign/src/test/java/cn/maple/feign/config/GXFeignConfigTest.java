@@ -13,6 +13,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.cloud.openfeign.FeignAutoConfiguration;
 import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.cloud.openfeign.FeignClientFactory;
 import org.springframework.cloud.openfeign.FeignClientSpecification;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
@@ -122,6 +123,32 @@ class GXFeignConfigTest {
                 .run(context -> assertThat(context).doesNotHaveBean(Logger.Level.class));
     }
 
+    @Test
+    void fallbackConfigurationCanBeDisabledWhenUserProvidesEncoder() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(FeignClientTestConfig.class, UserEncoderConfig.class)
+                .withConfiguration(AutoConfigurations.of(FeignAutoConfiguration.class, GXFeignConfig.class))
+                .withPropertyValues("maple.framework.feign.fallback-config.enabled=false")
+                .run(context -> {
+                    assertThat(context)
+                            .doesNotHaveBean("default.mapleFeignFallback.FeignClientSpecification");
+                    assertThat(context).hasSingleBean(TestServiceClient.class);
+                });
+    }
+
+    @Test
+    void feignClientReceivesEncoderFromFrameworkFallbackSpecification() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(FeignClientTestConfig.class)
+                .withConfiguration(AutoConfigurations.of(FeignAutoConfiguration.class, GXFeignConfig.class))
+                .run(context -> {
+                    FeignClientFactory feignClientFactory = context.getBean(FeignClientFactory.class);
+
+                    assertThat(feignClientFactory.getInstanceWithoutAncestors("test-service", Encoder.class))
+                            .isNotNull();
+                });
+    }
+
     private String readAutoConfigurationImports() {
         try (var inputStream = Thread.currentThread().getContextClassLoader()
                 .getResourceAsStream("META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports")) {
@@ -166,6 +193,14 @@ class GXFeignConfigTest {
     @Configuration
     @ComponentScan(basePackageClasses = GXFeignAuthTokenAspect.class)
     static class FeignAspectComponentScanConfig {
+    }
+
+    @Configuration
+    static class UserEncoderConfig {
+        @Bean
+        Encoder userEncoder() {
+            return new Encoder.Default();
+        }
     }
 
     @Configuration

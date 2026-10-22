@@ -26,7 +26,7 @@
 `leaf-base-feign` 是 Maple Leaf Framework 的 Feign 基础支持模块，当前主要提供以下能力：
 
 1. `GXFeignService`：定义 Feign 场景下的默认契约与可覆盖扩展点，包括认证 token 生成与校验、traceId 获取、平台标识透传、HMAC 相关能力以及敏感请求头约定。
-2. `GXFeignConfig`：提供 Feign 全局配置，统一注册日志级别、请求拦截器、错误解码器等基础 Bean。
+2. `GXFeignConfig`：提供 Feign 全局配置，统一注册日志级别、请求拦截器、鉴权切面与 default 规格等基础 Bean；错误解码器**默认不注册**，需显式开启 `maple.framework.feign.error-decoder.enabled=true`。
 3. `GXFeignRequestInterceptor`：负责在 Feign 请求发起前透传认证 token、平台标识、traceId、注解声明的请求头，以及补充通用请求头。
 4. `GXFeignCustomErrorDecoder`：对常见 HTTP 错误码进行统一解码，转换为框架层可消费的业务异常。
 5. `GXFeignAuthTokenAspect`：在标注 `@GXHttpInvokerAuthToken` 的方法或类型上执行 Feign 调用 token 校验，保证内部调用鉴权规则一致。
@@ -61,6 +61,10 @@
 14. 在线程池与虚拟线程都能满足场景需求时，优先使用虚拟线程；只有在需要固定资源隔离、调度策略或与既有执行器契约兼容时，才保留传统线程池。
 15. 在确保原有功能正确性的条件下进行完善；修改已经存在的逻辑时，不得改变现有逻辑的正确性、兼容性和线上可预期行为。
 16. 严格遵循测试驱动最佳实践；修复缺陷或新增能力时，优先补充能暴露问题或描述目标行为的测试，再实现代码并通过回归验证。
+17. 认证 token 的生成与注入受 `maple.framework.feign.auth-token.enabled` 控制：默认 `true` 保持 fail-fast（缺配置即中断调用），置 `false` 时只允许"跳过 + warn"降级，不得吞掉其它异常，也不得影响 traceId/platform 传播。
+18. 出站请求禁止写入响应类安全头（`X-Content-Type-Options`、`X-Frame-Options`、`X-XSS-Protection`、`Cache-Control`、`Pragma`、`Expires`），禁止无条件覆盖调用方已设置的 `User-Agent`；新增公共头必须在 `docs/leaf-base-feign开发手册.md` 的头表中登记。
+19. `maple.framework.feign.circuit-breaker.max-retries` 默认 `0`（不重试）；显式开启重试时必须排除 `code < 500` 的 `GXBusinessException`，避免非幂等请求重复执行。
+20. `default.mapleFeignFallback` 规格是本模块给每个 Feign 客户端提供 `Encoder` 与 `FeignHttpMessageConverters` 的唯一来源，改动前必须验证"关闭该规格后客户端仍能创建"，不得删除这两个 Bean 而不提供替代。
 
 ## 4. 测试要求
 

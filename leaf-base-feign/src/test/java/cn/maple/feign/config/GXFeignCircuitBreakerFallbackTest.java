@@ -1,5 +1,6 @@
 package cn.maple.feign.config;
 
+import cn.maple.feign.support.GXFeignTestHttpServer;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -51,6 +52,31 @@ class GXFeignCircuitBreakerFallbackTest {
                     assertThat(support.getLastCause()).isNotNull();
                     assertThat(support.getLastCause().getMessage()).isNotBlank();
                 });
+    }
+
+    @Test
+    void fallbackSwallowsBusinessErrorAndSendsSingleRequest() {
+        try (GXFeignTestHttpServer server = GXFeignTestHttpServer.start()) {
+            server.stub("/bad-request", 400, "{\"code\":400,\"msg\":\"invalid parameter\"}");
+            new ApplicationContextRunner()
+                    .withConfiguration(AutoConfigurations.of(
+                            FeignAutoConfiguration.class,
+                            GXFeignConfig.class,
+                            GXCircuitBreakerConfig.class,
+                            FrameworkRetryAutoConfiguration.class))
+                    .withPropertyValues(
+                            "spring.cloud.openfeign.circuitbreaker.enabled=true",
+                            "spring.cloud.openfeign.circuitbreaker.group.enabled=false",
+                            "maple.framework.feign.error-decoder.enabled=true",
+                            "gx.feign.test.url=" + server.baseUrl())
+                    .withUserConfiguration(BusinessErrorClientConfig.class)
+                    .run(context -> {
+                        BusinessErrorClient client = context.getBean(BusinessErrorClient.class);
+
+                        assertThat(client.badRequest()).isEqualTo("business-fallback");
+                    });
+            assertThat(server.hits("/bad-request")).isEqualTo(1);
+        }
     }
 
     @Configuration
@@ -115,6 +141,29 @@ class GXFeignCircuitBreakerFallbackTest {
         @Override
         public String ping(String name) {
             return "factory-fallback:" + name + ":" + cause.getClass().getSimpleName();
+        }
+    }
+
+    @Configuration
+    @EnableFeignClients(clients = BusinessErrorClient.class)
+    static class BusinessErrorClientConfig {
+        @Bean
+        BusinessErrorFallback businessErrorFallback() {
+            return new BusinessErrorFallback();
+        }
+    }
+
+    @FeignClient(name = "fallback-business", url = "${gx.feign.test.url}",
+            fallback = BusinessErrorFallback.class)
+    interface BusinessErrorClient {
+        @GetMapping("/bad-request")
+        String badRequest();
+    }
+
+    static class BusinessErrorFallback implements BusinessErrorClient {
+        @Override
+        public String badRequest() {
+            return "business-fallback";
         }
     }
 }

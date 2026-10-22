@@ -1,12 +1,21 @@
 package cn.maple.feign.config;
 
+import cn.maple.feign.codec.GXFeignCustomErrorDecoder;
 import cn.maple.feign.properties.GXCircuitBreakerProperties;
+import cn.maple.feign.support.GXFeignTestClients;
+import cn.maple.feign.support.GXFeignTestHttpServer;
+import feign.Contract;
+import feign.Feign;
+import feign.codec.Decoder;
+import feign.codec.Encoder;
+import feign.codec.ErrorDecoder;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.cloud.circuitbreaker.retry.FrameworkRetryAutoConfiguration;
 import org.springframework.cloud.circuitbreaker.retry.FrameworkRetryCircuitBreaker;
 import org.springframework.cloud.circuitbreaker.retry.FrameworkRetryCircuitBreakerFactory;
+import org.springframework.cloud.client.circuitbreaker.CircuitBreaker;
 import org.springframework.cloud.client.circuitbreaker.CircuitBreakerFactory;
 import org.springframework.cloud.client.circuitbreaker.Customizer;
 import org.springframework.context.annotation.Bean;
@@ -91,6 +100,82 @@ class GXCircuitBreakerConfigTest {
                     assertThat(circuitBreaker.getCircuitBreakerPolicy().getOpenTimeout()).isEqualTo(Duration.ofSeconds(3));
                     assertThat(circuitBreaker.getCircuitBreakerPolicy().getResetTimeout()).isEqualTo(Duration.ofSeconds(2));
                 });
+    }
+
+    @Test
+    void defaultPolicySendsRequestOnlyOnce() {
+        try (GXFeignTestHttpServer server = GXFeignTestHttpServer.start()) {
+            server.stub("/server-error", 500, "boom");
+            contextRunner.run(context -> {
+                assertThat(context.getBean(GXCircuitBreakerProperties.class).getMaxRetries()).isZero();
+                CircuitBreaker circuitBreaker = context.getBean(CircuitBreakerFactory.class).create("gx-feign-retry");
+                GXFeignTestClients.RoundTripClient client = client(server);
+
+                String result = circuitBreaker.run(client::serverError, throwable -> "fallback");
+
+                assertThat(result).isEqualTo("fallback");
+            });
+            assertThat(server.hits("/server-error")).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void serverSideFailureIsRetriedWhenMaxRetriesConfigured() {
+        try (GXFeignTestHttpServer server = GXFeignTestHttpServer.start()) {
+            server.stub("/server-error", 500, "boom");
+            contextRunner.withPropertyValues(
+                            "maple.framework.feign.circuit-breaker.max-retries=2",
+                            "maple.framework.feign.circuit-breaker.backoff=1ms")
+                    .run(context -> {
+                        CircuitBreaker circuitBreaker = context.getBean(CircuitBreakerFactory.class)
+                                .create("gx-feign-retry");
+                        GXFeignTestClients.RoundTripClient client = client(server);
+
+                        circuitBreaker.run(client::serverError, throwable -> "fallback");
+                    });
+            assertThat(server.hits("/server-error")).isEqualTo(3);
+        }
+    }
+
+    @Test
+    void clientSideBusinessFailureIsNotRetried() {
+        try (GXFeignTestHttpServer server = GXFeignTestHttpServer.start()) {
+            server.stub("/bad-request", 400, "{\"code\":400,\"msg\":\"invalid parameter\"}");
+            contextRunner.withPropertyValues(
+                            "maple.framework.feign.circuit-breaker.max-retries=2",
+                            "maple.framework.feign.circuit-breaker.backoff=1ms")
+                    .run(context -> {
+                        CircuitBreaker circuitBreaker = context.getBean(CircuitBreakerFactory.class)
+                                .create("gx-feign-retry");
+                        GXFeignTestClients.RoundTripClient client = client(server);
+
+                        circuitBreaker.run(client::badRequest, throwable -> "fallback");
+                    });
+            assertThat(server.hits("/bad-request")).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void legacyMapleFeignPrefixIsNotBound() {
+        contextRunner.withPropertyValues("maple.feign.circuit-breaker.max-retries=5")
+                .run(context -> assertThat(context.getBean(GXCircuitBreakerProperties.class).getMaxRetries())
+                        .isZero());
+    }
+
+    @Test
+    void negativeMaxRetriesFailsContextStartup() {
+        contextRunner.withPropertyValues("maple.framework.feign.circuit-breaker.max-retries=-1")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    private GXFeignTestClients.RoundTripClient client(GXFeignTestHttpServer server) {
+        ErrorDecoder errorDecoder = new GXFeignCustomErrorDecoder();
+        return Feign.builder()
+                .contract(new Contract.Default())
+                .encoder(new Encoder.Default())
+                .decoder(new Decoder.Default())
+                .errorDecoder(errorDecoder)
+                .target(GXFeignTestClients.RoundTripClient.class, server.baseUrl());
     }
 
     private FrameworkRetryCircuitBreaker createCircuitBreaker(CircuitBreakerFactory<?, ?> factory) {

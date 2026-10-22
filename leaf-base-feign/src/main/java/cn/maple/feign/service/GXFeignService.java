@@ -9,6 +9,7 @@ import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import jakarta.servlet.http.HttpServletRequest;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Map;
 import java.util.Optional;
@@ -106,9 +107,10 @@ public interface GXFeignService {
     /**
      * Returns the current request platform header.
      *
-     * @return platform value, or {@code null} when there is no HTTP request context
+     * @return platform value, or {@code null} when there is no HTTP request context or
+     * the header is absent
      */
-    default String getPlatform() {
+    default @Nullable String getPlatform() {
         return GXCurrentRequestContextUtils.getHeader(GXTokenConstant.PLATFORM);
     }
 
