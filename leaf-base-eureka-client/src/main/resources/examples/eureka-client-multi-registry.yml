@@ -1,0 +1,11 @@
+# Eureka client example - multiple registries.
+#
+# EUREKA_REGISTRY_URLS is a comma separated list of peer endpoints. Keep every
+# reachable registry in the list so a single unavailable peer does not stop the
+# client from registering (see the module manual, section "Troubleshooting").
+eureka:
+  client:
+    register-with-eureka: true
+    fetch-registry: true
+    service-url:
+      defaultZone: ${EUREKA_REGISTRY_URLS:http://localhost:7001/eureka/,http://localhost:7002/eureka/,http://localhost:7003/eureka/}

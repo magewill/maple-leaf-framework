@@ -1,0 +1,10 @@
+{
+  "properties": [
+    {
+      "name": "maple.framework.enable.eureka-client",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Enable the Eureka client contributions of leaf-base-eureka-client. Set to false to keep the dependency on the classpath without registering the application; the framework then writes eureka.client.enabled=false at the lowest precedence unless the application configures it explicitly."
+    }
+  ]
+}

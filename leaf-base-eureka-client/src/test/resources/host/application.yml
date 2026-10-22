@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: host-config-app
+
+eureka:
+  client:
+    register-with-eureka: false
+    fetch-registry: false
+    service-url:
+      defaultZone: http://host-file:9000/eureka/

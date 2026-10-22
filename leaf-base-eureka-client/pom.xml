@@ -31,14 +31,18 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
             <exclusions>
+                <!-- 解决 seata 与 eureka 引入 antlr 的冲突：排除后在下方按根 POM 统一版本重新引入 -->
                 <exclusion>
                     <groupId>org.antlr</groupId>
                     <artifactId>antlr-runtime</artifactId>
                 </exclusion>
+                <!-- 解决 caffeine 与 eureka 引入注解包的冲突：排除后按根 POM 的 error-prone 版本重新引入 -->
                 <exclusion>
                     <groupId>com.google.errorprone</groupId>
                     <artifactId>error_prone_annotations</artifactId>
                 </exclusion>
+                <!-- eureka-client 2.0.6 声明 httpclient 4.5.3：排除后按根 POM 的 4.5.14 重新引入，
+                     与 spring-cloud-netflix-eureka-client 使用的 httpclient5 分工共存 -->
                 <exclusion>
                     <groupId>org.apache.httpcomponents</groupId>
                     <artifactId>httpclient</artifactId>
@@ -49,6 +53,8 @@
             <groupId>org.antlr</groupId>
             <artifactId>antlr-runtime</artifactId>
         </dependency>
+        <!-- 与上方 exclusion 成对：实测删除后仍由 guava 传递提供 2.50.0，但依赖来源会从"显式锚定"退化为
+             "偶然传递"，故保留显式声明，版本由根 POM 的 error-prone.version 统一 -->
         <dependency>
             <groupId>com.google.errorprone</groupId>
             <artifactId>error_prone_annotations</artifactId>
