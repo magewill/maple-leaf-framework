@@ -1,4 +1,4 @@
-# 审查报告：leaf-base-rocketmq
+﻿# 审查报告：leaf-base-rocketmq
 
 **分支**：`006-rocketmq-module-audit` ｜ **日期**：2026-10-22 ｜ **规格**：[spec.md](./spec.md) ｜ **计划**：[plan.md](./plan.md)
 
@@ -65,7 +65,76 @@ mvn -pl leaf-base-rocketmq test -Dtest=GXRocketMQRealBrokerIT
 - 无环境变量时：`Tests run: 3, Skipped: 3`，构建成功（满足 FR-019）
 - 服务级错误凭据（第 4 个用例，经 `GXSendRocketMQService#syncSend`）：抛 `GXBusinessException("Failed to send sync message: Send [3] times, still failed...")`，cause 为 Spring `MessagingException`（其内部再包裹客户端异常）；**Broker 侧 `AclException: Check signature failed` 只在客户端日志中可见，不在异常消息链里**——该差异记录于 §8 遗留项 6。
 
-### 3.3 结构开销复核表（按代码路径复算，非压测）
+### 3.3 CDC 端到端实测（MySQL → Debezium → RocketMQ → Dispatcher）
+
+**环境**：MySQL `8.4.11`（`192.168.56.105:3306`，库 `test`，表 `t_listener_user`，1 行）；Debezium Server `3.7.0.Final`（Quarkus，sink=`rocketmq`）；RocketMQ 5.x（`aclEnable=true`，`127.0.0.1:9876`）；本模块以真实消费到的消息驱动 `GXCdcMessageDispatcher`。
+
+**上游先决问题（均位于 Debezium 侧，不在本模块）**：
+
+1. 直接运行 `run.bat` 未设置 `ENABLE_DEBEZIUM_SCRIPTING=true`，`lib_opt` 未进入类路径 → `io.debezium.transforms.ContentBasedRouter` `ClassNotFoundException` → 引擎线程中断；表现为"Quarkus 启动成功、控制台 Listening on 8080，但没有任何 CDC 数据"。
+2. `debezium.source.table.include.list=test.user` 指向不存在的表（库内实际为 `t_listener_user` 等 5 张表）→ 日志 `After applying the include/exclude list filters, no changes will be captured`，快照 0 行。
+3. `D:\tools\debezium1`（2.5.0）无法对接 MySQL 8.4：`SHOW MASTER STATUS` 在 8.4 已被移除，快照阶段报 SQL 语法错误；必须使用 3.7。
+4. 不能用"去掉 route 转换器"的方式绕过第 1 点：Debezium 默认 topic 为 `<prefix>.<db>.<table>`，含点号，Broker 直接拒绝（`The specified topic[...] contains illegal characters, allowing only ^[%|a-zA-Z0-9_-]+$`）。
+
+**修复后实测结果**：
+
+- 快照产生 1 条真实事件并投递到 topic `debezium-test-t-listener-user-dev`（topic 已自动创建）。
+- 真实消息体（截断，省略 `ts_us`/`ts_ns`）：
+
+  ```json
+  {"before":null,"after":{"id":105,"username":"carol","score":30,"status":"archived","created_at":null,"updated_at":null,"created_by":null,"updated_by":null,"is_deleted":0,"deleted_at":null,"ext":null},"source":{"version":"3.7.0.Final","connector":"mysql","name":"debezium","ts_ms":1792633713000,"snapshot":"last","db":"test","table":"t_listener_user","file":"mysql-bin.000002","pos":434,"row":0},"transaction":null,"op":"r","ts_ms":1792662514782}
+  ```
+
+- 经 `GXRocketMQRealCdcIT` 消费并分发：`consumed=1`、`dispatched=1`、`opHistogram={READ=1}`、`parseFailure=0`、`unknownOp=0`；`event.getAfter().getStr("username")` 取到真实列值 `carol`，`source.db/table` 与真实库表一致。
+- 同一消费链路追加负向输入：`dispatch("not-json")` → `parseFailure=1`；`dispatch("{\"op\":\"x\"}")` → `unknownOp=1`；两次均**不抛异常**、监听器未被误调（符合 FR-018 分层处置契约）。
+
+**未覆盖（初轮）**：`CREATE` / `UPDATE` / `DELETE` 三条分支未能在真实链路上触发——源库账号 `debezium` 只有只读权限（实测 `INSERT command denied to user 'debezium'`），无法制造数据变更。三条分支目前由 32 个单测覆盖；如需实测，需提供具备 DML 权限的账号。
+
+**复测（2026-10-22 18:10–18:25，上游修正后）**：Debezium 实例以 `test.user` 表为源重新启动，连接器线程存活（`debezium-mysqlconnector-debezium-change-event-source-coordinator`），写入 topic `debezium-test-user-dev`。依次执行"插入 → 更新 → 删除"后，经 `GXRocketMQRealCdcIT` 消费：`consumed=3`、`dispatched=3`、`opHistogram={CREATE=1, UPDATE=1, DELETE=1}`、`parseFailure=0`、`unknownOp=0`。三类真实增量事件样本（截断）：
+
+```json
+CREATE: {"before":null,"after":{"id":1,"username":"ikero"},"source":{"db":"test","table":"user","snapshot":"false"},"op":"c"}
+UPDATE: {"before":{"id":1,"username":"ikero"},"after":{"id":1,"username":"ikero1"},"op":"u"}
+DELETE: {"before":{"id":1,"username":"ikero1"},"after":null,"source":{"db":"test","table":"user"},"op":"d"}
+```
+
+即 `READ`（快照）、`CREATE`、`UPDATE`、`DELETE` 四类事件均已在真实链路上验证：`before`/`after` 形态、`source.db`/`table`、`op → GXCdcOperation` 映射、`ts_ms` 提取全部正确。`tombstones.on.delete=false` 下确认**没有**产生 `null` 消息体（不会触发空白消息分支）。
+
+**失败路径实测（`GXRocketMQRealCdcFailureIT`，消息真实经过 Broker）**：每次运行使用独立 tag 发布并只消费该 tag，避免历史消息干扰。
+
+| 场景 | 真实消息 | 观测结果 | 结论 |
+| --- | --- | --- | --- |
+| 毒消息（JSON 截断） | `{"op":"c","after":{"id":1}` | `dispatch` 不抛异常，`parseFailureCount=1`，`warn` 日志 | 符合 FR-018：记录 + 计数后正常返回 |
+| 未知 op | `{"op":"x","after":{"id":2}}` | 不抛异常，`unknownOperationCount=1` | 同上 |
+| 毒消息之后的合法消息 | `{"op":"c"...}` + `{"op":"u"...}` | `successCount=2`，监听器收到 `CREATE:bot`、`UPDATE:bot2` | **毒消息不会阻塞后续消息** |
+| 监听器抛异常 | 真实 `CREATE` 事件 | 抛 `GXCdcDispatchException` 且 `getSuppressed().length=1`；排在后面的监听器仍收到事件；`listenerFailureCount=1` | 隔离生效，异常保持对外可见 |
+| 异常后的 Broker 行为 | 同上，消费方返回 `RECONSUME_LATER` | 同一消息被 **重投 ≥2 次**（日志可见两次 `ConsumeMessageThread` 失败），`maxReconsumeTimes=2` 后进重试/DLQ | 印证"至少一次 + 重复执行"，业务必须幂等（F-08 影响定性成立） |
+
+本次运行写入 `leaf-base-rocketmq/target/cdc-failure-evidence.txt` 的实测计数：
+
+```text
+[broker-redelivery]      attempts=2 listenerFailure=2
+[listener-exception]     suppressed=1 listenerFailure=1 success=0 otherListenerEvents=[CREATE:bot]
+[poison-and-unknown-op]  consumed=4 parseFailure=1 unknownOp=1 success=2 listenerEvents=[CREATE:bot, UPDATE:bot2]
+```
+
+**复现命令**：
+
+```powershell
+# 1) 启动 Debezium（必须启用 scripting，否则 ContentBasedRouter 缺失）
+$env:ENABLE_DEBEZIUM_SCRIPTING="true"
+D:\tools\debezium-server\run.bat   # 或按 lib_opt 显式加入类路径
+
+# 2) 消费真实事件并驱动 Dispatcher
+$env:ROCKETMQ_NAME_SERVER="127.0.0.1:9876"
+$env:ROCKETMQ_ACCESS_KEY="<env>"; $env:ROCKETMQ_SECRET_KEY="<env>"
+mvn -pl leaf-base-rocketmq test -Dtest=GXRocketMQRealCdcIT
+
+# 3) 失败路径（毒消息 / 未知 op / 监听器异常 + Broker 重投）
+mvn -pl leaf-base-rocketmq test -Dtest=GXRocketMQRealCdcFailureIT
+```
+
+### 3.4 结构开销复核表（按代码路径复算，非压测）
 
 | 指标 | 口径 | 结果 | 代码位置 |
 | --- | --- | --- | --- |
@@ -160,9 +229,9 @@ CDC 分发语义：
 | F-10 | `dispatcher/impl/GXCdcMessageDispatcherImpl.java:50-59` | 运行期新增监听器 Bean | `-Dtest=GXCdcMessageDispatcherImplTest`（多监听器 + `@Order`） | 新增 Bean 后立即可被解析到 |
 | F-11 | `service/impl/GXSendRocketMQServiceImpl.java:132-145,204-210` | 带 TraceId 的请求发生异步失败 | `-Dtest=GXSendRocketMQServiceImplAsyncMdcTest` | 回调线程可见原 TraceId；结束后恢复回调线程原上下文 |
 | F-12 | `service/impl/GXSendRocketMQServiceImpl.java:63,87,110,167,200` | 高吞吐发送（每消息 1 条 info） | `#successPathDoesNotLogAtInfoLevel` | 成功路径 `info` 计数为 0，失败保持 `error` |
-| F-13 | `service/GXSendRocketMQService.java:7-42` | 需要批量发送场景 | 见 §3.3 结构开销表 + `quickstart.md` §6 | 未实现（需改契约），登记为遗留项 |
+| F-13 | `service/GXSendRocketMQService.java:7-42` | 需要批量发送场景 | 见 §3.4 结构开销表 + `quickstart.md` §6 | 未实现（需改契约），登记为遗留项 |
 | F-14 | `service/impl/GXSendRocketMQServiceImpl.java:228-234` | topic 含 `:` 导致 `topic:tag` 歧义 | `#sendNormalMessageRejectsTopicWithColon` | 前置拒绝，destination 拼装无歧义 |
-| F-15 | `dto/inner/GXCdcEvent.java:42-54,80-91` | 宽表事件 × 多监听器 | `GXCdcEventTest#detectsSingleChangedField` + §3.3 | 每事件 diff 1 次、`Dict` 4 个、额外容器 2 个 |
+| F-15 | `dto/inner/GXCdcEvent.java:42-54,80-91` | 宽表事件 × 多监听器 | `GXCdcEventTest#detectsSingleChangedField` + §3.4 | 每事件 diff 1 次、`Dict` 4 个、额外容器 2 个 |
 | F-16 | `service/impl/GXSendRocketMQServiceImpl.java:125-155` | 异步提交速率超过处理能力 | 无自动化（依赖生产者内部信号量） | 遗留项：需业务评估限流策略 |
 | F-17 | `properties/local/GXLocalRocketMQConfigProperties.java:26-39`、`properties/nacos/GXNacosRocketMQConfigProperties.java:23-43`、`META-INF/additional-spring-configuration-metadata.json` | 下游需要 IDE 配置提示 | 启动日志 + metadata 文件 | 已补 metadata 与来源日志 |
 | F-18 | `properties/local/GXLocalRocketMQConfigProperties.java:27-38` | 下游未启用包扫描（未用 `@GXEnableLeafFramework`） | 观察启动日志 | 日志输出 `Component scanning hint: ...` |
@@ -227,7 +296,9 @@ CDC 分发语义：
 | --- | --- | --- |
 | 单测全量 | `mvn -pl leaf-base-rocketmq clean test` | **58 执行 / 0 失败** |
 | 真实 Broker | `mvn -pl leaf-base-rocketmq test -Dtest=GXRocketMQRealBrokerIT`（含 env） | **4 执行 / 0 失败** |
-| 缺环境跳过 | 同上（无 env） | **4 跳过 / 构建成功** |
+| 真实 CDC 链路 | `mvn -pl leaf-base-rocketmq test -Dtest=GXRocketMQRealCdcIT`（含 env + 运行中的 Debezium） | **1 执行 / 0 失败**（`debezium-test-user-dev`：consumed=3，CREATE+UPDATE+DELETE 分发成功） |
+| CDC 失败路径 | `mvn -pl leaf-base-rocketmq test -Dtest=GXRocketMQRealCdcFailureIT`（含 env） | **3 执行 / 0 失败**（毒消息 / 未知 op / 监听器异常 + Broker 重投） |
+| 缺环境跳过 | 上述两条（无 env） | **4 / 1 跳过，构建成功** |
 | 静态检查 | 上述命令内含 ErrorProne + NullAway | 零告警 |
 
 ## 8. 遗留项
@@ -238,3 +309,5 @@ CDC 分发语义：
 4. **`GXCdcEvent` 集合仍为 `Dict` 返回**：已去除 setter 并做构造期防御拷贝，但 `getBefore().put(...)` 仍可改自身视图，未改为不可变返回类型以保持 API 兼容。
 5. **`cdc.active.status` 旧键**：保留兼容并加一次性迁移提示，未来大版本可移除。
 6. **ACL 失败原因未进入异常消息**：`GXBusinessException` 的消息来自 `MessagingException`（"Send [3] times, still failed"），Broker 的 `AclException` 细节只在客户端日志。若要求异常消息直接可定位鉴权问题，需要在服务层追溯 root cause 并拼接——会改变现有错误文本，建议作为独立变更评估。
+7. **上游 Debezium 启动参数依赖人工设置**：`ENABLE_DEBEZIUM_SCRIPTING=true` 缺失会导致"服务启动成功但无数据"，属于极易误判的静默失效；建议在其启动脚本或部署文档中固化该环境变量（不在本仓库范围）。
+8. **CDC 实测用例对 topic 状态敏感**：topic 被重建/清空时首个 20s 窗口可能读到 0 条（已加一次重试）；若在 CI 中长期运行，建议改为"先确认 topic 有消息再断言"或由测试自行投递样本。
