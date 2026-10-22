@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "extensions": {
+    "review": {
+      "version": "1.0.1",
+      "source": "local",
+      "manifest_hash": "sha256:e15d53ffb96c0564f48fd75a5dfc50361b3bbc5c87b476ece82e22f6433f449f",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "codebuddy": [
+          "speckit.review.run",
+          "speckit.review.code",
+          "speckit.review.comments",
+          "speckit.review.tests",
+          "speckit.review.errors",
+          "speckit.review.types",
+          "speckit.review.simplify"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-10-22T05:40:07.628514+00:00"
+    }
+  }
+}
