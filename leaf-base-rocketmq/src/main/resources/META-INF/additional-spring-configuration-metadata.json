@@ -1,0 +1,24 @@
+{
+  "groups": [
+    {
+      "name": "maple.framework.cdc",
+      "type": "cn.maple.rocketmq.dispatcher.impl.GXCdcMessageDispatcherImpl",
+      "sourceType": "cn.maple.rocketmq.dispatcher.impl.GXCdcMessageDispatcherImpl",
+      "description": "CDC 分发相关开关，用于控制消息解析与本地监听器分发。"
+    }
+  ],
+  "properties": [
+    {
+      "name": "maple.framework.cdc.active-status",
+      "type": "java.lang.String",
+      "defaultValue": "disabled",
+      "description": "CDC 运行期开关。enabled 表示正常分发，disabled 表示丢弃并记录 warn 日志；未配置时回退到旧键 cdc.active.status。"
+    },
+    {
+      "name": "maple.framework.cdc.dead-letter-topic",
+      "type": "java.lang.String",
+      "defaultValue": "",
+      "description": "CDC 无效消息（解析失败、未知 op）的可选死信 topic。为空表示不转发。"
+    }
+  ]
+}

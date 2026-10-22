@@ -2,54 +2,77 @@ package cn.maple.rocketmq.properties;
 
 import cn.maple.rocketmq.properties.local.GXLocalRocketMQConfigProperties;
 import cn.maple.rocketmq.properties.nacos.GXNacosRocketMQConfigProperties;
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.SpringBootConfiguration;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.ApplicationContext;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Import;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class GXRocketMQConfigPropertiesTest {
-    @Nested
-    @SpringBootTest(
-            classes = TestApplication.class,
-            webEnvironment = SpringBootTest.WebEnvironment.NONE,
-            properties = {
+    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+            .withUserConfiguration(TestApplication.class)
+            .withPropertyValues(
                     "spring.cloud.nacos.config.import-check.enabled=false",
-                    "spring.profiles.active=default",
-                    "rocketmq.config-source=local"
-            }
-    )
-    class LocalConfigSourceTest {
-        @Test
-        void loadsLocalConfigSource(ApplicationContext applicationContext) {
-            assertThat(applicationContext.getBeansOfType(GXLocalRocketMQConfigProperties.class)).hasSize(1);
-            assertThat(applicationContext.getBeansOfType(GXNacosRocketMQConfigProperties.class)).isEmpty();
-            assertThat(applicationContext.getEnvironment().getProperty("rocketmq.test-marker")).isEqualTo("local-source");
-        }
+                    "spring.profiles.active=default");
+
+    @Test
+    void loadsLocalConfigSourceWhenExplicitlySelected() {
+        contextRunner
+                .withPropertyValues("rocketmq.config-source=local")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(GXLocalRocketMQConfigProperties.class);
+                    assertThat(context).doesNotHaveBean(GXNacosRocketMQConfigProperties.class);
+                    assertThat(context.getEnvironment().getProperty("rocketmq.test-marker")).isEqualTo("local-source");
+                });
     }
 
-    @Nested
-    @SpringBootTest(
-            classes = TestApplication.class,
-            webEnvironment = SpringBootTest.WebEnvironment.NONE,
-            properties = {
-                    "spring.cloud.nacos.config.import-check.enabled=false",
-                    "rocketmq.config-source=nacos"
-            }
-    )
-    class NacosConfigSourceTest {
-        @Test
-        void loadsNacosConfigSource(ApplicationContext applicationContext) {
-            assertThat(applicationContext.getBeansOfType(GXNacosRocketMQConfigProperties.class)).hasSize(1);
-            assertThat(applicationContext.getBeansOfType(GXLocalRocketMQConfigProperties.class)).isEmpty();
-        }
+    @Test
+    void loadsNacosConfigSourceWhenExplicitlySelected() {
+        contextRunner
+                .withPropertyValues("rocketmq.config-source=nacos", "rocketmq.name-server=127.0.0.1:9876")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(GXNacosRocketMQConfigProperties.class);
+                    assertThat(context).doesNotHaveBean(GXLocalRocketMQConfigProperties.class);
+                });
+    }
+
+    @Test
+    void failsFastWhenExplicitNacosSourceHasBlankNameServer() {
+        contextRunner
+                .withPropertyValues("rocketmq.config-source=nacos")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasStackTraceContaining("rocketmq.name-server is blank");
+                });
+    }
+
+    @Test
+    void autoDetectsNacosWhenSwitchIsAbsent() {
+        contextRunner.run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context).hasSingleBean(GXNacosRocketMQConfigProperties.class);
+            assertThat(context).doesNotHaveBean(GXLocalRocketMQConfigProperties.class);
+        });
+    }
+
+    @Test
+    void rejectsUnsupportedConfigSource() {
+        contextRunner
+                .withPropertyValues("rocketmq.config-source=bogus")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasStackTraceContaining("Unsupported rocketmq.config-source=bogus");
+                });
     }
 
     @SpringBootConfiguration
-    @Import({GXLocalRocketMQConfigProperties.class, GXNacosRocketMQConfigProperties.class})
+    @Import({GXLocalRocketMQConfigProperties.class, GXNacosRocketMQConfigProperties.class,
+            GXRocketMQConfigSourceValidator.class})
     static class TestApplication {
     }
 }

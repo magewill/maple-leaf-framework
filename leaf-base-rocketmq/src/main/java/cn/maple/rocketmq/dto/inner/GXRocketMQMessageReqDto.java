@@ -1,7 +1,9 @@
 package cn.maple.rocketmq.dto.inner;
 
+import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.dto.req.GXBaseReqDto;
+import cn.maple.core.framework.exception.GXBusinessException;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
@@ -56,21 +58,26 @@ public class GXRocketMQMessageReqDto extends GXBaseReqDto {
     /**
      * Creates a request with a JSON serialized body.
      *
-     * @param body message body object
+     * <p>Note: a {@link String} argument also matches this constructor, so
+     * {@code new GXRocketMQMessageReqDto("paid")} serializes the text into
+     * {@code "\"paid\""}. Use the setter or the full constructor when the body is
+     * already a JSON string.</p>
+     *
+     * @param body message body object, must not be null
      */
     public GXRocketMQMessageReqDto(Object body) {
-        this.body = JSONUtil.toJsonStr(body);
+        this.body = serializeBody(body);
     }
 
     /**
      * Creates a request with a tag and a JSON serialized body.
      *
-     * @param tag message tag
-     * @param body message body object
+     * @param tag  message tag
+     * @param body message body object, must not be null
      */
     public GXRocketMQMessageReqDto(String tag, Object body) {
         this.tag = tag;
-        this.body = JSONUtil.toJsonStr(body);
+        this.body = serializeBody(body);
     }
 
     /**
@@ -87,6 +94,17 @@ public class GXRocketMQMessageReqDto extends GXBaseReqDto {
         this.tag = tag;
         this.deliverTime = deliverTime;
         this.messageKey = messageKey;
-        this.body = JSONUtil.toJsonStr(body);
+        this.body = serializeBody(body);
+    }
+
+    private static String serializeBody(Object body) {
+        if (body == null) {
+            throw new GXBusinessException("Message body must not be null");
+        }
+        String json = JSONUtil.toJsonStr(body);
+        if (CharSequenceUtil.isBlank(json) || "null".equals(json.trim())) {
+            throw new GXBusinessException("Message body must not be serialized to null");
+        }
+        return json;
     }
 }

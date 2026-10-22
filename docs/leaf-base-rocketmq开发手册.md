@@ -30,11 +30,13 @@ Leaf-Base-RocketMQ 是 Maple-Leaf-Framework 框架中用于简化 Apache RocketM
 
 ## 2. 配置说明
 
-本模块支持通过本地配置文件 (`application.yml` 或 `application.properties`) 和 Nacos 配置中心两种方式进行配置。系统启动时，会优先尝试加载 Nacos 配置。如果 Nacos 配置不可用或未配置，则会回退到使用本地配置文件中的设置。
+本模块支持通过本地配置文件 (`config/<profile>/rocket-mq.yml`) 和 Nacos 配置中心两种方式进行配置。**实际使用哪个来源由 `rocketmq.config-source` 显式决定**（`local` 或 `nacos`）；当该键未配置时，按类路径自动判定：存在 Nacos 客户端注解类则使用 `nacos`，否则使用 `local`。无论哪种情况，启动日志都会输出一行 `RocketMQ config source: ...`，便于确认实际生效的来源。
 
 ### 2.1 本地配置 (`cn.maple.rocketmq.properties.local.GXLocalRocketMQConfigProperties`)
 
-在项目的 `src/main/resources` 目录下，可以创建环境相关的 RocketMQ 配置文件，例如 `dev/rocket-mq.yml`。这些配置项由 `cn.maple.rocketmq.properties.local.GXLocalRocketMQConfigProperties` 类加载。该类通过 `@PropertySource(value = "classpath:${spring.profiles.active:}/rocket-mq.yml", factory = GXYamlPropertySourceFactory.class, ignoreResourceNotFound = true)` 注解加载 YAML 文件，并使用 `@ConfigurationProperties(prefix = "rocketmq")` 来绑定配置项。`ignoreResourceNotFound = true` 表示如果特定环境的配置文件不存在，不会报错。当 Nacos 相关类 `com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties` 不存在于类路径时，此本地配置类会被激活。
+在项目的 `src/main/resources` 目录下，可以创建环境相关的 RocketMQ 配置文件，例如 `dev/rocket-mq.yml`。这些配置项由 `cn.maple.rocketmq.properties.local.GXLocalRocketMQConfigProperties` 类加载。该类通过 `@PropertySource(value = "classpath:/${spring.profiles.active:default}/rocket-mq.yml", factory = GXYamlPropertySourceFactory.class, ignoreResourceNotFound = true)` 注解加载 YAML 文件，`spring.profiles.active` 未设置时默认取 `default`，因此不会因为占位符无法解析而启动失败；`ignoreResourceNotFound = true` 表示特定环境的文件不存在时不报错。配置文件中的 `rocketmq.*` 项由 `rocketmq-spring-boot-starter` 的 `RocketMQProperties` 完成绑定，本模块的类只负责"来源选择 + 启动日志"。
+
+激活条件（三态）：`rocketmq.config-source=local` 时强制使用本地源；未配置且类路径不存在 `com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties` 时自动使用本地源；其余情况不装配本地源。
 
 ```yaml
 rocketmq: # 注意：根据 GXLocalRocketMQConfigProperties 和 GXNacosRocketMQConfigProperties 的 @ConfigurationProperties(prefix = "rocketmq")，前缀应为 rocketmq
@@ -113,18 +115,14 @@ rocketmq: # 注意：根据 GXLocalRocketMQConfigProperties 和 GXNacosRocketMQC
 
 ### 2.2 Nacos 配置 (`cn.maple.rocketmq.properties.nacos.GXNacosRocketMQConfigProperties`)
 
-如果您的项目集成了 Nacos 作为配置中心，本模块可以通过 `cn.maple.rocketmq.properties.nacos.GXNacosRocketMQConfigProperties` 类从 Nacos 加载 RocketMQ 配置。该类通过 `@ConditionalOnClass(name = {"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})` 判断 Nacos 环境是否存在。如果存在，则此配置类会被激活。
+如果您的项目集成了 Nacos 作为配置中心，通过 `rocketmq.config-source=nacos` 显式指定后，`cn.maple.rocketmq.properties.nacos.GXNacosRocketMQConfigProperties` 会被装配。该类**不再依赖** `@NacosConfigurationProperties` 注解读取配置（本模块依赖树中没有该注解的处理器，实测从未生效），只承担两件事：输出来源日志、做启动期校验。
 
 **启用条件**:
-- 项目中引入了 `spring-cloud-starter-alibaba-nacos-config` 依赖。
-- 正确配置了 Nacos 服务器地址 (`spring.cloud.nacos.config.server-addr`)。
-- 在 Nacos 中创建了对应的 Data ID，并且配置了 RocketMQ 相关参数。
+- `rocketmq.config-source=nacos`（显式），或未配置该键但类路径存在 Nacos 客户端注解类（自动判定）；
+- 下游通过 `spring.config.import=nacos:rocket-mq.yml` 加载配置，由 Spring Cloud Alibaba 的 `NacosConfigDataLocationResolver` 完成实际读取；
+- `rocketmq.name-server` 必须有值：显式指定 `nacos` 来源时缺失会直接启动失败（fail-fast），自动判定场景下只输出 warn，不阻断启动。
 
-**Data ID**: `GXNacosRocketMQConfigProperties` 类通过 `@NacosConfigurationProperties(prefix = "rocketmq", dataId = "${spring.application.name:rocket-mq}-rocket-mq.yml", groupId = "${spring.cloud.nacos.config.group:${nacos.config.group:DEFAULT_GROUP}}", autoRefreshed = true)` 注解来指定配置来源。
-    - `prefix`: "rocketmq"
-    - `dataId`: 默认为 `${spring.application.name:rocket-mq}-rocket-mq.yml`。如果应用定义了 `spring.application.name`，则 Data ID 为 `[应用名]-rocket-mq.yml`；否则为 `rocket-mq-rocket-mq.yml`。
-    - `groupId`: 默认为 `${spring.cloud.nacos.config.group:${nacos.config.group:DEFAULT_GROUP}}`。优先使用 `spring.cloud.nacos.config.group`，其次是 `nacos.config.group`，最后是 `DEFAULT_GROUP`。
-    - `autoRefreshed`: `true`，表示配置变更时会自动刷新。
+**Data ID**: `rocket-mq.yml`，`group` 取 `spring.cloud.nacos.config.group`（缺省 `DEFAULT_GROUP`）。
 
 **Nacos 配置内容示例 (YAML格式)**:
 
@@ -193,14 +191,16 @@ rocketmq:
 ```
 
 **核心逻辑**:
-- 当 Nacos 中 `rocketmq` 前缀下的配置发生变更时，这些属性会自动刷新到应用中。`DefaultMQProducer` 实例是否会根据新的配置重建取决于 `RocketMQTemplate` 的具体实现和相关配置的变更影响。
-- 如果 `rocketmq.enabled` 在 Nacos 中被设置为 `false`，即使本地配置为 `true`，RocketMQ 生产者也不会被初始化或在运行时被关闭（具体行为取决于 `RocketMQTemplate` 如何响应配置变更）。
+- 配置值由 Spring `Environment` 绑定，`rocketmq-spring-boot-starter` 负责把 `rocketmq.*` 映射到生产者/消费者属性；配置刷新是否重建 `DefaultMQProducer` 取决于引入的 starter 版本与 refresh scope 配置，本模块不做额外处理。
+- 两个配置源互斥装配：同一应用内最多只有一个 `GX*RocketMQConfigProperties` 生效。
 
-**优先级**:
-1. Nacos 配置 (`GXNacosRocketMQConfigProperties`)
-2. 本地 `application.yml` 或 `application.properties` 配置 (`GXLocalRocketMQConfigProperties`)
+**来源选择**:
+1. `rocketmq.config-source=local` → 仅本地源（`config/<profile>/rocket-mq.yml`）
+2. `rocketmq.config-source=nacos` → 仅 Nacos 校验器（实际配置由 `spring.config.import=nacos:...` 加载）
+3. 未配置 → 按类路径自动判定，日志标注 `auto-detected`
+4. 其他取值 → 启动失败，错误信息包含 `Unsupported rocketmq.config-source=...`
 
-如果 Nacos 服务不可达或未配置相关 Data ID，启动时会打印警告日志，并使用本地配置。如果本地配置也不完整（例如缺少 `name-server` 或 `producer-group`），则生产者初始化会失败。
+本地 `application.yml`/`application.properties` 中的 `rocketmq.*` 始终被 Spring `Environment` 直接读取，与上述来源并存。
 
 ## 3. 核心功能
 
@@ -224,7 +224,7 @@ rocketmq:
 | topic | String | 消息主题，**必填**。消息的第一级分类，RocketMQ的消息必须有主题。最长不超过255个字符，由字母、数字、中划线和下划线构成。命名建议：使用有意义的业务名称（如 `order_topic`），下划线分隔。避免特殊字符和中文。 |
 | tag | String | 消息标签，可选，默认为空字符串。消息的第二级分类，用于同一主题下的消息过滤。命名建议：简洁明了，表达消息具体类型或操作（如 `created`, `paid`）。 |
 | body | String | 消息内容，**必填**。通常是业务对象的JSON格式字符串。在构造方法中，如果传入的是一个Object，会自动转换为JSON字符串。安全建议：避免包含敏感信息（如密码、密钥），必要时进行脱敏处理，控制消息大小。 |
-| deliverTime | long | 延迟发送时间（秒），用于延迟消息。设置后，消息将在指定的时间后才被消费者接收。适用于订单超时、预约提醒等场景。注意：RocketMQ的延时等级是固定的 (例如 1s 5s 10s 30s 1m ... 2h)，`GXSendRocketMQServiceImpl` 中的 `sendDelayMessage` 方法会将此秒级延时转换为毫秒级的时间戳 (`System.currentTimeMillis() + messageReqDto.getDeliverTime() * 1000L`)，并设置到 `Message` 的 `setDeliverTimeMs` 属性中，由 `RocketMQTemplate` 的 `syncSend` 方法处理。如果需要非常精确的延时，可能需要在应用层面进一步处理或选择其他机制。 |
+| deliverTime | long | 延迟发送时间（秒），用于延迟消息。设置后，消息将在指定的时间后才被消费者接收。适用于订单超时、预约提醒等场景。`GXSendRocketMQServiceImpl` 的 `sendDelayMessage` 会把它换算成绝对毫秒时间戳（`Math.addExact(System.currentTimeMillis(), Math.multiplyExact(deliverTime, 1000L))`，溢出即抛异常），再调用 `rocketMQTemplate.syncSendDeliverTimeMills` 发送定时消息。该能力依赖 Broker 5.x 的定时消息，且受 `timerMaxDelaySec` 限制（默认 24 小时；需要更长延时时须在 Broker 侧调大，例如 `timerMaxDelaySec=604800` 表示 7 天），超过上限的消息会被 Broker 拒绝。 |
 | messageKey | String | 消息唯一标识，可选，但**强烈建议设置**。用于消息的查询和跟踪。建议使用业务唯一标识（如订单号、用户ID）。好处：方便控制台查询跟踪、问题排查、业务分析、实现消息幂等性。 |
 
 #### 3.1.2 构造方法
@@ -268,7 +268,7 @@ customMessage.setMessageKey("ORD123456_REFUND");
 #### 3.2.1 普通消息发送 (`sendNormalMessage`)
 
 - **方法签名**: `void sendNormalMessage(GXRocketMQMessageReqDto messageReqDto)`
-- **描述**: 发送普通消息。内部调用 `rocketMQTemplate.send(destination, message)`，这是一个同步发送操作。如果发送成功，记录成功日志；如果发送失败，记录错误日志并抛出 `GXBusinessException`。
+- **描述**: 发送普通消息。内部调用 `rocketMQTemplate.syncSend(destination, message)`，这是一个同步发送操作。发送成功时仅记录 `debug` 日志（避免高吞吐场景下日志成为瓶颈）；Broker 返回非 `SEND_OK` 时记录 `error` 日志并抛出 `GXBusinessException`。
 - **参数**: `messageReqDto` - 包含消息主题、标签、内容、消息Key等信息的请求对象。`topic` 和 `body` 不能为空。
 - **返回**: `void`
 - **使用场景**: 对消息可靠性要求非常高，需要明确知道消息是否成功投递到 Broker 的场景。例如：重要的交易指令、订单状态变更等。
@@ -300,12 +300,13 @@ customMessage.setMessageKey("ORD123456_REFUND");
 - **使用场景**: 对响应时间敏感，且可以接受消息最终一致性的场景。例如：用户操作日志记录、用户行为数据采集、通知类消息（如图文推送结果通知）。可以显著提高系统的吞吐量。
 - **注意事项**: 
     - **回调处理**: `GXSendRocketMQServiceImpl` 内部实现了一个匿名 `SendCallback`：
-        - `onSuccess(SendResult sendResult)`: 记录包含主题、标签和消息ID的成功日志。
-        - `onException(Throwable throwable)`: 记录包含主题、标签、错误信息和异常堆栈的错误日志。
+        - `onSuccess(SendResult sendResult)`: 成功时记录 `debug` 日志；状态非 `SEND_OK` 或结果为 `null` 时记录 `error` 日志并触发失败扩展点。
+        - `onException(Throwable throwable)`: 记录包含主题、标签、错误信息和异常堆栈的 `error` 日志，并触发失败扩展点。
       业务方无法直接提供自定义的 `SendCallback` 实例给此方法。
-    - **返回值**: 返回 `true` 仅表示异步发送任务已提交给 `RocketMQTemplate`，不代表消息最终发送成功。实际的发送结果由内部 `SendCallback` 处理。
+    - **失败扩展点（可选）**: 实现 `cn.maple.rocketmq.handler.GXRocketMQAsyncSendFailureHandler` 并注册为 Bean，即可在最终失败时收到 `GXRocketMQAsyncSendFailureContext`（含 `topic`/`tag`/`messageKey`/`msgId`/`sendStatus`/`cause` 快照）。未注册实现时仅记日志；实现抛出的异常只记日志，不影响其他实现与生产者回调线程。多实现按 `@Order` 升序执行，同一消息可能因客户端重试产生多次回调，需自行按 `messageKey` 去重。
+    - **返回值**: 返回 `true` 仅表示异步发送任务已提交给 `RocketMQTemplate`，不代表消息最终发送成功。最终失败请通过上述扩展点补偿。
     - **异常处理**: 如果在准备异步发送（如参数校验、消息构建）阶段发生错误，会抛出 `GXBusinessException`。`SendCallback` 中的 `onException` 处理的是异步发送过程中的网络或Broker错误。
-    - **线程池**: 异步发送依赖于生产者内部的线程池。如果业务量过大，需要关注线程池的配置和状态。
+    - **线程池**: 异步发送依赖于生产者内部的线程池。回调中恢复了提交时的 MDC 上下文，便于用 TraceId 关联原请求；回调内应避免耗时操作。
     - **资源管理**: 回调方法中应避免执行耗时操作，以免阻塞回调线程池，影响其他异步消息的处理。
 
 #### 3.2.4 单向消息发送 (`sendOneway`)

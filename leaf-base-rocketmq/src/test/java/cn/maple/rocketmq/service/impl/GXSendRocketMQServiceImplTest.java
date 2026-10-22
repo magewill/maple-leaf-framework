@@ -4,6 +4,12 @@ import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.rocketmq.dto.inner.GXRocketMQMessageReqDto;
 import cn.maple.rocketmq.service.GXSendRocketMQService;
 import jakarta.annotation.Resource;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.Logger;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.Property;
 import org.apache.rocketmq.client.producer.SendCallback;
 import org.apache.rocketmq.client.producer.SendResult;
 import org.apache.rocketmq.client.producer.SendStatus;
@@ -17,6 +23,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.messaging.Message;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -25,14 +34,14 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest(
         classes = GXSendRocketMQServiceImplTest.TestApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = {
-                "spring.cloud.nacos.config.import-check.enabled=false",
-                "logging.level.cn.maple.rocketmq.service.impl.GXSendRocketMQServiceImpl=OFF"
+                "spring.cloud.nacos.config.import-check.enabled=false"
         }
 )
 class GXSendRocketMQServiceImplTest {
@@ -215,6 +224,114 @@ class GXSendRocketMQServiceImplTest {
                 .hasMessageContaining("Message topic must not be blank");
     }
 
+    @Test
+    void sendNormalMessageRejectsTopicWithColon() {
+        GXRocketMQMessageReqDto reqDto = messageReqDto("order:created", "created", "key-1");
+
+        assertThatThrownBy(() -> sendRocketMQService.sendNormalMessage(reqDto))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("Message topic contains illegal characters");
+
+        verifyNoInteractions(rocketMQTemplate);
+    }
+
+    @Test
+    void sendNormalMessageRejectsTooLongTopic() {
+        GXRocketMQMessageReqDto reqDto = messageReqDto("t".repeat(128), "created", "key-1");
+
+        assertThatThrownBy(() -> sendRocketMQService.sendNormalMessage(reqDto))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("Message topic contains illegal characters");
+
+        verifyNoInteractions(rocketMQTemplate);
+    }
+
+    @Test
+    void sendOnewayRejectsTagWithColon() {
+        GXRocketMQMessageReqDto reqDto = messageReqDto("order", "created:paid", "key-1");
+
+        assertThatThrownBy(() -> sendRocketMQService.sendOneway(reqDto))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("Message tag must not contain ':'");
+
+        verifyNoInteractions(rocketMQTemplate);
+    }
+
+    @Test
+    void sendOnewayRejectsTooLongTag() {
+        GXRocketMQMessageReqDto reqDto = messageReqDto("order", "x".repeat(129), "key-1");
+
+        assertThatThrownBy(() -> sendRocketMQService.sendOneway(reqDto))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("Message tag is longer than 128");
+
+        verifyNoInteractions(rocketMQTemplate);
+    }
+
+    @Test
+    void sendOnewayRejectsTooLongMessageKey() {
+        GXRocketMQMessageReqDto reqDto = messageReqDto("order", "created", "k".repeat(256));
+
+        assertThatThrownBy(() -> sendRocketMQService.sendOneway(reqDto))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("Message messageKey is longer than 255");
+
+        verifyNoInteractions(rocketMQTemplate);
+    }
+
+    @Test
+    void sendNormalMessageRejectsLiteralNullBody() {
+        GXRocketMQMessageReqDto reqDto = messageReqDto("order", "created", "key-1");
+        reqDto.setBody("null");
+
+        assertThatThrownBy(() -> sendRocketMQService.sendNormalMessage(reqDto))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("Message body must not be the literal null string");
+
+        verifyNoInteractions(rocketMQTemplate);
+    }
+
+    @Test
+    void sendNormalMessageRejectsTooLargeBody() {
+        GXRocketMQMessageReqDto reqDto = messageReqDto("order", "created", "key-1");
+        reqDto.setBody("a".repeat(4 * 1024 * 1024 + 1));
+
+        assertThatThrownBy(() -> sendRocketMQService.sendNormalMessage(reqDto))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("Message body is too large");
+
+        verifyNoInteractions(rocketMQTemplate);
+    }
+
+    @Test
+    void successPathDoesNotLogAtInfoLevel() {
+        when(rocketMQTemplate.syncSend(eq("order:created"), any(Message.class)))
+                .thenReturn(sendResult(SendStatus.SEND_OK, "msg-log"));
+
+        RecordingAppender appender = RecordingAppender.attach(GXSendRocketMQServiceImpl.class);
+        try {
+            sendRocketMQService.sendNormalMessage(messageReqDto("order", "created", "key-1"));
+            assertThat(appender.levels()).doesNotContain(Level.INFO);
+        } finally {
+            appender.detach();
+        }
+    }
+
+    @Test
+    void failurePathLogsAtErrorLevel() {
+        when(rocketMQTemplate.syncSend(eq("order:created"), any(Message.class)))
+                .thenReturn(sendResult(SendStatus.FLUSH_DISK_TIMEOUT, "msg-error"));
+
+        RecordingAppender appender = RecordingAppender.attach(GXSendRocketMQServiceImpl.class);
+        try {
+            assertThatThrownBy(() -> sendRocketMQService.sendNormalMessage(messageReqDto("order", "created", "key-1")))
+                    .isInstanceOf(GXBusinessException.class);
+            assertThat(appender.levels()).contains(Level.ERROR);
+        } finally {
+            appender.detach();
+        }
+    }
+
     private GXRocketMQMessageReqDto messageReqDto(String topic, String tag, String messageKey) {
         GXRocketMQMessageReqDto reqDto = new GXRocketMQMessageReqDto();
         reqDto.setTopic(topic);
@@ -229,6 +346,35 @@ class GXSendRocketMQServiceImplTest {
         sendResult.setSendStatus(sendStatus);
         sendResult.setMsgId(msgId);
         return sendResult;
+    }
+
+    static final class RecordingAppender extends AbstractAppender {
+        private final List<Level> levels = new ArrayList<>();
+
+        private RecordingAppender(String name) {
+            super(name, null, null, true, Property.EMPTY_ARRAY);
+        }
+
+        static RecordingAppender attach(Class<?> loggerClass) {
+            RecordingAppender appender = new RecordingAppender("GXSendRocketMQServiceImplTest-" + loggerClass.getSimpleName());
+            appender.start();
+            ((Logger) LogManager.getLogger(loggerClass)).addAppender(appender);
+            return appender;
+        }
+
+        void detach() {
+            ((Logger) LogManager.getLogger(GXSendRocketMQServiceImpl.class)).removeAppender(this);
+            stop();
+        }
+
+        @Override
+        public void append(LogEvent event) {
+            levels.add(event.getLevel());
+        }
+
+        List<Level> levels() {
+            return List.copyOf(levels);
+        }
     }
 
     @SpringBootConfiguration

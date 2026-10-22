@@ -27,9 +27,10 @@
 
 1. 消息目的地拼装必须保持 `topic`、空 `tag`、`topic:tag` 约定稳定。
 2. `messageKey`、`body`、`deliverTime` 的处理会影响上游调用方和 RocketMQ 控制台排障方式，不能随意改变。
-3. 配置来源通过 `rocketmq.config-source` 显式选择；默认值和本地/Nacos 切换语义不得随意改变。
-4. 异步发送回调必须明确处理成功、非 `SEND_OK`、空结果和异常分支。
-5. CDC 无效消息、未知 op、关闭开关、监听器过滤等分支必须保持可观测。
+3. 配置来源通过 `rocketmq.config-source` 显式选择（`local` / `nacos`）；未配置时按类路径自动判定并在启动日志标注 `auto-detected`，其他取值必须启动失败（`Unsupported rocketmq.config-source=...`）。键名、默认值和互斥装配语义不得随意改变。
+4. 异步发送回调必须明确处理成功、非 `SEND_OK`、空结果和异常分支；最终失败除 `error` 日志外，还需回调可选的 `GXRocketMQAsyncSendFailureHandler`。`sendAsync` 的方法签名、返回值与异常语义不得变更。
+5. CDC 无效消息、未知 op、关闭开关、监听器过滤等分支必须保持可观测：解析失败/未知 op 走 `warn` + 计数（可选转发 `maple.framework.cdc.dead-letter-topic`）后正常返回；监听器异常必须逐个隔离、保证其余监听器执行，最后汇总抛 `GXCdcDispatchException`。
+6. CDC 运行期开关优先读取 `maple.framework.cdc.active-status`，未配置时回退旧键 `cdc.active.status`；新代码不得只依赖旧键。
 
 ## 测试要求
 
