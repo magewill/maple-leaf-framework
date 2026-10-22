@@ -1,0 +1,19 @@
+# Peer member of a Eureka Server cluster.
+# Copy this file per node and override the placeholders with the node specific values.
+maple:
+  framework:
+    enable:
+      eureka-server: true
+
+server:
+  port: ${SERVER_PORT:7001}
+
+eureka:
+  instance:
+    hostname: ${EUREKA_INSTANCE_HOSTNAME:localhost}
+    prefer-ip-address: ${EUREKA_PREFER_IP_ADDRESS:true}
+  client:
+    register-with-eureka: true
+    fetch-registry: true
+    service-url:
+      defaultZone: ${EUREKA_PEER_URLS:http://localhost:7002/eureka/,http://localhost:7003/eureka/}

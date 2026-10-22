@@ -1,0 +1,11 @@
+# Standalone Eureka Server.
+# Copy this file next to the registry application configuration and set server.port there.
+maple:
+  framework:
+    enable:
+      eureka-server: true
+
+eureka:
+  client:
+    register-with-eureka: false
+    fetch-registry: false

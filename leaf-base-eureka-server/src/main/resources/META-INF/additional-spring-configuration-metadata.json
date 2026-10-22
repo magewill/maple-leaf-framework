@@ -1,0 +1,10 @@
+{
+  "properties": [
+    {
+      "name": "maple.framework.enable.eureka-server",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Enables the Eureka Server auto-configuration. Defaults to false; set to true to run this servlet application as a Eureka registry."
+    }
+  ]
+}

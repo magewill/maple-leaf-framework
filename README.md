@@ -66,7 +66,7 @@ Maple Leaf Framework是一套基于 Spring Boot 的企业级应用开发脚手�
 | `leaf-base-dubbo-nacos-sentinel` | Sentinel 限流熔断，规则持久化到 Nacos              | Sentinel 1.8.9                                                      | Sentinel SPI（`InitFunc`）                    |
 | `leaf-base-feign`                | OpenFeign 拦截器、编解码、熔断                    | spring-cloud-starter-openfeign、circuitbreaker-framework-retry       | 是（`GXFeignConfig`、`GXCircuitBreakerConfig`） |
 | `leaf-base-webclient`            | WebClient 封装与客户端负载均衡                    | spring-boot-starter-webflux、spring-cloud-starter-loadbalancer 5.0.3 | 是（`GXWebClientConfig`）                      |
-| `leaf-base-eureka-server`        | Eureka Server 装配                        | spring-cloud-starter-netflix-eureka-server 5.0.2                    | 是（`GXEurekaServerConfig`）                   |
+| `leaf-base-eureka-server`        | Eureka Server 装配，**需显式开启 `maple.framework.enable.eureka-server=true`，且不再随聚合门面传递** | spring-cloud-starter-netflix-eureka-server 5.0.2                    | 是（`GXEurekaServerConfig`）                   |
 | `leaf-base-eureka-client`        | Eureka Client 装配                        | eureka-client、feign、webclient                                       | 是（`GXEurekaClientConfig`）                   |
 | `leaf-base-manticore`            | Manticore Search 支持，**目前仅有包声明，产出空 JAR** | manticoresearch 10.2.0                                              | 否                                           |
 

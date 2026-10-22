@@ -21,7 +21,7 @@
 
 1. 通过 `GXEurekaServerConfig` 启用 `@EnableEurekaServer`。
 2. 提供 Eureka Server 相关依赖边界，包括 `spring-cloud-starter-netflix-eureka-server`。
-3. 维护 `application.yml` 中注册中心自身不注册、不拉取注册表以及集群 `defaultZone` 的默认示例配置。
+3. 维护 `src/main/resources/examples/` 下的单机与集群示例配置（`eureka-server-standalone.yml` 保留"不注册、不拉取"的单机基线，`eureka-server-peer.yml` 提供集群互注册的占位符配置）。
 4. 作为注册中心启动模块，不承载具体业务服务的注册、发现、远程调用、熔断降级或业务配置逻辑。
 
 本模块不负责：
@@ -31,35 +31,47 @@
 3. 维护业务实例元数据、灰度规则、路由规则或业务健康检查策略。
 4. 替代运维环境中的 Eureka 集群部署、域名解析、证书、鉴权或网络隔离配置。
 
+## 2. 启用方式与默认值
+
+1. 本模块默认**不启用**注册中心：只有显式设置 `maple.framework.enable.eureka-server=true` 才会装配 `@EnableEurekaServer`（`matchIfMissing=false`）。
+2. 仅在 Servlet 应用中生效（`@ConditionalOnWebApplication(type = SERVLET)`）；WebFlux 或非 Web 应用不会启用注册中心。
+3. 只要应用不是"Servlet 注册中心"（开关关闭，或开关开启但应用为 WebFlux/非 Web），`GXEurekaServerClientDefaultsPostProcessor` 就会把 `eureka.client.enabled` 以最低优先级默认置为 `false`，避免 starter 自带的客户端自动注册在注册中心不可达时导致应用启动失败；应用显式配置 `eureka.client.enabled` 时以其值为准。
+4. 应用是"Servlet 注册中心"时，同一后置处理器以最低优先级补充单机语义默认值 `eureka.client.register-with-eureka=false` 与 `eureka.client.fetch-registry=false`；应用（或集群示例）显式设为 `true` 时以显式值为准。
+5. 模块 jar 内**不再提供** `classpath:/application.yml`；单机与集群示例位于 `src/main/resources/examples/`，由 `docs/leaf-base-eureka-server开发手册.md` 引用。
+6. 聚合门面 `leaf-framework` 不再传递本模块，注册中心应用需显式声明依赖。
+
 ## 3. 功能基线
 
 开发前必须理解并保持以下行为稳定：
 
 1. `GXEurekaServerConfig` 的核心语义是启用 Eureka 注册中心，不要加入业务服务注册、客户端扫描或远程调用配置。
-2. Eureka Server 默认不向自身注册：`eureka.client.register-with-eureka` 应保持为 `false`，除非明确改为集群互注册场景并说明影响。
-3. Eureka Server 默认不拉取注册表：`eureka.client.fetch-registry` 应保持为 `false`，除非明确需要作为集群成员拉取注册信息。
+2. Eureka Server 默认不向自身注册：`eureka.client.register-with-eureka` 在 Servlet 注册中心场景由 `GXEurekaServerClientDefaultsPostProcessor` 以最低优先级默认置为 `false`；集群互注册场景必须显式设为 `true` 并说明影响。
+3. Eureka Server 默认不拉取注册表：`eureka.client.fetch-registry` 同上以最低优先级默认 `false`；集群成员必须显式设为 `true`。
 4. `service-url.defaultZone` 中的地址属于示例集群配置，修改时要同时检查 README、部署脚本或测试是否依赖旧地址。
 5. 自动装配入口必须加载 `cn.maple.eureka.server.config.GXEurekaServerConfig`，不能指向 Feign 或 Client 模块配置。
 6. 注册中心模块不应主动启用 `@EnableFeignClients`、`@LoadBalanced`、业务 `RestTemplate`、业务 `WebClient` 或客户端负载均衡 Bean。
 7. 新增配置属性时，优先使用 Spring Boot 原生 `eureka.*` 语义，不要发明与 Eureka 原生配置重复的自定义键。
+8. 注册中心默认不启用，开关为 `maple.framework.enable.eureka-server`（默认 `false`）；不得改回"引入即启用"。
+9. `src/main/resources` 根目录不得再出现 `application.yml`；示例配置只能放在 `examples/` 子目录，避免与宿主应用同名配置竞争。
+10. `jersey-apache-connector`（Jersey 3）是 `eureka-core-jersey3` 复制客户端的硬依赖，不得移除或替换为 `jersey-apache5-connector`（会导致 `NoClassDefFoundError: ApacheConnectorProvider`）。
 
 ## 4. 强制开发规则
 
 1. 所有日志文本必须使用 ASCII 字符；禁止新增或保留中文、全角符号或其他非 ASCII 日志文本。
 2. 只在本模块内修改注册中心服务端能力；不要为了“顺手修复”去改 `leaf-base-eureka-client`、`leaf-base-feign` 或根模块配置。
 3. 修改自动装配文件时，必须同时检查配置类包名、类名和 Maven 产物是否一致。
-4. 修改 `application.yml` 时，必须明确这是示例默认值还是运行时契约；不要把本地机器域名、临时端口或私有环境地址固化为框架默认。
+4. 修改 `src/main/resources/examples/` 下的示例配置时，必须明确这是示例值而非运行时契约；示例中只允许出现占位符（`${ENV:default}`），禁止固化本地机器域名、私有地址或固定端口到默认配置。
 5. 不要把注册中心配置类演变成业务 Bean 聚合入口。业务调用、鉴权、过滤、熔断和链路追踪能力应下沉到对应业务模块或客户端模块。
 6. 依赖升级必须视为兼容性变更处理，提交说明中写清 Spring Cloud Netflix 版本、Spring Boot 版本兼容性和已执行的验证命令。
 7. 删除冗余注释，保留能解释兼容性约束、自动装配入口和示例配置意图的说明。
 
 ## 5. 测试要求
 
-当前模块没有现成测试。后续凡是改动功能代码、自动装配入口、依赖或默认配置，必须补齐对应测试。
+模块现有 23 个用例，分六类：条件装配矩阵（`GXEurekaServerConfigTest`，6 个）、示例资源配置契约（`GXEurekaServerExamplesTest`，3 个）、开关真实启动（`GXEurekaServerSwitchSpringBootTest`，4 个：开关缺省 404、开关 `true` 200、开关缺省且未配置任何 `eureka.client.*` 时应用正常启动且客户端默认禁用、只设开关时单机默认不注册不拉取）、真实注册中心启动与注册往返（`GXEurekaServerSpringBootTest`，2 个）、双节点复制探针（`GXEurekaServerPeerClusterSpringBootTest`，2 个）、客户端默认值策略（`GXEurekaServerClientDefaultsPostProcessorTest`，6 个：开关缺省禁用客户端、Servlet 注册中心保留客户端、reactive + 开关仍禁用、显式客户端配置优先、Servlet 注册中心补单机默认、显式注册配置优先）。后续凡是改动功能代码、自动装配入口、依赖或默认配置，必须补齐或调整对应测试。
 
 1. 配置类变更至少覆盖 Spring Boot 上下文能加载 `GXEurekaServerConfig`。
 2. 自动装配入口变更至少覆盖 `AutoConfiguration.imports` 中的类存在且可加载。
-3. `application.yml` 变更至少覆盖关键配置值：`register-with-eureka`、`fetch-registry`、`service-url.defaultZone` 和 `instance.hostname`。
+3. `src/main/resources/examples/` 下的示例配置变更至少覆盖关键配置值：`register-with-eureka`、`fetch-registry`、`service-url.defaultZone` 和 `instance.hostname`（由 `GXEurekaServerExamplesTest` 断言，同时校验 classpath 根不存在 `application.yml`）。
 4. 依赖升级后至少运行 `mvn -pl leaf-base-eureka-server test`；如果测试会触发集成环境限制，提交说明中写明未执行原因和补验建议。
 5. 涉及真实 Eureka Server 启动行为时，优先使用接近真实容器行为的 `@SpringBootTest`，而不是只做字符串或反射断言。
 
