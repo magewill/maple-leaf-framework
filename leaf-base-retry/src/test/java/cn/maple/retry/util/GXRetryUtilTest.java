@@ -1,25 +1,35 @@
 package cn.maple.retry.util;
 
 import cn.maple.retry.callback.GXRetryCallback;
+import cn.maple.retry.config.GXRetryOptions;
 import cn.maple.retry.context.GXRetryContext;
+import cn.maple.retry.exception.GXRetryCancelledException;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.net.SocketTimeoutException;
 import java.sql.SQLException;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@ExtendWith(MockitoExtension.class)
 class GXRetryUtilTest {
 
     @Test
@@ -31,6 +41,10 @@ class GXRetryUtilTest {
         assertEquals(expectedResult, result);
     }
 
+    /**
+     * Keeps exactly one case that waits for the real default backoff (1s + 2s) so that the default
+     * parameters stay covered end-to-end; the rest use the 100ms lower bound.
+     */
     @Test
     void testRetryOperation_DefaultParams_SuccessAfterRetries() {
         AtomicInteger attempts = new AtomicInteger(0);
@@ -48,19 +62,20 @@ class GXRetryUtilTest {
         assertEquals("success", result);
         assertEquals(3, attempts.get());
         assertEquals(2, thirdAttemptContext.get().getRetryCount());
+        assertEquals(2, thirdAttemptContext.get().getAttemptIndex());
         assertInstanceOf(IllegalStateException.class, thirdAttemptContext.get().getLastThrowable());
         assertEquals("temporary failure 2", thirdAttemptContext.get().getLastThrowable().getMessage());
     }
 
     @Test
-    void testRetryOperation_DefaultParams_AllAttemptsFail() {
+    void testRetryOperation_ExhaustsConfiguredAttempts() {
         AtomicInteger attempts = new AtomicInteger(0);
 
         RuntimeException exception = assertThrows(RuntimeException.class, () ->
                 GXRetryUtil.retryOperation(context -> {
                     attempts.incrementAndGet();
                     throw new RuntimeException("always fail");
-                }));
+                }, 3, 100L));
 
         assertTrue(exception.getMessage().contains("always fail"));
         assertEquals(3, attempts.get());
@@ -180,7 +195,7 @@ class GXRetryUtilTest {
                     throw new IllegalArgumentException("not retryable");
                 },
                 context -> {
-                    assertEquals(1, context.getRetryCount());
+                    assertEquals(0, context.getRetryCount());
                     assertInstanceOf(IllegalArgumentException.class, context.getLastThrowable());
                     return "recovered";
                 },
@@ -195,23 +210,28 @@ class GXRetryUtilTest {
     }
 
     @Test
-    void testRetryOperation_RecoveryCallbackReceivesLastFailureAndTotalAttempts() {
+    void testRetryOperation_RecoveryCallbackReceivesLastFailureAndRetryCount() {
         AtomicInteger attempts = new AtomicInteger(0);
+        AtomicReference<GXRetryContext> lastAttemptContext = new AtomicReference<>();
 
         String result = GXRetryUtil.retryOperation(
                 context -> {
+                    lastAttemptContext.set(context);
                     attempts.incrementAndGet();
                     throw new RuntimeException("always fail");
                 },
                 context -> {
-                    assertEquals(3, context.getRetryCount());
+                    assertEquals(2, context.getRetryCount());
                     assertInstanceOf(RuntimeException.class, context.getLastThrowable());
                     assertEquals("always fail", context.getLastThrowable().getMessage());
                     return "recovered";
-                });
+                },
+                3,
+                100L);
 
         assertEquals("recovered", result);
         assertEquals(3, attempts.get());
+        assertEquals(2, lastAttemptContext.get().getRetryCount());
     }
 
     @Test
@@ -224,7 +244,8 @@ class GXRetryUtilTest {
                         context -> {
                             throw new IllegalStateException("recovery failed");
                         },
-                        2));
+                        2,
+                        100L));
 
         assertEquals("recovery failed", exception.getMessage());
     }
@@ -249,6 +270,184 @@ class GXRetryUtilTest {
 
         assertTrue(exception.getMessage().contains("maxAttempts"));
         assertEquals(0, attempts.get());
+    }
+
+    @Test
+    void testRetryOperation_AttributesAreCarriedAcrossAttempts() {
+        AtomicInteger attempts = new AtomicInteger(0);
+        AtomicReference<GXRetryContext> secondAttempt = new AtomicReference<>();
+
+        String result = GXRetryUtil.retryOperation(context -> {
+            int attempt = attempts.incrementAndGet();
+            if (attempt == 1) {
+                context.setAttribute("endpoint", "node-b");
+                throw new IllegalStateException("try another node");
+            }
+            secondAttempt.set(context);
+            return String.valueOf(context.getAttribute("endpoint"));
+        }, 2, 100L);
+
+        assertEquals("node-b", result);
+        assertEquals(2, attempts.get());
+        assertNotNull(secondAttempt.get().getParent());
+        assertSame("node-b", secondAttempt.get().getAttribute("endpoint"));
+        assertSame("node-b", secondAttempt.get().getParent().getAttribute("endpoint"));
+    }
+
+    @Test
+    void testRetryOperation_PropagatesNullFromCallbackAndRecovery() {
+        assertNull(GXRetryUtil.retryOperation(context -> null));
+
+        String recoveredToNull = GXRetryUtil.retryOperation(
+                (GXRetryCallback<String, RuntimeException>) context -> {
+                    throw new IllegalStateException("boom");
+                },
+                context -> null,
+                2,
+                100L);
+
+        assertNull(recoveredToNull);
+    }
+
+    @Test
+    void testRetryOperation_DefaultPolicyRetriesInterruptedException() {
+        AtomicInteger attempts = new AtomicInteger(0);
+
+        InterruptedException exception = assertThrows(InterruptedException.class, () ->
+                GXRetryUtil.retryOperation((GXRetryCallback<String, InterruptedException>) context -> {
+                    attempts.incrementAndGet();
+                    throw new InterruptedException("cancelled by upstream");
+                }, 3, 100L));
+
+        assertEquals("cancelled by upstream", exception.getMessage());
+        assertEquals(3, attempts.get(), "default policy retries every Exception, including InterruptedException");
+    }
+
+    @Test
+    void testRetryOperation_ExceptionMapIsSnapshottedForInFlightRetry() {
+        Map<Class<? extends Throwable>, Boolean> mutableExceptions = new HashMap<>();
+        mutableExceptions.put(IOException.class, true);
+        AtomicInteger attempts = new AtomicInteger(0);
+
+        IOException exception = assertThrows(IOException.class, () ->
+                GXRetryUtil.retryOperation((GXRetryCallback<String, IOException>) context -> {
+                    int attempt = attempts.incrementAndGet();
+                    if (attempt == 1) {
+                        mutableExceptions.clear();
+                        mutableExceptions.put(IllegalArgumentException.class, true);
+                    }
+                    throw new IOException("io");
+                }, 2, 100L, 1.0, 1000L, mutableExceptions));
+
+        assertEquals("io", exception.getMessage());
+        assertEquals(2, attempts.get(), "in-flight retry must follow the mapping snapshot taken at call time");
+    }
+
+    @Test
+    void testRetryOperation_CacheKeyUsesImmutableExceptionMapSnapshot() throws Exception {
+        Map<Class<? extends Throwable>, Boolean> mutableExceptions = new HashMap<>();
+        mutableExceptions.put(IOException.class, true);
+
+        GXRetryUtil.retryOperation(context -> "ok", 2, 200L, 1.0, 2000L, mutableExceptions);
+        int sizeAfterFirstCall = templateCache().size();
+
+        mutableExceptions.clear();
+        mutableExceptions.put(IllegalArgumentException.class, true);
+        Map<Class<? extends Throwable>, Boolean> sameAsFirstSnapshot = new LinkedHashMap<>();
+        sameAsFirstSnapshot.put(IOException.class, true);
+        GXRetryUtil.retryOperation(context -> "ok", 2, 200L, 1.0, 2000L, sameAsFirstSnapshot);
+
+        assertEquals(sizeAfterFirstCall, templateCache().size(),
+                "mutating the caller's exception map must not corrupt the cached key");
+    }
+
+    @Test
+    void testRetryOperation_TotalTimeoutStopsSyncChainEarly() {
+        AtomicInteger attempts = new AtomicInteger(0);
+        AtomicInteger recoveryRetryCount = new AtomicInteger(-1);
+        GXRetryOptions options = new GXRetryOptions(5, 100L, 1.0, 1000L, 300L, 0L, Map.of(Exception.class, true));
+
+        String result = GXRetryUtil.retryOperation(
+                context -> {
+                    attempts.incrementAndGet();
+                    sleep(200L);
+                    throw new IllegalStateException("slow failure");
+                },
+                context -> {
+                    recoveryRetryCount.set(context.getRetryCount());
+                    return "recovered";
+                },
+                options);
+
+        assertEquals("recovered", result);
+        assertTrue(attempts.get() < 5, "timeout must stop before maxAttempts, actual: " + attempts.get());
+        assertEquals(0, recoveryRetryCount.get(), "timeout after the first attempt means zero retries");
+    }
+
+    @Test
+    void testRetryOperation_ExceptionMapOverloadRetriesConfiguredType() throws Throwable {
+        AtomicInteger attempts = new AtomicInteger(0);
+        Map<Class<? extends Throwable>, Boolean> retryableExceptions = Map.of(IOException.class, true);
+
+        String result = GXRetryUtil.retryOperation((GXRetryCallback<String, Throwable>) context -> {
+            if (attempts.incrementAndGet() < 2) {
+                throw new IOException("io");
+            }
+            return "ok";
+        }, retryableExceptions);
+
+        assertEquals("ok", result);
+        assertEquals(2, attempts.get());
+    }
+
+    @Test
+    void testRetryOperation_RecoveryOverloadRunsRecoveryWithoutRetryingFatalError() {
+        AtomicInteger attempts = new AtomicInteger(0);
+
+        String result = GXRetryUtil.retryOperation(
+                (GXRetryCallback<String, RuntimeException>) context -> {
+                    attempts.incrementAndGet();
+                    throw new AssertionError("fatal");
+                },
+                context -> {
+                    assertInstanceOf(AssertionError.class, context.getLastThrowable());
+                    assertEquals(0, context.getRetryCount());
+                    return "recovered";
+                });
+
+        assertEquals("recovered", result);
+        assertEquals(1, attempts.get());
+    }
+
+    @Test
+    void testRetryOperation_AlreadyInterruptedThreadStopsBeforeCallback() {
+        AtomicInteger attempts = new AtomicInteger(0);
+        AtomicBoolean recovered = new AtomicBoolean(false);
+
+        Thread.currentThread().interrupt();
+        try {
+            GXRetryCancelledException exception = assertThrows(GXRetryCancelledException.class, () ->
+                    GXRetryUtil.retryOperation(
+                            (GXRetryCallback<String, RuntimeException>) context -> {
+                                attempts.incrementAndGet();
+                                return "unexpected";
+                            },
+                            context -> {
+                                recovered.set(true);
+                                return "recovered";
+                            }));
+            assertTrue(exception.getMessage().contains("cancelled"), exception.getMessage());
+        } finally {
+            Thread.interrupted();
+        }
+
+        assertEquals(0, attempts.get(), "callback must not run when the calling thread is already interrupted");
+        assertFalse(recovered.get(), "recovery callback must not run for cancellation");
+    }
+
+    @Test
+    void testRetrySupplier_DefaultOverload() {
+        assertEquals("value", GXRetryUtil.retrySupplier(() -> "value"));
     }
 
     @Test
@@ -291,9 +490,17 @@ class GXRetryUtilTest {
         ExecutorService executor = Executors.newSingleThreadExecutor();
 
         try {
-            CompletableFuture<String> future = GXRetryUtil.retryOperationAsync(context -> {
-                throw new RuntimeException("async failed");
-            }, executor);
+            CompletableFuture<String> future = GXRetryUtil.retryOperationAsync(
+                    context -> {
+                        throw new RuntimeException("async failed");
+                    },
+                    null,
+                    2,
+                    100L,
+                    1.5,
+                    1000L,
+                    Map.of(Exception.class, true),
+                    executor);
 
             ExecutionException exception = assertThrows(ExecutionException.class, future::get);
             assertInstanceOf(cn.maple.core.framework.exception.GXBusinessException.class, exception.getCause());
@@ -315,7 +522,7 @@ class GXRetryUtilTest {
                         throw new SQLException("database unavailable");
                     },
                     context -> {
-                        assertEquals(2, context.getRetryCount());
+                        assertEquals(1, context.getRetryCount());
                         assertInstanceOf(SQLException.class, context.getLastThrowable());
                         return "async recovered";
                     },
@@ -391,5 +598,20 @@ class GXRetryUtilTest {
         assertTrue(exception.getMessage().contains("always fail"));
         assertEquals(4, attempts.get());
         assertTrue(duration >= 700L, "retry delay should use exponential backoff");
+    }
+
+    private Map<?, ?> templateCache() throws Exception {
+        Field field = GXRetryUtil.class.getDeclaredField("RETRY_TEMPLATE_CACHE");
+        field.setAccessible(true);
+        return (Map<?, ?>) field.get(null);
+    }
+
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted", e);
+        }
     }
 }

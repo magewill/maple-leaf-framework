@@ -20,6 +20,22 @@
       },
       "registered_skills": [],
       "installed_at": "2026-10-22T05:40:07.628514+00:00"
+    },
+    "bug": {
+      "version": "1.0.1",
+      "source": "local",
+      "manifest_hash": "sha256:0f8ca9b828f8855be72a17cdef1f355fba81d7173b16f349d500d2ab367384fb",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "codebuddy": [
+          "speckit.bug.assess",
+          "speckit.bug.fix",
+          "speckit.bug.test"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-10-23T00:35:19.604751+00:00"
     }
   }
 }

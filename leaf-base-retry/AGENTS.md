@@ -54,6 +54,8 @@
 10. 本模块作为基础框架能力，代码性能、并发正确性和线程安全性必须优先评估。
 11. 在线程池与虚拟线程都能满足需求的场景中，优先使用虚拟线程。
 12. 严格遵循测试驱动最佳实践，优先通过测试描述预期行为，再进行实现或修复。
+13. 日志级别只能通过系统属性 `maple.framework.retry.log.level`（阈值语义 `OFF < ERROR < WARN < INFO < DEBUG`）与 `maple.framework.retry.log.verbose` 配置，禁止声称可用 `application.yml` 或 profile 配置。
+14. `GXRetryContext.getRetryCount()` 的语义固定为"已执行的重试次数（首次执行为 0）"，与 `getAttemptIndex()` 同值；恢复回调必须使用 `RetryException.getRetryCount()`，禁止用 `getExceptions().size()`（后者是尝试数）。
 
 ## 4. 测试要求
 
@@ -75,6 +77,8 @@
    - 不同日志级别下分支行为。
 6. 如果功能依赖 Spring 容器、自动配置、AOP 代理或 Bean 装配，测试必须使用接近真实运行形态的 Spring Boot 启动测试（如 `@SpringBootTest`），不能只做纯单元测试。
 7. 至少保证模块级测试命令可执行：`mvn -pl leaf-base-retry test`。
+8. 涉及 Bean 装配、`@ConditionalOnMissingBean`、`@Retryable` 的改动必须补 Spring 启动测试（`GXRetrySpringBootTest`，使用 `@SpringBootTest`），不得只做纯单元测试。
+9. 涉及模板缓存、并发调用、取消、MDC/TraceId 传播的改动必须补并发/异步用例（`GXRetryUtilConcurrencyTest`、`GXRetryUtilAsyncTest`），并断言缓存 `size() <= 256`。
 
 ## 5. 变更前检查清单
 
@@ -90,6 +94,7 @@
 10. 是否评估了性能、并发正确性和线程安全性影响。
 11. 是否在适合的异步/并发场景中优先考虑了虚拟线程。
 12. 是否遵循测试驱动最佳实践，先用测试描述目标行为再调整实现。
+13. 新增或修改公开方法时，是否同步更新 `specs/010-retry-module-audit/contracts/retry-api-contract.md` §1 与 `docs/leaf-base-retry开发手册.md` 对应章节（签名、语义、示例三处齐全）。
 
 ## 6. 提交说明建议
 

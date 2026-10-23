@@ -1,4 +1,5 @@
 installed:
+- bug
 - review
 settings:
   auto_execute_hooks: true
