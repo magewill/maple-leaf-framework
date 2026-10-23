@@ -45,6 +45,6 @@ class GXWebClientExceptionHandlerTest {
         GXResultUtils<Dict> result = handler.handleWebClientResponseException(exception);
 
         assertThat(result.getCode()).isEqualTo(HttpStatus.HTTP_BAD_GATEWAY);
-        assertThat(result.getMsg()).isEqualTo("WebClient remote service response exception");
+        assertThat(result.getMsg()).isEqualTo("WebClient远端服务响应异常");
     }
 }

@@ -10,6 +10,9 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.EnableAspectJAutoProxy;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -53,6 +56,50 @@ class GXWebClientAuthTokenAspectTest {
 
             assertThatCode(service::classLevelCall).doesNotThrowAnyException();
         });
+    }
+
+    @Test
+    void distinguishesMissingContextFromInvalidToken() {
+        contextRunner(false).run(context -> {
+            ProtectedService service = context.getBean(ProtectedService.class);
+
+            assertThatThrownBy(service::methodLevelWebClient)
+                    .isInstanceOf(GXWebClientAuthTokenException.class)
+                    .hasMessageContaining("reason=no request context");
+
+            MockHttpServletRequest request = new MockHttpServletRequest();
+            RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+            try {
+                assertThatThrownBy(service::methodLevelWebClient)
+                        .isInstanceOf(GXWebClientAuthTokenException.class)
+                        .hasMessageContaining("reason=token invalid");
+            } finally {
+                RequestContextHolder.resetRequestAttributes();
+            }
+        });
+    }
+
+    @Test
+    void usesFirstServiceBeanWhenMultipleImplementationsExist() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(AopTestConfig.class)
+                .withBean("firstWebClientService", GXWebClientService.class, () -> new GXWebClientService() {
+                    @Override
+                    public boolean checkTokenValidity() {
+                        return true;
+                    }
+                })
+                .withBean("secondWebClientService", GXWebClientService.class, () -> new GXWebClientService() {
+                    @Override
+                    public boolean checkTokenValidity() {
+                        return true;
+                    }
+                })
+                .run(context -> {
+                    ProtectedService service = context.getBean(ProtectedService.class);
+
+                    assertThatCode(service::methodLevelWebClient).doesNotThrowAnyException();
+                });
     }
 
     private ApplicationContextRunner contextRunner(boolean tokenValid) {

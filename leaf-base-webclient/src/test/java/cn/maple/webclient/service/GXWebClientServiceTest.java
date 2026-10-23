@@ -4,17 +4,27 @@ import cn.maple.core.framework.config.aware.GXApplicationContextAware;
 import cn.maple.core.framework.constant.GXCommonConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
+import cn.maple.webclient.config.GXWebClientConfig;
+import cn.maple.webclient.testsupport.GXWebClientTestSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.http.HttpStatus;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 import tools.jackson.databind.json.JsonMapper;
+
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 class GXWebClientServiceTest {
     private final GXWebClientService service = new GXWebClientService() {
@@ -106,5 +116,78 @@ class GXWebClientServiceTest {
             service.logRequestResponse(null, "url", null, 1L, "request-id");
             service.logRequestException(null, "url", new RuntimeException("boom"), "request-id");
         }).doesNotThrowAnyException();
+    }
+
+    @Test
+    void reusesGeneratedTokenWithinCacheWindow() {
+        GXWebClientService.clearTokenCache();
+
+        String first = service.generateHttpAuthToken("cache-source", 150);
+        String second = service.generateHttpAuthToken("cache-source", 150);
+
+        assertThat(second).isEqualTo(first);
+        assertThat(service.generateHttpAuthToken("other-source", 150)).isNotEqualTo(first);
+    }
+
+    @Test
+    void invokesSpiLoggingHooksOnSuccessAndFailure() {
+        AtomicInteger successHooks = new AtomicInteger();
+        AtomicInteger exceptionHooks = new AtomicInteger();
+        GXWebClientService countingService = new GXWebClientService() {
+            @Override
+            public String generateHttpAuthToken() {
+                return "token";
+            }
+
+            @Override
+            public void logRequestResponse(org.springframework.http.HttpMethod method, String url,
+                                           org.springframework.http.HttpHeaders requestHeaders,
+                                           Object requestBody, org.springframework.http.HttpStatusCode statusCode,
+                                           org.springframework.http.HttpHeaders responseHeaders,
+                                           Object responseBody, long durationMs) {
+                successHooks.incrementAndGet();
+            }
+
+            @Override
+            public void logRequestException(org.springframework.http.HttpMethod method, String url,
+                                            Throwable exception, String requestId) {
+                exceptionHooks.incrementAndGet();
+            }
+        };
+
+        GXWebClientConfig config = new GXWebClientConfig();
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty("maple.framework.web.client.retry-max-attempts", "0");
+        WebClient successClient = GXWebClientTestSupport.plainBuilder(config, environment, countingService)
+                .exchangeFunction(request -> Mono.just(ClientResponse.create(HttpStatus.OK).body("ok").build()))
+                .build();
+        successClient.get().uri("http://127.0.0.1/ping").retrieve().bodyToMono(String.class).block();
+
+        WebClient failureClient = GXWebClientTestSupport.plainBuilder(config, environment, countingService)
+                .exchangeFunction(request -> Mono.just(ClientResponse.create(HttpStatus.BAD_REQUEST)
+                        .header("Content-Type", "application/json")
+                        .body("{\"msg\":\"bad\"}")
+                        .build()))
+                .build();
+        catchThrowable(() -> failureClient.get().uri("http://127.0.0.1/ping")
+                .retrieve().bodyToMono(String.class).block());
+
+        assertThat(successHooks.get()).isGreaterThanOrEqualTo(1);
+        assertThat(exceptionHooks.get()).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    void checkTokenValidityLogsWarningWithoutSecret() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(GXCommonConstant.X_AUTH_TOKEN, "malformed");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        GXWebClientService secretless = new GXWebClientService() {
+            @Override
+            public String getAuthTokenSecret() {
+                throw new IllegalStateException("secret missing");
+            }
+        };
+
+        assertThat(secretless.checkTokenValidity()).isFalse();
     }
 }

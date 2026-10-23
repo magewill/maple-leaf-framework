@@ -1,4 +1,4 @@
-# AGENTS.md - leaf-base-webclient
+﻿# AGENTS.md - leaf-base-webclient
 
 本文档用于指导 `leaf-base-webclient` 模块的后续迭代开发。修改本模块时，优先保证 WebClient 自动装配、认证 token 生成与校验、TraceId 与平台信息透传、响应式异常处理，以及 Spring Boot 集成行为的稳定性，避免进行与当前职责无关的重构。
 
@@ -44,7 +44,7 @@
 2. `service`：模块对外暴露的 SPI 契约与默认方法实现，所有可覆盖扩展点优先放在这里。
 3. `aspect`：基于 `@GXHttpInvokerAuthToken` 的 token 校验切面逻辑，重点保证 AOP 代理兼容性与注解解析顺序。
 4. `handler`：WebClient 相关异常的统一返回与日志兜底。
-5. `src/test`：测试目录。当前模块已有测试目录结构，但尚未建立有效测试基线；后续涉及功能改动时必须补齐。
+5. `src/test`：测试目录。已建立有效测试基线（`mvn -pl leaf-base-webclient test` = 70 条用例全绿，含真实装配、过滤器链、连接池生命周期与日志断言），后续涉及功能改动时必须在此基线上补齐。
 
 ## 3. 强制开发规则
 
@@ -63,7 +63,7 @@
 13. 在确保原有功能正确性的条件下进行完善；修改已经存在的逻辑时，不得改变现有逻辑的正确性、异常语义和兼容行为。
 14. 严格遵循测试驱动最佳实践：先明确期望行为和回归用例，再实现或调整代码，最后通过测试验证行为没有回退。
 15. 修改 `GXWebClientService` 默认方法时，必须评估对现有实现类覆盖行为、环境配置键、异常语义、token 兼容性和上下游调用方的影响。
-16. 修改 `GXWebClientConfig` 时，必须保持 `WebClient` 过滤器顺序、错误转换语义、连接池参数、超时策略与编解码配置的可预期性，避免无意改变默认运行行为。
+16. 修改 `GXWebClientConfig` 时，过滤器顺序以 `specs/012-webclient-module-audit/contracts/filter-chain-contract.md` 的当前链为准（`requestFilter` → `retryFilter`（指标/日志/SPI/逐尝试时间戳）→ `errorResponseHandleFilter` → `lbGuardFilter` → LB 过滤器）；顺序或组成变更必须同步该契约与本规则。同时保持错误转换语义、连接池参数、超时策略与编解码配置的可预期性，避免无意改变默认运行行为。
 17. 修改 `GXWebClientAuthTokenAspect` 时，必须保持方法级注解优先于类级注解的解析语义，并兼顾 AOP 代理类、目标类和无 `GXWebClientService` Bean 场景下的错误处理。
 18. 修改 `GXWebClientExceptionHandler` 时，必须明确返回码、返回文案和异常日志策略是否发生变化，避免静默改变上层接口契约。
 19. 新增公共配置、默认请求头、异常映射规则或安全相关行为前，必须先确认它是否应作为模块级默认行为，而不是某个业务方私有需求。
@@ -71,7 +71,7 @@
 ## 4. 测试要求
 
 1. 任意功能改动前，都要先检查当前是否存在对应测试，以及这些测试是否覆盖成功、失败、异常、空值和边界分支。
-2. 当前模块虽然存在 `src/test/java` 目录，但尚未形成有效测试基线；后续首次改动本模块代码时，应优先建立最小可运行测试骨架。
+2. 已有 70 条用例的测试基线（含 `GXWebClientTestSupport` 的本地 HttpServer 与日志捕获支撑）；改动时按"先在旧代码上失败、再实现转绿"的顺序补充用例，禁止删除或跳过既有用例。
 3. `GXWebClientService` 相关改动至少要覆盖：
    - `maple.framework.web.client.token` 或 `maple.framework.web.client.secret` 缺失时的异常行为。
    - token 生成、token 解码校验、空 token、非法 token、过期参数非法等分支。
@@ -93,7 +93,15 @@
 7. 涉及 Spring 容器装配、AOP、生效顺序、`@RestControllerAdvice`、请求上下文或 Bean 查找行为的测试，必须使用接近真实运行方式的 Spring Boot 集成测试。
 8. 提交前至少保证模块级验证命令可运行：`mvn -pl leaf-base-webclient test`。
 
-## 5. 变更前检查清单
+## 5. 已知限制（使用方必读）
+
+1. **寻址语义**：`webClient` / `webClientBuilder` 带 `@LoadBalanced`，只接受服务名（`^[A-Za-z0-9_-]+$`）。FQDN / IP / `localhost` / 带端口字面量会被守卫在 0 次网络尝试时拒绝（`GXBusinessException` code=400）。直连请使用 `webClientDirectBuilder`；带点服务名（如 `svc.ns.svc.cluster.local`）登记到 `maple.framework.web.client.lb-guard-allow-hosts`；需要完全回到旧行为时设统一开关 `maple.framework.enable.webclient-lb-guard=false`（宪法 IV 命名；`lb-guard-enabled` 为兼容别名，统一开关优先）。该开关默认 `true`，属 F-01 缺陷收敛的显式豁免。
+2. **超时**：`timeout-seconds` 是四类超时的回退基准；`connect/read/write/response-timeout-millis` 可独立覆盖。`read-timeout-millis=0`（或 `response-timeout-millis=0`）表示禁用，用于流式 / 长轮询 / SSE 消费；默认 30s 读空闲会切断更长的流式响应。
+3. **上下文透传**：`traceId` / `platform` / token 头来自请求线程的 `RequestContextHolder` / MDC。异步、调度或 reactor 并行线程上无上下文时不会静默：会按 30s 窗口限流输出 `HTTP request dropped context` 告警。需要跨线程携带时用 `GXWebClientContextSnapshot`：`webClient.get()...retrieve()...contextWrite(ctx -> ctx.put(GXWebClientContextSnapshot.ATTRIBUTE_KEY, GXWebClientContextSnapshot.capture()))`。切面在无请求上下文时抛出的失败文案带 `reason=no request context`，与 `reason=token invalid` 可区分。
+4. **token 契约（fail-fast）**：容器存在 `GXWebClientService` Bean 且未配置 `maple.framework.web.client.token` / `secret` 时，所有出站调用直接失败；本期不提供关闭开关。token 生成结果在 `min(60s, expiry/2)` 窗口内复用，按 `source + secret` 失效。
+5. **重试**：默认仅 `GET,HEAD,OPTIONS` 可重试（`retry-methods` 可改）；非幂等方法不再被网络类失败自动重放。非可重放请求体（流 / 表单流）在重试场景没有重放语义，需要重放时必须自行缓冲。
+
+## 6. 变更前检查清单
 
 1. 是否明确本次改动影响的是自动装配、SPI 默认行为、AOP 鉴权、异常处理还是请求透传链路。
 2. 是否检查并补齐了与改动点对应的测试用例。
@@ -108,7 +116,7 @@
 11. 如果涉及线程模型选择，是否优先考虑并验证了虚拟线程方案。
 12. 是否先明确或补齐测试用例，再修改实现逻辑，并通过测试确认原有功能没有回退。
 
-## 6. 提交说明建议
+## 7. 提交说明建议
 
 1. 涉及默认请求头、token、TraceId、异常映射、连接池或超时策略调整时，提交说明中要明确写清行为变化、兼容性影响和回归范围。
 2. 涉及日志调整时，提交前确认新增和修改后的日志文本全部为 ASCII。

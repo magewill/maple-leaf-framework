@@ -1,0 +1,113 @@
+{
+  "properties": [
+    {
+      "name": "maple.framework.web.client.timeout-seconds",
+      "type": "java.lang.Integer",
+      "defaultValue": 30,
+      "description": "Base timeout in seconds. Used as fallback for connect/read/write/response timeouts."
+    },
+    {
+      "name": "maple.framework.web.client.memory-buffer-size-mb",
+      "type": "java.lang.Integer",
+      "defaultValue": 16,
+      "description": "Codec max in memory size in MB; also the response Content-Length warning threshold."
+    },
+    {
+      "name": "maple.framework.web.client.max-connections",
+      "type": "java.lang.Integer",
+      "defaultValue": 500,
+      "description": "Maximum number of pooled connections."
+    },
+    {
+      "name": "maple.framework.web.client.acquire-timeout-millis",
+      "type": "java.lang.Integer",
+      "defaultValue": 3000,
+      "description": "Maximum wait time when acquiring a pooled connection."
+    },
+    {
+      "name": "maple.framework.web.client.pending-acquire-max-count",
+      "type": "java.lang.Integer",
+      "defaultValue": 1000,
+      "description": "Maximum number of pending acquire requests."
+    },
+    {
+      "name": "maple.framework.web.client.idle-timeout-millis",
+      "type": "java.lang.Integer",
+      "defaultValue": 30000,
+      "description": "Idle timeout for pooled connections; 0 disables idle eviction."
+    },
+    {
+      "name": "maple.framework.web.client.max-life-time-millis",
+      "type": "java.lang.Integer",
+      "defaultValue": 300000,
+      "description": "Maximum life time for pooled connections; 0 disables life time eviction."
+    },
+    {
+      "name": "maple.framework.web.client.evict-in-background-seconds",
+      "type": "java.lang.Integer",
+      "defaultValue": 120,
+      "description": "Background eviction interval in seconds."
+    },
+    {
+      "name": "maple.framework.web.client.retry-max-attempts",
+      "type": "java.lang.Integer",
+      "defaultValue": 3,
+      "description": "Maximum retry attempts; 0 disables retry."
+    },
+    {
+      "name": "maple.framework.web.client.retry-delay-millis",
+      "type": "java.lang.Integer",
+      "defaultValue": 1000,
+      "description": "Fixed retry delay in milliseconds; 0 means no backoff."
+    },
+    {
+      "name": "maple.framework.web.client.retry-methods",
+      "type": "java.lang.String",
+      "defaultValue": "GET,HEAD,OPTIONS",
+      "description": "Comma separated HTTP methods eligible for retry; empty disables retry for every method."
+    },
+    {
+      "name": "maple.framework.web.client.user-agent-suffix",
+      "type": "java.lang.String",
+      "defaultValue": "",
+      "description": "Optional suffix appended to the fixed User-Agent Maple-Leaf-WebClient/1.0."
+    },
+    {
+      "name": "maple.framework.web.client.connect-timeout-millis",
+      "type": "java.lang.Integer",
+      "description": "Independent connect timeout; falls back to timeout-seconds multiplied by 1000 when unset."
+    },
+    {
+      "name": "maple.framework.web.client.read-timeout-millis",
+      "type": "java.lang.Integer",
+      "description": "Independent read timeout; 0 disables the read timeout (streaming safe). Falls back to timeout-seconds multiplied by 1000 when unset."
+    },
+    {
+      "name": "maple.framework.web.client.write-timeout-millis",
+      "type": "java.lang.Integer",
+      "description": "Independent write timeout; falls back to timeout-seconds multiplied by 1000 when unset."
+    },
+    {
+      "name": "maple.framework.web.client.response-timeout-millis",
+      "type": "java.lang.Integer",
+      "description": "Independent response timeout; 0 disables it. Falls back to timeout-seconds multiplied by 1000 when unset."
+    },
+    {
+      "name": "maple.framework.web.client.lb-guard-enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Enables the load balancer addressing guard on the load balanced builder. Set to false to restore the legacy behaviour."
+    },
+    {
+      "name": "maple.framework.web.client.lb-guard-allow-hosts",
+      "type": "java.util.Set<java.lang.String>",
+      "description": "Hosts allowed through the load balancer guard, for example dotted service ids such as svc.ns.svc.cluster.local."
+    },
+    {
+      "name": "maple.framework.enable.webclient-lb-guard",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Unified feature switch for the load balancer addressing guard; takes precedence over maple.framework.web.client.lb-guard-enabled. Defaults to true because the guard closes a misleading synthetic 503 defect (registered constitution IV exemption)."
+    }
+  ]
+}

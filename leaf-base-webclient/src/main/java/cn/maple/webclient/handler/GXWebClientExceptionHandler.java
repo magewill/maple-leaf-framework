@@ -22,6 +22,6 @@ public class GXWebClientExceptionHandler {
     public GXResultUtils<Dict> handleWebClientResponseException(WebClientResponseException e) {
         log.error("WebClient response error: statusCode={}, responseBodyLength={}",
                 e.getStatusCode().value(), e.getResponseBodyAsString().length(), e);
-        return GXResultUtils.error(e.getStatusCode().value(), "WebClient remote service response exception");
+        return GXResultUtils.error(e.getStatusCode().value(), "WebClient远端服务响应异常");
     }
 }

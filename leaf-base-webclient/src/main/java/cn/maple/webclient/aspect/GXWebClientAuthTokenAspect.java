@@ -5,6 +5,7 @@ import cn.maple.core.framework.annotation.GXHttpInvokerAuthToken;
 import cn.maple.core.framework.constant.GXHttpInvokerConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.exception.GXWebClientAuthTokenException;
+import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.webclient.service.GXWebClientService;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +20,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -61,10 +63,10 @@ public class GXWebClientAuthTokenAspect {
         if (!CharSequenceUtil.equalsIgnoreCase(value, GXHttpInvokerConstant.WEB_CLIENT_INVOKER)) {
             return;
         }
-        GXWebClientService webClientService = GXSpringContextUtils.getBean(GXWebClientService.class);
+        GXWebClientService webClientService = resolveService();
         if (Objects.isNull(webClientService)) {
             String errorMsg = CharSequenceUtil.format("Please implement {} interface", GXWebClientService.class.getName());
-            log.error(errorMsg);
+            log.error("WebClient auth token SPI is missing: interface={}", GXWebClientService.class.getName());
             throw new GXBusinessException(errorMsg);
         }
 
@@ -72,12 +74,26 @@ public class GXWebClientAuthTokenAspect {
         log.debug("Validate WebClient auth token: method={}", methodName);
 
         if (!webClientService.checkTokenValidity()) {
-            String errorMsg = CharSequenceUtil.format("WebClient auth token validation failed: method={}", methodName);
-            log.error(errorMsg);
+            boolean hasRequestContext = Objects.nonNull(GXCurrentRequestContextUtils.getHttpServletRequest());
+            String reason = hasRequestContext ? "token invalid" : "no request context";
+            String errorMsg = CharSequenceUtil.format(
+                    "WebClient auth token validation failed: reason={}, method={}", reason, methodName);
+            log.error("WebClient auth token validation failed: reason={}, method={}", reason, methodName);
             throw new GXWebClientAuthTokenException(errorMsg);
         }
 
         log.debug("WebClient auth token validation succeeded: method={}", methodName);
+    }
+
+    private GXWebClientService resolveService() {
+        Map<String, GXWebClientService> beans = GXSpringContextUtils.getBeans(GXWebClientService.class);
+        if (beans.isEmpty()) {
+            return null;
+        }
+        if (beans.size() > 1) {
+            log.warn("Multiple GXWebClientService beans found: count={}, using the first one", beans.size());
+        }
+        return beans.values().iterator().next();
     }
 
     private GXHttpInvokerAuthToken findAuthTokenAnnotation(JoinPoint point, Method method) {

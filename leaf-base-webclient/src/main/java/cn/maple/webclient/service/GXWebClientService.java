@@ -9,12 +9,15 @@ import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import jakarta.servlet.http.HttpServletRequest;
+import org.jspecify.annotations.Nullable;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * SPI used by {@code leaf-base-webclient} to supply auth, trace and platform
@@ -26,6 +29,16 @@ import java.util.Optional;
  * @since 1.0.0
  */
 public interface GXWebClientService {
+    /**
+     * Maximum reuse window for generated tokens.
+     */
+    long TOKEN_CACHE_WINDOW_MILLIS = 60_000L;
+
+    /**
+     * Generated token cache keyed by {@code source + secret}.
+     */
+    Map<String, CachedToken> TOKEN_CACHE = new ConcurrentHashMap<>();
+
     /**
      * Generates the auth token used for outbound WebClient requests.
      *
@@ -41,6 +54,8 @@ public interface GXWebClientService {
 
     /**
      * Encodes a WebClient auth token with the configured secret.
+     * <p>The generated value is reused for at most {@code min(60s, expiry/2)} and
+     * invalidated when the source or secret changes.</p>
      *
      * @param source token payload
      * @param expiry expiry in seconds
@@ -54,7 +69,25 @@ public interface GXWebClientService {
             throw new GXBusinessException("WebClient Token expiry must be greater than 0");
         }
         String authTokenSecret = getAuthTokenSecret();
-        return GXAuthCodeUtils.authCodeEncode(source, authTokenSecret, expiry);
+        long windowMillis = Math.min(TOKEN_CACHE_WINDOW_MILLIS, (expiry * 1000L) / 2);
+        String cacheKey = source + '\u0000' + authTokenSecret;
+        long now = System.currentTimeMillis();
+        CachedToken cachedToken = TOKEN_CACHE.get(cacheKey);
+        if (cachedToken != null && cachedToken.windowMillis() == windowMillis
+                && cachedToken.expiresAtMillis() > now) {
+            return cachedToken.token();
+        }
+
+        String authToken = GXAuthCodeUtils.authCodeEncode(source, authTokenSecret, expiry);
+        TOKEN_CACHE.put(cacheKey, new CachedToken(authToken, now + windowMillis, windowMillis));
+        return authToken;
+    }
+
+    /**
+     * Clears the generated token cache.
+     */
+    static void clearTokenCache() {
+        TOKEN_CACHE.clear();
     }
 
     /**
@@ -74,6 +107,8 @@ public interface GXWebClientService {
             return CharSequenceUtil.isNotBlank(decodedToken)
                     && !CharSequenceUtil.equalsIgnoreCase(decodedToken, "{}");
         } catch (Exception e) {
+            LoggerFactory.getLogger(GXWebClientService.class).warn(
+                    "Validate WebClient auth token failed: exceptionType={}", e.getClass().getName());
             return false;
         }
     }
@@ -92,8 +127,8 @@ public interface GXWebClientService {
     }
 
     default void logRequestResponse(HttpMethod method, String url, HttpHeaders requestHeaders,
-                                    Object requestBody, HttpStatusCode statusCode,
-                                    HttpHeaders responseHeaders, Object responseBody, long durationMs) {
+                                    @Nullable Object requestBody, HttpStatusCode statusCode,
+                                    HttpHeaders responseHeaders, @Nullable Object responseBody, long durationMs) {
     }
 
     default void logRequestResponse(HttpMethod method, String url, HttpStatusCode statusCode,
@@ -123,7 +158,7 @@ public interface GXWebClientService {
      *
      * @return platform value, or {@code null} when absent
      */
-    default String getPlatform() {
+    default @Nullable String getPlatform() {
         return GXCurrentRequestContextUtils.getHeader(GXTokenConstant.PLATFORM);
     }
 
@@ -164,5 +199,15 @@ public interface GXWebClientService {
         return Optional.ofNullable(traceId)
                 .map(Object::toString)
                 .orElse(GXTraceIdContextUtils.getTraceId());
+    }
+
+    /**
+     * Cached auth token entry.
+     *
+     * @param token           encoded token
+     * @param expiresAtMillis absolute expiry of the reuse window
+     * @param windowMillis    reuse window that produced the entry
+     */
+    record CachedToken(String token, long expiresAtMillis, long windowMillis) {
     }
 }
