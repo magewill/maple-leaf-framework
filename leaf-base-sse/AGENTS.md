@@ -61,6 +61,10 @@
 13. 修改连接缓存、超时下限、心跳策略、发送失败重试次数、退避策略或默认事件名时，必须确认不会破坏现有调用方预期。
 14. 修改 `GXSseMessageInnerReqDto` 字段、默认值或构造方式时，必须确认消息 ID、事件名、重连时间和数据负载的兼容性仍然成立。
 15. 修改连接关闭、异常回调或销毁逻辑时，必须保证缓存清理路径完整，避免连接泄漏或重复关闭导致的副作用。
+16. **移除即关闭**：任何由本模块主动把连接移出缓存的路径（心跳失败、显式心跳失败、重试耗尽、销毁）都必须走 `closeAndRemove`，保证 `complete()` 被调用一次且幂等；容器回调路径只做条件删除，不得重复 `complete()`。新增移除路径时同步补"移除后连接不可再用"的用例。
+17. **单连接保序**：同一 `clientId` 的消息必须按发送顺序投递，包括"首投失败 + 重试"场景；改动发送路径时必须保留或显式更新有序管线（`GXSseClientSendPipeline`），并在用例中断言接收顺序。
+18. **销毁语义**：`destroy()` 必须幂等、取消排队任务并等待执行器终止；销毁后 `createSseConnect` 抛 `GXBusinessException`，`send*` 静默降级。不要在构造函数里启动线程，启动点只允许 `@PostConstruct init()` 或首次使用时的懒启动。
+19. **默认值红线**：最小超时 60s、最大重试 3 次、退避 100/200/400ms、默认事件名 `Push Msg`、`retry:2000`、拆分上限 100 字符、心跳周期 60s 不得在修复缺陷时顺带修改。
 
 ## 4. 测试要求
 
@@ -72,6 +76,12 @@
    - `sendMessageToAllClient` 的空连接集合、空消息、广播到多个连接、单个连接发送失败后的清理。
    - `splitMessage` 的空消息、超短消息、超长消息、长度边界和拆分结果完整性。
    - `closeConnect`、`sendHeartbeat`、`closeConnections`、`destroy` 的资源释放与缓存变更。
+  - 移除即关闭：心跳失败、重试耗尽后"缓存为空 + 连接已 `complete`"。
+  - 投递顺序：首投失败后后续消息必须排在其后（`failedMessage_IsRetriedBeforeNextMessage`）。
+  - 并发：同 clientId 多线程注册不抛异常、广播与关闭并发不抛 `ConcurrentModificationException`。
+  - 生命周期：`destroy` 后不再产生重试、销毁后新建连接抛业务异常、`destroy` 幂等。
+  - 可观测性：`getMetrics()` 六项计数与"移除/清理日志为 DEBUG"。
+  - 真实 HTTP：`@SpringBootTest(webEnvironment = RANDOM_PORT)` 断言 `id:201`、`event: Push Msg`、`retry:2000`、`data:` 与关闭帧。
 4. 如果某项功能只有在 Spring Boot 应用真正启动后才能验证，例如 `@Service` 装配、Bean 生命周期回调、`@PreDestroy`、`SseEmitter` 与 Spring MVC 容器协作行为，那么测试必须使用接近真实运行方式的 Spring Boot 集成测试，例如 `@SpringBootTest`，不能只做纯单元测试。
 5. 纯工具型逻辑可以使用单元测试，但涉及 Spring 容器、生命周期、自动装配或 Web 层协作的行为，必须至少补一个真实 Spring Boot 启动场景测试。
 6. 涉及并发、缓存、连接清理、重试、异步发送或虚拟线程选择的改动，测试必须覆盖线程安全、资源释放和失败恢复场景。

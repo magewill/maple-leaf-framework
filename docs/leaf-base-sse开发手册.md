@@ -66,7 +66,7 @@ Leaf-Base-SSE 是 Maple-Leaf-Framework 框架中提供的 Server-Sent Events (SS
 | `clientId`          | String | `null`                                  | 客户端标识 ID。用于唯一标识连接的客户端，在发送消息和管理连接时使用。                                 |
 | `msgId`             | String | `IdUtil.fastUUID()` (Hutool生成)        | 消息 ID。每条消息的唯一标识，默认使用 Hutool 的 `fastUUID` 生成，用于消息追踪和去重。                   |
 | `data`              | Dict   | `null`                                  | 传输数据，即 SSE 事件的 `data` 字段。使用 Hutool 的 `Dict` 类型存储灵活的键值对消息内容。例如：`Dict.create().set("message", "内容")` |
-| `eventName`         | String | `null` (发送时若为空，实现类中可能使用默认值) | 事件标识符，即 SSE 事件的 `event` 字段。用于客户端区分不同类型的事件，客户端可以通过事件名称注册不同的处理函数。例如："userLogin", "newMessage"。 |
+| `eventName`         | String | `null` | 事件标识符，即 SSE 事件的 `event` 字段。经 `sendMessageToOneClient` / `sendMessageToAllClient` 发送时由实现统一置为 `Push Msg`；手工构建 DTO 直接发送时才需要自行设置。 |
 | `reconnectTimeMillis` | long   | `2000L` (2秒)                           | 重新连接时间（毫秒），即 SSE 事件的 `retry` 字段。当连接断开时，客户端尝试重新连接的等待时间。可根据网络环境和业务需求调整。 |
 | `comment`           | String | `""` (空字符串)                         | 事件注释。即 SSE 事件流中的注释行。用于添加事件的额外说明信息，方便调试和日志记录。该字段会在 SSE 事件中作为注释发送给客户端。 |
 
@@ -97,7 +97,7 @@ GXSseMessageInnerReqDto messageDto = GXSseMessageInnerReqDto.builder()
 
 | 方法名                      | 参数                                         | 返回值        | 说明                                                                                                                               |
 |-----------------------------|----------------------------------------------|---------------|------------------------------------------------------------------------------------------------------------------------------------|
-| `createSseConnect`          | `String clientId`, `long timeout`            | `SseEmitter`  | 创建 SSE 连接。`clientId` 可选，若为空则自动生成。`timeout` 为连接超时时间（秒），实际超时时间会与最小超时时间（`DEFAULT_MIN_TIMEOUT`）比较取最大值。 |
+| `createSseConnect`          | `String clientId`, `long timeout`            | `SseEmitter`  | 创建 SSE 连接。`clientId` 可选，若为空则自动生成。`timeout` 为连接超时时间（秒），实际超时时间会与最小超时时间（`DEFAULT_MIN_TIMEOUT_SECONDS`）比较取最大值。 |
 | `getSseEmitterByClientId`   | `String clientId`                            | `SseEmitter`  | 根据客户端 ID 获取 `SseEmitter` 对象。如果连接不存在，返回 `null`。                                                                     |
 | `sendMessageToAllClient`    | `String msg`                                 | `void`        | 向所有当前连接的客户端广播消息。如果消息为空或没有活跃连接，则不执行任何操作。                                                                 |
 | `sendMessageToOneClient`    | `String clientId`, `String msg`, `boolean splitMsg` | `void`        | 向指定的客户端发送消息。`splitMsg` 为 `true` 时，会调用 `splitMessage` 方法对长消息进行拆分。                                                  |
@@ -113,45 +113,96 @@ GXSseMessageInnerReqDto messageDto = GXSseMessageInnerReqDto.builder()
 **核心特性与机制：**
 
 - **连接缓存**：
-    - 使用静态 `ConcurrentHashMap<String, SseEmitter> SSE_CLIENT_CACHE` 存储客户端ID与 `SseEmitter` 实例的映射，确保线程安全。
+    - 使用实例级 `ConcurrentHashMap<String, SseEmitter>` 存储客户端 ID 与 `SseEmitter` 实例的映射。
+    - 只允许"条件删除"（`remove(key, value)`）：旧连接的 `onCompletion`/`onTimeout`/`onError` 回调不会误删重连后的新连接。
 - **超时管理**：
-    - `createSseConnect` 方法中，传入的 `timeout`（秒）会与内部定义的 `DEFAULT_MIN_TIMEOUT`（默认为60秒）比较，取较大者作为实际超时时间（毫秒级传递给 `SseEmitter` 构造函数）。
+    - `createSseConnect` 方法中，传入的 `timeout`（秒）会与内部定义的 `DEFAULT_MIN_TIMEOUT_SECONDS`（默认为60秒）比较，取较大者作为实际超时时间（毫秒级传递给 `SseEmitter` 构造函数）。
     - `SseEmitter` 本身具有超时机制，超时后会触发 `onTimeout` 回调。
 - **回调处理**：
-    - `onCompletionCallBack`: 连接正常完成（客户端关闭或服务器调用 `emitter.complete()`）时触发，调用 `removeUser` 清理连接。
-    - `onTimeoutCallBack`: 连接超时触发，调用 `removeUser` 清理连接。
-    - `onErrorCallBack`: 推送消息发生 I/O 异常时触发，记录错误日志，并尝试向客户端发送连接异常的恢复提示消息。若发送恢复消息失败，则调用 `removeUser` 清理连接。
-- **定时清理 (`cleanupConnections`)**：
-    - 通过静态 `ScheduledExecutorService`（`SCHEDULER`）以固定频率（默认为每分钟）执行。
-    - 遍历 `SSE_CLIENT_CACHE` 中的所有连接，尝试向每个连接发送一个空注释（`comment("heartbeat")`）作为心跳检测。
-    - 如果发送心跳失败（通常意味着连接已失效），则将该连接从缓存中移除。
-- **消息发送 (`sendMsgToClientByClientId`, `send`)**：
-    - `sendMsgToClientByClientId` 方法负责构建 `SseEmitter.SseEventBuilder`，设置 `data`, `id`, `comment`, `reconnectTime`, `name` 等 SSE 事件字段。
-    - 实际的 `emitter.send()` 操作封装在私有的 `send` 方法中，该方法包含异常捕获和重试逻辑。
-- **指数退避重试 (`retryWithBackoff`)**：
-    - 当 `send` 方法捕获到 `IOException` 时调用。
-    - 最多重试 `maxRetries` 次（默认为3次）。
-    - 重试间隔时间按指数增长：`2^(retryCount-1) * 100` 毫秒。
-    - 使用 `SCHEDULER` 调度重试任务。
+    - `onCompletionCallBack`: 连接正常完成（客户端关闭或服务器调用 `emitter.complete()`）时触发，条件删除连接。
+    - `onTimeoutCallBack`: 连接超时触发，条件删除连接（容器已完成该连接，不重复 `complete()`）。
+    - `onErrorCallBack`: 连接被容器判定失败时触发，记录 WARN 日志并条件删除连接；**不再尝试发送"恢复提示"消息**（此时连接已不可用）。
+- **心跳与清理 (`triggerHeartbeat` / `cleanupConnections`)**：
+    - `scheduler` 是单线程 `ScheduledExecutorService`，**只做触发**：每分钟把连接快照按 `256` 条一批提交给 `taskExecutor`（`Executors.newVirtualThreadPerTaskExecutor()`），批内串行写、批间并行，单个慢连接不会拖住其它连接。
+    - 每批对每个连接发送空注释 `comment("heartbeat")`；发送失败即判定连接失效，**移除并关闭**该连接。
+    - 心跳只用于**探活与清理**，不会延长连接寿命（见 2.4 节）。
+- **消息投递 (`dispatchMessage` / `trySend`)**：
+    - `dispatchMessage` 负责空负载拦截、错误分类与"同步直发 / 有序队列"分流；`trySend` 负责单次写并根据异常区分 `SENT` / `IO_FAILED` / `DEAD`。
+    - 成功路径在调用线程同步写；**首次写失败后**该连接转入有序发送管线（`GXSseClientSendPipeline`），此后同一连接的消息按 FIFO 异步投递。
+- **指数退避重试 (`deliverWithRetry`)**：
+    - 仅对 `IOException` 重试，最多 3 次，间隔 100 / 200 / 400 毫秒，在发送管线的虚拟线程上执行（**不在调用线程 sleep**）。
+    - `IllegalStateException`（连接已 `complete`）不重试，直接丢弃并计入 `drops`。
+    - 3 次重试仍失败：丢弃该消息、`failures` 计数 +1、**关闭连接并从缓存移除**。
 - **消息拆分 (`splitMessage`)**：
-    - 如果消息为空，返回空列表。
-    - 基准长度 `length` 会被限制在 1 到 100 之间。
-    - 每次拆分的实际长度在 `[1, length]` 区间内随机，避免固定模式。
-    - 使用 `StringBuilder` 优化日志构建性能。
+    - `null` 或空白消息返回空列表。
+    - `length` 会被钳制到 `1-100`（单位：字符，不是 KB）；每片长度在该区间随机，避免固定模式。
+    - 分片共享同一个 `msgId`，并在 SSE 注释中携带 `chunk=<序号>/<总片数>`，便于客户端重组与去重。
 - **心跳机制 (`sendHeartbeat`)**：
-    - 提供一个公共方法向指定客户端发送空注释作为心跳包。
-    - 如果发送失败，会移除该用户连接。
+    - 向指定客户端发送空注释作为心跳包；失败时关闭并移除该连接。
 - **辅助方法**：
-    - `buildMessageDto`: 根据客户端ID和消息内容构建一个默认事件名称（`DEFAULT_EVENT_NAME`，值为 "Push Msg"）的 `GXSseMessageInnerReqDto` 对象。
-    - `removeUser`: 从 `SSE_CLIENT_CACHE` 中移除指定客户端的连接，并记录日志。
-    - `getActiveConnectionCount`: 返回当前活跃连接数。
-    - `closeConnections(Function<String, Boolean> predicate)`: 根据提供的断言条件批量关闭连接。
+    - `buildMessageDto`: 根据客户端 ID、消息内容、共享 `msgId` 与分片序号构建 `GXSseMessageInnerReqDto`（默认事件名 `Push Msg`）。
+    - `closeAndRemove`: **移除即关闭**——条件删除成功后调用 `complete()`，所有主动清理路径统一走它。
+    - `removeEmitter`: 仅供容器回调使用，只做条件删除。
+    - `getActiveConnectionCount` / `getMetrics`: 返回当前活跃连接数与六项投递指标。
+    - `closeConnections(Function<String, Boolean> predicate)`: 按谓词批量关闭连接；谓词异常会直接抛给调用方（批量关闭不是原子操作）。
 
 **重要常量：**
 
-- `DEFAULT_MIN_TIMEOUT`: 默认最小超时时间（秒），值为 `60L`。
-- `DEFAULT_EVENT_NAME`: 默认SSE事件名称，值为 `"Push Msg"`。
-- `SCHEDULER`: 用于执行定时任务（如 `cleanupConnections` 和 `retryWithBackoff`）的 `ScheduledExecutorService` 实例。
+- `DEFAULT_MIN_TIMEOUT_SECONDS`: 默认最小超时时间（秒），值为 `60L`。
+- `DEFAULT_EVENT_NAME`: 默认 SSE 事件名称，值为 `"Push Msg"`。
+- `MAX_RETRIES`: 重试次数上限，值为 `3`（总尝试次数 = 1 + 3）。
+- `DEFAULT_SPLIT_LENGTH`: 拆分基准长度，值为 `100`（字符）。
+- `MAX_PENDING_MESSAGES`: 单连接有序队列容量，值为 `256`。
+- `HEARTBEAT_BATCH_SIZE`: 心跳分批大小，值为 `256`。
+- `scheduler`: 单线程 `ScheduledExecutorService`，仅用于触发心跳批次。
+- `taskExecutor`: `Executors.newVirtualThreadPerTaskExecutor()`，承载心跳批次与有序投递任务。
+
+### 2.4 连接生命周期、投递顺序与可观测性
+
+#### 2.4.1 连接生命周期真相
+
+SSE 的异步超时是**绝对超时**：`ResponseBodyEmitterReturnValueHandler` 用 `new DeferredResult<>(emitter.getTimeout())` 建立异步处理，后续任何写入（包括心跳）都不会重置它。因此：
+
+| 事件 | 缓存变化 | 是否 `complete()` | 客户端表现 |
+| --- | --- | --- | --- |
+| 正常完成 / 超时 / 错误（容器回调） | 条件删除 | 容器已完成，不重复调用 | 流结束，浏览器按 `retry` 重连 |
+| 服务端 `closeConnect` | 删除 | 是 | 收到 `event: close`，随后**仍会自动重连** |
+| 心跳失败 / `sendHeartbeat` 失败 | 删除 | 是 | 连接被关闭后自动重连 |
+| 重试耗尽 | 删除 | 是 | 同上 |
+| 同 clientId 新连接替换旧连接 | 覆盖 | 旧连接被 `complete()` | 旧浏览器连接断开并重连 |
+
+由此可得两条必须在业务侧接受的限制：
+
+1. **心跳不保活**：连接存活上限就是 `timeout` 秒（最小 60 秒），心跳只用于发现失效连接；
+2. **服务端无法阻止重连**：`closeConnect` 不会返回 HTTP 204，浏览器会按 `retry`（默认 2000ms）重连；如需"下线即不再连接"，必须在业务层拒绝再次握手。
+
+#### 2.4.2 投递顺序与重试
+
+| 场景 | 行为 |
+| --- | --- |
+| 全部发送成功 | 调用线程同步写，顺序即调用顺序 |
+| 某条消息首次写入失败 | 该消息进入连接专属 FIFO 队列，后续消息排在其后，由单个 drain 任务串行投递 → **顺序保持** |
+| 重试 | 仅 `IOException` 重试 3 次（100/200/400ms），在虚拟线程上 sleep，不阻塞调用方 |
+| 连接已 `complete`（`IllegalStateException`） | 不重试，丢弃并计入 `drops` |
+| 3 次重试仍失败 | 丢弃消息、`failures`+1、关闭连接 |
+| 队列超过 256 条 | 拒绝新消息（`drops`+1），已排队消息不受影响 |
+
+> 一旦某连接发生过写入失败，该连接之后的投递都会经由有序队列异步完成；其它连接仍保持同步直发。
+
+#### 2.4.3 可观测性
+
+`GXSseEmitterService#getMetrics()` 返回不可变快照（`GXSseMetrics`）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `attempts` | 发送尝试次数（含重试，不含握手） |
+| `successes` | 成功写入次数 |
+| `failures` | 重试耗尽被丢弃的消息数 |
+| `retries` | 实际执行的重试次数 |
+| `drops` | 丢弃消息数（连接失效 / 队列满 / 负载为空） |
+| `connections` | 当前活跃连接数 |
+
+日志级别约定：连接**创建/关闭**为 INFO（每个连接每次生命周期最多 2 条），**移除/清理/丢弃/重试中**为 DEBUG，**重试耗尽**为 ERROR（每条消息最多 1 条）。生产环境排障建议优先看指标，而不是打开 DEBUG。
 
 ## 3. 使用指南
 
@@ -202,7 +253,7 @@ public class SseController {
     @GetMapping("/sse/connect")
     public SseEmitter handleSseConnection(@RequestParam(required = false) String clientId) {
         // 创建连接，超时时间设置为 5 分钟（300 秒）
-        // 实际超时时间会是 Math.max(300, DEFAULT_MIN_TIMEOUT) 秒
+        // 实际超时时间会是 Math.max(300, DEFAULT_MIN_TIMEOUT_SECONDS) 秒
         long timeoutInSeconds = 300L;
         SseEmitter emitter = sseEmitterService.createSseConnect(clientId, timeoutInSeconds);
         // 连接建立后，服务器会首先发送一个包含 clientId 的消息，客户端可以此作为连接成功的凭证和 clientId
@@ -311,10 +362,11 @@ public void closeClientConnection(@PathVariable String clientId) {
 
 ### 3.6 其他实用方法
 
-- **获取连接实例**：`sseEmitterService.getSseEmitterByClientId(clientId)`
-- **获取活跃连接数**：`sseEmitterService.getActiveConnectionCount()` (需要将 `GXSseEmitterServiceImpl` 中的该方法提升到接口或注入实现类)
-- **发送心跳**：`sseEmitterService.sendHeartbeat(clientId)` (同样需要提升到接口或注入实现类)
-- **批量关闭连接**：`sseEmitterService.closeConnections(predicate)` (同样需要提升到接口或注入实现类)
+- **获取连接实例**：`sseEmitterService.getSseEmitterByClientId(clientId)`（可能返回 `null`；直接向返回的 emitter 写会绕过重试、顺序与指标统计）
+- **获取活跃连接数**：`sseEmitterService.getMetrics().connections()`（接口方法，推荐）；实现类另有 `getActiveConnectionCount()`
+- **发送心跳**：`sseEmitterService.sendHeartbeat(clientId)`（仅实现类可见，需要注入 `GXSseEmitterServiceImpl`）
+- **批量关闭连接**：`sseEmitterService.closeConnections(predicate)`（仅实现类可见；谓词异常直接抛给调用方，批量关闭非原子）
+- **投递指标**：`sseEmitterService.getMetrics()`（接口方法，六项计数）
 
 ## 4. 前端接收示例
 
@@ -588,33 +640,30 @@ onBeforeUnmount(() => {
 ### 5.1 服务器端 (基于 `GXSseEmitterServiceImpl`)
 
 - **合理设置超时时间**：
-    - 通过 `createSseConnect(clientId, timeoutInSeconds)` 方法设置连接的超时时间。实际超时时间会是 `Math.max(timeoutInSeconds, DEFAULT_MIN_TIMEOUT)`，其中 `DEFAULT_MIN_TIMEOUT` 默认为 60 秒。这意味着即使你设置一个非常短的超时，至少也会有 60 秒的有效期。
+    - 通过 `createSseConnect(clientId, timeoutInSeconds)` 方法设置连接的超时时间。实际超时时间会是 `Math.max(timeoutInSeconds, DEFAULT_MIN_TIMEOUT_SECONDS)`，其中 `DEFAULT_MIN_TIMEOUT_SECONDS` 默认为 60 秒。这意味着即使你设置一个非常短的超时，至少也会有 60 秒的有效期。
     - 长时间运行的连接应配合心跳机制来维持其活跃状态，并及时清理无效连接。
 - **客户端标识 (`clientId`)**：
     - 强烈建议为每个客户端连接使用唯一的 `clientId`。这可以是用户ID、设备ID或会话ID。
     - 如果在 `createSseConnect` 时未提供 `clientId`，服务器会自动生成一个 UUID 作为 `clientId`，并通过初始消息（事件ID `201`）发送给客户端。
     - `clientId` 是管理连接、定向推送消息和关闭特定连接的关键。
 - **连接管理与监控**：
-    - `GXSseEmitterServiceImpl` 内部使用 `ConcurrentHashMap` 存储 `SseEmitter` 实例，是线程安全的。
-    - 可以通过 `getActiveConnectionCount()` 方法（如果已在接口中声明或直接使用实现类）获取当前活跃连接数，用于监控服务器负载。
-    - 定期检查并清理不再活跃或已完成的连接，`GXSseEmitterServiceImpl` 内部有 `onCompletion`、`onTimeout` 和 `onError` 回调来处理连接的终止，并从缓存中移除。
+    - `GXSseEmitterServiceImpl` 使用实例级 `ConcurrentHashMap` 存储 `SseEmitter`，并以"条件删除 + 引用相等"保证并发安全。
+    - 通过 `getMetrics().connections()`（推荐）或实现类的 `getActiveConnectionCount()` 获取活跃连接数。
+    - `onCompletion` / `onTimeout` / `onError` 回调只做条件删除；**主动清理路径（心跳失败、重试耗尽、销毁）统一走 `closeAndRemove`，保证"移除即关闭"**。
 - **消息发送**：
-    - **消息拆分**：对于可能较长的消息，使用 `sendMessageToOneClient(clientId, message, true)` 或 `sendMessageToAllClient(message, true)` (如果重载支持) 来启用消息拆分。`splitMessage` 方法会将长消息按随机长度（默认1KB到2KB之间）拆分成多个小块发送，有助于避免网络传输问题和提高响应性。
-    - **自定义事件**：使用 `SseEmitter.event().name("customEventName").data(...).build()` 来发送带有特定事件名的消息，方便客户端进行分类处理。
-    - **错误处理与重试**：`sendMsgToClientByClientId` 方法内部实现了基于指数退避的重试机制（默认最多3次），用于处理临时的发送失败。如果最终发送失败，会调用 `onErrorCallBack`。
+    - **消息拆分**：使用 `sendMessageToOneClient(clientId, message, true)`。分片按 `1-100` 个**字符**随机切分（不是 KB），所有分片共享同一 `msgId`，注释中带 `chunk=i/n`；客户端应按 `msgId` 去重、按 `chunk` 校验完整性。`sendMessageToAllClient` **没有**拆分重载。
+    - **自定义事件**：使用 `SseEmitter.event().name("customEventName").data(...)` 构造事件；直接调用 `emitter.send()` 会绕过本模块的重试、顺序与清理逻辑，仅建议在能自行处理异常时使用。
+    - **错误处理与重试**：失败计入指标并可观测；重试只在连接仍为当前连接且未完成时进行，3 次耗尽即关闭连接。**不要**依赖重试保证送达——`IOException` 后容器通常已判定连接失败。
 - **心跳机制**：
-    - `GXSseEmitterServiceImpl` 提供了 `sendHeartbeat(clientId)` 和 `sendHeartbeatToAll()` 方法。定期向客户端发送心跳消息（默认事件名为 `"heartbeat"`，数据为当前时间戳）可以帮助：
-        - 维持 TCP 连接活跃，防止被中间网络设备（如防火墙、负载均衡器）因空闲超时而断开。
-        - 客户端可以此判断连接是否仍然有效。
-    - 如果心跳发送失败，通常意味着客户端已不可达，此时会关闭并移除该客户端的连接。
+    - 只有 `sendHeartbeat(clientId)`（单个）与内部每分钟一次的批量心跳，**没有** `sendHeartbeatToAll()` 公共方法。
+    - 心跳内容是空注释 `:heartbeat`（不是事件、也不是时间戳），作用是探活与触发清理，**不能延长连接寿命**（见 2.4.1）。连接存活上限就是 `timeout` 秒。
+    - 心跳发送失败即判定连接失效，关闭并移除该连接。
 - **回调处理**：
     - `createSseConnect` 方法返回的 `SseEmitter` 实例注册了 `onCompletion`、`onTimeout` 和 `onError` 回调。
-    - `onCompletionCallBack`：连接正常完成时（例如客户端主动关闭或服务器调用 `emitter.complete()`）调用。
-    - `onTimeoutCallBack`：连接因超时未活动而被终止时调用。
-    - `onErrorCallBack`：连接发生错误时（例如发送数据IO异常）调用。
-    - 这些回调负责从内部缓存 `emitterMap` 中移除对应的 `SseEmitter`，释放资源。
-- **线程安全**：服务实现已考虑线程安全，主要依赖 `ConcurrentHashMap` 和同步块（例如在 `closeConnect` 中移除时）。
-- **日志记录**：服务内部使用 SLF4J 进行日志记录，便于问题排查。
+    - `onCompletionCallBack`：连接正常完成时调用；`onTimeoutCallBack`：绝对超时终止时调用；`onErrorCallBack`：容器判定连接出错时调用。
+    - 三者均只从缓存**条件删除**，避免误删重连后的新连接。
+- **线程安全**：依赖 `ConcurrentHashMap`、引用相等、Spring 内部 `ReentrantLock` 与单连接 FIFO 管线；没有全局锁、没有单线程串行写。
+- **日志记录**：SLF4J + 全 ASCII 文本；连接生命周期 INFO，清理与丢弃 DEBUG，重试耗尽 ERROR。
 
 ### 5.2 客户端 (JavaScript `EventSource`)
 
@@ -643,7 +692,7 @@ onBeforeUnmount(() => {
 - **负载均衡**：
     - 在多实例部署时，需要确保客户端的 SSE 连接能够路由到正确的服务器实例（如果消息是针对特定会话的）。这通常需要“粘性会话”(sticky sessions) 或一个共享的后端（如 Redis Pub/Sub）来分发消息到持有连接的实例。
     - `leaf-base-sse` 本身是单实例设计，若要水平扩展，需要额外的消息总线集成。
-- **异步处理**：服务器端的消息发送操作（如 `emitter.send()`）是异步的。确保任何触发消息发送的业务逻辑也是非阻塞的，以避免耗尽服务器线程池。
+- **阻塞与异步**：成功路径的写入发生在调用线程（同步），因此广播到大量慢连接会占用调用线程的写时间；一旦某连接出现写失败，其后续消息改为经有序队列异步投递。
 - **资源清理**：确保所有连接在不再需要或出错时都能被正确关闭和清理，防止资源泄漏。`GXSseEmitterServiceImpl` 中的回调机制对此至关重要。
 
 ## 6. 常见问题与解决方案 (FAQ)
@@ -651,19 +700,19 @@ onBeforeUnmount(() => {
 - **问题 1：SSE 连接意外断开**
     - **可能原因**：
         1.  **网络波动或中断**：客户端与服务器之间的网络连接不稳定。
-        2.  **服务器/客户端超时**：`SseEmitter` 在服务器端达到配置的超时时间 (`timeoutInSeconds`，最小 `DEFAULT_MIN_TIMEOUT`) 而没有活动（如发送消息或心跳）。客户端 `EventSource` 也可能有自己的超时或不活动检测。
+        2.  **服务器/客户端超时**：`SseEmitter` 的超时是**绝对超时**（`timeoutInSeconds`，最小 `DEFAULT_MIN_TIMEOUT_SECONDS`），从连接建立开始计时，发送消息或心跳都不会重置它。客户端 `EventSource` 也可能有自己的超时或不活动检测。
         3.  **中间代理/防火墙**：网络中的防火墙或负载均衡器可能因空闲超时而关闭长连接。
         4.  **服务器重启或部署**：导致所有活动连接丢失。
         5.  **客户端主动关闭**：用户关闭浏览器标签页或应用，或代码调用 `eventSource.close()`。
         6.  **服务器端错误**：发送消息时发生 `IOException` 或其他错误，触发 `onErrorCallBack`，导致连接关闭。
     - **解决方案**：
-        1.  **心跳机制**：
-            -   服务器端：定期调用 `sseEmitterService.sendHeartbeat(clientId)` 或 `sendHeartbeatToAll()`。`GXSseEmitterServiceImpl` 的心跳发送失败时会自动关闭该连接。
-            -   客户端：可以监听心跳事件，如果一段时间未收到心跳，可认为连接可能已断开，并尝试重连或提示用户。
+        1.  **心跳机制与超时口径**：
+            -   服务器端：模块内置每分钟一次的批量心跳（空注释 `:heartbeat`），并可调用 `sendHeartbeat(clientId)` 手动探活；失败即关闭连接。
+            -   **心跳不能延长连接寿命**：`SseEmitter` 的超时是绝对超时（见 2.4.1），连接到期必然断开，因此必须依赖客户端 `EventSource` 自动重连，而不要把"心跳间隔小于超时"当成保活手段。
         2.  **客户端自动重连**：
             -   JavaScript `EventSource` API 默认支持自动重连（除非服务器响应 HTTP 204 或客户端调用 `close()`）。
             -   在 `eventSource.onerror` 回调中可以实现更精细的重连策略（如增加延迟、限制重连次数）。
-        3.  **合理配置超时**：根据业务场景设置服务器端 `SseEmitter` 的超时时间。对于需要长时间保持的连接，确保心跳间隔小于超时时间。
+        3.  **合理配置超时**：`createSseConnect(clientId, timeoutSeconds)` 的 `timeout` 就是连接存活上限（最小 60 秒），与心跳无关；需要"长时间在线"时调大 `timeout` 并接受到期重连，或在业务层实现"到期前主动重连"。
         4.  **服务器端日志**：检查 `GXSseEmitterServiceImpl` 的日志，特别是 `onTimeoutCallBack` 和 `onErrorCallBack` 的触发情况，以定位断开原因。
         5.  **优雅停机**：在服务器关闭或重新部署时，尝试优雅地通知客户端并关闭连接，但这对于 SSE 比较困难，通常客户端的重连机制更为关键。
 
@@ -675,7 +724,7 @@ onBeforeUnmount(() => {
         4.  **客户端处理逻辑错误**：客户端 `onmessage` 或 `addEventListener` 中的代码有 bug。
         5.  **服务器端逻辑错误**：未正确调用发送方法，或 `clientId` 不匹配。
     - **解决方案**：
-        1.  **服务器端重试机制**：`GXSseEmitterServiceImpl` 的 `sendMsgToClientByClientId` 方法内置了指数退避重试机制，可以处理临时的发送失败。检查相关日志确认重试是否成功。
+        1.  **服务器端重试与指标**：`GXSseEmitterServiceImpl` 对 `IOException` 做 3 次指数退避重试（100/200/400ms），3 次失败即丢弃消息并关闭连接。通过 `getMetrics()` 的 `attempts` / `successes` / `failures` / `retries` / `drops` 判断是否在丢消息；重试只覆盖"尚未被容器判定失败"的窗口，不能替代客户端去重与业务幂等。
         2.  **消息持久化与确认 (高级)**：对于非常关键的消息，SSE 本身不提供应用级的消息确认。如果需要严格保证送达：
             -   可以考虑将消息先存入持久化队列（如 Kafka, RabbitMQ）。
             -   客户端收到消息后，向服务器发送一个确认回执（通过另一个 HTTP 请求）。
@@ -727,7 +776,7 @@ onBeforeUnmount(() => {
 | **消息格式**     | 文本 (通常 UTF-8)，`leaf-base-sse` 支持发送 JSON 等。 | 文本 (UTF-8) 或二进制数据。                  |
 | **防火墙/代理**  | 通常更容易通过，因为它使用标准 HTTP 端口。        | 可能需要特定配置才能通过某些防火墙或代理。   |
 | **服务器资源**   | 每个连接通常比 WebSocket 轻量一些（尤其在连接数非常多时）。 | 每个连接维护一个持久的 TCP 套接字。          |
-| **`leaf-base-sse` 特点** | 线程安全、内存优化、连接超时、心跳、消息拆分、指数退避重试、定时清理。 | (通用 WebSocket 特点)                        |
+| **`leaf-base-sse` 特点** | 连接缓存与条件删除、单连接有序投递、指数退避重试、心跳探活、消息拆分（共享 msgId + 分片序号）、六项投递指标。 | (通用 WebSocket 特点)                        |
 | **适用场景**     | **`leaf-base-sse` 理想场景**：<br>- 实时通知推送 (如新邮件、新订单、系统告警)<br>- 实时数据更新 (如股票行情、仪表盘数据、体育比分)<br>- 任务进度反馈 (如文件上传/下载、后台任务处理)<br>- 日志流推送 | **WebSocket 理想场景**：<br>- 实时聊天应用<br>- 多人在线游戏<br>- 协同编辑工具<br>- 需要低延迟、高频率双向交互的场景 |
 
 **总结**：

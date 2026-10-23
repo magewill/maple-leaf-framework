@@ -1,8 +1,10 @@
 package cn.maple.sse.service.impl;
 
+import cn.maple.sse.dto.GXSseMessageInnerReqDto;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.lang.reflect.Field;
@@ -140,6 +142,44 @@ class GXSseEmitterServiceImplTest {
         errorCallback.accept(new RuntimeException("boom"));
 
         assertSame(secondEmitter, service.getSseEmitterByClientId("client-1"));
+        assertEquals(1, service.getActiveConnectionCount());
+    }
+
+    @Test
+    void messageWithNullData_IsDroppedWithoutThrowing() {
+        SseEmitter emitter = service.createSseConnect("null-data", 120L);
+        GXSseMessageInnerReqDto messageDto = GXSseMessageInnerReqDto.builder()
+                .clientId("null-data")
+                .eventName("Push Msg")
+                .build();
+
+        assertDoesNotThrow(() -> service.dispatchMessage("null-data", emitter, messageDto));
+
+        assertEquals(1, service.getActiveConnectionCount());
+        assertEquals(1L, service.getMetrics().drops());
+    }
+
+    @Test
+    void directEmitterUseBypassesMetricsAndRetry() throws Exception {
+        SseEmitter emitter = service.createSseConnect("direct-use", 120L);
+
+        emitter.send(SseEmitter.event().data("raw-payload", MediaType.TEXT_PLAIN));
+
+        assertEquals(0L, service.getMetrics().attempts(),
+                "writing to the raw emitter bypasses attempts/retries accounting");
+        assertEquals(1, service.getActiveConnectionCount());
+    }
+
+    @Test
+    void getSseEmitterByClientId_NullClientIdReturnsNull() {
+        assertNull(service.getSseEmitterByClientId(null));
+    }
+
+    @Test
+    void closeConnections_NullPredicateReturnsZero() {
+        service.createSseConnect("null-predicate", 120L);
+
+        assertEquals(0, service.closeConnections(null));
         assertEquals(1, service.getActiveConnectionCount());
     }
 

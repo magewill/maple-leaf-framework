@@ -6,6 +6,7 @@ import cn.maple.core.framework.dto.req.GXBaseReqDto;
 import lombok.Builder;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Internal DTO used to build SSE messages.
@@ -17,7 +18,7 @@ public class GXSseMessageInnerReqDto extends GXBaseReqDto {
     /**
      * Client connection id.
      */
-    private String clientId;
+    private @Nullable String clientId;
 
     /**
      * Message id. Lombok builders do not keep field initializers unless the field
@@ -27,14 +28,15 @@ public class GXSseMessageInnerReqDto extends GXBaseReqDto {
     private String msgId = IdUtil.fastUUID();
 
     /**
-     * Event payload.
+     * Event payload. A {@code null} payload is never sent: callers that build the DTO
+     * manually must set it, otherwise the message is dropped and counted.
      */
-    private Dict data;
+    private @Nullable Dict data;
 
     /**
      * SSE event name.
      */
-    private String eventName;
+    private @Nullable String eventName;
 
     /**
      * Browser reconnect interval in milliseconds.
