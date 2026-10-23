@@ -48,6 +48,21 @@ public class ImageCaptcha extends AbstractCaptcha {
     }
 
     /**
+     * Create a fully configured instance.
+     *
+     * @param length character count (1 to 10)
+     * @param width  image width in pixels
+     * @param height image height in pixels
+     * @param gif    whether to render animated GIF frames
+     * @return a new captcha instance
+     */
+    public static ImageCaptcha of(int length, int width, int height, boolean gif) {
+        ImageCaptcha captcha = new ImageCaptcha();
+        captcha.setLength(length).setWidth(width).setHeight(height).setGif(gif);
+        return captcha;
+    }
+
+    /**
      * Render the captcha text as an image.
      *
      * @param captcha captcha text
@@ -69,8 +84,8 @@ public class ImageCaptcha extends AbstractCaptcha {
                     gifEncoder.addFrame(graphicsImage(captcha, i));
                 }
                 gifEncoder.finish();
-            } else {
-                ImageIO.write(graphicsImage(captcha, 1), suffix, out);
+            } else if (!ImageIO.write(graphicsImage(captcha, 1), suffix, out)) {
+                throw new IOException("No image writer found for suffix [" + suffix + "]");
             }
             out.flush();
             return captcha;
@@ -130,9 +145,16 @@ public class ImageCaptcha extends AbstractCaptcha {
      * @return alpha value from 0.0 to 1.0
      */
     private float getAlpha(int i, int j) {
+        if (length <= 1) {
+            return 1.0f;
+        }
         int num = i + j;
         float r = (float) 1 / (length - 1);
         float s = length * r;
-        return num >= length ? (num * r - s) : num * r;
+        float alpha = num >= length ? (num * r - s) : num * r;
+        if (Float.isNaN(alpha) || alpha < 0.0f) {
+            return 0.0f;
+        }
+        return Math.min(alpha, 1.0f);
     }
 }

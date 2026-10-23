@@ -6,6 +6,7 @@ import cn.maple.sso.properties.GXSSOProperties;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
@@ -13,8 +14,10 @@ import java.lang.reflect.Modifier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@ResourceLock("sso-global-config")
 class GXSSOUtilsBehaviorTest {
     @BeforeEach
     void setUp() {
@@ -78,6 +81,55 @@ class GXSSOUtilsBehaviorTest {
         request.addHeader("x-forwarded-for", "203.0.113.7, 10.0.0.1");
 
         assertEquals("203.0.113.7", GXIpHelperUtil.getIpAddr(request));
+    }
+
+    @Test
+    void inContainUrlMatchesByPathSegment() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/user-admin/list");
+
+        assertFalse(GXHttpUtil.inContainURL(request, "/api/user"),
+                "substring matching must not treat a different path as a match");
+        assertTrue(GXHttpUtil.inContainURL(request, "/api/user-admin/list"));
+    }
+
+    @Test
+    void requestPlayloadRejectsOversizedBody() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setContent(new byte[70 * 1024]);
+
+        boolean thrown = false;
+        try {
+            GXHttpUtil.requestPlayload(request);
+        } catch (cn.maple.core.framework.exception.GXBusinessException e) {
+            thrown = true;
+        }
+        assertTrue(thrown, "request body must be bounded");
+    }
+
+    @Test
+    void localRequestIpReusesResolvedAddress() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("127.0.0.1");
+
+        assertSame(GXIpHelperUtil.LOCAL_IP, GXIpHelperUtil.getIpAddr(request),
+                "localhost resolution must not run on every request");
+    }
+
+    @Test
+    void localIpCheckUsesPreResolvedAddresses() {
+        assertTrue(GXIpHelperUtil.isLocalIp(GXIpHelperUtil.LOCAL_IP),
+                "the address resolved at class initialisation must be recognised as local");
+        assertFalse(GXIpHelperUtil.isLocalIp("203.0.113.9"), "a public address is not local");
+        assertFalse(GXIpHelperUtil.isLocalIp(""), "a blank address is not local");
+        assertFalse(GXIpHelperUtil.isLocalIp(null), "a null address is not local");
+    }
+
+    @Test
+    void localIpFieldsAreNotMutable() throws Exception {
+        assertTrue(Modifier.isFinal(GXIpHelperUtil.class.getDeclaredField("LOCAL_IP").getModifiers()),
+                "LOCAL_IP must not be rewritable by callers");
+        assertTrue(Modifier.isFinal(GXIpHelperUtil.class.getDeclaredField("HOST_NAME").getModifiers()),
+                "HOST_NAME must not be rewritable by callers");
     }
 
     @Test

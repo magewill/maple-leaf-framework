@@ -5,6 +5,7 @@ import cn.maple.core.framework.web.interceptor.GXAuthorizationInterceptor;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
+import org.springframework.core.annotation.Order;
 import org.springframework.web.servlet.config.annotation.CorsRegistration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -44,6 +45,26 @@ class GXWebMvcConfigurerTest {
     }
 
     @Test
+    void addInterceptorsHonoursOrderAnnotationBeforeBeanNameOrder() {
+        GXAuthorizationInterceptor plain = new PlainInterceptor();
+        GXAuthorizationInterceptor ordered = new OrderedInterceptor();
+        Map<String, GXAuthorizationInterceptor> interceptors = new LinkedHashMap<>();
+        interceptors.put("aPlain", plain);
+        interceptors.put("zOrdered", ordered);
+        InterceptorRegistry registry = mock(InterceptorRegistry.class);
+
+        try (MockedStatic<GXSpringContextUtils> springContext = Mockito.mockStatic(GXSpringContextUtils.class)) {
+            springContext.when(() -> GXSpringContextUtils.getBeans(GXAuthorizationInterceptor.class)).thenReturn(interceptors);
+
+            configurer.addInterceptors(registry);
+
+            var inOrder = Mockito.inOrder(registry);
+            inOrder.verify(registry).addInterceptor(ordered);
+            inOrder.verify(registry).addInterceptor(plain);
+        }
+    }
+
+    @Test
     void addInterceptorsDoesNothingWhenNoInterceptorBeanExists() {
         InterceptorRegistry registry = mock(InterceptorRegistry.class);
 
@@ -75,5 +96,12 @@ class GXWebMvcConfigurerTest {
         verify(registration).allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
         verify(registration).allowedHeaders("*");
         verify(registration).maxAge(3600);
+    }
+
+    @Order(100)
+    private static class OrderedInterceptor extends GXAuthorizationInterceptor {
+    }
+
+    private static class PlainInterceptor extends GXAuthorizationInterceptor {
     }
 }

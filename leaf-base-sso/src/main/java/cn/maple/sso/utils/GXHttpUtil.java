@@ -1,9 +1,10 @@
 package cn.maple.sso.utils;
 
-import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.json.JSONConfig;
 import cn.hutool.json.JSONUtil;
+import cn.maple.core.framework.exception.GXBusinessException;
+import cn.maple.core.framework.util.GXResultUtils;
 import cn.maple.sso.properties.GXSSOProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -20,11 +21,21 @@ public class GXHttpUtil {
 
     public static final String X_REQUESTED_WITH = "X-Requested-With";
 
+    public static final String X_RESPONSE_TYPE = "X-RESPONSE-TYPE";
+
+    private static final int MAX_PAYLOAD_CHARS = 64 * 1024;
+
     private GXHttpUtil() {
     }
 
     public static boolean isAjax(HttpServletRequest request) {
-        return XML_HTTP_REQUEST.equals(request.getHeader(X_REQUESTED_WITH));
+        if (request == null) {
+            return false;
+        }
+        if (XML_HTTP_REQUEST.equalsIgnoreCase(request.getHeader(X_REQUESTED_WITH))) {
+            return true;
+        }
+        return "api".equalsIgnoreCase(request.getHeader(X_RESPONSE_TYPE));
     }
 
     public static void ajaxStatus(HttpServletResponse response, int status, String tip) {
@@ -32,13 +43,12 @@ public class GXHttpUtil {
             response.setContentType("application/json;charset=" + GXSSOProperties.getSsoEncoding());
             response.setStatus(status);
             PrintWriter out = response.getWriter();
-            Dict data = Dict.create().set("code", status).set("msg", tip).set("data", null);
             JSONConfig jsonConfig = new JSONConfig();
             jsonConfig.setIgnoreNullValue(false);
-            out.print(JSONUtil.toJsonStr(data, jsonConfig));
+            out.print(JSONUtil.toJsonStr(GXResultUtils.error(status, tip), jsonConfig));
             out.flush();
         } catch (IOException e) {
-            log.error(e.getMessage());
+            log.error("Write ajax status failed: status={}", status, e);
         }
     }
 
@@ -53,18 +63,27 @@ public class GXHttpUtil {
     }
 
     public static boolean inContainURL(HttpServletRequest request, String url) {
-        boolean result = false;
-        if (url != null && !url.trim().isEmpty()) {
-            String[] urlArr = url.split(";");
-            StringBuilder reqUrl = new StringBuilder(request.getRequestURL());
-            for (String s : urlArr) {
-                if (reqUrl.indexOf(s) > 1) {
-                    result = true;
-                    break;
-                }
+        if (request == null || CharSequenceUtil.isBlank(url)) {
+            return false;
+        }
+        String path = request.getRequestURI();
+        if (CharSequenceUtil.isBlank(path)) {
+            return false;
+        }
+        for (String candidate : url.split(";")) {
+            String pattern = candidate.trim();
+            if (pattern.isEmpty()) {
+                continue;
+            }
+            if (path.equals(pattern)) {
+                return true;
+            }
+            String prefix = pattern.endsWith("/") ? pattern : pattern + "/";
+            if (path.startsWith(prefix)) {
+                return true;
             }
         }
-        return result;
+        return false;
     }
 
     public static String encodeRetURL(String url, String retParam, String retUrl) {
@@ -129,10 +148,15 @@ public class GXHttpUtil {
     public static String requestPlayload(HttpServletRequest request) throws IOException {
         StringBuilder stringBuilder = new StringBuilder();
         try (InputStream inputStream = request.getInputStream();
-             BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(inputStream))) {
+             BufferedReader bufferedReader = new BufferedReader(
+                     new InputStreamReader(inputStream, java.nio.charset.StandardCharsets.UTF_8))) {
             char[] charBuffer = new char[128];
-            int bytesRead = -1;
+            int bytesRead;
             while ((bytesRead = bufferedReader.read(charBuffer)) > 0) {
+                if (stringBuilder.length() + bytesRead > MAX_PAYLOAD_CHARS) {
+                    throw new GXBusinessException("Request body exceeds the supported limit of "
+                            + MAX_PAYLOAD_CHARS + " characters.");
+                }
                 stringBuilder.append(charBuffer, 0, bytesRead);
             }
         }

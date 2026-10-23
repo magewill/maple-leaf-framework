@@ -1,0 +1,192 @@
+{
+  "groups": [
+    {
+      "name": "sso.config",
+      "type": "cn.maple.sso.properties.GXSSOProperties",
+      "sourceType": "cn.maple.sso.properties.GXSSOConfigProperties",
+      "description": "SSO token, cookie and interceptor configuration."
+    },
+    {
+      "name": "url",
+      "type": "cn.maple.sso.properties.GXUrlWhiteListsConfigProperties",
+      "sourceType": "cn.maple.sso.properties.GXUrlWhiteListsConfigProperties",
+      "description": "SSO login interceptor URL whitelist."
+    }
+  ],
+  "properties": [
+    {
+      "name": "sso.config.source",
+      "type": "java.lang.String",
+      "defaultValue": "nacos",
+      "description": "Configuration source: nacos (default) or local (classpath:${spring.profiles.active}/sso.yml)."
+    },
+    {
+      "name": "sso.config.encoding",
+      "type": "java.lang.String",
+      "defaultValue": "UTF-8",
+      "description": "Response and redirect encoding."
+    },
+    {
+      "name": "sso.config.token-name",
+      "type": "java.lang.String",
+      "defaultValue": "token",
+      "description": "Header name carrying the token and the token field name inside the cookie payload."
+    },
+    {
+      "name": "sso.config.cookie-name",
+      "type": "java.lang.String",
+      "defaultValue": "uid",
+      "description": "Cookie name carrying the token."
+    },
+    {
+      "name": "sso.config.cookie-domain",
+      "type": "java.lang.String",
+      "description": "Cookie domain. Empty means current host."
+    },
+    {
+      "name": "sso.config.cookie-path",
+      "type": "java.lang.String",
+      "defaultValue": "/",
+      "description": "Cookie path."
+    },
+    {
+      "name": "sso.config.cookie-secure",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Cookie Secure attribute. Required when cookie-same-site is None."
+    },
+    {
+      "name": "sso.config.cookie-http-only",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Cookie HttpOnly attribute."
+    },
+    {
+      "name": "sso.config.cookie-same-site",
+      "type": "java.lang.String",
+      "defaultValue": "Lax",
+      "description": "Cookie SameSite attribute: Lax, Strict or None."
+    },
+    {
+      "name": "sso.config.cookie-max-age",
+      "type": "java.lang.Integer",
+      "defaultValue": -1,
+      "description": "Cookie Max-Age in seconds. -1 means browser session cookie."
+    },
+    {
+      "name": "sso.config.cookie-browser",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Validate the browser fingerprint (SHA-256 of User-Agent) stored in the token."
+    },
+    {
+      "name": "sso.config.cookie-check-ip",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Validate the client IP stored in the token. Unresolvable IP is rejected."
+    },
+    {
+      "name": "sso.config.trust-forwarded-ip-headers",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Trust X-Forwarded-For and similar headers when resolving the client IP."
+    },
+    {
+      "name": "sso.config.login-url",
+      "type": "java.lang.String",
+      "defaultValue": "",
+      "description": "Login page URL. Empty means return 401 JSON instead of redirecting."
+    },
+    {
+      "name": "sso.config.logout-url",
+      "type": "java.lang.String",
+      "defaultValue": "",
+      "description": "Post-logout redirect URL."
+    },
+    {
+      "name": "sso.config.param-return-url",
+      "type": "java.lang.String",
+      "defaultValue": "ReturnURL",
+      "description": "Query parameter name carrying the return URL."
+    },
+    {
+      "name": "sso.config.cache-expires",
+      "type": "java.lang.Integer",
+      "defaultValue": 7200,
+      "description": "Token absolute time-to-live in seconds, also used as cache TTL. -1 disables expiry (not recommended)."
+    },
+    {
+      "name": "sso.config.cache-fallback-enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Allow a degraded local token (no server-side validation) when no GXSSOCache bean is available."
+    },
+    {
+      "name": "sso.config.capacity",
+      "type": "java.lang.Integer",
+      "defaultValue": 4096,
+      "description": "Maximum entries of the handler-method annotation cache."
+    },
+    {
+      "name": "sso.config.permission-uri",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Enable URI-based authorization in GXSSOPermissionInterceptor."
+    },
+    {
+      "name": "sso.config.nothing-annotation-pass",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Allow handlers without a permission annotation when neither URI mode nor annotation mode applies."
+    },
+    {
+      "name": "sso.config.illegal-url",
+      "type": "java.lang.String",
+      "description": "Redirect target for a denied request; when blank a 403 response is written."
+    },
+    {
+      "name": "sso.config.sign-key",
+      "type": "java.lang.String",
+      "description": "Reserved legacy field. Not used by the current implementation."
+    },
+    {
+      "name": "sso.config.sign-algorithm",
+      "type": "java.lang.String",
+      "defaultValue": "HS512",
+      "description": "Reserved legacy field. Not used by the current implementation."
+    },
+    {
+      "name": "sso.config.rsa-jks-store",
+      "type": "java.lang.String",
+      "defaultValue": "key.jks",
+      "description": "Reserved legacy field. Not used by the current implementation."
+    },
+    {
+      "name": "sso.config.rsa-cert-store",
+      "type": "java.lang.String",
+      "defaultValue": "public.cert",
+      "description": "Reserved legacy field. Not used by the current implementation."
+    },
+    {
+      "name": "sso.config.rsa-alias",
+      "type": "java.lang.String",
+      "defaultValue": "jwtkey",
+      "description": "Reserved legacy field. Not used by the current implementation."
+    },
+    {
+      "name": "sso.config.rsa-keypass",
+      "type": "java.lang.String",
+      "description": "Reserved legacy field. Must not carry a plaintext password."
+    },
+    {
+      "name": "sso.config.rsa-storepass",
+      "type": "java.lang.String",
+      "description": "Reserved legacy field. Must not carry a plaintext password."
+    },
+    {
+      "name": "url.white-lists",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Ant-style path patterns that skip the SSO login interceptor."
+    }
+  ]
+}

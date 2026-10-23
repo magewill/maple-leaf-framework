@@ -49,10 +49,13 @@
 
 - 新增配置项必须使用 `@ConfigurationProperties(prefix = "...")` 绑定到 `GX<能力>Properties` 类，字段给出合理默认值；裸 `@Value` 仅用于单点开关，不得用于成组配置。
 - 需要外部化的能力提供两套实现并共享抽象基类：
-  - `properties/local/GXLocal<能力>Properties`：`@PropertySource("classpath:/${spring.profiles.active}/<能力>.yml")` + `@ConditionalOnMissingClass("com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties")`；
-  - `properties/nacos/GXNacos<能力>Properties`：`@NacosConfigurationProperties(dataId = "<能力>.yml", ...)` + `@ConditionalOnClass(...)`。
-  两者通过类路径条件互斥装配，业务代码只面向基类编程。
-- 功能开关统一置于 `maple.framework.enable.<feature>`，默认关闭，通过 `@ConditionalOnProperty` / `@ConditionalOnExpression` 显式开启；新增开关同步写入 `META-INF/additional-spring-configuration-metadata.json`，保证 IDE 提示。
+  - `properties/local/GXLocal<能力>Properties`：`@PropertySource("classpath:/${spring.profiles.active}/<能力>.yml")`；
+  - `properties/nacos/GXNacos<能力>Properties`：`@NacosConfigurationProperties(dataId = "<能力>.yml", ...)`。
+  业务代码只面向基类编程。
+- 两套实现的互斥方式二选一，但**不允许出现"文档说支持两套、实际只有一套"**：
+  - **类路径条件（默认）**：local 用 `@ConditionalOnMissingClass("com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties")`，nacos 用 `@ConditionalOnClass(...)`；
+  - **显式开关（仅当类路径条件不可达时）**：例如模块以 compile 依赖引入 `leaf-base-nacos`，导致 `@ConditionalOnMissingClass` 恒为假、local 变体永不生效。此时用 `@ConditionalOnProperty(name = "<模块>.config.source", havingValue = "local" | "nacos", matchIfMissing = true)` 互斥装配，并同时满足四条护栏：① 默认值（`matchIfMissing`）保持已发布的既有行为；② 启动时以 INFO 打印实际生效源与关键默认值（不打印密钥）；③ 必须有互斥装配与默认值的测试；④ 新增键登记 `additional-spring-configuration-metadata.json` 并在模块手册的配置键表中标注。
+- 跨模块的框架能力开关统一置于 `maple.framework.enable.<feature>`，默认关闭，通过 `@ConditionalOnProperty` / `@ConditionalOnExpression` 显式开启；**单模块内部开关沿用该模块既有配置前缀**（如 `sso.config.*`、`redisson.*`），不强制迁移到 `maple.framework.enable.*`。新增开关同步写入 `META-INF/additional-spring-configuration-metadata.json`，保证 IDE 提示。
 - 敏感值只允许 `${ENV_VAR:default}` 形式注入，禁止把真实密码、令牌、生产地址写入源码、测试或 `config/` 模板。
 - 配置类必须保持可覆盖、可观测：装配过程输出明确日志（如"Nacos 配置 / 本地配置"），禁止静默降级。
 
@@ -92,12 +95,13 @@
 | 异常 | `GX<领域>Exception` | `GXBusinessException`、`GXSqlInjectionException` |
 | 状态码 | `GX<范围>StatusCode`（枚举，实现 `GXResultStatusCode`） | `GXDefaultResultStatusCode` |
 | 枚举 | `GX<概念>Enums` / `GX<概念>Enum` | `GXUnionTypeEnums` |
-| 常量 | `GX<范围>Constant`（私有构造、全大写字段） | `GXCommonConstant` |
+| 常量 | `GX<范围>Constant`（私有构造、全大写字段）；顺序、上限、标记类常量并入模块既有的 `GX<范围>Constant`，不为个别常量新建类 | `GXCommonConstant`、`GXSSOConstant.AUTHORIZATION_ORDER` |
 | 配置属性 | `GX<能力>Properties`（外层 + `local`/`nacos` 子包） | `GXRedissonProperties` |
 | 配置类 | `GX<能力>Config` | `GXFrameworkConfig`、`GXRetryConfig` |
 | 注解与切面 | 注解 `GX<动作>`，切面同名 + `Aspect` | `GXStopWatch` / `GXStopWatchAspect` |
 | 过滤器 / 拦截器 | `GX<用途>Filter` / `GX<用途>Interceptor` | `GXXssFilter`、`GXTraceIdInterceptor` |
 | 工具类 | `GX<用途>Utils`（历史 `*Util` 不再新增） | `GXCommonUtils`、`GXResultUtils` |
+| 校验器 | `GX<概念>Validator`（无状态、可静态调用、不持有可变字段） | `GXRocketMQConfigSourceValidator`、`GXValidateDBExistsValidator` |
 | 请求 DTO / 响应 DTO | `GX<业务>ReqDto` / `GX<业务>ResDto` | `GXUserReqDto`、`GXPaginationResDto` |
 | 对外协议对象 | `GX<业务>ReqProtocol` / `GX<业务>ResProtocol` | `GXQueryParamReqProtocol` |
 | 内部传输对象 | `GX<业务>InnerDto` | `GXBaseQueryParamInnerDto` |
@@ -142,4 +146,11 @@
 - 复杂度必须被证明：新增抽象层、缓存、反射链路、生命周期钩子、并发模型时，需在 PR 中说明必要性、替代方案与回滚方式。
 - 运行时开发指导以根 `README.md`、`docs/` 各模块手册与模块级 `AGENTS.md` 为准；宪法只约束"什么不可妥协"。
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-21 | **Last Amended**: 2026-10-21
+## 修订记录
+
+| 版本 | 日期 | 类型 | 变更 | 依据 |
+| --- | --- | --- | --- | --- |
+| 1.1.0 | 2026-10-23 | MINOR | §IV：为双配置源新增"显式开关"等价互斥方式（附四条护栏），并澄清单模块内部开关沿用模块既有前缀、不强制迁移到 `maple.framework.enable.*`；§VII：后缀表新增"校验器 `GX<概念>Validator`"角色，并注明顺序/上限/标记类常量并入既有 `GX<范围>Constant` | `specs/013-sso-module-audit` T102：`leaf-base-nacos` 为 compile 依赖使 `@ConditionalOnMissingClass` 恒为假（F-06），模块改用 `sso.config.source` 显式开关并经 110 条用例验证；仓库已有 `GXRocketMQConfigSourceValidator`、`GXValidateDBExistsValidator`、`GXValidateCallRemoteServiceValidator` 三个类型在实践上使用 `Validator` 后缀但后缀表无对应角色 |
+| 1.0.0 | 2026-10-21 | MAJOR | 初始版本（由现有代码库静态分析归纳） | 根 POM + 25 个 `leaf-base-*` 模块 + `docs/` + 各模块 `AGENTS.md` |
+
+**Version**: 1.1.0 | **Ratified**: 2026-10-21 | **Last Amended**: 2026-10-23

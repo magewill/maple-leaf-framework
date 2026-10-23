@@ -5,7 +5,8 @@ import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.constant.GXTokenConstant;
-import cn.maple.core.framework.util.GXSpringContextUtils;
+import cn.maple.core.framework.exception.GXBusinessException;
+
 import cn.maple.core.framework.web.support.GXCustomerHandlerMethodArgumentResolver;
 import cn.maple.sso.annotation.GXLoginUserAnnotation;
 import cn.maple.sso.constant.GXSSOConstant;
@@ -29,22 +30,35 @@ public class GXLoginUserHandlerMethodArgumentResolver implements GXCustomerHandl
                 GXUserInfoDto.class.isAssignableFrom(parameter.getParameterType());
     }
 
+    /**
+     * Resolve the current login user for a {@code @GXLoginUserAnnotation} parameter.
+     *
+     * <p>Failure semantics are single valued: a missing token, an unresolvable user id and a
+     * missing user record all raise {@link GXBusinessException}. Returning {@code null} would
+     * hand a {@code null} to a non nullable controller parameter (FR-017).</p>
+     *
+     * @param parameter controller parameter carrying the annotation
+     * @param container model and view container
+     * @param request current request
+     * @param factory data binder factory
+     * @return the resolved DTO instance, never {@code null}
+     */
     @Override
     public Object resolveArgument(MethodParameter parameter, ModelAndViewContainer container,
                                   NativeWebRequest request, WebDataBinderFactory factory) {
         Long userId = resolveUserId(request);
         if (userId == null) {
-            return null;
+            throw new GXBusinessException("SSO token is absent, cannot resolve @GXLoginUserAnnotation parameter.");
         }
 
-        GXUUserService userService = GXSpringContextUtils.getBean(GXUUserService.class);
+        GXUUserService userService = GXSSOHelperUtil.bean(GXUUserService.class);
         if (userService == null) {
-            return null;
+            throw new GXBusinessException("GXUUserService implementation not found.");
         }
 
         Dict user = userService.getUserByUserId(userId);
         if (CollUtil.isEmpty(user)) {
-            return null;
+            throw new GXBusinessException("SSO user not found, userId=" + userId);
         }
         return JSONUtil.toBean(JSONUtil.toJsonStr(user), parameter.getParameterType());
     }

@@ -1,15 +1,13 @@
 package cn.maple.sso.properties;
 
-import cn.maple.core.framework.exception.GXBusinessException;
-import cn.maple.core.framework.util.GXCookieHelperUtil;
 import cn.maple.sso.cache.GXSSOCache;
 import cn.maple.sso.constant.GXSSOConstant;
 import cn.maple.sso.oauth.GXSSOAuthorization;
 import cn.maple.sso.plugins.GXSSOPlugin;
 import cn.maple.sso.utils.GXSSOHelperUtil;
+import org.jspecify.annotations.Nullable;
 import lombok.Data;
 import lombok.experimental.Accessors;
-import cn.hutool.core.text.CharSequenceUtil;
 
 import java.util.List;
 import java.util.Objects;
@@ -26,6 +24,20 @@ import java.util.Objects;
 @Accessors(chain = true)
 public class GXSSOProperties {
     /**
+     * Default absolute token time-to-live in seconds (2 hours).
+     *
+     * <p>Before v4.3 this default was {@code -1}, which disabled both the signature
+     * expiry and the cache TTL. Explicitly setting {@code -1} still reproduces the old
+     * behaviour but is logged as an error.</p>
+     */
+    public static final int DEFAULT_CACHE_EXPIRES = 7200;
+
+    /**
+     * Maximum token TTL used when the cache is unavailable and the fallback is enabled.
+     */
+    public static final int MAX_FALLBACK_TTL_SECONDS = 900;
+
+    /**
      * 编码格式，默认 UTF-8
      */
     private String encoding = GXSSOConstant.ENCODING;
@@ -33,7 +45,7 @@ public class GXSSOProperties {
     /**
      * 签名密钥（用于对此算法）
      */
-    private String signKey;
+    private @Nullable String signKey;
 
     /**
      * 签名算法
@@ -56,14 +68,14 @@ public class GXSSOProperties {
     private String rsaAlias = "jwtkey";
 
     /**
-     * RSA 密钥 keypass
+     * RSA 密钥 keypass（保留字段，当前实现未使用；不得写入真实口令）
      */
-    private String rsaKeypass = "llTs1p68K";
+    private @Nullable String rsaKeypass;
 
     /**
-     * RSA 密钥 storepass
+     * RSA 密钥 storepass（保留字段，当前实现未使用；不得写入真实口令）
      */
-    private String rsaStorepass = "lLt66Y8L321";
+    private @Nullable String rsaStorepass;
 
     /**
      * 访问票据名
@@ -78,7 +90,7 @@ public class GXSSOProperties {
     /**
      * cookie 所在有效域名，不设置为当前访问域名
      */
-    private String cookieDomain;
+    private @Nullable String cookieDomain;
 
     /**
      * cookie 路径
@@ -136,9 +148,26 @@ public class GXSSOProperties {
     private String paramReturnUrl = "ReturnURL";
 
     /**
-     * 缓存有效期设置
+     * Token 绝对有效期（秒），同时作为服务端缓存 TTL。
+     *
+     * <p>{@code -1} 表示永不过期，仅用于兼容历史配置，启动校验会打 ERROR 日志。</p>
      */
-    private int cacheExpires = GXCookieHelperUtil.CLEAR_BROWSER_IS_CLOSED;
+    private int cacheExpires = DEFAULT_CACHE_EXPIRES;
+
+    /**
+     * Configuration source: {@code nacos} (default) or {@code local}.
+     */
+    private String source = "nacos";
+
+    /**
+     * Whether a local only token is allowed when no {@code GXSSOCache} bean is available.
+     */
+    private boolean cacheFallbackEnabled = false;
+
+    /**
+     * Maximum entries of the handler method annotation cache.
+     */
+    private int capacity = 4096;
 
     /**
      * 权限认证（默认 false）
@@ -146,19 +175,32 @@ public class GXSSOProperties {
     private boolean permissionUri = false;
 
     /**
+     * 无权限注解时是否放行（默认 true，与历史行为一致）。
+     *
+     * <p>生产环境建议显式配置为 {@code false}（白名单模式）；启用 {@code permission-uri} 后
+     * URI 授权自身决断，不再回落到该开关。</p>
+     */
+    private boolean nothingAnnotationPass = true;
+
+    /**
+     * 无权限时的跳转地址；为空则返回 403。
+     */
+    private @Nullable String illegalUrl;
+
+    /**
      * 插件列表
      */
-    private List<GXSSOPlugin> pluginList;
+    private @Nullable List<GXSSOPlugin> pluginList;
 
     /**
      * SSO 缓存
      */
-    private GXSSOCache cache;
+    private @Nullable GXSSOCache cache;
 
     /**
      * SSO 权限授权
      */
-    private GXSSOAuthorization authorization;
+    private @Nullable GXSSOAuthorization authorization;
 
     public GXSSOProperties() {
         /* 支持 setInstance 设置初始化 */
@@ -188,28 +230,11 @@ public class GXSSOProperties {
         return "ssoTokenKey_" + userId;
     }
 
-    public String getRsaCertStore() {
-        if (CharSequenceUtil.isBlank(rsaCertStore)) {
-            throw new GXBusinessException("public.cert not found");
-        }
-        return rsaCertStore;
-    }
-
     /**
-     * 签名密钥
+     * 签名密钥（保留字段，当前实现未读取；缺失时返回 null，不再内联默认值）
      */
     public String getSignKey() {
-        if (CharSequenceUtil.isBlank(this.signKey)) {
-            return "Janfv5UgKhoDrH73EZT7m+81pgqLN3EjWKXZtqF9lQHH9WruxqX0+FkQys6XK0QXzSUckseOAZGeQyvfreA3tw==";
-        }
         return this.signKey;
-    }
-
-    public String getRsaJksStore() {
-        if (CharSequenceUtil.isBlank(rsaJksStore)) {
-            throw new GXBusinessException("jwt.jks not found");
-        }
-        return rsaJksStore;
     }
 
     public GXSSOAuthorization getAuthorization() {

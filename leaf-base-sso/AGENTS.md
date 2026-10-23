@@ -28,9 +28,18 @@
 
 1. Token 校验、Cookie 安全属性、登录拦截、权限校验和白名单策略属于安全关键路径，变更前必须评估兼容性和风险。
 2. 新增配置项必须有明确默认值、失效语义和兼容策略，避免隐式行为变化。
-3. 登录拦截链和权限拦截链的顺序不得随意改变。
+3. 登录拦截链和权限拦截链的顺序不得随意改变；顺序由 `@Order` + `GXSSOConstant` 显式声明，不得依赖 bean 名称字典序。
 4. AJAX 请求、普通请求、未登录、无权限、验证码失败等分支必须保持明确语义。
-5. 插件扩展点不能吞掉关键失败，也不能绕过核心校验。
+5. 插件扩展点不能吞掉关键失败，也不能绕过核心校验；`plugin.login=false` 必须使登录失败并回滚缓存。
+
+## 安全红线（不得回退）
+
+1. **默认 fail-closed**：没有 `GXSSOCache` 实现时必须拒绝登录、拒绝校验；只有显式 `sso.config.cache-fallback-enabled=true` 才允许降级为本地 Token（TTL ≤ 900 秒 + ERROR 日志）。禁止把"无缓存也能登录"重新变成默认行为。
+2. **密钥无源码默认值**：Token 密钥不得使用框架公开常量作为生产默认；`prod` profile 下 `GXAbstractSSOService#validateConfiguration` 必须拒绝启动。`signKey`/`rsaKeypass`/`rsaStorepass` 等字段不得写入真实口令。
+3. **拒绝路径零副作用**：未登录或被拒绝的请求（含**可解析但校验失败**的 Token）不得删除缓存键、不得调用 `plugin.logout`、不得写 INFO 日志；`clearRedirectLogin` 只清 Cookie，完整登出语义只属于显式 `clearLogin`。
+4. **权限单一判定链**：`@GXIgnoreLoginIntercept` → `@GXPermissionAnnotation(Skip)` → URI 模式（终局）→ 注解模式 → `nothingAnnotationPass`；任何"判定失败后再被默认值放行"的实现都视为缺陷。
+5. **Token 可达过期**：`sso.config.cache-expires` 默认必须为正数；`-1`（永不过期）只能作为显式配置并打 ERROR。
+6. **配置源必须显式**：local / nacos 两套配置源由 `sso.config.source`（默认 `matchIfMissing=true` → nacos）互斥选择，不得回退为"依赖传递类路径隐式判断"（本模块以 compile 依赖引入 `leaf-base-nacos`，`@ConditionalOnMissingClass` 恒为假）。该机制为宪法 v1.1.0 §IV 认可的等价方式，改动时必须同时满足四条护栏：默认值保持既有行为、启动 INFO 打印生效源、`GXSSOConfigSourceTest` 覆盖互斥与默认值、新键登记 `additional-spring-configuration-metadata.json` 与手册配置表。
 
 ## 测试要求
 
@@ -39,6 +48,8 @@
 3. 涉及性能关键节点时，至少要有可执行的冒烟验证，覆盖重复执行、批量输入、空输入和异常输入；无法自动化时，在交付说明中写清手工验证命令、样本规模和观察指标。
 4. 依赖 Spring 容器、自动配置、Web 请求上下文、拦截器链或 Bean 装配的功能，必须使用接近真实运行形态的 Spring Boot 测试。
 5. 重点覆盖 Token 获取与校验、登录态写入与清理、白名单策略、权限拦截、验证码生成/存储/校验、配置来源切换。
+6. 修改本模块任一安全红线相关逻辑时，必须同时更新或新增以下用例：`GXSSOCacheContractTest`（缓存失败语义）、`GXSSOServiceBehaviorTest`（登录/登出/降级/插件拒绝）、`GXSSOInterceptorBehaviorTest`（权限矩阵 16 组合）、`GXSSOAuthFlowSpringBootTest`（真实拦截链）、`GXSSOConcurrencyTest`（并发与共享状态）、`CaptchaRenderTest`（真实渲染与边界）、`GXSSOConfigSourceTest`（配置源与默认值）。
+7. 测试改写全局静态配置（`GXSSOHelperUtil#setSsoConfig`）时必须 `@AfterEach` 复原并标注 `@ResourceLock("sso-global-config")`；禁止依赖反射构造失败现场（使用 `GXSSOTestDoubles`）。
 
 ## 变更检查
 

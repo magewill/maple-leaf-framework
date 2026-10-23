@@ -1,0 +1,5 @@
+sso:
+  config:
+    login-url: http://localhost/login
+    logout-url: http://localhost/logout
+    token-name: local-token

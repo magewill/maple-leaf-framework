@@ -1,7 +1,7 @@
 package cn.maple.sso.web.handler;
 
-import cn.hutool.core.lang.Dict;
 import cn.hutool.http.HttpStatus;
+import cn.maple.core.framework.util.GXResultUtils;
 import cn.hutool.json.JSONConfig;
 import cn.hutool.json.JSONUtil;
 import jakarta.servlet.http.HttpServletRequest;
@@ -53,15 +53,11 @@ public class GXSSODefaultHandler implements GXSSOHandler, Serializable {
         Objects.requireNonNull(response, "response must not be null");
 
         try {
-            Dict data = Dict.create()
-                    .set("code", HttpStatus.HTTP_UNAUTHORIZED)
-                    .set("msg", UNAUTHORIZED_MESSAGE)
-                    .set("data", null);
-
             response.setStatus(HttpStatus.HTTP_UNAUTHORIZED);
             response.setCharacterEncoding(StandardCharsets.UTF_8.name());
             response.setContentType(JSON_CONTENT_TYPE);
-            response.getWriter().write(JSONUtil.toJsonStr(data, getJsonConfig()));
+            response.getWriter().write(JSONUtil.toJsonStr(
+                    GXResultUtils.error(HttpStatus.HTTP_UNAUTHORIZED, UNAUTHORIZED_MESSAGE), getJsonConfig()));
         } catch (IOException e) {
             log.error("Handle unauthorized AJAX request failed with IO error.", e);
         } catch (Exception e) {

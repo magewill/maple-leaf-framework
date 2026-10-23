@@ -33,12 +33,32 @@ public interface GXTokenConfigService {
         return true;
     }
 
+    /**
+     * Whether the current secret is still the framework development default.
+     *
+     * <p>Production deployments must override {@link #getTokenSecret()}; the startup
+     * validation of {@code GXAbstractSSOService} refuses to run in a production profile
+     * when this method returns {@code true}.</p>
+     *
+     * @return {@code true} when the default secret is in use
+     */
+    default boolean isDefaultTokenSecret() {
+        return CharSequenceUtil.equals(GXTokenConstant.TOKEN_SECRET_KEY, getTokenSecret());
+    }
+
     default String getTokenCachePrefix() {
         return "ssoTokenKey_";
     }
 
     default String getTokenCacheKey(Long userId, Dict extraData) {
-        return getTokenCachePrefix() + userId;
+        if (extraData == null) {
+            return getTokenCachePrefix() + userId;
+        }
+        String platform = extraData.getStr(GXTokenConstant.PLATFORM);
+        if (CharSequenceUtil.isBlank(platform)) {
+            return getTokenCachePrefix() + userId;
+        }
+        return getTokenCachePrefix() + userId + ":" + platform;
     }
 
     default Dict getEfficaciousToken(Dict requestToken) {

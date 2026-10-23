@@ -5,8 +5,12 @@ import java.io.OutputStream;
 
 /**
  * <p>
- * Gif 编码器
+ * Gif 编码器（NeuQuant 量化 + LZW 压缩）
  * </p>
+ *
+ * <p>Provenance: inlined third-party implementation, same origin as {@link Quant}
+ * (animated-gif-lib-for-java, Apache License 2.0). It is kept only for captcha rendering;
+ * do not extend or reuse it outside this package.</p>
  *
  * @author britton britton@126.com
  * @since 2021-09-16

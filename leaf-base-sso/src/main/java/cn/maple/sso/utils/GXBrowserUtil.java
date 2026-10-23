@@ -3,6 +3,7 @@ package cn.maple.sso.utils;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.crypto.SecureUtil;
 import jakarta.servlet.http.HttpServletRequest;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,15 +19,15 @@ public class GXBrowserUtil {
     private GXBrowserUtil() {
     }
 
-    public static String getUserAgent(HttpServletRequest request) {
+    public static @Nullable String getUserAgent(HttpServletRequest request) {
         if (request == null) {
-            LOG.warn("Cannot get browser fingerprint: request is null.");
+            LOG.debug("event=sso.fingerprint.skip reason=null-request");
             return null;
         }
 
         String userAgentHeader = request.getHeader(USER_AGENT_HEADER);
         if (CharSequenceUtil.isBlank(userAgentHeader)) {
-            LOG.warn("Cannot get browser fingerprint: User-Agent is blank.");
+            LOG.debug("event=sso.fingerprint.skip reason=blank-user-agent");
             return null;
         }
 

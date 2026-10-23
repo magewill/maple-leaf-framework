@@ -86,7 +86,7 @@
         *   否则，获取注解中定义的权限字符串（`value`）。调用`GXSSOAuthorization.isPermitted(token, permissionValue)`进行验证。
     *   如果注解不存在：
         *   根据`GXSSOProperties.isNothingAnnotationPass()`的配置决定是否放行。若为`true`则放行，否则视为无权限。
-4.  **（可选）URL级权限验证**：如果`GXSSOProperties.isPermissionUri()`为`true`，还会调用`GXSSOAuthorization.isPermitted(token, requestURI)`进行基于请求URI的权限验证。
+4.  **（可选）URL级权限验证**：如果`GXSSOProperties.isPermissionUri()`为`true`，还会调用`GXSSOAuthorization.isPermitted(token, requestURI)`进行基于请求URI的权限验证。该模式下 URI 判定是**终局**：`requestURI` 为空/空白时一律拒绝（fail-closed），不会回落到 `nothingAnnotationPass`；对应用例 `GXSSOInterceptorBehaviorTest#blankUriIsDeniedWhenUriPermissionModeEnabled`。
 5.  **处理结果**：
     *   如果权限验证通过，则放行到业务处理器。
     *   如果权限验证失败，调用`GXSSOPermissionInterceptor.unauthorizedAccess()`方法，根据请求类型（AJAX/普通）返回403错误或重定向到配置的`illegalUrl`。
@@ -96,10 +96,10 @@
 1.  用户请求注销接口，或管理员触发强制下线。
 2.  调用`GXAbstractSSOService.clearLogin(request, response)`或`GXAbstractSSOService.kickLogin(userId)`。
 3.  **`GXAbstractSSOService`处理注销**：
-    *   从Cookie或参数中获取Token/用户ID。
-    *   调用`GXSSOCache.delete()`从缓存中删除对应的Token。
-    *   清除客户端Cookie（通过`GXHttpUtil`）。
-    *   执行`GXSSOPlugin`的`logout`插件。
+    *   从请求属性、Header 或 Cookie 中解析 Token（`GXSSOSupportService.getSSOTokenFromCookie`）。
+    *   仅在**已登录**时执行后续步骤：调用`GXSSOCache.delete()`删除服务端 Token，并执行 `GXSSOPlugin` 的 `logout` 插件。
+    *   **未登录/重复注销**（Token 为空）：跳过缓存删除与插件循环，只做幂等的 Cookie 清理并返回 `true`，不产生任何业务副作用。
+    *   清除客户端 Cookie（`GXCookieHelperUtil.clearCookieByName`，Cookie 不存在时不写响应头）。
 
 ## 3. 核心功能详解
 
@@ -286,8 +286,9 @@ public class AuthController {
         // ticket用于后续校验时关联验证码，可以是session ID或其他唯一标识
         String ticket = request.getSession().getId(); 
         String generatedCode = captcha.generate(request, response.getOutputStream(), ticket);
-        // 注意：框架内部会将 ticket 和 generatedCode 存入 GXSSOCache (如果配置了)
-        // 或者你可以自己处理存储，例如存入Session: request.getSession().setAttribute("captcha_" + ticket, generatedCode);
+        // 框架默认把 ticket + generatedCode 存入 HttpSession（ICaptchaStore -> CaptchaStoreSession），
+        // 默认有效期 60 秒；校验成功后立即删除（一次性消费）。如需 Redis 等共享存储，
+        // 实现 ICaptchaStore 并在首次 generate 前通过 captcha.setCaptchaStore(...) 注入。
     }
 
     // 校验验证码 (通常在登录或注册接口内部调用)
@@ -297,50 +298,45 @@ public class AuthController {
     }
 }
 ```
-**注意**：`ImageCaptcha.generate`方法内部会尝试使用`GXSSOHelperUtil.getSSOCache()`将验证码存入缓存，键为`GXSSOConstant.CACHE_CAPTCHA_CODE_PREFIX + ticket`。校验时`ImageCaptcha.verification`也会从该缓存读取。确保`GXSSOCache`已正确配置和工作。
+**存储说明**：验证码**不使用** `GXSSOCache`。默认实现是 `CaptchaStoreSession`（存 `HttpSession`），读写都经过 `ICaptchaStore`；`generate` 写入、`verification` 消费即删除（P-08），过期时间取 `ICaptchaStore.DEFAULT_EXPIRE_SECONDS`（60 秒）或 `setExpireSeconds(...)` 的显式值，且**不会**修改 `HttpSession` 的 `maxInactiveInterval`。`ticket` 为空时 `verification` 直接返回 `false` 且不会作废他人验证码；`put` 失败会抛 `GXBusinessException` 而不是静默返回空图。
 
 ### 3.4 用户信息注入 (`@GXLoginUserAnnotation`)
 
-在Controller方法参数上使用`@GXLoginUserAnnotation`，可以将当前登录用户的Token信息（`Dict`对象）或其特定字段注入。
+在Controller方法参数上使用`@GXLoginUserAnnotation`，可以把当前登录用户注入为 **`GXUserInfoDto`**（内置解析器只支持该类型及其子类；它由 Token 与 `GXUUserService` 组装而成）。该注解**没有** `value()` 属性，因此不支持"字段级注入"。
+
+> **失败语义（单一且显式）**：解析失败只有一种表达——抛 `GXBusinessException`。以下三种情况都会抛异常，**不会**把 `null` 注入到参数：
+> 1. 请求未携带任何 Token（匿名请求）；
+> 2. Token 无法解析；
+> 3. Token 合法但用户记录不存在。
+>
+> 因此 Controller 中不需要（也不应依赖）`if (param == null)` 分支。如果某个端点允许匿名访问且需要"可选用户"，不要使用本注解：改为显式读取 `GXSSOHelperUtil.getSSOToken(request)` 并自行判空（但请注意该类端点仍需 `@GXIgnoreLoginIntercept` 才能通过登录拦截）。
 
 ```java
 @RestController
 @RequestMapping("/api/me")
 public class UserProfileController {
 
-    // 注入整个Token Dict对象
+    // 内置解析器唯一支持的类型：GXUserInfoDto 及其子类
     @GetMapping("/profile")
-    public Result<Dict> getUserProfile(@GXLoginUserAnnotation Dict currentUser) {
-        if (currentUser == null) {
-            return Result.failed("用户未登录");
-        }
-        // currentUser 包含登录时存入的所有信息
+    public Result<GXUserInfoDto> getUserProfile(@GXLoginUserAnnotation GXUserInfoDto currentUser) {
+        // currentUser 由 Token + GXUUserService 组装，且一定非空
         return Result.success(currentUser);
-    }
-
-    // 注入Token中的特定字段 (假设LoginUser是你的用户模型类)
-    // 需要自定义一个 HandlerMethodArgumentResolver 来实现将 Dict 转换为 LoginUser
-    // 或者直接注入Long类型的用户ID
-    @GetMapping("/id")
-    public Result<Long> getCurrentUserId(@GXLoginUserAnnotation(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME) Long userId) {
-        if (userId == null) {
-            return Result.failed("用户未登录");
-        }
-        return Result.success(userId);
-    }
-    
-    // 推荐：注入自定义的用户对象，需要配合 ArgumentResolver
-    // 假设你有一个 LoginUserArgumentResolver 实现了 HandlerMethodArgumentResolver
-    @GetMapping("/info")
-    public Result<LoginUser> getCurrentUserInfo(@GXLoginUserAnnotation LoginUser loginUser) {
-        if (loginUser == null) {
-            return Result.failed("用户未登录");
-        }
-        return Result.success(loginUser);
     }
 }
 ```
-要实现将`Dict`自动转换为自定义的`LoginUser`对象，你需要创建一个`HandlerMethodArgumentResolver`：
+
+**内置解析器不支持的类型**（写错不会抛异常，而是静默拿到空对象，务必对照）：
+
+| 写法 | 是否生效 | 说明 |
+| --- | --- | --- |
+| `@GXLoginUserAnnotation GXUserInfoDto u` | ✅ | `GXUserInfoDto` 及其子类 |
+| `@GXLoginUserAnnotation Dict d` | ❌ | `supportsParameter` 返回 `false`，Spring 按普通模型参数绑定 → 得到空 `Dict` |
+| `@GXLoginUserAnnotation Long id` | ❌ | 同上；`userId` 请从 `GXUserInfoDto#getUserId()` 取 |
+| `@GXLoginUserAnnotation(XXX) T t` | ❌（无法编译） | 注解没有 `value()`，不存在字段级注入 |
+| `@GXLoginUserAnnotation LoginUser u` | ❌ | 自定义类型需自建 `HandlerMethodArgumentResolver`（见下） |
+
+> 内置解析器带 `@ConditionalOnBean(GXUUserService.class)`：未提供 `GXUUserService` 实现时，该注解不会被解析。
+若需要注入自定义类型（例如 `LoginUser`），请自建 `HandlerMethodArgumentResolver`。两个易错点：① `supportsParameter` 的判断方向不能写反（应为"参数类型是 `LoginUser` 或其子类"）；② 失败语义必须与内置解析器一致——**抛 `GXBusinessException`，不要返回 `null`**。
 
 ```java
 @Component
@@ -348,27 +344,26 @@ public class LoginUserArgumentResolver implements HandlerMethodArgumentResolver 
 
     @Override
     public boolean supportsParameter(MethodParameter parameter) {
-        return parameter.hasParameterAnnotation(GXLoginUserAnnotation.class) &&
-               parameter.getParameterType().isAssignableFrom(LoginUser.class);
+        return parameter.hasParameterAnnotation(GXLoginUserAnnotation.class)
+                && LoginUser.class.isAssignableFrom(parameter.getParameterType());
     }
 
     @Override
     public Object resolveArgument(MethodParameter parameter, ModelAndViewContainer mavContainer,
-                                  NativeWebRequest webRequest, WebDataBinderFactory binderFactory) throws Exception {
+                                  NativeWebRequest webRequest, WebDataBinderFactory binderFactory) {
         HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
         if (request == null) {
-            return null;
+            throw new GXBusinessException("No HTTP request available for @GXLoginUserAnnotation parameter.");
         }
-        Dict tokenDict = (Dict) request.getAttribute(GXSSOConstant.SSO_TOKEN_ATTR);
-        if (tokenDict == null) {
-            tokenDict = GXSSOHelperUtil.getSSOToken(request); // 尝试再次获取
+        Dict tokenDict = GXSSOHelperUtil.attrToken(request);
+        if (tokenDict.isEmpty()) {
+            tokenDict = GXSSOHelperUtil.getSSOToken(request);
+        }
+        if (tokenDict.isEmpty()) {
+            throw new GXBusinessException("SSO token is absent, cannot resolve @GXLoginUserAnnotation parameter.");
         }
 
-        if (tokenDict == null || tokenDict.isEmpty()) {
-            return null;
-        }
-
-        // 将Dict转换为LoginUser对象
+        // 将 Dict 转换为 LoginUser 对象
         LoginUser loginUser = new LoginUser();
         loginUser.setId(tokenDict.getLong(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME));
         loginUser.setUsername(tokenDict.getStr("username"));
@@ -377,7 +372,9 @@ public class LoginUserArgumentResolver implements HandlerMethodArgumentResolver 
     }
 }
 ```
-然后注册这个Resolver到Spring MVC配置中：
+
+注册自建解析器（内置的 `GXLoginUserHandlerMethodArgumentResolver` 由框架自动装配，不要重复注册）：
+
 ```java
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
@@ -393,108 +390,84 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
 ### 3.5 Token管理
 
-- **Token内容**：Token是一个`Dict`对象，可以存储任意键值对信息。核心是`GXTokenConstant.TOKEN_USER_ID_FIELD_NAME`。
-- **Token加密**：Token在存入Cookie前会通过`GXAuthCodeUtils.encode()`进行加密（默认使用AES），密钥和算法在`GXSSOProperties`中配置。
-- **Token有效期**：
-    - `tokenTimeout`：Token的绝对超时时间（秒）。即使有活动，超过此时间Token也会失效。
-    - `tokenActivityTimeout`：Token的活动超时时间（秒）。如果用户在此时间内有活动，Token会自动续期（重新设置缓存的过期时间）。
-- **Token缓存**：Token信息（解密后的`Dict`对象）存储在`GXSSOCache`中，用于快速验证和获取用户信息。
+- **Token内容**：Token 是一个 `Dict`，核心字段为 `userId`（必须 `>0`）、`loginAt`（秒，唯一的新旧 Token 判据）、`createTime`（毫秒）、`userAgent`（SHA-256 指纹，`cookie-browser=true` 时必需）、`ip`（`cookie-check-ip=true` 时必需）。其它业务字段原样往返。
+- **Token编码**：Token 由 `GXAuthCodeUtils.authCodeEncode` 生成（RC4 + 多段 MD5 的**对称可逆编码**，不是签名），输出 URL-safe Base64，可安全放入 Cookie。密钥来自 `GXTokenConfigService.getTokenSecret()`；**默认密钥是框架公开常量，仅限开发环境**，`prod` profile 下启动校验会直接拒绝启动。
+- **Token有效期**：有效期由 `sso.config.cache-expires` 单键控制，同时决定签名绝对过期时间与缓存 TTL。默认 **7200 秒**。显式配置 `-1` 表示"永不过期"（会打 ERROR 日志，不建议）。
+- **Token缓存**：解析后的 `Dict` 存入 `GXSSOCache`，键为 `ssoTokenKey_<userId>[:<platform>]`。**缓存不可用时默认登录失败**（fail-closed）；只有显式开启 `cache-fallback-enabled` 才降级为本地 Token（TTL ≤ 900 秒、`flag=CACHE_SHUT`、ERROR 日志）。
 
 ## 4. 配置说明 (`GXSSOProperties`)
 
-`GXSSOProperties`类定义了SSO系统的所有可配置项。可以通过`application.yml`或Java Bean配置。
+`GXSSOProperties` 定义全部可配置项，前缀为 `sso.config`（由 `GXSSOConfigProperties` 包裹，即 `sso.config.xxx`）；白名单是独立的 `url.white-lists`。
 
-**主要配置项**：
+**配置项（与实现一致）**：
 
-| 配置项                      | 类型          | 说明                                                                 | 默认值                               |
-| --------------------------- | ------------- | -------------------------------------------------------------------- | ------------------------------------ |
-| `encoding`                  | `String`      | 字符编码                                                               | `UTF-8`                              |
-| `signKey`                   | `String`      | Token签名密钥（用于JWT等场景，当前模块主要用AES加密Cookie内容）          | `maple-leaf-framework`               |
-| `signAlgorithm`             | `String`      | 签名算法 (如 HS256, HS512)                                             | `HS512`                              |
-| `aesKey`                    | `String`      | AES加密密钥 (用于Cookie内容加密, `GXAuthCodeUtils`)                      | `www.maple.leaf.framework.cn`        |
-| `rsaJksStore`               | `String`      | RSA JKS密钥库路径                                                        | `key.jks`                            |
-| `rsaCertStore`              | `String`      | RSA公钥证书路径                                                        | `public.cert`                        |
-| `rsaAlias`                  | `String`      | RSA密钥别名                                                            | `jwtkey`                             |
-| `rsaKeypass`                | `String`      | RSA私钥密码                                                            | `llTs1p68K`                          |
-| `rsaStorepass`              | `String`      | RSA密钥库密码                                                          | `lLt66Y8L321`                        |
-| `tokenName`                 | `String`      | Token在Cookie中的名称                                                    | `ssoToken`                           |
-| `cookieName`                | `String`      | （已废弃，请使用`tokenName`）旧版Cookie名称                              | `uid`                                |
-| `cookieDomain`              | `String`      | Cookie的有效域名 (例如 `.example.com`)                                 | 当前访问域名                         |
-| `cookiePath`                | `String`      | Cookie的有效路径                                                         | `/`                                  |
-| `cookieSecure`              | `boolean`     | Cookie是否仅通过HTTPS传输                                                | `false`                              |
-| `cookieHttpOnly`            | `boolean`     | Cookie是否禁止客户端脚本访问                                             | `true`                               |
-| `cookieMaxAge`              | `int`         | Cookie在客户端的存活时间（秒），-1表示会话级Cookie                       | `-1`                                 |
-| `tokenTimeout`              | `int`         | Token绝对超时时间（秒），缓存在此时间后失效                               | `2592000` (30天)                     |
-| `tokenActivityTimeout`      | `int`         | Token活动超时时间（秒），用户在此时间内无活动则Token失效，有活动则续期 | `1800` (30分钟)                      |
-| `isPermissionUri`           | `boolean`     | 是否开启基于URI的权限验证                                                | `false`                              |
-| `isNothingAnnotationPass`   | `boolean`     | Controller方法无`@GXPermissionAnnotation`时是否默认放行权限检查        | `true`                               |
-| `illegalUrl`                | `String`      | 无权限访问时重定向的URL (普通请求)                                       | `null` (返回403)                     |
-| `urlWhiteLists`             | `List<String>`| URL白名单列表，这些URL不进行登录拦截                                   | 空列表                               |
-| `captchaTimeout`            | `int`         | 验证码超时时间（秒）                                                     | `300` (5分钟)                        |
-| `multiLogin`                | `boolean`     | 是否允许多端登录，`false`表示后登录会踢掉前一个登录（基于相同用户ID）    | `true`                               |
-| `tokenPrefix`               | `String`      | Token缓存键前缀                                                        | `sso:token:`                         |
-| `userPermissionCachePrefix` | `String`      | 用户权限缓存键前缀 (如果业务实现了权限缓存)                              | `sso:user_permission:`               |
-| `cacheCaptchaCodePrefix`    | `String`      | 验证码缓存键前缀                                                       | `sso:captcha:`                       |
+| 配置键 | 类型 | 说明 | 默认值 |
+| --- | --- | --- | --- |
+| `sso.config.source` | `String` | 配置源：`nacos`（默认）/ `local`（`classpath:${spring.profiles.active}/sso.yml`） | `nacos` |
+| `sso.config.encoding` | `String` | 响应与跳转编码 | `UTF-8` |
+| `sso.config.token-name` | `String` | Header 名 + Token 载荷内的字段名 | `token` |
+| `sso.config.cookie-name` | `String` | 承载 Token 的 Cookie 名 | `uid` |
+| `sso.config.cookie-domain` | `String` | Cookie 域，空表示当前主机 | 空 |
+| `sso.config.cookie-path` | `String` | Cookie 路径 | `/` |
+| `sso.config.cookie-secure` | `boolean` | Cookie `Secure`；`same-site=None` 时必须为 `true` | `false` |
+| `sso.config.cookie-http-only` | `boolean` | Cookie `HttpOnly` | `true` |
+| `sso.config.cookie-same-site` | `String` | `Lax` / `Strict` / `None` | `Lax` |
+| `sso.config.cookie-max-age` | `int` | Cookie `Max-Age`（秒），`-1` 为浏览器会话级 | `-1` |
+| `sso.config.cookie-browser` | `boolean` | 校验 Token 内的浏览器指纹 | `false` |
+| `sso.config.cookie-check-ip` | `boolean` | 校验 Token 内的 IP（无法解析 IP 时拒绝） | `false` |
+| `sso.config.trust-forwarded-ip-headers` | `boolean` | 是否信任 `X-Forwarded-For` 等转发头 | `false` |
+| `sso.config.login-url` | `String` | 未登录跳转地址，空则返回 401 JSON | 空 |
+| `sso.config.logout-url` | `String` | 登出后跳转地址 | 空 |
+| `sso.config.param-return-url` | `String` | 回跳参数名 | `ReturnURL` |
+| `sso.config.cache-expires` | `int` | Token 绝对有效期（秒），同时作为缓存 TTL；`-1` 为永不过期（ERROR 日志） | `7200` |
+| `sso.config.cache-fallback-enabled` | `boolean` | 无 `GXSSOCache` 时是否允许降级为本地 Token | `false` |
+| `sso.config.capacity` | `int` | 注解缓存上限 | `4096` |
+| `sso.config.permission-uri` | `boolean` | 是否启用 URI 授权模式 | `false` |
+| `sso.config.nothing-annotation-pass` | `boolean` | 无权限注解时是否放行（生产建议 `false`；URI 模式下不生效） | `true` |
+| `sso.config.illegal-url` | `String` | 无权限时的跳转地址，空则返回 403 | 空 |
+| `url.white-lists` | `List<String>` | Ant 风格路径白名单，命中则跳过登录拦截 | 空列表 |
 
-**配置示例 (`application.yml`)**：
+**保留但当前无效的字段**（`GXSSOProperties` 中仍存在，但没有任何生产代码读取，配置不会生效）：`sign-key`、`sign-algorithm`、`rsa-jks-store`、`rsa-cert-store`、`rsa-alias`、`rsa-keypass`、`rsa-storepass`。这些字段**不得**写入真实口令（源码默认值已删除）。
+
+**行为型配置的优先级**：`illegal-url`、`nothing-annotation-pass` 既可通过 `sso.config.*` 绑定，也可通过 `GXSSOPermissionInterceptor#setIllegalUrl(...)` / `#setNothingAnnotationPass(...)` 显式覆盖，**显式 setter 优先于配置**。
+**只能通过 Bean 注入的项**：`cache`、`plugin-list`、`authorization`（类型为接口/对象，不能从 YAML 绑定）。
+
+**配置示例（Nacos `sso.yml` 或本地 `config/<profile>/sso.yml`）**：
 
 ```yaml
-maple:
-  sso:
-    token-name: "MY_APP_TOKEN"
+sso:
+  config:
+    source: nacos
     cookie-domain: ".myapp.com"
-    cookie-http-only: true
-    token-timeout: 86400 # 1天
-    token-activity-timeout: 1800 # 30分钟
-    aes-key: "a-very-strong-and-secret-aes-key" # 务必修改为强密钥
-    url-white-lists:
-      - /api/public/**
-      - /api/auth/login
-      - /api/auth/captcha
-    is-nothing-annotation-pass: false # 建议生产环境设为false
-    illegal-url: "/error/403"
-    multi-login: false # 只允许单端登录
+    cookie-secure: true
+    cookie-same-site: "Lax"
+    cache-expires: 7200
+    cache-fallback-enabled: false
+    login-url: "https://sso.example.com/login"
+    logout-url: "https://sso.example.com/logout"
+    permission-uri: false
+url:
+  white-lists:
+    - /api/public/**
+    - /api/auth/login
+    - /api/auth/captcha
 ```
+
+> 本地文件缺失时只打 WARN 并使用默认值（`ignore-resource-not-found=true`）；Nacos 不可用时会记录 ERROR，不会静默接管。
 
 ## 5. 拦截器配置
 
-你需要将`GXSSOAuthorizationInterceptor`和`GXSSOPermissionInterceptor`注册到Spring MVC的拦截器链中。
+**无需手工注册**。`GXSSOAuthorizationInterceptor` 与 `GXSSOPermissionInterceptor` 都是 `@Component`，由 `leaf-base-framework` 的 `GXWebMvcConfigurer#addInterceptors` 收集全部 `GXAuthorizationInterceptor` 子类并按 `@Order` 注册：
 
-```java
-@Configuration
-public class WebMvcConfig implements WebMvcConfigurer {
+| 顺序 | 拦截器 | `@Order` |
+| --- | --- | --- |
+| 1 | `GXSSOAuthorizationInterceptor` | `GXSSOConstant.AUTHORIZATION_ORDER`（100） |
+| 2 | `GXSSOPermissionInterceptor` | `GXSSOConstant.PERMISSION_ORDER`（200） |
 
-    @Resource
-    private GXSSOAuthorizationInterceptor ssoAuthorizationInterceptor;
-
-    @Resource
-    private GXSSOPermissionInterceptor ssoPermissionInterceptor;
-    
-    @Autowired // 如果你实现了自定义的ArgumentResolver
-    private LoginUserArgumentResolver loginUserArgumentResolver;
-
-    @Override
-    public void addInterceptors(InterceptorRegistry registry) {
-        // 登录拦截器 (先执行)
-        registry.addInterceptor(ssoAuthorizationInterceptor)
-                .addPathPatterns("/**") // 拦截所有请求
-                .excludePathPatterns("/static/**", "/public/**", "/error", "/favicon.ico") // 排除静态资源和公共路径
-                .order(1); // 设置执行顺序
-
-        // 权限拦截器 (后执行)
-        registry.addInterceptor(ssoPermissionInterceptor)
-                .addPathPatterns("/**")
-                .excludePathPatterns("/static/**", "/public/**", "/error", "/favicon.ico")
-                .order(2); // 设置执行顺序
-    }
-    
-    @Override
-    public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
-        resolvers.add(loginUserArgumentResolver); // 注册自定义的参数解析器
-    }
-}
-```
-**注意拦截器顺序**：`GXSSOAuthorizationInterceptor`必须在`GXSSOPermissionInterceptor`之前执行。
+**约束**：
+1. 登录拦截器必须在权限拦截器之前执行；顺序由 `@Order` 保证，**不再依赖 bean 名称字典序**。
+2. 自定义 `GXAuthorizationInterceptor` 子类若需指定位置，请自行标注 `@Order`（未标注者排在已标注者之后）。
+3. `@GXLoginUserAnnotation` 参数解析器在存在 `GXUUserService` Bean 时自动装配，无需手工 `addArgumentResolvers`。
 
 ## 6. 扩展机制
 
@@ -543,7 +516,12 @@ public class MyCustomSSOPlugin implements GXSSOPlugin {
 
 ### 6.2 自定义Token缓存 (`GXSSOCache`)
 
-默认情况下，框架可能使用基于内存的缓存或尝试从Spring上下文中获取`GXBaseCacheService`的实现。你可以提供自己的`GXSSOCache`实现（例如基于Redis），并注册为Spring Bean，SSO模块会自动使用它。
+**重要**：`leaf-base-sso` 自身**不提供** `GXSSOCache` 实现。你必须实现它（例如基于 `GXBaseCacheService`/Redis）并注册为 Spring Bean，否则：
+
+- 默认（`cache-fallback-enabled=false`）：登录直接失败、校验一律视为未登录（fail-closed）；
+- 显式开启降级：退化为"自包含 Cookie"模式（本地 Token、无服务端校验、TTL ≤ 900 秒、ERROR 日志），仅用于本地开发。
+
+Bean 按**类型**查找（`GXSpringContextUtils.getBean(GXSSOCache.class)`），不存在"优先查找名为 `ssoCache` 的 Bean"的约定。
 
 ```java
 @Component("ssoCache") // Bean的名称可以自定义，但SSO模块会优先查找名为"ssoCache"的Bean
@@ -606,7 +584,11 @@ public class RedisSSOCache implements GXSSOCache {
     }
 }
 ```
-**重要**：`GXSSOCache`的`get`方法在框架中的实际调用链是 `GXSSOHelperUtil.getSSOToken` -> `GXAbstractSSOService.getSSOToken` -> `GXSSOCache.get`。而`GXSSOCache.get`的默认实现会进一步调用`GXTokenConfigService.checkLoginStatus()`和`GXTokenConfigService.getEfficaciousToken()`。因此，自定义`GXSSOCache`时，需要理解这个调用关系，或者同时自定义`GXTokenConfigService`。
+**关于上面的示例代码**：示例中的 `validateCacheToken(...)` 是历史遗留写法，接口中并不存在该方法；一致性校验的实际方法名是 `verifyTokenConsistency(Dict cacheToken, Dict requestToken)`（默认实现只比较 `loginAt`，通常无需覆盖）。
+
+**实际调用链**：`GXSSOHelperUtil.getSSOToken` → `GXAbstractSSOService.getSSOToken` → `GXSSOSupportService.cacheSSOToken` → `GXSSOCache.get`。默认 `get` 会依次调用 `GXTokenConfigService.checkLoginStatus()`、`verifyTokenEffectiveness()`、`getEfficaciousToken()`。
+
+**失败语义（与旧版不同）**：`get` 不再抛 `GXTokenInvalidException`，而是返回空 `Dict` 并把原因写入请求属性 `GXSSOConstant.SSO_TOKEN_STATE`（取值见 `GXSSOTokenStateEnums`：`absent` / `active` / `cache-miss` / `expired` / `kicked` / `cache-unavailable` / `plugin-rejected` / `local-only`）。`delete` 是幂等的：键不存在也算成功。`kickLogin(null)` 返回 `false` 而不抛异常。
 
 ### 6.3 自定义Token配置服务 (`GXTokenConfigService`)
 
@@ -723,28 +705,58 @@ public class MySSOHandler implements GXSSOHandler {
 
 ### 7.1 安全配置
 
-- **强密钥**：务必为`GXSSOProperties.aesKey`（以及RSA相关配置，如果使用）设置强大且唯一的密钥，并妥善保管。
-- **HTTPS**：生产环境必须使用HTTPS，并设置`GXSSOProperties.cookieSecure = true`。
-- **HttpOnly Cookie**：保持`GXSSOProperties.cookieHttpOnly = true`，防止客户端脚本窃取Token Cookie。
-- **Token有效期**：根据业务需求设置合理的`tokenTimeout`和`tokenActivityTimeout`。过长的有效期会增加安全风险。
-- **CSRF防护**：SSO本身不直接处理CSRF，但HttpOnly Cookie有助于缓解。业务系统应配合使用标准的CSRF Token机制。
-- **输入验证**：所有用户输入（如登录参数、权限字符串）都应进行严格验证。
-- **日志审计**：定期审查SSO相关的日志（登录、登出、权限失败等），监控异常活动。
-- **`isNothingAnnotationPass`**: 生产环境建议设置为`false`，采用白名单模式管理权限，即默认所有接口都需要权限注解。
-- **`multiLogin`**: 根据业务需求决定是否允许多端登录。禁止多端登录可以提高账户安全性。
+- **强密钥（必须）**：`GXTokenConfigService.getTokenSecret()` 默认返回框架公开常量（`31D0D393D3EAF5`），仅限开发环境。生产环境必须覆盖该实现；`prod` profile 下启动校验会直接拒绝启动（`event=sso.config.invalid key=token-secret`）。仓库中不存在 `aesKey` 配置项，Token 编码由 `GXAuthCodeUtils` 完成。
+- **HTTPS**：生产环境必须使用 HTTPS 并设置 `sso.config.cookie-secure=true`；`cookie-same-site=None` 时该值为强制要求（启动校验与登录时都会校验）。
+- **HttpOnly Cookie**：保持 `sso.config.cookie-http-only=true`，防止客户端脚本读取 Token。
+- **Token有效期**：`sso.config.cache-expires` 默认 7200 秒；不要配置 `-1`（永不过期会打 ERROR）。
+- **服务端校验**：必须提供 `GXSSOCache` 实现；保持 `cache-fallback-enabled=false`，避免退化成"Cookie 即身份"。
+- **CSRF防护**：SSO 不处理 CSRF；`SameSite=Lax` + HttpOnly 只能缓解，业务侧仍需标准 CSRF Token。
+- **日志审计**：按 `event=sso.login.*`、`event=sso.token.reject`、`event=sso.permission.denied`、`event=sso.config.invalid` 检索与告警；日志中不会输出 Token 原文与密钥。
+- **`nothing-annotation-pass`**：生产环境建议在配置中显式设为 `false`（`sso.config.nothing-annotation-pass: false`，白名单模式，未标注权限注解的接口一律拒绝）。注意：① 启用 `permission-uri=true` 后 URI 授权**自身决断**，不会再回落到该开关；② 代码里调用 `setNothingAnnotationPass(...)` 会覆盖配置值，两处不要给相反的值。
+- **多端登录**：通过 `loginAt` 判定，后登录会使旧 Token 变为 `kicked`；不存在 `multiLogin` 配置项。
 
 ### 7.2 性能优化
 
-- **分布式缓存**：在高并发或集群环境下，使用Redis等分布式缓存实现`GXSSOCache`和`GXBaseCacheService`。
-- **权限缓存**：对于复杂或查询频繁的权限验证逻辑（`GXSSOAuthorization.isPermitted`），考虑在业务层面增加缓存。
-- **异步处理**：对于非核心流程（如登录日志记录），可以考虑使用异步方式处理，避免阻塞主线程。
-- **验证码优化**：如果验证码生成消耗较大，可以考虑预生成或使用更轻量级的验证码方案。
+- **分布式缓存**：在集群环境下必须用 Redis 等分布式缓存实现 `GXSSOCache`/`GXBaseCacheService`，否则各实例的登录态不一致。
+- **权限缓存**：`GXSSOAuthorization.isPermitted` 每个请求都会调用，复杂判定建议在业务侧加缓存。
+- **固定开销口径**（可复算）：每请求 4 次 MD5 + 2×256 轮 RC4 密钥表（`GXAuthCodeUtils`）、1 次 JSON 解析、**0 次** `getBean`（`GXSSOHelperUtil` 已缓存 Bean 引用）、**0 条** INFO 日志；`InetAddress` 解析只在类初始化时执行一次。
+- **注解缓存**：容量由 `sso.config.capacity`（默认 4096）控制，超限按 FIFO 淘汰，不会整体清空。
+- **验证码优化**：`ImageCaptcha` 单实例首次渲染后冻结；高并发场景请每请求 `ImageCaptcha.getInstance()` 或 `of(...)` 新建，避免串行化。
+- **异步处理**：登录日志等非核心流程建议业务侧异步化，本模块在请求线程内不做额外 I/O。
 
 ### 7.3 部署与维护
 
 - **配置分离**：将敏感配置（如密钥）通过环境变量或外部配置文件注入，而不是硬编码在代码或打包的配置文件中。
 - **版本控制**：SSO模块的配置和自定义实现应纳入版本控制。
 - **监控告警**：对SSO服务的关键指标（如Token生成速率、缓存命中率、认证失败率）进行监控，并设置告警。
+
+### 7.4 可观测性
+
+**指标**（`GXSSOMetrics.snapshot()`，返回不可变 `record`；`GXSSOMetrics.reset()` 仅用于测试）：
+
+| 指标 | 含义 | 递增点 |
+| --- | --- | --- |
+| `parseSuccess` / `parseFailure` | Token 解析成功 / 失败（签名非法、JSON 非法、空载荷） | `GXSSOHelperUtil.parser` |
+| `cacheHit` / `cacheMiss` | 服务端缓存命中 / 未命中 | `GXSSOCache.get` |
+| `denied` | 权限拒绝（403） | `GXSSOPermissionInterceptor` |
+| `loginFailure` | 登录失败（缓存不可用、插件拒绝、Cookie 配置非法） | `GXAbstractSSOService.setCookie` |
+| `cacheFallback` | 进入本地 Token 降级模式 | 降级分支 |
+| `invalidToken` | `userId` 缺失或 `<=0` | `GXSSOCache` |
+| `activeTokens` | 缓存桶内 Token 数（登录/登出后刷新） | `GXSSOCache.set/delete` |
+
+**日志事件**（ASCII 键值对，按 `event=` 检索）：
+
+| 事件 | 级别 | 关键字段 |
+| --- | --- | --- |
+| `event=sso.login.success` | INFO | `userId`、`degraded` |
+| `event=sso.login.failure` | WARN | `reason`（`cache-unavailable` / `cache-write-failed` / `plugin-rejected` / `invalid-cookie-config`） |
+| `event=sso.login.degraded` | ERROR | `reason`、TTL ≤ 900 |
+| `event=sso.token.reject` | DEBUG | `reason`（`absent` / `cache-miss` / `kicked` / `expired` / `cache-unavailable` / `plugin-rejected`） |
+| `event=sso.permission.denied` | DEBUG | `uri`（同时 `denied` 指标 +1） |
+| `event=sso.logout` | INFO | `result` |
+| `event=sso.config.invalid` | ERROR | `key`、`reason`（启动校验失败） |
+
+**约束**：① 日志不得输出 Token 原文、密钥或 Cookie 值（只允许 `userId`/`loginAt`/`flag`）；② 未登录路径不得输出 INFO；③ 不得引入 Micrometer 等新依赖；④ 指标与日志事件名保持 ASCII 且语义对齐。
 
 ## 8. 故障排查
 

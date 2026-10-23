@@ -2,11 +2,11 @@ package cn.maple.sso.web.interceptor;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.Dict;
-import cn.maple.core.framework.annotation.GXHttpInvokerAuthToken;
+import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.framework.annotation.GXIgnoreLoginIntercept;
-import cn.maple.core.framework.util.GXSpringContextUtils;
+
 import cn.maple.core.framework.web.interceptor.GXAuthorizationInterceptor;
-import cn.maple.sso.cache.GXSSOCache;
+
 import cn.maple.sso.constant.GXSSOConstant;
 import cn.maple.sso.properties.GXUrlWhiteListsConfigProperties;
 import cn.maple.sso.service.GXAuthorizationInterceptorService;
@@ -20,15 +20,24 @@ import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.method.HandlerMethod;
+import org.springframework.web.util.UrlPathHelper;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * Login interceptor.
+ *
+ * <p>An anonymous request is answered without any side effect: no cache delete, no plugin
+ * callback and no cookie cleanup.</p>
+ */
 @Component
 @Slf4j
+@Order(GXSSOConstant.AUTHORIZATION_ORDER)
 public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
     private final AtomicReference<GXSSOHandler> handlerRef = new AtomicReference<>();
 
@@ -36,6 +45,15 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
 
     @Resource
     private GXUrlWhiteListsConfigProperties urlWhiteListsConfigProperties;
+
+    /**
+     * Test seam for the whitelist configuration.
+     *
+     * @param urlWhiteListsConfigProperties whitelist configuration, may be {@code null}
+     */
+    void setUrlWhiteListsConfigProperties(GXUrlWhiteListsConfigProperties urlWhiteListsConfigProperties) {
+        this.urlWhiteListsConfigProperties = urlWhiteListsConfigProperties;
+    }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
@@ -66,18 +84,17 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
             return true;
         }
 
-        String requestURI = request.getRequestURI();
-        if (isWhiteListUrl(requestURI)) {
-            log.debug("Skip SSO login check for whitelist URL: {}", requestURI);
+        if (isWhiteListUrl(request)) {
+            log.debug("Skip SSO login check for whitelist URL: {}", request.getRequestURI());
             return true;
         }
 
-        if (GXHandlerMethodAnnotationUtils.hasMergedAnnotation(handlerMethod, GXIgnoreLoginIntercept.class)) {
+        if (GXHandlerMethodAnnotationUtils.hasIgnoreAnnotation(handlerMethod)) {
             log.debug("Skip SSO login check for GXIgnoreLoginIntercept: {}", handlerMethod.getMethod().getName());
             return true;
         }
 
-        if (GXHandlerMethodAnnotationUtils.hasMergedAnnotation(handlerMethod, GXHttpInvokerAuthToken.class)) {
+        if (GXHandlerMethodAnnotationUtils.hasHttpInvokerTokenAnnotation(handlerMethod)) {
             log.debug("Skip SSO login check for GXHttpInvokerAuthToken: {}", handlerMethod.getMethod().getName());
             return true;
         }
@@ -90,18 +107,23 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
                 || request.getAttribute(RequestDispatcher.ERROR_REQUEST_URI) != null;
     }
 
-    private boolean isWhiteListUrl(String requestURI) {
+    private boolean isWhiteListUrl(HttpServletRequest request) {
         if (urlWhiteListsConfigProperties == null || CollUtil.isEmpty(urlWhiteListsConfigProperties.getWhiteLists())) {
             return false;
         }
+
+        String pathWithinApplication = UrlPathHelper.defaultInstance.getPathWithinApplication(request);
+        String requestUri = request.getRequestURI();
+
         return urlWhiteListsConfigProperties.getWhiteLists().stream()
-                .filter(Objects::nonNull)
-                .anyMatch(pattern -> pathMatcher.match(pattern, requestURI));
+                .filter(pattern -> CharSequenceUtil.isNotBlank(pattern))
+                .anyMatch(pattern -> pathMatcher.match(pattern, pathWithinApplication)
+                        || pathMatcher.match(pattern, requestUri));
     }
 
     private boolean applyCustomInterceptorRules(HttpServletRequest request, HttpServletResponse response) {
         GXAuthorizationInterceptorService authorizationInterceptorService =
-                GXSpringContextUtils.getBean(GXAuthorizationInterceptorService.class);
+                GXSSOHelperUtil.bean(GXAuthorizationInterceptorService.class);
         if (Objects.nonNull(authorizationInterceptorService)) {
             boolean interceptor = authorizationInterceptorService.interceptor(request, response);
             if (interceptor) {
@@ -113,24 +135,13 @@ public class GXSSOAuthorizationInterceptor extends GXAuthorizationInterceptor {
     }
 
     private boolean handleEmptyToken(HttpServletRequest request, HttpServletResponse response) throws Exception {
-        GXSSOCache ssoCache = GXSpringContextUtils.getBean(GXSSOCache.class);
+        log.debug("event=sso.token.absent uri={}", request.getRequestURI());
 
         if (GXHttpUtil.isAjax(request)) {
             getHandler().preTokenIsNullAjax(request, response);
-
-            if (Objects.nonNull(ssoCache)) {
-                ssoCache.delete(Dict.create());
-            }
-        } else {
-            if (getHandler().preTokenIsNull(request, response)) {
-                log.debug("User is not logged in, request URL: {}", request.getRequestURL());
-
-                if (Objects.nonNull(ssoCache)) {
-                    ssoCache.delete(Dict.create());
-                }
-
-                GXSSOHelperUtil.clearRedirectLogin(request, response);
-            }
+        } else if (getHandler().preTokenIsNull(request, response)) {
+            log.debug("User is not logged in, request URL: {}", request.getRequestURL());
+            GXSSOHelperUtil.clearRedirectLogin(request, response);
         }
 
         return false;

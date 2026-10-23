@@ -7,34 +7,62 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.HashSet;
+import java.util.Set;
 
 @Slf4j
 public class GXIpHelperUtil {
-    public static String LOCAL_IP;
+    /**
+     * Local address resolved once at class initialisation.
+     *
+     * <p>Immutable on purpose: a mutable public field could be rewritten by any code and would
+     * silently change the address recorded into the login token.</p>
+     */
+    public static final String LOCAL_IP;
 
-    public static String HOST_NAME;
+    /**
+     * Local host name resolved once at class initialisation.
+     */
+    public static final String HOST_NAME;
+
+    /**
+     * Every local address resolved once at class initialisation, so {@link #isLocalIp(String)}
+     * never performs a host name lookup on the request hot path.
+     */
+    private static final Set<String> LOCAL_ADDRESSES;
 
     static {
-        StringBuilder ip = new StringBuilder();
+        String resolvedIp = "unknown";
+        String resolvedHostName = "";
+        Set<String> addresses = new HashSet<>();
         try {
             InetAddress inetAddr = InetAddress.getLocalHost();
-            HOST_NAME = inetAddr.getHostName();
-            byte[] addr = inetAddr.getAddress();
-            for (int i = 0; i < addr.length; i++) {
-                if (i > 0) {
-                    ip.append(".");
-                }
-                ip.append(addr[i] & 0xFF);
+            resolvedHostName = inetAddr.getHostName();
+            resolvedIp = formatAddress(inetAddr.getAddress());
+            addresses.add(resolvedIp);
+            for (InetAddress inetAddress : InetAddress.getAllByName(resolvedHostName)) {
+                addresses.add(inetAddress.getHostAddress());
             }
         } catch (UnknownHostException e) {
-            ip = new StringBuilder("unknown");
             log.error("Resolve local host failed: {}", e.getMessage());
-        } finally {
-            LOCAL_IP = ip.toString();
         }
+        LOCAL_IP = resolvedIp;
+        HOST_NAME = resolvedHostName;
+        LOCAL_ADDRESSES = Set.copyOf(addresses);
     }
 
     private GXIpHelperUtil() {
+    }
+
+    private static String formatAddress(byte[] addr) {
+        StringBuilder ip = new StringBuilder();
+        for (int i = 0; i < addr.length; i++) {
+            if (i > 0) {
+                ip.append(".");
+            }
+            ip.append(addr[i] & 0xFF);
+        }
+        return ip.toString();
     }
 
     public static String getIpAddr(HttpServletRequest request) {
@@ -49,32 +77,26 @@ public class GXIpHelperUtil {
 
         if (isUnknown(ip)) {
             ip = request.getRemoteAddr();
-            if ("127.0.0.1".equals(ip) || "0:0:0:0:0:0:0:1".equals(ip)) {
-                try {
-                    ip = InetAddress.getLocalHost().getHostAddress();
-                } catch (UnknownHostException e) {
-                    log.error("Resolve local request IP failed: {}", e.getMessage());
-                }
+            if ("127.0.0.1".equals(ip) || "0:0:0:0:0:0:0:1".equals(ip) || "::1".equals(ip)) {
+                // Reuse the address resolved once at class initialisation: resolving the local
+                // host on every request performs a host name lookup on the hot path.
+                ip = LOCAL_IP;
             }
         }
         return ip;
     }
 
+    /**
+     * Whether the given address belongs to the local host.
+     *
+     * <p>Uses the address set resolved once at class initialisation instead of resolving the
+     * local host name on every call (T051).</p>
+     *
+     * @param ip address to check, may be blank
+     * @return {@code true} when the address is a local address
+     */
     public static boolean isLocalIp(String ip) {
-        if (CharSequenceUtil.isNotEmpty(ip)) {
-            try {
-                InetAddress inetAddress = InetAddress.getLocalHost();
-                InetAddress[] ias = InetAddress.getAllByName(inetAddress.getHostName());
-                for (InetAddress ia : ias) {
-                    if (ip.equals(ia.getHostAddress())) {
-                        return true;
-                    }
-                }
-            } catch (UnknownHostException e) {
-                log.error("Check local IP failed: {}", e.getMessage());
-            }
-        }
-        return false;
+        return CharSequenceUtil.isNotEmpty(ip) && LOCAL_ADDRESSES.contains(ip);
     }
 
     private static String getForwardedIp(HttpServletRequest request) {

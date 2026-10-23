@@ -1,0 +1,4 @@
+url:
+  white-lists:
+    - /public/**
+    - /login

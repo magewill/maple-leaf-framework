@@ -3,6 +3,7 @@ package cn.maple.sso.utils;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.json.JSONUtil;
+import cn.maple.core.framework.config.aware.GXApplicationContextSingleton;
 import cn.maple.core.framework.constant.GXTokenConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXAuthCodeUtils;
@@ -10,6 +11,7 @@ import cn.maple.core.framework.util.GXCurrentRequestContextUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.sso.cache.GXSSOCache;
 import cn.maple.sso.constant.GXSSOConstant;
+import cn.maple.sso.metrics.GXSSOMetrics;
 import cn.maple.sso.plugins.GXSSOPlugin;
 import cn.maple.sso.properties.GXSSOConfigProperties;
 import cn.maple.sso.properties.GXSSOProperties;
@@ -23,9 +25,20 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 public class GXSSOHelperUtil {
     private static final Logger LOGGER = LoggerFactory.getLogger(GXSSOHelperUtil.class);
+
+    private static final Map<Class<?>, CachedBean> BEAN_CACHE = new ConcurrentHashMap<>();
+
+    private static final AtomicInteger BEAN_LOOKUP_COUNT = new AtomicInteger();
+
+    private static final AtomicInteger RESOLVER_VERSION = new AtomicInteger();
+
+    private static volatile Function<Class<?>, Object> beanResolver = GXSpringContextUtils::getBean;
 
     protected static volatile GXSSOProperties ssoConfig;
 
@@ -44,6 +57,7 @@ public class GXSSOHelperUtil {
                         if (Objects.nonNull(configProperties) && Objects.nonNull(configProperties.getConfig())) {
                             ssoConfig = configProperties.getConfig();
                         } else {
+                            LOGGER.error("event=sso.config.invalid key=config-source reason=bean-absent; using defaults without cache and plugins.");
                             ssoConfig = new GXSSOProperties();
                         }
 
@@ -70,16 +84,72 @@ public class GXSSOHelperUtil {
     }
 
     public static GXSSOProperties setSsoConfig(GXSSOProperties ssoConfig) {
-        Objects.requireNonNull(ssoConfig, "ssoConfig must not be null");
+        if (ssoConfig == null) {
+            throw new IllegalArgumentException("ssoConfig must not be null");
+        }
         GXSSOHelperUtil.ssoConfig = ssoConfig;
+        invalidateBeanCache();
         return GXSSOHelperUtil.ssoConfig;
+    }
+
+    /**
+     * Cached bean lookup used on the request path.
+     *
+     * @param type bean type
+     * @param <T>  bean type
+     * @return the bean or {@code null} when absent
+     */
+    public static <T> T bean(Class<T> type) {
+        Object context = GXApplicationContextSingleton.INSTANCE.getApplicationContext();
+        int version = RESOLVER_VERSION.get();
+        CachedBean cached = BEAN_CACHE.get(type);
+        if (cached != null && cached.context() == context && cached.version() == version) {
+            return type.cast(cached.bean());
+        }
+
+        BEAN_LOOKUP_COUNT.incrementAndGet();
+        Object resolved;
+        try {
+            resolved = beanResolver.apply(type);
+        } catch (Exception e) {
+            LOGGER.debug("event=sso.bean.lookup.failed type={} error={}", type.getSimpleName(), e.getMessage());
+            return null;
+        }
+        if (resolved == null) {
+            return null;
+        }
+
+        T bean = type.cast(resolved);
+        BEAN_CACHE.put(type, new CachedBean(context, version, bean));
+        return bean;
+    }
+
+    static void setBeanResolverForTests(Function<Class<?>, Object> resolver) {
+        beanResolver = resolver == null ? GXSpringContextUtils::getBean : resolver;
+        RESOLVER_VERSION.incrementAndGet();
+        invalidateBeanCache();
+    }
+
+    private record CachedBean(Object context, int version, Object bean) {
+    }
+
+    static int beanLookupCount() {
+        return BEAN_LOOKUP_COUNT.get();
+    }
+
+    static void resetBeanLookupCount() {
+        BEAN_LOOKUP_COUNT.set(0);
+    }
+
+    private static void invalidateBeanCache() {
+        BEAN_CACHE.clear();
     }
 
     public static GXAbstractSSOService getSSOService() {
         if (Objects.isNull(ssoService)) {
             synchronized (GXSSOHelperUtil.class) {
                 if (Objects.isNull(ssoService)) {
-                    GXAbstractSSOService service = GXSpringContextUtils.getBean(GXAbstractSSOService.class);
+                    GXAbstractSSOService service = bean(GXAbstractSSOService.class);
                     ssoService = Objects.nonNull(service) ? service : new GXConfigurableAbstractSSOServiceImpl();
                 }
             }
@@ -120,7 +190,7 @@ public class GXSSOHelperUtil {
     }
 
     public static String getTokenCacheKey(HttpServletRequest request) {
-        GXTokenConfigService tokenConfigService = GXSpringContextUtils.getBean(GXTokenConfigService.class);
+        GXTokenConfigService tokenConfigService = bean(GXTokenConfigService.class);
         if (tokenConfigService == null) {
             throw new GXBusinessException("GXTokenConfigService implementation not found");
         }
@@ -149,37 +219,40 @@ public class GXSSOHelperUtil {
         }
 
         if (CharSequenceUtil.isBlank(token)) {
-            LOGGER.warn("Received blank token.");
+            LOGGER.debug("event=sso.token.parse.skip reason=blank-token");
             return Dict.create();
         }
 
         if (header) {
-            LOGGER.debug("Token source: header");
+            LOGGER.debug("event=sso.token.source header");
         } else {
-            LOGGER.debug("Token source: cookie");
+            LOGGER.debug("event=sso.token.source cookie");
         }
 
         try {
-            GXTokenConfigService tokenSecretService = GXSpringContextUtils.getBean(GXTokenConfigService.class);
+            GXTokenConfigService tokenSecretService = bean(GXTokenConfigService.class);
             if (Objects.isNull(tokenSecretService)) {
                 throw new GXBusinessException("GXTokenConfigService implementation not found in Spring context");
             }
 
             String tokenSecret = tokenSecretService.getTokenSecret();
             if (CharSequenceUtil.isBlank(tokenSecret)) {
-                LOGGER.error("Token secret is blank.");
+                LOGGER.error("event=sso.config.invalid key=token-secret reason=blank");
                 throw new GXBusinessException("Token secret config error");
             }
 
             String decodedToken;
             try {
                 decodedToken = GXAuthCodeUtils.authCodeDecode(token, tokenSecret);
-                if (CharSequenceUtil.isBlank(decodedToken)) {
-                    LOGGER.warn("Token decode result is blank.");
-                    return Dict.create();
-                }
             } catch (Exception e) {
-                LOGGER.error("Token decode failed: {}", e.getMessage());
+                LOGGER.debug("event=sso.token.parse.failed reason=decode-error error={}", e.getMessage());
+                GXSSOMetrics.getInstance().incrementParseFailure();
+                return Dict.create();
+            }
+
+            if (CharSequenceUtil.isBlank(decodedToken) || "{}".equals(decodedToken)) {
+                LOGGER.debug("event=sso.token.parse.failed reason=invalid-token");
+                GXSSOMetrics.getInstance().incrementParseFailure();
                 return Dict.create();
             }
 
@@ -187,18 +260,26 @@ public class GXSSOHelperUtil {
             try {
                 requestToken = JSONUtil.toBean(decodedToken, Dict.class);
             } catch (Exception e) {
-                LOGGER.error("Token JSON parse failed: {}", e.getMessage());
+                LOGGER.debug("event=sso.token.parse.failed reason=json-error error={}", e.getMessage());
+                GXSSOMetrics.getInstance().incrementParseFailure();
                 return Dict.create();
+            }
+
+            if (requestToken.isEmpty()) {
+                GXSSOMetrics.getInstance().incrementParseFailure();
+                return requestToken;
             }
 
             String clientIP = GXCurrentRequestContextUtils.getClientIP();
             requestToken.putIfAbsent(GXSSOConstant.TOKEN_USER_IP, clientIP);
 
+            GXSSOMetrics.getInstance().incrementParseSuccess();
             return requestToken;
         } catch (GXBusinessException e) {
             throw e;
         } catch (Exception e) {
-            LOGGER.error("Unexpected token parse error.", e);
+            LOGGER.error("event=sso.token.parse.failed reason=unexpected error={}", e.getMessage());
+            GXSSOMetrics.getInstance().incrementParseFailure();
             return Dict.create();
         }
     }

@@ -1,16 +1,20 @@
 package cn.maple.sso.service;
 
 import cn.hutool.core.lang.Dict;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.config.aware.GXApplicationContextSingleton;
 import cn.maple.core.framework.constant.GXTokenConstant;
 import cn.maple.core.framework.exception.GXBusinessException;
-import cn.maple.core.framework.exception.GXTokenInvalidException;
+
 import cn.maple.core.framework.service.GXBaseCacheService;
 import cn.maple.sso.cache.GXSSOCache;
 import cn.maple.sso.constant.GXSSOConstant;
+import cn.maple.sso.enums.GXSSOTokenStateEnums;
 import cn.maple.sso.enums.GXTokenFlag;
 import cn.maple.sso.plugins.GXSSOPlugin;
 import cn.maple.sso.properties.GXSSOProperties;
+import cn.maple.sso.support.GXSSOTestDoubles;
 import cn.maple.sso.utils.GXSSOHelperUtil;
 import cn.maple.sso.web.handler.GXSSODefaultHandler;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,11 +22,12 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.support.GenericApplicationContext;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
-import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -35,10 +40,12 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@ResourceLock("sso-global-config")
 class GXSSOServiceBehaviorTest {
     private final TestSSOService service = new TestSSOService();
     private ApplicationContext originalApplicationContext;
@@ -46,7 +53,7 @@ class GXSSOServiceBehaviorTest {
     @BeforeEach
     void setUp() {
         originalApplicationContext = GXApplicationContextSingleton.INSTANCE.getApplicationContext();
-        replaceApplicationContext(null);
+        GXSSOTestDoubles.restoreApplicationContext(null);
         GXSSOHelperUtil.setSsoConfig(new GXSSOProperties());
     }
 
@@ -57,7 +64,7 @@ class GXSSOServiceBehaviorTest {
             context.close();
         }
         RequestContextHolder.resetRequestAttributes();
-        replaceApplicationContext(originalApplicationContext);
+        GXSSOTestDoubles.restoreApplicationContext(originalApplicationContext);
         GXSSOHelperUtil.setSsoConfig(new GXSSOProperties());
     }
 
@@ -82,7 +89,9 @@ class GXSSOServiceBehaviorTest {
 
     @Test
     void setCookieDoesNotMutateCallerTokenAndUsesConfiguredSameSite() {
-        GXSSOProperties config = new GXSSOProperties().setCookieSameSite("Strict");
+        registerContext(new InMemoryCacheService(), new GXTokenConfigService() {
+        });
+        GXSSOProperties config = new GXSSOProperties().setCookieSameSite("Strict").setCache(passThroughCache());
         GXSSOHelperUtil.setSsoConfig(config);
         Dict token = Dict.create().set(config.getTokenName(), "token-value");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -95,6 +104,9 @@ class GXSSOServiceBehaviorTest {
 
     @Test
     void setCookieKeepsLaxAsDefaultSameSite() {
+        registerContext(new InMemoryCacheService(), new GXTokenConfigService() {
+        });
+        GXSSOHelperUtil.setSsoConfig(new GXSSOProperties().setCache(passThroughCache()));
         Dict token = Dict.create().set(GXSSOProperties.getInstance().getTokenName(), "token-value");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
@@ -150,17 +162,61 @@ class GXSSOServiceBehaviorTest {
                 return false;
             }
         })));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(GXSSOConstant.SSO_TOKEN_ATTR,
+                Dict.create().set(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, 7L));
 
-        service.exposeLogout(new MockHttpServletRequest(), new MockHttpServletResponse(), null);
+        service.exposeLogout(request, new MockHttpServletResponse(), null);
 
         assertEquals(1, logoutCount.get());
     }
 
     @Test
+    void anonymousLogoutSkipsPlugins() {
+        AtomicInteger logoutCount = new AtomicInteger();
+        GXSSOHelperUtil.setSsoConfig(new GXSSOProperties().setPluginList(List.of(new GXSSOPlugin() {
+            @Override
+            public boolean logout(HttpServletRequest request, HttpServletResponse response) {
+                logoutCount.incrementAndGet();
+                return true;
+            }
+        })));
+
+        assertTrue(service.clearLogin(new MockHttpServletRequest(), new MockHttpServletResponse()));
+
+        assertEquals(0, logoutCount.get(), "a request without a token has no session to log out");
+    }
+
+    @Test
+    void anonymousLogoutWithoutCookieWritesNoSetCookie() {
+        GXSSOHelperUtil.setSsoConfig(new GXSSOProperties());
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertTrue(service.clearLogin(new MockHttpServletRequest(), response));
+
+        assertNull(response.getHeader("Set-Cookie"), "a request without a cookie must not emit Set-Cookie");
+    }
+
+    @Test
+    void degradedModeClampsCookieMaxAgeToFallbackTtl() {
+        registerContext(new InMemoryCacheService(), new GXTokenConfigService() {
+        });
+        GXSSOHelperUtil.setSsoConfig(new GXSSOProperties().setCacheExpires(-1).setCacheFallbackEnabled(true));
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        service.setCookie(new MockHttpServletRequest(), response, Dict.create().set("userId", 7L));
+
+        assertTrue(response.getHeader("Set-Cookie").contains("Max-Age=900"),
+                "no-expiry config must degrade to the fallback ceiling, not a one second cookie");
+    }
+
+    @Test
     void logoutDoesNotRetryFailedCacheDelete() {
         AtomicInteger deleteCount = new AtomicInteger();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(GXSSOConstant.SSO_TOKEN_ATTR, Dict.create().set(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, 7L));
 
-        service.exposeLogout(new MockHttpServletRequest(), new MockHttpServletResponse(), new GXSSOCache() {
+        service.exposeLogout(request, new MockHttpServletResponse(), new GXSSOCache() {
             @Override
             public boolean delete(Dict ssoToken) {
                 deleteCount.incrementAndGet();
@@ -173,6 +229,9 @@ class GXSSOServiceBehaviorTest {
 
     @Test
     void authCookieUsesSecureLongerSessionId() {
+        registerContext(new InMemoryCacheService(), new GXTokenConfigService() {
+        });
+        GXSSOHelperUtil.setSsoConfig(new GXSSOProperties().setCache(passThroughCache()));
         Dict token = Dict.create().set(GXSSOProperties.getInstance().getTokenName(), "token-value");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
@@ -221,7 +280,8 @@ class GXSSOServiceBehaviorTest {
 
     @Test
     void defaultCacheUsesTokenEffectivenessHook() {
-        bindRequest();
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(servletRequest));
         registerContext(new InMemoryCacheService(), new GXTokenConfigService() {
             @Override
             public boolean verifyTokenEffectiveness() {
@@ -232,7 +292,10 @@ class GXSSOServiceBehaviorTest {
         };
         Dict token = Dict.create().set(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, 7L);
 
-        assertThrows(GXTokenInvalidException.class, () -> cache.get(30, token));
+        Dict result = cache.get(30, token);
+
+        assertEquals(Dict.create(), result, "an ineffective token resolves to an empty dict");
+        assertEquals(GXSSOTokenStateEnums.EXPIRED.code(), servletRequest.getAttribute(GXSSOConstant.SSO_TOKEN_STATE));
     }
 
     @Test
@@ -271,7 +334,190 @@ class GXSSOServiceBehaviorTest {
 
         assertFalse(result);
         assertEquals(401, response.getStatus());
-        assertTrue(response.getContentAsString().contains("Already logged out, please login again."));
+        assertEquals("application/json;charset=UTF-8", response.getContentType(),
+                "the unauthorized body must be produced by the unified response builder");
+        JSONObject body = JSONUtil.parseObj(response.getContentAsString());
+        assertEquals(401, body.getInt("code"));
+        assertEquals("Already logged out, please login again.", body.getStr("msg"));
+        assertTrue(body.containsKey("data"), "GXResultUtils keeps data even when it is null");
+    }
+
+    @Test
+    void loginFailsWhenCacheUnavailable() {
+        GXSSOHelperUtil.setSsoConfig(new GXSSOProperties());
+
+        assertThrows(GXBusinessException.class,
+                () -> service.setCookie(new MockHttpServletRequest(), new MockHttpServletResponse(),
+                        Dict.create().set("userId", 7L)),
+                "no cache implementation and no explicit fallback must fail closed");
+    }
+
+    @Test
+    void loginDegradesWithBoundedTtlWhenFallbackEnabled() {
+        registerContext(new InMemoryCacheService(), new GXTokenConfigService() {
+        });
+        GXSSOHelperUtil.setSsoConfig(new GXSSOProperties().setCacheFallbackEnabled(true).setCookieMaxAge(3600));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        service.setCookie(new MockHttpServletRequest(), response, Dict.create().set("userId", 7L));
+
+        String setCookie = response.getHeader("Set-Cookie");
+        assertTrue(setCookie != null && setCookie.contains("Max-Age="), "degraded token must be bounded");
+        int maxAge = Integer.parseInt(setCookie.replaceAll(".*Max-Age=(\\d+).*", "$1"));
+        assertTrue(maxAge > 0 && maxAge <= 900, "degraded token TTL must not exceed 900 seconds, was " + maxAge);
+    }
+
+    @Test
+    void pluginLoginFailureRollsBackCacheAndThrows() {
+        registerContext(new InMemoryCacheService(), new GXTokenConfigService() {
+        });
+        AtomicInteger retained = new AtomicInteger();
+        GXSSOCache cache = new GXSSOCache() {
+            @Override
+            public boolean set(Dict ssoToken, int expires) {
+                retained.incrementAndGet();
+                return true;
+            }
+
+            @Override
+            public boolean delete(Dict ssoToken) {
+                retained.decrementAndGet();
+                return true;
+            }
+        };
+        GXSSOHelperUtil.setSsoConfig(new GXSSOProperties().setCache(cache).setPluginList(List.of(new GXSSOPlugin() {
+            @Override
+            public boolean login(HttpServletRequest request, HttpServletResponse response) {
+                return false;
+            }
+        })));
+
+        assertThrows(GXBusinessException.class,
+                () -> service.setCookie(new MockHttpServletRequest(), new MockHttpServletResponse(),
+                        Dict.create().set("userId", 7L)));
+        assertEquals(0, retained.get(), "a rejected login must roll back the cache entry");
+    }
+
+    @Test
+    void logoutIsIdempotentAndReturnsTrue() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        assertTrue(service.clearLogin(request, response));
+        assertTrue(service.clearLogin(request, response), "second logout of a missing cookie is still a success");
+    }
+
+    @Test
+    void invalidSameSiteCombinationIsRejected() {
+        registerContext(new InMemoryCacheService(), new GXTokenConfigService() {
+        });
+        GXSSOHelperUtil.setSsoConfig(new GXSSOProperties()
+                .setCookieSameSite("None")
+                .setCookieSecure(false)
+                .setCache(new GXSSOCache() {
+                }));
+
+        GXBusinessException exception = assertThrows(GXBusinessException.class,
+                () -> service.setCookie(new MockHttpServletRequest(), new MockHttpServletResponse(),
+                        Dict.create().set("userId", 7L)),
+                "SameSite=None requires Secure");
+        assertTrue(exception.getMessage().contains("SameSite"),
+                "the failure must come from the SameSite validation, not from another guard");
+    }
+
+    @Test
+    void unsupportedSameSiteValueIsRejected() {
+        GXSSOHelperUtil.setSsoConfig(new GXSSOProperties()
+                .setCookieSameSite("Laxx")
+                .setCache(new GXSSOCache() {
+                }));
+
+        GXBusinessException exception = assertThrows(GXBusinessException.class,
+                () -> service.setCookie(new MockHttpServletRequest(), new MockHttpServletResponse(),
+                        Dict.create().set("userId", 7L)),
+                "an unsupported SameSite value must not reach the Set-Cookie header");
+        assertTrue(exception.getMessage().contains("SameSite"),
+                "the failure must come from the SameSite validation, not from another guard");
+    }
+
+    @Test
+    void logoutWithoutLogoutUrlReturnsUnifiedJson() throws Exception {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        service.logout(new MockHttpServletRequest(), response);
+
+        assertEquals("application/json;charset=UTF-8", response.getContentType(),
+                "logout must answer with the unified response instead of a raw text body");
+        JSONObject body = JSONUtil.parseObj(response.getContentAsString());
+        assertEquals(200, body.getInt("code"));
+        assertEquals("Logged out", body.getStr("msg"));
+    }
+
+    @Test
+    void authCookieInvalidatesExistingSessionOnly() {
+        registerContext(new InMemoryCacheService(), new GXTokenConfigService() {
+        });
+        GXSSOHelperUtil.setSsoConfig(new GXSSOProperties().setCache(passThroughCache()));
+        Dict token = Dict.create().set(GXSSOProperties.getInstance().getTokenName(), "token-value");
+
+        MockHttpServletRequest withSession = new MockHttpServletRequest();
+        MockHttpSession session = new MockHttpSession();
+        withSession.setSession(session);
+        service.authCookie(withSession, new MockHttpServletResponse(), token);
+        assertTrue(session.isInvalid(), "an existing session must be invalidated on login");
+
+        MockHttpServletRequest withoutSession = new MockHttpServletRequest();
+        service.authCookie(withoutSession, new MockHttpServletResponse(), token);
+        assertNull(withoutSession.getSession(false), "login must not create a session");
+    }
+
+    @Test
+    void blankRequestIpIsRejectedWhenIpCheckEnabled() {
+        GXSSOHelperUtil.setSsoConfig(new GXSSOProperties().setCookieCheckIp(true));
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("");
+        Dict token = Dict.create().set(GXTokenConstant.TOKEN_USER_ID_FIELD_NAME, 7L).set("ip", "10.0.0.1");
+
+        assertTrue(service.exposeCheckIpBrowser(request, token).isEmpty(), "a blank request ip must be rejected");
+
+        request.setRemoteAddr("10.0.0.1");
+        assertFalse(service.exposeCheckIpBrowser(request, token).isEmpty(), "a matching ip must be accepted");
+    }
+
+    @Test
+    void cookieMaxAgeAttributeAcceptsNonIntegerTypes() {
+        registerContext(new InMemoryCacheService(), new GXTokenConfigService() {
+        });
+        GXSSOProperties config = new GXSSOProperties().setCache(passThroughCache()).setCookieMaxAge(600);
+        GXSSOHelperUtil.setSsoConfig(config);
+        Dict token = Dict.create().set(config.getTokenName(), "token-value");
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(GXSSOConstant.SSO_COOKIE_MAX_AGE, 120L);
+        MockHttpServletResponse longResponse = new MockHttpServletResponse();
+        service.setCookie(request, longResponse, token);
+        assertTrue(longResponse.getHeader("Set-Cookie").contains("Max-Age=120"),
+                "a Number attribute must be honoured");
+
+        request.setAttribute(GXSSOConstant.SSO_COOKIE_MAX_AGE, "not-a-number");
+        MockHttpServletResponse fallbackResponse = new MockHttpServletResponse();
+        service.setCookie(request, fallbackResponse, token);
+        assertTrue(fallbackResponse.getHeader("Set-Cookie").contains("Max-Age=600"),
+                "an unsupported attribute type must fall back to the configured value");
+    }
+
+    private static GXSSOCache passThroughCache() {
+        return new GXSSOCache() {
+            @Override
+            public boolean set(Dict ssoToken, int expires) {
+                return true;
+            }
+
+            @Override
+            public boolean delete(Dict ssoToken) {
+                return true;
+            }
+        };
     }
 
     private static void registerContext(GXBaseCacheService cacheService, GXTokenConfigService tokenConfigService) {
@@ -279,11 +525,7 @@ class GXSSOServiceBehaviorTest {
         context.registerBean(GXBaseCacheService.class, () -> cacheService);
         context.registerBean(GXTokenConfigService.class, () -> tokenConfigService);
         context.refresh();
-        replaceApplicationContext(context);
-    }
-
-    private static void replaceApplicationContext(ApplicationContext applicationContext) {
-        ReflectionTestUtils.setField(GXApplicationContextSingleton.INSTANCE, "applicationContext", applicationContext);
+        GXSSOTestDoubles.installApplicationContext(context);
     }
 
     private static void bindRequest() {
@@ -297,6 +539,10 @@ class GXSSOServiceBehaviorTest {
 
         private boolean exposeLogout(MockHttpServletRequest request, MockHttpServletResponse response, GXSSOCache cache) {
             return logout(request, response, cache);
+        }
+
+        private Dict exposeCheckIpBrowser(MockHttpServletRequest request, Dict token) {
+            return checkIpBrowser(request, token);
         }
     }
 
