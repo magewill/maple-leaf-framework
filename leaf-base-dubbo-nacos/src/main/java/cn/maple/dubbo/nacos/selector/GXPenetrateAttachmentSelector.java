@@ -9,6 +9,7 @@ import org.apache.dubbo.common.extension.Activate;
 import org.apache.dubbo.rpc.Invocation;
 import org.apache.dubbo.rpc.PenetrateAttachmentSelector;
 import org.apache.dubbo.rpc.RpcContextAttachment;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -84,7 +85,7 @@ public class GXPenetrateAttachmentSelector implements PenetrateAttachmentSelecto
         return traceId;
     }
 
-    private String getAttachment(RpcContextAttachment attachment) {
+    private @Nullable String getAttachment(RpcContextAttachment attachment) {
         if (attachment == null) {
             return null;
         }
@@ -95,7 +96,7 @@ public class GXPenetrateAttachmentSelector implements PenetrateAttachmentSelecto
         return Objects.toString(traceId, null);
     }
 
-    private String getInvocationAttachment(Invocation invocation) {
+    private @Nullable String getInvocationAttachment(Invocation invocation) {
         if (invocation == null) {
             return null;
         }
@@ -109,13 +110,20 @@ public class GXPenetrateAttachmentSelector implements PenetrateAttachmentSelecto
     private void logDebug(String message, Object... args) {
         if (LOG.isDebugEnabled()) {
             Object[] allArgs = new Object[args.length + 1];
-            allArgs[0] = getAppName();
+            allArgs[0] = getCachedAppName();
             System.arraycopy(args, 0, allArgs, 1, args.length);
             LOG.debug(message, allArgs);
         }
     }
 
-    private String getAppName() {
+    /**
+     * Reads {@code spring.application.name} once and caches it for the whole JVM.
+     *
+     * <p>Shared by {@link #select} / {@link #selectReverse} and the TraceId filters so the hot path
+     * does not hit the Spring {@code Environment} per request. {@link #UNKNOWN_APP} is never cached
+     * so a later-available environment can still be picked up.
+     */
+    public static String getCachedAppName() {
         String currentAppName = appName;
         if (CharSequenceUtil.isNotBlank(currentAppName) && !UNKNOWN_APP.equals(currentAppName)) {
             return currentAppName;
@@ -125,5 +133,13 @@ public class GXPenetrateAttachmentSelector implements PenetrateAttachmentSelecto
             appName = currentAppName;
         }
         return currentAppName;
+    }
+
+    /**
+     * Clears the cached application name. Intended for tests and Spring context refresh so that
+     * multiple application contexts in one JVM do not leak the first name into the second.
+     */
+    public static void resetAppNameCache() {
+        appName = null;
     }
 }

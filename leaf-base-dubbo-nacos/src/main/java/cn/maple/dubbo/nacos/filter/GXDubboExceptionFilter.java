@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Provider-side exception filter that preserves declared exceptions and hides undeclared runtime details.
@@ -28,6 +29,10 @@ import java.util.Objects;
 @Activate(group = CommonConstants.PROVIDER)
 public class GXDubboExceptionFilter extends ExceptionFilter {
     private static final Logger LOGGER = LoggerFactory.getLogger(GXDubboExceptionFilter.class);
+    private static final String SENTINEL_BLOCK_PACKAGE = "com.alibaba.csp.sentinel.slots.block.";
+    private static final String SENTINEL_FLOW_MESSAGE = "SentinelBlockException: FlowException";
+    private static final Class<?> SENTINEL_BLOCK_EXCEPTION = resolveBlockExceptionClass();
+    private static final AtomicLong FILTER_FAILURE_COUNT = new AtomicLong();
 
     @Override
     public void onResponse(Result appResponse, Invoker<?> invoker, Invocation invocation) {
@@ -63,8 +68,9 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
                     return;
                 }
 
+                Class<?>[] parameterTypes = invocation.getParameterTypes() == null ? new Class<?>[0] : invocation.getParameterTypes();
                 try {
-                    Method method = invoker.getInterface().getMethod(invocation.getMethodName(), invocation.getParameterTypes());
+                    Method method = invoker.getInterface().getMethod(invocation.getMethodName(), parameterTypes);
                     Class<?>[] exceptionClasses = method.getExceptionTypes();
                     for (Class<?> exceptionClass : exceptionClasses) {
                         if (exceptionClass.isAssignableFrom(exception.getClass())) {
@@ -73,11 +79,12 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
                         }
                     }
                 } catch (NoSuchMethodException e) {
-                    return;
+                    LOGGER.debug("Method signature not resolvable, fall through to undeclared-exception handling. service: {}, method: {}",
+                            invoker.getInterface().getName(), invocation.getMethodName());
                 }
 
                 LOGGER.error("Got unchecked and undeclared exception called by {}. service: {}, method: {}, exception: {}: {}",
-                        RpcContext.getServiceContext().getRemoteHost(), invoker.getInterface().getName(),
+                        RpcContext.getServiceContext().getRemoteHost(), serviceName(invoker),
                         invocation.getMethodName(), exception.getClass().getName(), exception.getMessage(), exception);
 
                 String className = exception.getClass().getName();
@@ -95,8 +102,9 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
                 }
                 appResponse.setException(exception);
             } catch (Throwable e) {
+                FILTER_FAILURE_COUNT.incrementAndGet();
                 LOGGER.warn("Failed to run Dubbo exception filter called by {}. service: {}, method: {}, exception: {}: {}",
-                        RpcContext.getServiceContext().getRemoteHost(), invoker.getInterface().getName(),
+                        RpcContext.getServiceContext().getRemoteHost(), serviceName(invoker),
                         invocation.getMethodName(), e.getClass().getName(), e.getMessage(), e);
             }
         }
@@ -105,17 +113,36 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
     private boolean isSentinelFlowException(Throwable exception) {
         Throwable current = exception;
         while (Objects.nonNull(current)) {
-            String className = current.getClass().getName();
             String message = current.getMessage();
-            if (CharSequenceUtil.equals(className, "com.alibaba.csp.sentinel.slots.block.flow.FlowException")
-                    || CharSequenceUtil.equals(className, "com.alibaba.csp.sentinel.slots.block.BlockException")
-                    || CharSequenceUtil.contains(message, "SentinelBlockException: FlowException")
-                    || CharSequenceUtil.contains(message, "FlowException")) {
+            if (current.getClass().getName().startsWith(SENTINEL_BLOCK_PACKAGE)
+                    || isAssignableToBlockException(current)
+                    || CharSequenceUtil.contains(message, SENTINEL_FLOW_MESSAGE)) {
                 return true;
             }
             current = current.getCause();
         }
         return false;
+    }
+
+    private boolean isAssignableToBlockException(Throwable exception) {
+        return Objects.nonNull(SENTINEL_BLOCK_EXCEPTION) && SENTINEL_BLOCK_EXCEPTION.isAssignableFrom(exception.getClass());
+    }
+
+    private static Class<?> resolveBlockExceptionClass() {
+        try {
+            return Class.forName("com.alibaba.csp.sentinel.slots.block.BlockException", false, GXDubboExceptionFilter.class.getClassLoader());
+        } catch (ClassNotFoundException e) {
+            return null;
+        }
+    }
+
+    static long filterFailureCount() {
+        return FILTER_FAILURE_COUNT.get();
+    }
+
+    private String serviceName(Invoker<?> invoker) {
+        Class<?> serviceInterface = invoker.getInterface();
+        return Objects.isNull(serviceInterface) ? "unknown" : serviceInterface.getName();
     }
 
     private Dict buildErrorData(Invoker<?> invoker, Invocation invocation, String errorType) {

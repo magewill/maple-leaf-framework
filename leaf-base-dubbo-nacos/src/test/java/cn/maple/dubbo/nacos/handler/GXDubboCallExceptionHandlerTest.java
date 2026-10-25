@@ -9,6 +9,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class GXDubboCallExceptionHandlerTest {
@@ -45,5 +48,27 @@ class GXDubboCallExceptionHandlerTest {
         assertEquals("busy", result.getMsg());
         assertEquals(data, result.getData());
         assertEquals("trace-flow", result.getData().getStr(GXTraceIdContextUtils.TRACE_ID_KEY));
+    }
+
+    @Test
+    void rpcExceptionSubtypesKeepStableCode() {
+        Map<Integer, String> expectedErrorTypes = new LinkedHashMap<>();
+        expectedErrorTypes.put(RpcException.TIMEOUT_EXCEPTION, "timeout");
+        expectedErrorTypes.put(RpcException.NETWORK_EXCEPTION, "network");
+        expectedErrorTypes.put(RpcException.SERIALIZATION_EXCEPTION, "serialization");
+        expectedErrorTypes.put(RpcException.FORBIDDEN_EXCEPTION, "forbidden");
+        expectedErrorTypes.put(RpcException.AUTHORIZATION_EXCEPTION, "authorization");
+        expectedErrorTypes.put(RpcException.LIMIT_EXCEEDED_EXCEPTION, "limitExceed");
+        expectedErrorTypes.put(RpcException.NO_INVOKER_AVAILABLE_AFTER_FILTER, "noInvoker");
+        expectedErrorTypes.put(RpcException.VALIDATION_EXCEPTION, "validation");
+        expectedErrorTypes.put(RpcException.BIZ_EXCEPTION, "business");
+
+        expectedErrorTypes.forEach((rpcCode, errorType) -> {
+            GXResultUtils<Dict> result = handler.handleRpcException(new RpcException(rpcCode, "subtype-" + rpcCode));
+
+            assertEquals(500, result.getCode());
+            assertEquals(errorType, result.getData().getStr("errorType"));
+            assertEquals(rpcCode, result.getData().getInt("rpcCode"));
+        });
     }
 }

@@ -51,6 +51,8 @@
    负责声明 Dubbo SPI 扩展名到实现类的映射，属于运行时装配基线。
 6. `src/main/resources/security`
    负责 Dubbo 序列化安全白名单资源。新增跨进程传输对象时，要同步评估是否需要更新。
+7. `src/main/java/cn/maple/dubbo/nacos/config`
+   负责启动期装配校验，例如 provider filter 是否已排除 Dubbo 内置 `ExceptionFilter`。
 
 ## 3. 核心行为基线
 
@@ -61,6 +63,7 @@
 3. 两个 TraceId Filter 都会保存进入前的原始 TraceId，并在 `finally` 中调用 `GXTraceIdContextUtils.restoreTraceId(originalTraceId)` 恢复线程上下文，禁止删除或绕过。
 4. `GXPenetrateAttachmentSelector` 与两个 TraceId Filter 相互配合，变更任意一方时必须一起评估请求链和响应链的透传行为。
 5. `GXDubboExceptionFilter` 只在 Provider 侧生效，并且对 `GXBusinessException`、方法签名已声明异常、`RpcException`、JDK/Jakarta 异常、MyBatis 异常、Sentinel 限流异常的处理策略不同，不得合并成单一路径。
+5.1 **强制装配**：Provider 侧必须配置 `dubbo.provider.filter: dubboExceptionFilter,-exception`。Dubbo 内置 `ExceptionFilter` 与 `GXDubboExceptionFilter` 均为 `@Activate(group=provider)`；未排除内置 filter 时，`GXBusinessException` 会被内置 filter 包装成普通 `RuntimeException`，业务 `code`/`msg`/`data` 丢失。模块启动时由 `GXDubboProviderFilterValidator` 读取 `dubbo.provider.filter`，缺失或未包含 `-exception` 时输出 ERROR（不阻断启动）。
 6. `GXDubboExceptionFilter` 对 Sentinel 限流异常的识别依赖类名和消息内容双重兜底，修改判断逻辑时必须考虑未直接引入 Sentinel 依赖的运行场景。
 7. `GXDubboRpcApiBeanPostProcessor` 依赖 Dubbo `ServiceBean#getRef()`、泛型参数解析、Spring 容器按类型取 Bean，以及反射调用 `staticBindServeServiceClass` 完成绑定。这是一条约定式链路，不得轻易变更协议。
 8. SPI 文件中的扩展名是外部装配点。修改扩展名、实现类路径或资源位置时，必须视为兼容性变更。
@@ -86,7 +89,7 @@
 
 ## 5. 测试要求
 
-当前模块下没有现成的 `src/test` 测试目录。后续凡是修改本模块功能代码，必须同步补齐与变更点对应的测试基线。
+模块当前已有 9 个测试类 / ≥31 条用例（`mvn -o -pl leaf-base-dubbo-nacos test` 全绿）。后续凡是修改本模块功能代码，必须在其基础上补齐与变更点对应的测试基线，不得删除或跳过既有用例。
 
 1. 测试用例要覆盖全面，至少覆盖成功路径、失败路径、异常路径、空值路径和边界条件。
 2. 如果功能需要在 Spring Boot 应用运行后才能验证，测试用例就应该模拟真实 Spring Boot 应用启动之后再测试，优先使用 `@SpringBootTest`、真实 Bean 装配、AOP/BeanPostProcessor 生效后的上下文。

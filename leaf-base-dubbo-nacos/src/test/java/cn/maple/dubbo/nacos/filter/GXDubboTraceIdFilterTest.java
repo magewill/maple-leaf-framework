@@ -1,6 +1,8 @@
 package cn.maple.dubbo.nacos.filter;
 
+import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
+import cn.maple.dubbo.nacos.support.GXDubboTestSupport;
 import org.apache.dubbo.rpc.AppResponse;
 import org.apache.dubbo.rpc.AsyncRpcResult;
 import org.apache.dubbo.rpc.Invocation;
@@ -11,14 +13,24 @@ import org.apache.dubbo.rpc.RpcException;
 import org.apache.dubbo.rpc.RpcInvocation;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.slf4j.MDC;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -113,6 +125,90 @@ class GXDubboTraceIdFilterTest {
 
         assertEquals("async-trace", response.getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY));
         assertEquals("original", GXTraceIdContextUtils.getTraceId());
+    }
+
+    @Test
+    void resolveTraceIdKeepsClientCustomOrder() {
+        RpcContext.getClientAttachment().setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, "client-trace");
+        RpcContext.getServerAttachment().setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, "server-trace");
+        Invocation invocation = invocationWithTraceId(null);
+        Result result = mock(Result.class);
+        Invoker<?> invoker = successfulInvoker(invocation, result);
+
+        new GXDubboClientTraceIdFilter().invoke(invoker, invocation);
+
+        verify(invocation).setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, "client-trace");
+    }
+
+    @Test
+    void resolveTraceIdKeepsServerCustomOrder() {
+        RpcContext.getClientAttachment().setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, "client-trace");
+        RpcContext.getServerAttachment().setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, "server-trace");
+        Invocation invocation = invocationWithTraceId(null);
+        Invoker<?> invoker = successfulInvoker(invocation, mock(Result.class));
+
+        new GXDubboServerTraceIdFilter().invoke(invoker, invocation);
+
+        verify(invocation).setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, "server-trace");
+    }
+
+    @Test
+    void exceptionRestoresMdcWhenEnteredEmpty() {
+        Invocation invocation = invocationWithTraceId("incoming");
+        Invoker<?> invoker = mock(Invoker.class);
+        when(invoker.invoke(invocation)).thenThrow(new RpcException("boom"));
+
+        assertThrows(RpcException.class, () -> new GXDubboClientTraceIdFilter().invoke(invoker, invocation));
+
+        assertEquals("", GXTraceIdContextUtils.getTraceId());
+    }
+
+    @Test
+    void asyncCallbackRestoresMdcOnCallbackThread() throws Exception {
+        GXTraceIdContextUtils.putTraceId("original");
+        RpcInvocation invocation = new RpcInvocation("call", "service", "", new Class<?>[0], new Object[0]);
+        invocation.setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, "async-trace");
+        CompletableFuture<AppResponse> responseFuture = new CompletableFuture<>();
+        AsyncRpcResult asyncResult = new AsyncRpcResult(responseFuture, invocation);
+
+        new GXDubboClientTraceIdFilter().invoke(successfulInvoker(invocation, asyncResult), invocation);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            executor.submit(() -> responseFuture.complete(new AppResponse())).get(5, TimeUnit.SECONDS);
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertEquals("original", GXTraceIdContextUtils.getTraceId());
+    }
+
+    @Test
+    void filterReusesSharedAppNameCache() {
+        GXDubboTestSupport.resetAppNameCache();
+        Invocation invocation = invocationWithTraceId("fixed-trace");
+        Invoker<?> invoker = successfulInvoker(invocation, mock(Result.class));
+        try (MockedStatic<GXCommonUtils> mocked = Mockito.mockStatic(GXCommonUtils.class)) {
+            mocked.when(() -> GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "UnknownApp"))
+                    .thenReturn("app-x");
+
+            new GXDubboClientTraceIdFilter().invoke(invoker, invocation);
+            new GXDubboClientTraceIdFilter().invoke(invoker, invocation);
+
+            mocked.verify(() -> GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "UnknownApp"),
+                    times(1));
+        } finally {
+            GXDubboTestSupport.resetAppNameCache();
+        }
+    }
+
+    @Test
+    void traceIdLoggingIsDebugLevel() throws IOException {
+        for (String file : new String[]{"GXDubboClientTraceIdFilter.java", "GXDubboServerTraceIdFilter.java"}) {
+            String source = Files.readString(Path.of("src/main/java/cn/maple/dubbo/nacos/filter/" + file));
+            assertTrue(source.contains("log.debug("), file + " must log TraceId at DEBUG");
+            assertFalse(source.contains("log.info("), file + " must not emit INFO on the hot path");
+        }
     }
 
     private Invocation invocationWithTraceId(String traceId) {

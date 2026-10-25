@@ -1,8 +1,8 @@
 package cn.maple.dubbo.nacos.filter;
 
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
+import cn.maple.dubbo.nacos.selector.GXPenetrateAttachmentSelector;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.common.constants.CommonConstants;
 import org.apache.dubbo.common.extension.Activate;
@@ -13,6 +13,7 @@ import org.apache.dubbo.rpc.Invoker;
 import org.apache.dubbo.rpc.Result;
 import org.apache.dubbo.rpc.RpcContext;
 import org.apache.dubbo.rpc.RpcException;
+import org.jspecify.annotations.Nullable;
 import org.springframework.core.Ordered;
 
 import java.util.Objects;
@@ -28,8 +29,10 @@ public class GXDubboServerTraceIdFilter implements Filter {
         String originalTraceId = GXTraceIdContextUtils.getNullableTraceId();
         try {
             String traceId = resolveTraceId(invocation);
-            String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class);
-            log.info("[{} --->> Dubbo Service] receive TraceId: {}", appName, traceId);
+            String appName = GXPenetrateAttachmentSelector.getCachedAppName();
+            if (log.isDebugEnabled()) {
+                log.debug("[{} --->> Dubbo Service] receive TraceId: {}", appName, traceId);
+            }
 
             GXTraceIdContextUtils.putTraceId(traceId);
             invocation.setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
@@ -69,7 +72,7 @@ public class GXDubboServerTraceIdFilter implements Filter {
         return traceId;
     }
 
-    private String getInvocationAttachment(Invocation invocation) {
+    private @Nullable String getInvocationAttachment(Invocation invocation) {
         Object traceId = invocation.getObjectAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
         if (Objects.isNull(traceId)) {
             traceId = invocation.getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);

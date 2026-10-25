@@ -3,7 +3,7 @@ package cn.maple.dubbo.nacos.processor;
 import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXSpringContextUtils;
-import lombok.extern.log4j.Log4j2;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.spring.ServiceBean;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
@@ -17,7 +17,7 @@ import java.util.Objects;
  * Binds a Dubbo RPC API implementation to its generic service class after ServiceBean initialization.
  */
 @Component
-@Log4j2
+@Slf4j
 public class GXDubboRpcApiBeanPostProcessor implements BeanPostProcessor {
     @Override
     public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {

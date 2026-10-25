@@ -8,6 +8,7 @@ import org.mockito.Mockito;
 import org.springframework.context.ApplicationContext;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
@@ -76,6 +77,24 @@ class GXDubboRpcApiBeanPostProcessorTest {
         assertSame(serviceBean, result);
     }
 
+    @Test
+    void skipsBindingWhenStaticBindMethodIsMissing() {
+        NoBindRpcApi api = new NoBindRpcApi();
+        ServiceBean<NoBindRpcApi> serviceBean = mock(ServiceBean.class);
+        when(serviceBean.getRef()).thenReturn(api);
+        ApplicationContext applicationContext = applicationContextWithBeanNames("testService");
+
+        try (MockedStatic<GXSpringContextUtils> springContext = Mockito.mockStatic(GXSpringContextUtils.class)) {
+            springContext.when(GXSpringContextUtils::getApplicationContext).thenReturn(applicationContext);
+
+            Object result = assertDoesNotThrow(
+                    () -> processor.postProcessAfterInitialization(serviceBean, "noBindServiceBean"));
+
+            assertSame(serviceBean, result);
+            verify(applicationContext).getBeanNamesForType(TestService.class, false, false);
+        }
+    }
+
     private ServiceBean<TestRpcApi> serviceBean(TestRpcApi api) {
         ServiceBean<TestRpcApi> serviceBean = mock(ServiceBean.class);
         when(serviceBean.getRef()).thenReturn(api);
@@ -101,6 +120,13 @@ class GXDubboRpcApiBeanPostProcessorTest {
         public Class<?> getBoundServiceClass() {
             return boundServiceClass;
         }
+    }
+
+    static class NoBindRpcApi extends NoBindBaseRpcApi<TestService> {
+    }
+
+    static class NoBindBaseRpcApi<T> {
+        // deliberately no staticBindServeServiceClass: exercises the reflection-failure branch
     }
 
     static class TestService {

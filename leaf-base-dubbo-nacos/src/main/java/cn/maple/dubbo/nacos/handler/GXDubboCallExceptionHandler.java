@@ -8,10 +8,20 @@ import cn.maple.core.framework.util.GXResultUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.rpc.RpcException;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+/**
+ * Dubbo-specific MVC advice.
+ *
+ * <p>{@code @Order(HIGHEST_PRECEDENCE)} ensures {@link RpcException} / {@code GXSentinelFlowException}
+ * are matched by the dedicated handlers below instead of the catch-all
+ * {@code @ExceptionHandler(Exception.class)} inherited from {@link GXExceptionHandler}.
+ */
 @RestControllerAdvice
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @Slf4j
 public class GXDubboCallExceptionHandler extends GXExceptionHandler {
     @ExceptionHandler(RpcException.class)

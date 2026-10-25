@@ -184,6 +184,60 @@ class GXDubboExceptionFilterTest {
         assertEquals("providerRuntime", wrapped.getData().getStr("errorType"));
     }
 
+    @Test
+    void convertsDegradeAndAuthorityExceptions() {
+        GXTraceIdContextUtils.putTraceId("trace-degrade");
+        AppResponse degrade = new AppResponse();
+        degrade.setException(new com.alibaba.csp.sentinel.slots.block.degrade.DegradeException("degrade"));
+        filter.onResponse(degrade, invoker(TestService.class), invocation("call"));
+        assertEquals("sentinelFlow", assertInstanceOf(GXSentinelFlowException.class, degrade.getException()).getData().getStr("errorType"));
+
+        AppResponse authority = new AppResponse();
+        authority.setException(new com.alibaba.csp.sentinel.slots.block.authority.AuthorityException("authority"));
+        filter.onResponse(authority, invoker(TestService.class), invocation("call"));
+        assertInstanceOf(GXSentinelFlowException.class, authority.getException());
+    }
+
+    @Test
+    void doesNotMisclassifyBusinessMessageContainingFlowException() {
+        GXTraceIdContextUtils.putTraceId("trace-misclassify");
+        AppResponse response = new AppResponse();
+        response.setException(new FatalBeanException("my FlowException happened"));
+
+        filter.onResponse(response, invoker(TestService.class), invocation("call"));
+
+        GXBusinessException wrapped = assertInstanceOf(GXBusinessException.class, response.getException());
+        assertEquals("providerRuntime", wrapped.getData().getStr("errorType"));
+    }
+
+    @Test
+    void wrapsUndeclaredRuntimeWhenMethodSignatureUnresolvable() {
+        GXTraceIdContextUtils.putTraceId("trace-unresolvable");
+        AppResponse response = new AppResponse();
+        response.setException(new FatalBeanException("spring"));
+        Invocation mismatched = invocation("call", new Class<?>[]{String.class}, new Object[]{"x"});
+
+        filter.onResponse(response, invoker(TestService.class), mismatched);
+
+        GXBusinessException wrapped = assertInstanceOf(GXBusinessException.class, response.getException());
+        assertEquals("providerRuntime", wrapped.getData().getStr("errorType"));
+    }
+
+    @Test
+    void recordsFilterInternalFailure() {
+        long before = GXDubboExceptionFilter.filterFailureCount();
+        RuntimeException original = new FatalBeanException("spring");
+        AppResponse response = new AppResponse();
+        response.setException(original);
+        Invoker<?> brokenInvoker = mock(Invoker.class);
+        when(brokenInvoker.getInterface()).thenReturn(null);
+
+        filter.onResponse(response, brokenInvoker, invocation("call"));
+
+        assertEquals(before + 1, GXDubboExceptionFilter.filterFailureCount());
+        assertSame(original, response.getException());
+    }
+
     interface TestService {
         void call();
 

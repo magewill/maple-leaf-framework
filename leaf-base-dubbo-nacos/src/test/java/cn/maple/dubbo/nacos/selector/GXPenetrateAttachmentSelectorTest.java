@@ -1,13 +1,22 @@
 package cn.maple.dubbo.nacos.selector;
 
+import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import org.apache.dubbo.rpc.Invocation;
 import org.apache.dubbo.rpc.RpcContextAttachment;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.slf4j.MDC;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -75,6 +84,70 @@ class GXPenetrateAttachmentSelectorTest {
         Map<String, Object> selected = selector.select(null, clientAttachment, null);
 
         assertEquals("client-trace", selected.get(GXTraceIdContextUtils.TRACE_ID_KEY));
+    }
+
+    @Test
+    void selectReversePrefersServerAttachment() {
+        Invocation invocation = invocationWithTraceId(null);
+        RpcContextAttachment clientAttachment = attachmentWithTraceId("client-trace");
+        RpcContextAttachment serverAttachment = attachmentWithTraceId("server-trace");
+
+        Map<String, Object> selected = selector.selectReverse(invocation, clientAttachment, serverAttachment);
+
+        assertEquals("server-trace", selected.get(GXTraceIdContextUtils.TRACE_ID_KEY));
+        assertEquals(1, selected.size());
+    }
+
+    @Test
+    void nullAttachmentsFallbackToThreadLocalOrGenerate() {
+        GXTraceIdContextUtils.putTraceId("thread-trace");
+        Map<String, Object> selected = selector.select(null, null, null);
+        assertEquals("thread-trace", selected.get(GXTraceIdContextUtils.TRACE_ID_KEY));
+        assertEquals(1, selected.size());
+
+        MDC.clear();
+        Map<String, Object> generated = selector.select(null, null, null);
+        assertFalse(String.valueOf(generated.get(GXTraceIdContextUtils.TRACE_ID_KEY)).isBlank());
+    }
+
+    @Test
+    void appNameCacheIsolatesAcrossReset() {
+        GXPenetrateAttachmentSelector.resetAppNameCache();
+        try (MockedStatic<GXCommonUtils> mocked = Mockito.mockStatic(GXCommonUtils.class)) {
+            mocked.when(() -> GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "UnknownApp"))
+                    .thenReturn("first-app");
+            assertEquals("first-app", GXPenetrateAttachmentSelector.getCachedAppName());
+
+            GXPenetrateAttachmentSelector.resetAppNameCache();
+            mocked.when(() -> GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "UnknownApp"))
+                    .thenReturn("second-app");
+            assertEquals("second-app", GXPenetrateAttachmentSelector.getCachedAppName());
+        } finally {
+            GXPenetrateAttachmentSelector.resetAppNameCache();
+        }
+    }
+
+    @Test
+    void appNameCacheIsConsistentUnderConcurrency() throws Exception {
+        GXPenetrateAttachmentSelector.resetAppNameCache();
+        try (MockedStatic<GXCommonUtils> mocked = Mockito.mockStatic(GXCommonUtils.class)) {
+            mocked.when(() -> GXCommonUtils.getEnvironmentValue("spring.application.name", String.class, "UnknownApp"))
+                    .thenReturn("concurrent-app");
+            assertEquals("concurrent-app", GXPenetrateAttachmentSelector.getCachedAppName());
+        }
+        ExecutorService executor = Executors.newFixedThreadPool(8);
+        try {
+            List<Future<String>> futures = new ArrayList<>();
+            for (int i = 0; i < 32; i++) {
+                futures.add(executor.submit(GXPenetrateAttachmentSelector::getCachedAppName));
+            }
+            for (Future<String> future : futures) {
+                assertEquals("concurrent-app", future.get(5, TimeUnit.SECONDS));
+            }
+        } finally {
+            executor.shutdownNow();
+            GXPenetrateAttachmentSelector.resetAppNameCache();
+        }
     }
 
     private Invocation invocationWithTraceId(String traceId) {
