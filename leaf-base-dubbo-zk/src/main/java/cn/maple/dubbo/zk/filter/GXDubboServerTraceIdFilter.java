@@ -1,18 +1,29 @@
 package cn.maple.dubbo.zk.filter;
 
 import cn.hutool.core.text.CharSequenceUtil;
-import cn.maple.core.framework.util.GXCommonUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
+import cn.maple.dubbo.zk.selector.GXPenetrateAttachmentSelector;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.common.constants.CommonConstants;
 import org.apache.dubbo.common.extension.Activate;
-import org.apache.dubbo.rpc.*;
+import org.apache.dubbo.rpc.AsyncRpcResult;
+import org.apache.dubbo.rpc.Filter;
+import org.apache.dubbo.rpc.Invocation;
+import org.apache.dubbo.rpc.Invoker;
+import org.apache.dubbo.rpc.Result;
+import org.apache.dubbo.rpc.RpcContext;
+import org.apache.dubbo.rpc.RpcException;
+import org.jspecify.annotations.Nullable;
 import org.springframework.core.Ordered;
 
 import java.util.Objects;
 
 /**
  * Provider-side Dubbo filter that restores TraceId for service execution and response propagation.
+ *
+ * <p>The MDC is restored in {@code finally}, which happens before
+ * {@link org.apache.dubbo.rpc.Filter.Listener#onResponse} callbacks run. The invocation attachment
+ * written here is therefore the TraceId source for the exception filter.
  */
 @Activate(group = {CommonConstants.PROVIDER}, order = Ordered.LOWEST_PRECEDENCE)
 @Slf4j
@@ -22,8 +33,9 @@ public class GXDubboServerTraceIdFilter implements Filter {
         String originalTraceId = GXTraceIdContextUtils.getNullableTraceId();
         try {
             String traceId = resolveTraceId(invocation);
-            String appName = GXCommonUtils.getEnvironmentValue("spring.application.name", String.class);
-            log.info("[{} --->> Dubbo Service] receive TraceId: {}", appName, traceId);
+            if (log.isDebugEnabled()) {
+                log.debug("[{} --->> Dubbo Service] receive TraceId: {}", GXPenetrateAttachmentSelector.getCachedAppName(), traceId);
+            }
 
             GXTraceIdContextUtils.putTraceId(traceId);
             invocation.setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
@@ -63,7 +75,7 @@ public class GXDubboServerTraceIdFilter implements Filter {
         return traceId;
     }
 
-    private String getInvocationAttachment(Invocation invocation) {
+    private @Nullable String getInvocationAttachment(Invocation invocation) {
         Object traceId = invocation.getObjectAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
         if (Objects.isNull(traceId)) {
             traceId = invocation.getAttachment(GXTraceIdContextUtils.TRACE_ID_KEY);
@@ -71,7 +83,7 @@ public class GXDubboServerTraceIdFilter implements Filter {
         return Objects.toString(traceId, null);
     }
 
-    private void attachTraceId(Result result, String traceId) {
+    private void attachTraceId(@Nullable Result result, String traceId) {
         if (Objects.isNull(result) || CharSequenceUtil.isBlank(traceId)) {
             return;
         }
@@ -82,7 +94,7 @@ public class GXDubboServerTraceIdFilter implements Filter {
         result.setAttachment(GXTraceIdContextUtils.TRACE_ID_KEY, traceId);
     }
 
-    private void attachTraceIdWithContext(Result result, String traceId) {
+    private void attachTraceIdWithContext(@Nullable Result result, String traceId) {
         String originalTraceId = GXTraceIdContextUtils.getNullableTraceId();
         try {
             GXTraceIdContextUtils.putTraceId(traceId);

@@ -25,19 +25,22 @@
 
 ## 1. 模块定位
 
-`leaf-base-dubbo-zk` 是 Maple Leaf Framework 中基于 Dubbo 和 Zookeeper 注册中心的 RPC 基础支持模块。按照当前代码实现，本模块主要提供以下能力：
+`leaf-base-dubbo-zk` 是 Maple Leaf Framework 中基于 Dubbo 和 Zookeeper 注册中心的 RPC 基础支持模块。按照当前代码实现，本模块提供以下能力：
 
-1. Dubbo Provider 侧异常过滤与分类处理：`GXDubboExceptionFilter`
-2. Spring Boot Web 层中 Dubbo 调用异常的统一返回兜底：`GXDubboCallExceptionHandler`
-3. Dubbo Filter SPI 扩展声明：`src/main/resources/META-INF/dubbo/org.apache.dubbo.rpc.Filter`
+1. Dubbo 异常过滤与分类处理（Provider/Consumer 双侧均可装配）：`GXDubboExceptionFilter`
+2. Consumer 侧 TraceId 透传与响应回填：`GXDubboClientTraceIdFilter`
+3. Provider 侧 TraceId 恢复与响应回填：`GXDubboServerTraceIdFilter`
+4. TraceId 跨边界附件选择：`GXPenetrateAttachmentSelector`
+5. Web 层 Dubbo 异常统一返回兜底：`GXDubboCallExceptionHandler`
+6. `ServiceBean` 启动期绑定增强：`GXDubboRpcApiBeanPostProcessor`
+7. Provider filter 装配自检：`GXDubboProviderFilterValidator`
+8. Dubbo SPI 扩展声明：`src/main/resources/META-INF/dubbo/org.apache.dubbo.rpc.Filter`、`org.apache.dubbo.rpc.PenetrateAttachmentSelector`
 
 本模块当前不承载以下职责：
 
-1. Dubbo Consumer 侧 TraceId 透传
-2. Provider 侧 TraceId 恢复与跨线程上下文管理
-3. `PenetrateAttachmentSelector` 之类的附件透传策略
-4. `ServiceBean` 启动期绑定增强
-5. Sentinel 控制台规则管理
+1. Sentinel 控制台规则管理、原生指标上报（只做异常语义转换）
+2. Zookeeper 注册中心端到端服务发现（由 `dubbo-zookeeper-curator5-spring-boot-starter` 提供）
+3. Dubbo 鉴权 filter、消费者路由策略
 
 以上能力如果后续引入，必须同步更新本文档。
 
@@ -52,24 +55,31 @@
 ## 3. 目录职责
 
 1. `src/main/java/cn/maple/dubbo/zk/filter`
-   负责 Dubbo Provider 侧 Filter 扩展，当前核心类为 `GXDubboExceptionFilter`。
+   负责 Dubbo Filter 扩展：`GXDubboExceptionFilter`、`GXDubboClientTraceIdFilter`、`GXDubboServerTraceIdFilter`。
 2. `src/main/java/cn/maple/dubbo/zk/handler`
    负责 Spring MVC 场景中的异常统一处理，当前核心类为 `GXDubboCallExceptionHandler`。
-3. `src/main/resources/META-INF/dubbo`
+3. `src/main/java/cn/maple/dubbo/zk/selector`
+   负责跨边界附件选择，当前核心类为 `GXPenetrateAttachmentSelector`（同时持有 `appName` 静态缓存）。
+4. `src/main/java/cn/maple/dubbo/zk/processor`
+   负责 `ServiceBean` 启动期绑定增强，当前核心类为 `GXDubboRpcApiBeanPostProcessor`。
+5. `src/main/java/cn/maple/dubbo/zk/config`
+   负责启动期装配自检，当前核心类为 `GXDubboProviderFilterValidator`。
+6. `src/main/resources/META-INF/dubbo`
    负责 Dubbo SPI 资源声明，属于运行时装配基线。类名、扩展名、资源路径发生变化时必须同步调整并验证。
 
 ## 4. 功能基线
 
 开发前必须理解并保持以下行为稳定：
 
-1. `GXDubboExceptionFilter` 只在 Dubbo Provider 侧生效，并以 `ExceptionFilter` 扩展方式接入。
-2. `GXDubboExceptionFilter` 当前会区分处理 checked exception、`GXBusinessException`、`RpcException`、JDK/Jakarta 异常、MyBatis 异常以及特定 Sentinel 限流异常文案。
-3. `GXDubboExceptionFilter` 当前通过异常消息 `"SentinelBlockException: FlowException"` 识别限流场景，并转换成 `GXSentinelFlowException`，同时附带 `methodName`、`arguments`、`interfaceName` 数据。
-4. `GXDubboExceptionFilter` 当前会跳过 `GenericService` 调用场景，不应轻易改变这个兼容边界。
-5. `GXDubboExceptionFilter` 当前会在未声明的运行时异常场景记录错误日志，并根据服务接口与异常类是否位于同一代码来源决定是否继续透传。
-6. `GXDubboCallExceptionHandler` 当前只显式处理 `RpcException`，并返回既有兜底响应语义。
-7. `GXDubboCallExceptionHandler` 继承 `GXExceptionHandler`，因此本模块的 Web 异常返回行为同时受父类通用异常处理链影响；调整时必须一并评估兼容性。
-8. Dubbo SPI 资源文件是模块运行时注册入口。任何包名、类名、扩展名调整，都必须把资源文件同步视为一等变更点。
+1. **强制装配**：`dubbo.provider.filter` 必须包含 `dubboServerTraceIdFilter,dubboExceptionFilter,-exception`；缺失 `-exception` 时内置 `ExceptionFilter` 会把 `GXBusinessException` 包装成普通 `RuntimeException` 并丢失 `code/msg/data`。`GXDubboProviderFilterValidator` 会在启动期输出 ERROR 告警（不阻断启动）。consumer 侧推荐 `dubboClientTraceIdFilter,dubboExceptionFilter,-exception`。
+2. `GXDubboExceptionFilter` 的判定顺序即对外契约：`GXSentinelFlowException` 透传 → Sentinel 阻断异常转换 → checked 异常透传 → MyBatis 透传 → `GXBusinessException` 透传 → 声明异常透传 → `java.`/`jakarta.` 与 `RpcException` 透传 → 其余运行时异常包装为 `GXBusinessException(500)`。
+3. Sentinel 识别条件为三选一：类名以 `com.alibaba.csp.sentinel.slots.block.` 前缀、可赋值给 `BlockException`、消息包含完整常量 `SentinelBlockException: FlowException`；判定会**遍历 `cause` 链**，因此 `GXBusinessException` 的 cause 链含 `BlockException` 子类时会被转换为限流异常并丢弃业务码（既有顺序，用例 `convertsBusinessExceptionWhoseCauseIsBlockException` 锁定）。**禁止**使用裸 `"FlowException"` 子串判定（会误判业务异常）。转换结果附带 `X-B3-TraceId`、`errorType`、`interfaceName`、`methodName`、`argumentCount`、`parameterTypes`，**不得**携带参数值。
+4. 方法签名无法反射解析时不得提前返回（fail-closed）：未声明运行时异常仍需包装并记录 ERROR；filter 自身异常只允许 WARN + 内部计数。
+5. 两个 TraceId filter 必须在 `finally` 中恢复 MDC，异步结果通过 `whenCompleteWithContext` 二次捕获/恢复；异常 filter 处于 Dubbo `Filter.Listener` 阶段，traceId 必须优先从 invocation 附件读取（此时 MDC 已恢复）。
+6. `GXPenetrateAttachmentSelector` 的 `appName` 是共享静态缓存（`volatile` + `resetAppNameCache()`），filter 与 selector 必须共用 `getCachedAppName()`，核心链路不得输出 INFO 日志。
+7. `GXDubboCallExceptionHandler` 显式处理 `RpcException` 与 `GXSentinelFlowException`，并通过 `@Order(HIGHEST_PRECEDENCE)` 优先于继承自 `GXExceptionHandler` 的兜底 `Exception` handler；`data` 只返回副本，不得修改异常自身。
+8. `GXPenetrateAttachmentSelector` 只透传 `X-B3-TraceId` 一项；consumer 与 provider 两侧均写 `clientAttachment`/`serverAttachment` 属既定契约，禁止以“语义更干净”为由删除。
+9. Dubbo SPI 资源文件与 `security/serialize.allowlist` 是模块运行时注册入口。任何包名、类名、扩展名调整，都必须同步视为一等变更点。
 
 ## 5. 强制开发规则
 
@@ -88,7 +98,7 @@
 
 ## 6. 测试要求
 
-当前模块如果缺少完整 `src/test` 覆盖，后续凡是修改本模块功能代码，都必须同步补齐与变更点对应的测试基线。
+模块当前已有 **14 个测试类 / 83 条用例**（`mvn -o -pl leaf-base-dubbo-zk test`，0 失败 0 跳过）。后续凡是修改本模块功能代码，都必须在既有基线上补齐与变更点对应的测试，**不得删除或禁用既有用例**。
 
 1. 测试用例要覆盖全面，至少覆盖成功路径、失败路径、异常路径、空值路径和边界条件。
 2. 如果功能需要在 Spring Boot 应用运行的情况下才能测试，那么测试用例应模拟真实 Spring Boot 应用启动之后再测试，优先使用 `@SpringBootTest` 或等价的真实容器启动方式。
@@ -103,7 +113,9 @@
    - `RpcException` 的响应结果
    - 与 `GXExceptionHandler` 继承链的协同行为
    - 真实 Spring Boot Web 容器启动后的异常拦截效果
-5. 如果未来新增 TraceId 透传、selector、bean post processor、Sentinel 细化处理等能力，对应测试基线也必须同步写入本文档。
+5. 修改 TraceId 链路、selector 或 `RpcContext` 写入行为时，至少要覆盖：来源优先级、MDC 恢复（正常/异常/异步）、同一次调用单一 traceId、附件写入位置。
+6. 修改启动期装配或 `GXDubboRpcApiBeanPostProcessor` 时，至少要覆盖：`-exception` 缺失告警、`ref` 为空、泛型解析失败、目标 Bean 缺失、多候选、绑定未生效。
+7. 现有测试类职责：`GXDubboExceptionFilterTest`（23）、`GXDubboTraceIdFilterTest`（10）、`GXPenetrateAttachmentSelectorTest`（6）、`GXDubboCallExceptionHandlerTest`（13）、`GXDubboCallExceptionHandlerSpringBootTest`（3）、`GXDubboRpcApiBeanPostProcessorTest`（6）、`GXDubboRpcApiBeanPostProcessorSpringBootTest`（2）、`GXDubboProviderFilterValidatorTest`（3）、`GXDubboProviderFilterValidatorSpringBootTest`（2）、`GXDubboFilterChainBehaviorTest`（3）、`GXDubboSharedStateContractTest`（4）、`GXDubboPerformanceContractTest`（5）、`GXDubboExceptionDataContractTest`（2）、`AsciiSourceGuardTest`（1）。
 
 ## 7. 变更前检查清单
 
