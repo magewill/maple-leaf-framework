@@ -1,33 +1,27 @@
 package cn.maple.rabbitmq.properties.nacos;
 
 import cn.maple.rabbitmq.properties.GXRabbitMQProperties;
-import com.alibaba.nacos.api.annotation.NacosProperties;
-import com.alibaba.nacos.api.config.ConfigType;
-import com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties;
 import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
+/**
+ * Nacos 配置来源变体，{@code maple.framework.rabbitmq.config-source} 未配置或等于 {@code nacos} 时装配。
+ *
+ * <p>真正的 {@code rabbit.yml} 拉取由 {@link cn.maple.rabbitmq.properties.GXRabbitMQEnvironmentPostProcessor}
+ * 在环境准备阶段完成；本类只负责把最终 Environment 绑定为类型安全配置，并保持历史 Bean 身份。</p>
+ */
 @Slf4j
+@Primary
 @Component
-@SuppressWarnings("all")
 @EqualsAndHashCode(callSuper = true)
-@ConditionalOnClass(name = {"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
-@NacosConfigurationProperties(dataId = "rabbit.yml",
-        prefix = "spring.rabbitmq",
-        groupId = "${spring.cloud.nacos.config.group:${nacos.config.group:}}",
-        type = ConfigType.YAML,
-        autoRefreshed = true,
-        properties = @NacosProperties(
-                serverAddr = "${spring.cloud.nacos.config.server-addr:${nacos.config.server-addr:}}",
-                namespace = "${spring.cloud.nacos.config.namespace:${nacos.config.namespace:}}",
-                username = "${spring.cloud.nacos.username:${nacos.config.username:}}",
-                password = "${spring.cloud.nacos.password:${nacos.config.password:}}"))
+@ConditionalOnProperty(name = "maple.framework.rabbitmq.config-source", havingValue = "nacos", matchIfMissing = true)
 @ConfigurationProperties(prefix = "spring.rabbitmq")
 public class GXNacosRabbitMQProperties extends GXRabbitMQProperties {
     public GXNacosRabbitMQProperties() {
-        log.info("RabbitMQ数据源配置使用NACOS配置");
+        log.info("RabbitMQ config source: nacos, dataId=rabbit.yml");
     }
 }

@@ -1,0 +1,46 @@
+{
+  "properties": [
+    {
+      "name": "maple.framework.rabbitmq.config-source",
+      "type": "java.lang.String",
+      "defaultValue": "nacos",
+      "description": "RabbitMQ config source. local: load rabbit.yml from classpath or ./config/<profile>/; nacos: pull rabbit.yml from Nacos at startup when server-addr is configured."
+    },
+    {
+      "name": "maple.framework.rabbitmq.scheduler.expose",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Whether to expose the rabbitTaskScheduler as a TaskScheduler bean. Set false to keep the Spring Boot default task scheduler."
+    },
+    {
+      "name": "maple.framework.rabbitmq.thread-pool.core-size",
+      "type": "java.lang.Integer",
+      "defaultValue": "available processors",
+      "description": "Core thread count of the async channel-setup executor."
+    },
+    {
+      "name": "maple.framework.rabbitmq.thread-pool.max-size",
+      "type": "java.lang.Integer",
+      "defaultValue": "2 x available processors",
+      "description": "Max thread count; only effective when the queue is full, or immediately when queue-capacity <= 0."
+    },
+    {
+      "name": "maple.framework.rabbitmq.thread-pool.queue-capacity",
+      "type": "java.lang.Integer",
+      "defaultValue": 1000,
+      "description": "Queue capacity of the async executor; <= 0 uses a synchronous queue so max-size takes effect immediately."
+    },
+    {
+      "name": "maple.framework.mq.rabbitmq.enable",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Enable the default RabbitMQ queue listener."
+    },
+    {
+      "name": "maple.framework.mq.rabbitmq.default-queue-name",
+      "type": "java.lang.String",
+      "defaultValue": "maple.default.queue",
+      "description": "Queue name consumed by the default listener; overrides spring.rabbitmq.default-queue-name."
+    }
+  ]
+}
