@@ -1,0 +1,19 @@
+{
+  "id": 1,
+  "database": "demo",
+  "table": "sys_user",
+  "type": "UPDATE",
+  "isDdl": false,
+  "es": 1730000000000,
+  "ts": 1730000000100,
+  "pkNames": ["id"],
+  "data": [
+    {"id": "1", "name": "alice"}
+  ],
+  "old": [
+    {"id": "1", "name": "alice_old"}
+  ],
+  "mysqlType": {"id": "bigint", "name": "varchar(64)"},
+  "sqlType": {"id": 12, "name": 12},
+  "sql": ""
+}

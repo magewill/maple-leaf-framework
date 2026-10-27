@@ -22,6 +22,13 @@
             <artifactId>leaf-base-rabbitmq</artifactId>
             <version>${project.parent.version}</version>
         </dependency>
+        <!-- 可选依赖：RocketMQ 消费能力需由下游显式引入，避免仅用 RabbitMQ 的应用被拖入 rocketmq-client / fastjson -->
+        <dependency>
+            <groupId>cn.maple.framework</groupId>
+            <artifactId>leaf-base-rocketmq</artifactId>
+            <version>${project.parent.version}</version>
+            <optional>true</optional>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

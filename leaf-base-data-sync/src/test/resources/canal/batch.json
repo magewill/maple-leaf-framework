@@ -1,0 +1,24 @@
+[
+  {
+    "database": "demo",
+    "table": "sys_user",
+    "type": "INSERT",
+    "isDdl": false,
+    "pkNames": ["id"],
+    "data": [
+      {"id": "2", "name": "bob"}
+    ]
+  },
+  {
+    "database": "demo",
+    "table": "sys_user",
+    "type": "ALTER",
+    "isDdl": true,
+    "sql": "alter table sys_user add column age int"
+  },
+  {
+    "database": "demo",
+    "type": "DELETE",
+    "isDdl": false
+  }
+]

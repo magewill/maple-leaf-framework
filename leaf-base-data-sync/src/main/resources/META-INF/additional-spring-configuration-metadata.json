@@ -1,0 +1,155 @@
+{
+  "properties": [
+    {
+      "name": "canal.concurrency-count",
+      "type": "java.lang.String",
+      "defaultValue": "10",
+      "description": "RabbitMQ listener concurrency count passed to @RabbitListener."
+    },
+    {
+      "name": "canal.canal-queue-name",
+      "type": "java.lang.String",
+      "defaultValue": "canalQueue",
+      "description": "Queue name consumed by the application."
+    },
+    {
+      "name": "canal.exchange-name",
+      "type": "java.lang.String",
+      "defaultValue": "exchange.fanout.canal",
+      "description": "Exchange name used by the Canal producer."
+    },
+    {
+      "name": "canal.routing-key",
+      "type": "java.lang.String",
+      "defaultValue": "canal.example.exchange.routingkey",
+      "description": "Routing key written into the queue binding."
+    },
+    {
+      "name": "canal.mq-type",
+      "type": "cn.maple.canal.enums.GXCanalMqTypeEnums",
+      "defaultValue": "rabbitmq",
+      "description": "Message middleware that consumes Canal messages. Exactly one type is active."
+    },
+    {
+      "name": "canal.consumer-enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Whether consumer side infrastructure is assembled at all."
+    },
+    {
+      "name": "canal.config-source",
+      "type": "java.lang.String",
+      "description": "Configuration source: local, nacos or blank for class path detection."
+    },
+    {
+      "name": "canal.retry.max-attempts",
+      "type": "java.lang.Integer",
+      "defaultValue": 3,
+      "description": "Maximum re-delivery attempts for retryable failures."
+    },
+    {
+      "name": "canal.dead-letter.exchange",
+      "type": "java.lang.String",
+      "defaultValue": "canal.dlx",
+      "description": "Dead letter exchange name."
+    },
+    {
+      "name": "canal.dead-letter.queue",
+      "type": "java.lang.String",
+      "defaultValue": "canal.dlq",
+      "description": "Dead letter queue name."
+    },
+    {
+      "name": "canal.dead-letter.routing-key",
+      "type": "java.lang.String",
+      "defaultValue": "canal.dead",
+      "description": "Routing key binding the dead letter queue to the dead letter exchange."
+    },
+    {
+      "name": "canal.handler-cache-size",
+      "type": "java.lang.Integer",
+      "defaultValue": 4096,
+      "description": "Upper bound of the resolved handler cache."
+    },
+    {
+      "name": "canal.handler-miss-log-level",
+      "type": "java.lang.String",
+      "defaultValue": "warn-once",
+      "description": "Log level used when no table level handler exists: off, debug, warn-once or warn."
+    },
+    {
+      "name": "canal.rocketmq.topic",
+      "type": "java.lang.String",
+      "description": "RocketMQ topic consumed by the application. Required when canal.mq-type=rocketmq."
+    },
+    {
+      "name": "canal.rocketmq.consumer-group",
+      "type": "java.lang.String",
+      "description": "RocketMQ consumer group. Required when canal.mq-type=rocketmq."
+    },
+    {
+      "name": "canal.rocketmq.tag",
+      "type": "java.lang.String",
+      "defaultValue": "*",
+      "description": "RocketMQ tag expression used as the selector."
+    },
+    {
+      "name": "canal.rocketmq.dead-letter-topic",
+      "type": "java.lang.String",
+      "description": "Optional RocketMQ topic receiving non retryable payloads."
+    }
+  ],
+  "hints": [
+    {
+      "name": "canal.mq-type",
+      "values": [
+        {
+          "value": "rabbitmq",
+          "description": "AMQP based consumption with exchange, queue and dead letter queue."
+        },
+        {
+          "value": "rocketmq",
+          "description": "RocketMQ based consumption; requires leaf-base-rocketmq on the class path."
+        }
+      ]
+    },
+    {
+      "name": "canal.config-source",
+      "values": [
+        {
+          "value": "local",
+          "description": "Values come from the application environment."
+        },
+        {
+          "value": "nacos",
+          "description": "Values are expected from a Nacos configuration source."
+        },
+        {
+          "value": "auto",
+          "description": "Class path detection, the historical behaviour."
+        }
+      ]
+    },
+    {
+      "name": "canal.handler-miss-log-level",
+      "values": [
+        {
+          "value": "off",
+          "description": "No log output, counters only."
+        },
+        {
+          "value": "debug",
+          "description": "Debug level for every miss."
+        },
+        {
+          "value": "warn-once",
+          "description": "Warn the first time a table misses a handler."
+        },
+        {
+          "value": "warn",
+          "description": "Warn for every miss."
+        }
+      ]
+    }
+  ]
+}

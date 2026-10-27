@@ -1,21 +1,20 @@
 package cn.maple.canal.properties.local;
 
 import cn.maple.canal.properties.GXCanalProperties;
-import cn.maple.core.framework.factory.GXYamlPropertySourceFactory;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.PropertySource;
-import org.springframework.stereotype.Component;
 
+/**
+ * Canal properties sourced from the application environment (local configuration files).
+ *
+ * <p>The bean is created by {@code GXCanalPropertiesConfig}; this class no longer takes part in
+ * component scanning so that the configuration source becomes an explicit, testable decision.</p>
+ */
 @Data
 @Slf4j
-@Component
 @EqualsAndHashCode(callSuper = true)
-@ConditionalOnMissingClass({"com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties"})
-@PropertySource(value = {"classpath:/${spring.profiles.active}/canal.yml"}, factory = GXYamlPropertySourceFactory.class, ignoreResourceNotFound = false)
 @ConfigurationProperties(prefix = "canal")
 public class GXLocalCanalProperties extends GXCanalProperties {
     public GXLocalCanalProperties() {
