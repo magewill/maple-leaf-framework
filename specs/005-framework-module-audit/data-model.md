@@ -72,8 +72,9 @@ DRAFT ──复核──> REVIEWED ──定级──> CLASSIFIED ──复现�
 | `exceptionPathVerdict` | enum | 是 | `RESTORED` / `LEAKED` / `NOT_EXERCISED`（无 `finally` 或未覆盖） |
 | `verdict` | enum | 是 | `OK` / `GAP` / `RISK` |
 | `findingRefs` | string[] | 条件 | `verdict != OK` 时必填 |
+| `evidence` | string | 条件 | `verdict=OK` 且 `propagatePath` 含 `ASYNC_EXECUTOR`/`FORK_JOIN`/`PARALLEL_STREAM` 时必填：`EXECUTABLE` 用例全名（`类#方法`，多个以 `、` 分隔）；其余行可填复现用例全名或 `-` |
 
-**不变量**：`propagatePath` 含 `ASYNC_EXECUTOR`/`FORK_JOIN`/`PARALLEL_STREAM` 且 `verdict=OK` 的项，必须附 `EXECUTABLE` 证据；否则降级为 `RISK`。
+**不变量**：`propagatePath` 含 `ASYNC_EXECUTOR`/`FORK_JOIN`/`PARALLEL_STREAM` 且 `verdict=OK` 的项，其 `evidence` 必须附 `EXECUTABLE` 证据（可执行用例全名）；否则降级为 `RISK`。
 
 ---
 

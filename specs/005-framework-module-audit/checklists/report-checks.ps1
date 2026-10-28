@@ -143,6 +143,28 @@ if (Test-Path $specPath) {
     Check 'C-09 spec findings echoed in report' ($missingInReport.Count -eq 0) ($missingInReport -join ',')
 }
 
+# C-13 context matrix (chapter 6): OK rows with ASYNC_EXECUTOR/FORK_JOIN/PARALLEL_STREAM
+# must cite executable evidence (Class#method) per data-model.md section 3 invariant.
+$matrixStart = $report.IndexOf('## 6. ')
+$matrixEnd = $report.IndexOf('## 7. ')
+$matrixSection = if (($matrixStart -ge 0) -and ($matrixEnd -gt $matrixStart)) { $report.Substring($matrixStart, $matrixEnd - $matrixStart) } else { '' }
+$weakMatrix = 0
+$badMatrixRows = 0
+if ($matrixSection -ne '') {
+    foreach ($line in ($matrixSection -split "`r?`n")) {
+        if ($line -notmatch '^\|') { continue }
+        $cells = @($line -split '\|')
+        # 8 columns + leading/trailing split artifacts => exactly 10 parts; anything else
+        # means the matrix schema drifted and must fail loudly instead of being skipped.
+        if ($cells.Count -ne 10) { $badMatrixRows++; continue }
+        $propagate = $cells[3].Trim()
+        $verdict = $cells[6].Trim()
+        $evidence = $cells[8].Trim()
+        if (($propagate -match 'ASYNC_EXECUTOR|FORK_JOIN|PARALLEL_STREAM') -and ($verdict -match '^OK') -and ($evidence -notmatch '#')) { $weakMatrix++ }
+    }
+}
+Check 'C-13 matrix OK-async rows cite evidence' (($matrixSection -ne '') -and ($weakMatrix -eq 0) -and ($badMatrixRows -eq 0)) "weak=$weakMatrix badRows=$badMatrixRows"
+
 Write-Output "----"
 if ($failed -eq 0) { Write-Output 'RESULT: ALL CHECKS PASSED'; exit 0 }
 Write-Output "RESULT: $failed CHECK(S) FAILED"; exit 1

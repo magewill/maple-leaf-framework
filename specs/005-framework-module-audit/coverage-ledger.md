@@ -313,6 +313,6 @@
 | `web/support/GXCustomerHandlerMethodArgumentResolver.java` | web | IMPLEMENTATION | CLEAN | - | reviewed: no defect found |
 | `web/support/package-info.java` | web | IMPLEMENTATION | CLEAN | - | reviewed: no defect found |
 | `wrapper/mdc/GXMdcWrapperForkJoinPool.java` | wrapper | IMPLEMENTATION | DEFECT | F-01 | defect: submit(ForkJoinTask)/invoke not wrapped |
-| `wrapper/mdc/GXMdcWrapperThreadPoolExecutor.java` | wrapper | IMPLEMENTATION | CLEAN | - | reviewed: no defect found |
-| `wrapper/mdc/GXMdcWrapperThreadPoolTaskExecutor.java` | wrapper | IMPLEMENTATION | DEFECT | F-01 | defect: submitListenable not overridden |
+| `wrapper/mdc/GXMdcWrapperThreadPoolExecutor.java` | wrapper | IMPLEMENTATION | DEFECT | F-01 | defect: never registered as bean (E-01) so wrap capability silently unused; wrap covers execute/submit/invokeAll |
+| `wrapper/mdc/GXMdcWrapperThreadPoolTaskExecutor.java` | wrapper | IMPLEMENTATION | DEFECT | F-01 | defect: unassembled + no TaskDecorator; Spring 7 removed submitListenable (E-23) so that gap is gone; wrap covers execute/submit/submitCompletable |
 | `wrapper/mdc/package-info.java` | wrapper | IMPLEMENTATION | CLEAN | - | reviewed: no defect found |

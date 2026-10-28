@@ -21,6 +21,9 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -30,6 +33,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -43,8 +47,15 @@ import static org.mockito.Mockito.mock;
  * CURRENT BEHAVIOR - flip when fixed.
  *
  * <p>Characterizes how trace id / MDC context behaves across the async executor, the
- * ForkJoin wrapper, the Spring task executor wrapper and the request logging filter.
- * These assertions describe the current (defective) behavior on purpose.</p>
+ * ForkJoin wrapper, the two thread pool wrappers (Spring {@code ThreadPoolTaskExecutor}
+ * and JDK {@code ThreadPoolExecutor}) and the request logging filter.
+ * Most assertions describe the current (defective) behavior on purpose and must flip
+ * when the defects are fixed. Methods whose names state working propagation or correct
+ * restore (e.g. {@code explicitWrapRestoresTraceIdInsideWorkerThread},
+ * {@code parallelStreamElementWrappersPropagateMdcPerElement},
+ * {@code parallelStreamElementWrapperRestoresMdcAfterException}) assert correct behavior
+ * as EXECUTABLE evidence for the OK rows of the chapter 6 context matrix in
+ * review-report.md; they guard against regressions and do not flip on fixes.</p>
  */
 class GXContextPropagationAuditTest {
     private static final String CUSTOM_MDC_KEY = "audit-user-id";
@@ -149,5 +160,42 @@ class GXContextPropagationAuditTest {
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    @Test
+    void parallelStreamElementWrappersPropagateMdcPerElement() {
+        MDC.put(CUSTOM_MDC_KEY, "u-parallel");
+        Map<String, String> context = GXMdcThreadUtils.getMdcContext();
+        List<String> observed = Collections.synchronizedList(new ArrayList<>());
+
+        IntStream.range(0, 50).parallel().forEach(i ->
+                GXMdcThreadUtils.consumerWrapper(
+                        (Integer ignored) -> observed.add(String.valueOf(MDC.get(CUSTOM_MDC_KEY))), context).accept(i));
+
+        assertEquals(50, observed.size());
+        assertTrue(observed.stream().allMatch("u-parallel"::equals),
+                "each element must see the submit-side MDC snapshot");
+    }
+
+    @Test
+    void parallelStreamElementWrapperRestoresMdcAfterException() {
+        MDC.put(CUSTOM_MDC_KEY, "u-restore");
+        Map<String, String> context = GXMdcThreadUtils.getMdcContext();
+        List<String> observed = Collections.synchronizedList(new ArrayList<>());
+
+        IntStream.range(0, 20).parallel().forEach(i ->
+                GXMdcThreadUtils.consumerWrapper((Integer element) -> {
+                    try {
+                        GXMdcThreadUtils.consumerWrapper((Integer ignored) -> {
+                            throw new IllegalStateException("boom");
+                        }, Map.of(CUSTOM_MDC_KEY, "u-inner")).accept(element);
+                    } catch (IllegalStateException expected) {
+                        observed.add(expected.getMessage() + "=" + MDC.get(CUSTOM_MDC_KEY));
+                    }
+                }, context).accept(i));
+
+        assertEquals(20, observed.size());
+        assertTrue(observed.stream().allMatch("boom=u-restore"::equals),
+                "a failed element must surface the designed exception and restore the wrapping MDC snapshot");
     }
 }

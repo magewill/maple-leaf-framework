@@ -389,3 +389,36 @@ eturn null 173、静默 catch 3，覆盖 175+173=348 处分支；标题中去掉
 
 - [X] T065 把 `review-report.md` 第 2 章"审计用例"行的"8 个类 / 28 个用例"改为"8 个类 / 32 个用例"，并在 `checklists/report-checks.ps1` 增加 **C-12**：第 2 章"8 个类 / N 个用例"与第 14 章"8 类 M 用例"的数值必须相等（实测 550 = 518 既有 + 32 审计），防止同一文档内的用例数再次分叉 per contracts/review-report-schema.md §1 (contradicts)
 
+---
+
+## Phase 16: Convergence
+
+- [X] T066 补全 `review-report.md` 第 6 章上下文纪律矩阵对全部 `ThreadLocal`/`MDC` 使用点的四段判定（"写入—传播—清理—异常路径"）：新增 `web/interceptor/GXTraceIdInterceptor.java:14-22`（T023 明确要求但矩阵无行）、`wrapper/mdc/GXMdcWrapperThreadPoolTaskExecutor.java:13-41`、`wrapper/mdc/GXMdcWrapperThreadPoolExecutor.java:32-70` 三行；并把 `util/GXMdcThreadUtils.java` 行的覆盖范围由 `:41-110` 扩至全部 MDC 使用点（`:34`、`:41-106`、`:124-129`、`:141-153`），把 `util/GXConcurrentToolsUtils.java` 行由 `:120-135` 扩至 `:157`、`:349`（或按方法聚合补行）；新行按既有口径引用或追加发现编号（新增发现从 `F-23` 起，不得重排既有编号），并同步 §11 状态表/§13 排期/§14 复现索引与台账 `findingRefs` per SC-003 (partial)
+- [X] T067 使 `review-report.md` 第 6 章满足 `data-model.md` §3 不变量："propagatePath 含 `ASYNC_EXECUTOR`/`FORK_JOIN`/`PARALLEL_STREAM` 且 `verdict=OK` 的项必须附 `EXECUTABLE` 证据，否则降级 `RISK`"——当前 4 行（`GXMdcThreadUtils:41-110`×2 含 `PARALLEL_STREAM` 行、`GXMdcWrapperForkJoinPool:26-43`、`GXConcurrentToolsUtils:120-135`）均未附证据；优先引用既有 `GXMdcThreadUtilsTest`/`GXConcurrentToolsUtilsTest` 等确实覆盖该路径的用例全名并核对覆盖点，无法引用的行降级 `RISK` 或按 T062 模式补特征化用例；可在 `report-checks.ps1` 增加对应校验项 per data-model.md §3 (contradicts)
+- [X] T068 对齐测试基线记录与实测：`mvn -o -pl leaf-base-framework test` 实测 `files=73 tests=551`（既有 **519** + 审计 32，`@Test` 注解逐方法计数一致），而 `review-report.md` §2"交付验收/@Test 计数"、§14 用例数表述、`contracts/review-report-schema.md` C-12 表述与验收结果均记 `tests=550`（518 既有）；重跑基线、定位 +1 用例的类与方法（只登记来源，**不得删改既有用例**），更新上述记录中的对应数值，并在 §12 修订说明登记差额来源及其与 `spec.md` SC-007"既有 518 个用例"表述的关系（`spec.md` 保持冻结，不修改）per FR-013 (partial)
+- [X] T069 修正 `coverage-ledger.md` 中与已交付结论矛盾的 `wrapper/mdc` 台账行：`GXMdcWrapperThreadPoolTaskExecutor.java` 行的 note 仍写 "submitListenable not overridden"，与 E-23/F-01 修订（Spring Framework 7 已移除 `submitListenable`，该缺口不存在）及 §12 修订说明矛盾，应改述为"未装配 + 无 `TaskDecorator`"（与 F-01 收窄后的证据一致）；同时复核 `GXMdcWrapperThreadPoolExecutor.java` 行 `CLEAN` 判定与 E-01（三个包装器均无 Bean 注册点）及 T066 新增矩阵行的一致性，必要时改判并补 `findingRefs` per FR-001 (contradicts)
+
+### 第八轮收敛回填（2026-10-28）
+
+- T066：§6 矩阵新增 3 行——`web/interceptor/GXTraceIdInterceptor.java:14-22`（GAP，F-02，`afterCompletion` 空实现）、`wrapper/mdc/GXMdcWrapperThreadPoolTaskExecutor.java:13-41`、`wrapper/mdc/GXMdcWrapperThreadPoolExecutor.java:32-70`（包装实现 OK，E-01 装配缺口注记归 F-01）；`util/GXMdcThreadUtils.java` 行扩为 `:33-130` 与 `:132-184` 两行（覆盖 `:34`、`:44-57`、`:65-78`、`:85-89`、`:94-107`、`:113-129`、`:141-153` 全部 MDC 使用点）；`util/GXConcurrentToolsUtils.java` 补 `:157`（`composerFuture` 提交侧捕获）与 `:349`（`allOf` 等待侧捕获）两行。缺口均归入既有 F-01/F-02，未追加新发现编号。
+- T067：§6 全表新增"证据"列；4 行 `OK×ASYNC_EXECUTOR/FORK_JOIN/PARALLEL_STREAM` 均附 EXECUTABLE 用例全名（`GXMdcThreadUtilsTest`、`GXMdcWrapperForkJoinPoolTest`、`GXMdcWrapperThreadPool*Test`、`GXConcurrentToolsUtilsTest` 既有用例 + 新增 `GXContextPropagationAuditTest#parallelStreamElementWrappersPropagateMdcPerElement` 作为 PARALLEL_STREAM 行证据）；`data-model.md` §3 新增 `evidence` 字段并细化不变量；`report-checks.ps1` 新增 **C-13**，合同 §8 登记（校验项 12→13）。
+- T068：+1 差额定位为提交 `ab91dbfe`（`feat(fix): 完善sso模块`，2026-10-23）为 `GXWebMvcConfigurerTest` 新增 `#addInterceptorsHonoursOrderAnnotationBeforeBeanNameOrder`（既有 518→519）；+1 审计为 T067 新增用例（32→33）。§2（`@Test` 计数/审计用例/交付验收）、§14 用例数、合同 C-12 与 §1 全部对齐为 `tests=552`（519 既有 + 33 审计）；§12 登记差额来源及其与 `spec.md` SC-007"既有 518 个用例"冻结表述的关系（spec 不修改，执行记录以报告为准）。同提交已使 `GXWebMvcConfigurer` 按 `@Order`/`Ordered` 排序，F-18 的"按 Bean 名排序"子项被后续实现收敛，已在 §12 登记（剩余范围：include/exclude 与 `assert` 判空）。
+- T069：台账 317 行 note 改为 "unassembled + no TaskDecorator; Spring 7 removed submitListenable (E-23)"；316 行由 `CLEAN` 改判 `DEFECT`（`F-01`），与 E-01"三个包装器均无 Bean 注册点"及 §6 新增行一致；315 行（ForkJoinPool 未包装路径）判定保持不变。
+- 校验：`report-checks.ps1` → 16 项全 PASS（C-01a、C-01b、C-02…C-13、L-01、L-02）；`mvn -o -pl leaf-base-framework clean test` → `files=73 tests=552 failures=0 errors=0 skipped=0`（519 既有 + 33 审计）。复测时如遇 `GXMdcWrapperForkJoinPoolTest` 报 "Unresolved compilation problem"，为 `target/` 陈旧 class 残留（见 `specs/017-data-sync-mq-switchable` 与 `specs/004-redisson-module-audit` 登记），`clean test` 后消失，与本特性无关。
+- 变更范围：`specs/005-framework-module-audit/**`（报告/数据模型/合同/校验脚本/台账/tasks）+ `leaf-base-framework/src/test/java/cn/maple/core/framework/audit/GXContextPropagationAuditTest.java`（+1 用例）+ 根 `.gitignore`（补 `*.class`/`*.jar`/`*.tmp`/`*.swp`/`.DS_Store`/`Thumbs.db`）；`src/main/**` 与 `pom.xml` 零改动。
+
+### PR 评审修复补记（2026-10-28）
+
+- Important-1：`GXContextPropagationAuditTest` 类头注释区分"缺陷特征化断言（修复后翻转）"与"OK 行证据断言（不随修复翻转）"两类语义。
+- Important-2：§6 矩阵 `GXMdcWrapperThreadPoolExecutor` 行号范围 `:32-70` 修正为 `:32-75`（补全第二个 `invokeAll` 覆写）。
+- Suggestion-1：`report-checks.ps1` C-13 对列数异常的矩阵行不再静默跳过，计入 `badRows` 并使校验失败。
+- Suggestion-2：补并行流异常路径断言 `GXContextPropagationAuditTest#parallelStreamElementWrapperRestoresMdcAfterException`（审计用例 33→34），§6 `PARALLEL_STREAM` 行证据同步引用。
+- Suggestion-3：`.gitignore` 增加 `!**/maven-wrapper.jar` 反选，防止 `*.jar` 误伤 Maven Wrapper。
+- 计数对齐：§2/§14/合同 §1 与 C-12 由 `552（519+33）` 更新为 `553（519+34）`；§12"基线"行同步。上文第八轮回填中的 552 为当时时间戳记录，按约定保留。
+
+### PR 评审修复补记（第二轮，2026-10-28）
+
+- Important：把 `GXContextPropagationAuditTest#explicitWrapRestoresTraceIdInsideWorkerThread` 补进 §6 `GXMdcThreadUtils:33-130` 行证据列，使类头 javadoc 的"OK 行证据"声明与矩阵实际引用一致（无计数变化）。
+- Suggestion：类头场景枚举补 `GXMdcWrapperThreadPoolExecutor`；javadoc 示例清单补 `#parallelStreamElementWrapperRestoresMdcAfterException`。
+- Suggestion：异常路径用例的 catch 参数由未使用的 `expected` 改为消费其 `getMessage()`，断言同步强化为 `boom=u-restore`（异常身份 + 快照还原双验证）。
+

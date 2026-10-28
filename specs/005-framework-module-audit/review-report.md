@@ -17,11 +17,11 @@
 | --- | --- | --- |
 | 构建命令 | `mvn -o -q -pl leaf-base-framework test` | 离线可执行，父 POM 与 `leaf-base-framework` 已安装到本地仓库 |
 | 测试结果 | `files=65 tests=518 failures=0 errors=0 skipped=0` | 既有用例全绿，0 跳过 |
-| `@Test` 计数 | 518 | 以 `@Test\b` 逐方法统计；此前"519"是按 `@Test` 子串按行统计，多计了 `@TestPropertySource` 一行（`src/test/java/.../GXBotNotificationExceptionServiceSpringBootTest.java:20`），已更正 |
+| `@Test` 计数 | 既有 519（2026-10-28 复测） | 以 `@Test\b` 逐方法统计；交付时既有 518（此前"519"是按 `@Test` 子串按行统计，多计了 `@TestPropertySource` 一行（`src/test/java/.../GXBotNotificationExceptionServiceSpringBootTest.java:20`））。+1 来自后续提交 `ab91dbfe` 为 `GXWebMvcConfigurerTest` 新增的 1 个用例（见 §12） |
 | 运行 JDK | 25.0.4 | 编译目标 `release=21`；虚拟线程调度细节与目标环境存在差异，登记为风险 |
 | Spring Boot | 4.1.1 / Spring Framework 7.x | `ThreadPoolTaskExecutor.submitListenable` 在 Spring 7 已移除（E-23），影响 F-01 的证据范围 |
-| 审计用例 | 8 个类 / 32 个用例，`mvn -o -pl leaf-base-framework test -Dtest=GX*AuditTest` 全绿 | 特征化用例，断言当前行为 |
-| 交付验收 | `mvn -o -pl leaf-base-framework test` → `files=73 tests=550 failures=0 errors=0 skipped=0` | 518 既有 + 32 审计；生产代码零改动 |
+| 审计用例 | 8 个类 / 34 个用例，`mvn -o -pl leaf-base-framework test -Dtest=GX*AuditTest` 全绿 | 特征化用例，断言当前行为 |
+| 交付验收 | `mvn -o -pl leaf-base-framework test` → `files=73 tests=553 failures=0 errors=0 skipped=0` | 2026-10-28 复测：519 既有 + 34 审计；交付时为 550（518 + 32），差额来源见 §12。本特性交付未改生产代码（`src/main/**`、`pom.xml`），后续特性的独立改动见 §12 |
 
 **基线用途**：区分"既有失败"与"审查引入的失败"；同时证明本报告的所有结论都不依赖修改生产代码。
 
@@ -394,28 +394,35 @@
 
 ## 6. 上下文纪律矩阵
 
-| 上下文项 | 写入点 | 传播路径 | 清理点 | 异常路径 | 判定 | 发现 |
-| --- | --- | --- | --- | --- | --- | --- |
-| `TRACE_ID` | `filter/GXBaseRequestLoggingFilter.java:28` | `SYNC` | `:42`（`restoreTraceId`） | RESTORED | OK | — |
-| `TRACE_ID` | `util/GXTraceIdContextUtils.java:34-41` | `SYNC` | 无自动清理 | NOT_EXERCISED | GAP | F-02 |
-| `TRACE_ID` | 同上 | `ASYNC_EXECUTOR` | 无 | NOT_EXERCISED | GAP | F-01 |
-| `TRACE_ID` | 同上 | `FORK_JOIN` | 无 | NOT_EXERCISED | GAP | F-01 |
-| `TRACE_ID` | 同上 | `EVENT_BUS` | 无 | NOT_EXERCISED | GAP | F-10 |
-| `MDC_OTHER` | 业务代码任意位置 | `SYNC` | `filter:42` 只恢复 traceId | LEAKED | GAP | F-02 |
-| `MDC_OTHER` | `util/GXMdcThreadUtils.java:41-110` | `ASYNC_EXECUTOR` | `finally` 内 `MDC.clear()` + 还原 | RESTORED | OK | — |
-| `MDC_OTHER` | 同上 | `PARALLEL_STREAM` | 每个元素重建包装 | RESTORED | OK（成本见 F-16） | — |
-| `MDC_OTHER` | `wrapper/mdc/GXMdcWrapperForkJoinPool.java:26-43` | `FORK_JOIN` | 委托 `GXMdcThreadUtils.wrap` | RESTORED | OK | — |
-| `MDC_OTHER` | `wrapper/mdc/GXMdcWrapperForkJoinPool.java:45-53` | `FORK_JOIN` | 无包装 | NOT_EXERCISED | GAP | F-01 |
-| `REQUEST_CONTEXT` | `util/GXCurrentRequestContextUtils.java` | `SYNC` | 依赖容器请求作用域 | NOT_EXERCISED | RISK | F-19 |
-| `REQUEST_CONTEXT` | 同上 | `ASYNC_EXECUTOR` | 无传播 | NOT_EXERCISED | GAP | F-19 |
-| `REQUEST_CONTEXT` | `web/advice/GXRequestBodyAdvice.java:80-98`（写入 `JSON_REQUEST_BODY` 属性） | `SYNC` | 依赖容器请求作用域，无显式清理 | NOT_EXERCISED | GAP | F-04 |
-| `MDC_OTHER` | `util/GXConcurrentToolsUtils.java:120-135`（`withMdcContext`） | `ASYNC_EXECUTOR` | `finally` 中 `setContextMap(original)` 或 `clear()` | RESTORED | OK | — |
-| `THREAD_LOCAL_OTHER` | `filter/GXXssHttpServletRequestWrapper.java:32`（`HTML_FILTER`） | `SYNC`（容器线程复用） | 无（从不 `remove`） | LEAKED | GAP | F-22 |
-| `THREAD_LOCAL_OTHER` | `service/impl/GXBaseCacheLockServiceImpl.java:26`（`THREAD_LOCKS`） | `SYNC` | 仅 `releaseAllLocks()` 内 `remove()`（`:149`） | NOT_EXERCISED | GAP | F-22 |
-| `THREAD_LOCAL_OTHER` | `api/GXBaseServeApiImpl.java:35`（`DYNAMIC_SERVE_SERVICE_CLASS_THREAD_LOCAL`） | `SYNC` | 仅 `runInThreadLocalContext` 的 `finally`（`:337-341`） | PARTIAL | GAP | F-22 |
-| `SECURITY_CONTEXT` | 未在本模块发现写入点 | — | — | — | OK | — |
+| 上下文项 | 写入点 | 传播路径 | 清理点 | 异常路径 | 判定 | 发现 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `TRACE_ID` | `filter/GXBaseRequestLoggingFilter.java:28` | `SYNC` | `:42`（`restoreTraceId`） | RESTORED | OK | — | — |
+| `TRACE_ID` | `util/GXTraceIdContextUtils.java:34-41` | `SYNC` | 无自动清理 | NOT_EXERCISED | GAP | F-02 | `GXContextPropagationAuditTest#customMdcKeyLeaksAfterRequestFilterChain` |
+| `TRACE_ID` | 同上 | `ASYNC_EXECUTOR` | 无 | NOT_EXERCISED | GAP | F-01 | `GXContextPropagationAuditTest#asyncExecutorDoesNotPropagateTraceId` |
+| `TRACE_ID` | 同上 | `FORK_JOIN` | 无 | NOT_EXERCISED | GAP | F-01 | `GXContextPropagationAuditTest#forkJoinSubmitOfForkJoinTaskIsNotWrapped` |
+| `TRACE_ID` | 同上 | `EVENT_BUS` | 无 | NOT_EXERCISED | GAP | F-10 | — |
+| `TRACE_ID` | `web/interceptor/GXTraceIdInterceptor.java:14-22`（`preHandle` 读取并回写响应头，`afterCompletion` 空实现） | `SYNC` | 无（`:21-22` 空） | NOT_EXERCISED | GAP | F-02 | — |
+| `MDC_OTHER` | 业务代码任意位置 | `SYNC` | `filter:42` 只恢复 traceId | LEAKED | GAP | F-02 | `GXContextPropagationAuditTest#customMdcKeyLeaksAfterRequestFilterChain` |
+| `MDC_OTHER` | `util/GXMdcThreadUtils.java:33-130`（`getMdcContext`/`wrap`/`wrapSupplier`/`supplyAsync`/`runAsync`：`:34`、`:44-57`、`:65-78`、`:85-89`、`:94-107`、`:113-129`） | `ASYNC_EXECUTOR` | `finally` 内 `MDC.clear()` + 还原 | RESTORED | OK | — | `GXMdcThreadUtilsTest#testWrapRunnableMdcPropagation`、`#testWrapCallableMdcPropagation`、`#testWrapSupplierMdcPropagation`、`#testSupplyAsyncMdcPropagation`、`#testRunAsyncMdcPropagation`、`#testMdcContextCleanup`、`GXContextPropagationAuditTest#explicitWrapRestoresTraceIdInsideWorkerThread` |
+| `MDC_OTHER` | `util/GXMdcThreadUtils.java:132-184`（`contextWrapper`/`consumerWrapper`/`biFunctionWrapper`/`biConsumerWrapper`，逐元素/逐阶段重建包装） | `PARALLEL_STREAM` | `finally` 内 `MDC.clear()` + 还原（`:150-154`） | RESTORED | OK（成本见 F-16） | — | `GXMdcThreadUtilsTest#testCompletableFutureThenApplyExplicitWrapperMdcPropagation`、`#testCompletableFutureThenComposeExplicitWrapperMdcPropagation`、`#testCompletableFutureWhenCompleteExplicitWrapperMdcPropagation`、`GXContextPropagationAuditTest#parallelStreamElementWrappersPropagateMdcPerElement`、`GXContextPropagationAuditTest#parallelStreamElementWrapperRestoresMdcAfterException` |
+| `MDC_OTHER` | `wrapper/mdc/GXMdcWrapperForkJoinPool.java:26-43` | `FORK_JOIN` | 委托 `GXMdcThreadUtils.wrap` | RESTORED | OK | — | `GXMdcWrapperForkJoinPoolTest#testExecuteMdcPropagation`、`#testSubmitMdcPropagation`、`#testInvokeAllMdcPropagation`、`#testMdcContextCleanup` |
+| `MDC_OTHER` | `wrapper/mdc/GXMdcWrapperForkJoinPool.java:45-53` | `FORK_JOIN` | 无包装 | NOT_EXERCISED | GAP | F-01 | `GXContextPropagationAuditTest#forkJoinSubmitOfForkJoinTaskIsNotWrapped` |
+| `MDC_OTHER` | `wrapper/mdc/GXMdcWrapperThreadPoolTaskExecutor.java:13-41`（`execute`/`submit`/`submitCompletable` 全系经 `GXMdcThreadUtils.wrap`；E-01 装配缺口见 F-01） | `ASYNC_EXECUTOR` | 任务内 `wrap` 的 `finally` 还原 | RESTORED | OK | — | `GXMdcWrapperThreadPoolTaskExecutorTest#testExecuteMdcPropagation`、`#testSubmitMdcPropagation`、`#testMdcContextCleanup` |
+| `MDC_OTHER` | `wrapper/mdc/GXMdcWrapperThreadPoolExecutor.java:32-75`（`execute`/`submit`/`invokeAll` 全系经 `GXMdcThreadUtils.wrap`；E-01 装配缺口见 F-01） | `ASYNC_EXECUTOR` | 任务内 `wrap` 的 `finally` 还原 | RESTORED | OK | — | `GXMdcWrapperThreadPoolExecutorTest#testExecuteMdcPropagation`、`#testSubmitMdcPropagation`、`#testMdcContextCleanup` |
+| `REQUEST_CONTEXT` | `util/GXCurrentRequestContextUtils.java` | `SYNC` | 依赖容器请求作用域 | NOT_EXERCISED | RISK | F-19 | — |
+| `REQUEST_CONTEXT` | 同上 | `ASYNC_EXECUTOR` | 无传播 | NOT_EXERCISED | GAP | F-19 | — |
+| `REQUEST_CONTEXT` | `web/advice/GXRequestBodyAdvice.java:80-98`（写入 `JSON_REQUEST_BODY` 属性） | `SYNC` | 依赖容器请求作用域，无显式清理 | NOT_EXERCISED | GAP | F-04 | `GXSecurityBoundaryAuditTest#requestBodyIsStoredWithSensitiveFields` |
+| `MDC_OTHER` | `util/GXConcurrentToolsUtils.java:120-135`（`withMdcContext` 保存/还原） | `ASYNC_EXECUTOR` | `finally` 中 `setContextMap(original)` 或 `clear()` | RESTORED | OK | — | `GXConcurrentToolsUtilsTest#composerFutureCompletesSuccessfullyAndPropagatesMdc`、`#completedResultsDoNotLeakTaskLocalMdc` |
+| `MDC_OTHER` | `util/GXConcurrentToolsUtils.java:157`（`composerFuture` 提交侧捕获，`:168` 进 `withMdcContext`） | `ASYNC_EXECUTOR` | `finally` 还原（`withMdcContext:129-135`） | RESTORED | OK | — | `GXConcurrentToolsUtilsTest#composerFutureCompletesSuccessfullyAndPropagatesMdc` |
+| `MDC_OTHER` | `util/GXConcurrentToolsUtils.java:349`（`allOf` 等待侧捕获，`:356` 进 `withMdcContext`） | `SYNC` | `finally` 还原（`withMdcContext:129-135`） | RESTORED | OK | — | `GXConcurrentToolsUtilsTest#allOfCompletesNormally`、`#allOfDefaultTimeoutOverloadCompletesNormally` |
+| `THREAD_LOCAL_OTHER` | `filter/GXXssHttpServletRequestWrapper.java:32`（`HTML_FILTER`） | `SYNC`（容器线程复用） | 无（从不 `remove`） | LEAKED | GAP | F-22 | `GXContextPropagationAuditTest#nonMdcThreadLocalsAreNotCleared` |
+| `THREAD_LOCAL_OTHER` | `service/impl/GXBaseCacheLockServiceImpl.java:26`（`THREAD_LOCKS`） | `SYNC` | 仅 `releaseAllLocks()` 内 `remove()`（`:149`） | NOT_EXERCISED | GAP | F-22 | `GXContextPropagationAuditTest#nonMdcThreadLocalsAreNotCleared` |
+| `THREAD_LOCAL_OTHER` | `api/GXBaseServeApiImpl.java:35`（`DYNAMIC_SERVE_SERVICE_CLASS_THREAD_LOCAL`） | `SYNC` | 仅 `runInThreadLocalContext` 的 `finally`（`:337-341`） | PARTIAL | GAP | F-22 | —（源码事实） |
+| `SECURITY_CONTEXT` | 未在本模块发现写入点 | — | — | — | OK | — | — |
 
 **矩阵结论**：`MDC_OTHER` 的清理在过滤层只覆盖 traceId 单键（F-02），异步与 ForkJoin 两条传播路径存在确定性缺口（F-01）；`GXMdcThreadUtils` 与 `GXConcurrentToolsUtils` 自身的包装/还原实现是正确的，缺口在"没有接入"，不在"实现错误"。三处非 MDC 的 `ThreadLocal`（`HTML_FILTER`、`THREAD_LOCKS`、`DYNAMIC_SERVE_SERVICE_CLASS_THREAD_LOCAL`）清理不成对，统一登记为 F-22。
+
+**证据口径**（对应 `data-model.md` §3 不变量）：`判定=OK` 且传播路径含 `ASYNC_EXECUTOR`/`FORK_JOIN`/`PARALLEL_STREAM` 的行，其"证据"列必须引用可执行用例全名（`类#方法`）；本矩阵此类行均引用既有单元测试或审计特征化用例（2026-10-28 复测全绿）。`GXMdcWrapperThreadPoolTaskExecutor`/`GXMdcWrapperThreadPoolExecutor` 两行的 `OK` 仅指包装实现本身正确，二者在生产链路中从未注册为 Bean（E-01，装配缺口归 F-01）。全部 `ThreadLocal`/`MDC` 使用点（`grep -E '\bThreadLocal\b|org\.slf4j\.MDC'` 命中的 9 个生产文件 + `GXTraceIdInterceptor`/`GXBaseRequestLoggingFilter` 两个 traceId 触点）均已在本表逐点判定。
 
 ---
 
@@ -689,6 +696,8 @@
 | `E-13` / `F-04` | "每个响应都下发 `UserData` Cookie" | 限定为"`cors.allow.credentials=true` 且配置 `cors.cookie.virusId` 时下发" | 复核 `GXResponseBodyAdvice.java:46-50`、`:65-66` 的分支条件，原表述过强 |
 | `F-12` | "缓存不生效" | "模块不提供 key 隔离能力" | `GXCaffeineCacheConfigTest` 已证 `CacheManager` 装配成功；风险在于下游启用后的 key 共享（实测两方法同参数得到同一 key） |
 | `E-22`（新增） | — | 契约偏差单列 | `AGENTS.md`/宪法要求与实现不一致，按宪法 II 只做文档同步 |
+| `基线` | 交付验收 `tests=550`（518 既有 + 32 审计） | `tests=553`（519 既有 + 34 审计，2026-10-28 复测） | +1 既有：提交 `ab91dbfe`（`feat(fix): 完善sso模块`，2026-10-23）为 `GXWebMvcConfigurerTest` 新增 `#addInterceptorsHonoursOrderAnnotationBeforeBeanNameOrder`；+2 审计：收敛轮次 T067 为 `PARALLEL_STREAM` 矩阵行补证据用例 `GXContextPropagationAuditTest#parallelStreamElementWrappersPropagateMdcPerElement`，PR 评审修复补并行流异常路径断言 `#parallelStreamElementWrapperRestoresMdcAfterException`。`spec.md` SC-007 的"既有 518 个用例"为规格冻结表述（FR-010：spec 只留摘要与引用），不再修改；执行记录以第 2 章与本行为准 |
+| `E-20` / `F-18` | "拦截器按 Bean 名排序而非声明顺序" | 排序子项已被后续实现收敛；F-18 剩余范围为 include/exclude 缺失与 `assert` 判空 | 与上一行同一差额来源提交 `ab91dbfe` 使 `GXWebMvcConfigurer` 按 `@Order`/`Ordered` 排序（Bean 名作 tie-breaker），并以 `GXWebMvcConfigurerTest#addInterceptorsHonoursOrderAnnotationBeforeBeanNameOrder` 锁定新行为；本报告为 2026-10-22 快照结论，台账 `web/config/GXWebMvcConfigurer.java` 行的 "interceptor order by bean name" 表述留待修复批次复核 |
 
 ---
 
@@ -745,4 +754,4 @@
 | F-21 | 直接查阅 `leaf-base-framework/AGENTS.md`"当前实现边界（2026-10-22 审查登记）"一节 |
 | F-22 | `mvn -o -pl leaf-base-framework test -Dtest=GXContextPropagationAuditTest`（`#nonMdcThreadLocalsAreNotCleared`） |
 
-**整体复现**：`mvn -o -pl leaf-base-framework test -Dtest=GX*AuditTest` → 8 类 32 用例全绿（当前行为成立）。
+**整体复现**：`mvn -o -pl leaf-base-framework test -Dtest=GX*AuditTest` → 8 类 34 用例全绿（当前行为成立）。
