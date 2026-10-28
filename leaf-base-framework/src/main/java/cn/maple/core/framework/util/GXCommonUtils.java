@@ -65,7 +65,6 @@ public class GXCommonUtils {
     @Getter
     private static final CopyOptions defaultCopyOptions = CopyOptions.create().setIgnoreNullValue(true).setIgnoreError(true).setConverter(GXHutoolDataConvert::staticConvert);
 
-    @Getter
     private static final Map<GXMethodCacheKeyUtils.MethodCacheKey, Method> METHOD_CACHE = new ConcurrentHashMap<>(64);
 
     private static final ConcurrentHashMap<String, Class<?>> UPDATE_FIELD_CLASS_CACHE = new ConcurrentHashMap<>(8);
@@ -96,7 +95,7 @@ public class GXCommonUtils {
     private static void __methodNotFound() {
     }
 
-    public static <R> R getEnvironmentValue(String key, Class<R> clazzType) {
+    public static <R> @Nullable R getEnvironmentValue(String key, Class<R> clazzType) {
         if (CharSequenceUtil.isBlank(key)) {
             throw new IllegalArgumentException("Configuration key must not be blank");
         }
@@ -144,7 +143,7 @@ public class GXCommonUtils {
         }
     }
 
-    public static <R> R getEnvironmentValue(String key, Class<R> clazzType, R defaultValue) {
+    public static <R> @Nullable R getEnvironmentValue(String key, Class<R> clazzType, R defaultValue) {
         if (CharSequenceUtil.isBlank(key)) {
             throw new IllegalArgumentException("Configuration key must not be blank");
         }
@@ -225,7 +224,7 @@ public class GXCommonUtils {
         }
     }
 
-    public static String hiddenPhoneNumber(CharSequence phoneNumber, int startInclude, int endExclude, char replacedChar) {
+    public static String hiddenPhoneNumber(@Nullable CharSequence phoneNumber, int startInclude, int endExclude, char replacedChar) {
         if (CharSequenceUtil.isBlank(phoneNumber)) {
             return "";
         }
@@ -258,7 +257,7 @@ public class GXCommonUtils {
         return GXAuthCodeUtils.authCodeEncode(jsonData, combinedKey, safeExpiry);
     }
 
-    public static Dict decryptedData(String encryptedStr, String key) {
+    public static Dict decryptedData(@Nullable String encryptedStr, String key) {
         if (CharSequenceUtil.isEmpty(key)) {
             throw new GXBusinessException("Decrypt key must not be empty");
         }
@@ -358,15 +357,15 @@ public class GXCommonUtils {
         return convertSourceToTarget(source, tClass, methodName, copyOptions, Dict.create());
     }
 
-    public static <R> List<R> convertSourceListToTargetList(Collection<?> collection, Class<R> tClass) {
+    public static <R> List<R> convertSourceListToTargetList(@Nullable Collection<?> collection, Class<R> tClass) {
         return convertSourceListToTargetList(collection, tClass, GXCommonConstant.DEFAULT_CUSTOMER_PROCESS_METHOD_NAME, null);
     }
 
-    public static <R> List<R> convertSourceListToTargetList(Collection<?> collection, Class<R> tClass, @Nullable String methodName, @Nullable CopyOptions copyOptions) {
+    public static <R> List<R> convertSourceListToTargetList(@Nullable Collection<?> collection, Class<R> tClass, @Nullable String methodName, @Nullable CopyOptions copyOptions) {
         return convertSourceListToTargetList(collection, tClass, methodName, copyOptions, Dict.create());
     }
 
-    public static <R> List<R> convertSourceListToTargetList(Collection<?> collection, Class<R> tClass, @Nullable String methodName, @Nullable CopyOptions copyOptions, @Nullable Object extraData) {
+    public static <R> List<R> convertSourceListToTargetList(@Nullable Collection<?> collection, Class<R> tClass, @Nullable String methodName, @Nullable CopyOptions copyOptions, @Nullable Object extraData) {
         if (CollUtil.isEmpty(collection)) {
             return Collections.emptyList();
         }
@@ -380,7 +379,7 @@ public class GXCommonUtils {
                 .collect(Collectors.toList());
     }
 
-    public static @Nullable Object reflectCallObjectMethod(Class<?> serviceClass, String methodName, Object... params) {
+    public static @Nullable Object reflectCallObjectMethod(Class<?> serviceClass, String methodName, @Nullable Object... params) {
         if (serviceClass == null) {
             throw new IllegalArgumentException("Target type must not be null");
         }
@@ -392,7 +391,7 @@ public class GXCommonUtils {
         return reflectCallObjectMethod(target, methodName, params);
     }
 
-    public static @Nullable Object reflectCallObjectMethod(@Nullable Object object, @Nullable String methodName, Object... params) {
+    public static @Nullable Object reflectCallObjectMethod(@Nullable Object object, @Nullable String methodName, @Nullable Object... params) {
         if (Objects.isNull(object)) {
             LOG.debug("Reflection target object is null");
             return null;
@@ -603,15 +602,14 @@ public class GXCommonUtils {
         return new GXBusinessException(exceptionMessage, Optional.ofNullable(targetException.getCause()).orElse(targetException));
     }
 
-    public static boolean checkPhone(String phone) {
+    public static boolean checkPhone(@Nullable String phone) {
         if (CharSequenceUtil.isEmpty(phone)) {
             return true;
         }
-        final String regex = "^((13[0-9])|(14[5,7,9])|(15[0-3,5-9])|(16[6,8])|(17[0,3,5-8])|(18[0-9])|(19[1,8,9]))\\d{8}$";
-        return !ReUtil.isMatch(regex, phone);
+        return !Validator.isMobile(phone);
     }
 
-    public static boolean checkTelephone(String telephone) {
+    public static boolean checkTelephone(@Nullable String telephone) {
         if (CharSequenceUtil.isEmpty(telephone)) {
             return true;
         }
@@ -619,11 +617,11 @@ public class GXCommonUtils {
         return !ReUtil.isMatch(regex, telephone);
     }
 
-    public static <R> List<R> buildTree(List<R> sourceList, Object rootParentValue) {
+    public static <R> List<R> buildTree(@Nullable List<R> sourceList, Object rootParentValue) {
         return buildTree(sourceList, rootParentValue, null);
     }
 
-    public static <R> List<R> buildTree(List<R> sourceList, Object rootParentValue, String getParentMethodName) {
+    public static <R> List<R> buildTree(@Nullable List<R> sourceList, Object rootParentValue, @Nullable String getParentMethodName) {
         if (CollUtil.isEmpty(sourceList)) {
             return CollUtil.newArrayList();
         }
@@ -675,7 +673,7 @@ public class GXCommonUtils {
         }
     }
 
-    public static <R> @Nullable R decodeConnectStr(String connectEncodeStr, Class<R> targetClazz) {
+    public static <R> @Nullable R decodeConnectStr(@Nullable String connectEncodeStr, Class<R> targetClazz) {
         if (targetClazz == null) {
             throw new IllegalArgumentException("Target type must not be null");
         }
@@ -713,7 +711,7 @@ public class GXCommonUtils {
     }
 
     @SuppressWarnings("all")
-    public static <R> Class<R> getGenericClassType(Class<?> clazz, Integer index) {
+    public static <R> @Nullable Class<R> getGenericClassType(Class<?> clazz, Integer index) {
         if (clazz == null) {
             throw new IllegalArgumentException("Target class must not be null");
         }
@@ -723,7 +721,7 @@ public class GXCommonUtils {
         return (Class<R>) ClassUtil.getTypeArgument(clazz, index);
     }
 
-    public static List<GXCondition<?>> convertTableConditionToConditionExp(String tableNameAlias, Table<String, String, Object> condition) {
+    public static List<GXCondition<?>> convertTableConditionToConditionExp(String tableNameAlias, @Nullable Table<String, String, Object> condition) {
         if (condition == null) {
             return new ArrayList<>();
         }
@@ -752,7 +750,7 @@ public class GXCommonUtils {
         return conditions;
     }
 
-    public static <T> @Nullable T convertStrToTarget(String str, Class<T> targetClazz) {
+    public static <T> @Nullable T convertStrToTarget(@Nullable String str, @Nullable Class<T> targetClazz) {
         if (CharSequenceUtil.isEmpty(str)) {
             return null;
         }
@@ -798,7 +796,7 @@ public class GXCommonUtils {
         }
     }
 
-    public static boolean isBase64(String base64Str) {
+    public static boolean isBase64(@Nullable String base64Str) {
         if (CharSequenceUtil.isEmpty(base64Str)) {
             return false;
         }
@@ -807,7 +805,7 @@ public class GXCommonUtils {
                 && Base64.isBase64(value);
     }
 
-    public static boolean checkMethodExists(Class<?> targetClazz, String methodName, Object... params) {
+    public static boolean checkMethodExists(Class<?> targetClazz, String methodName, @Nullable Object... params) {
         if (targetClazz == null) {
             throw new IllegalArgumentException("Target class must not be null");
         }
@@ -821,7 +819,7 @@ public class GXCommonUtils {
         return method != METHOD_NOT_FOUND;
     }
 
-    public static Integer checkURLReachable(String urlString) {
+    public static Integer checkURLReachable(@Nullable String urlString) {
         if (CharSequenceUtil.isEmpty(urlString)) {
             LOG.debug("URL must not be empty");
             return -1;
@@ -874,7 +872,7 @@ public class GXCommonUtils {
         }
     }
 
-    public static boolean checkHmac(String secret, String clientHmac, Object payload) {
+    public static boolean checkHmac(String secret, @Nullable String clientHmac, Object payload) {
         if (CharSequenceUtil.isBlank(secret)) {
             throw new GXBusinessException("Signing secret must not be blank");
         }
@@ -905,7 +903,7 @@ public class GXCommonUtils {
         }
     }
 
-    public static List<GXUpdateField<?>> convertUpdateFieldRequestLst(List<GXUpdateFieldRequest> updateLst) {
+    public static List<GXUpdateField<?>> convertUpdateFieldRequestLst(@Nullable List<GXUpdateFieldRequest> updateLst) {
         if (CollUtil.isEmpty(updateLst)) {
             return Collections.emptyList();
         }
@@ -928,17 +926,17 @@ public class GXCommonUtils {
 
                 Class<?> updateFieldClass = UPDATE_FIELD_CLASS_CACHE.computeIfAbsent(className, name -> {
                     try {
-                        return Class.forName(name);
+                        Class<?> clazz = Class.forName(name, false, GXUpdateField.class.getClassLoader());
+                        if (!GXUpdateField.class.isAssignableFrom(clazz)) {
+                            throw new GXBusinessException("Update field class must extend GXUpdateField: " + name);
+                        }
+                        return clazz;
                     } catch (ClassNotFoundException e) {
                         throw new GXBusinessException("Update field class not found: " + name, e);
                     }
                 });
 
                 Object updateFieldObj = ReflectUtil.newInstance(updateFieldClass, tableName, fieldName, value);
-
-                if (!(updateFieldObj instanceof GXUpdateField<?>)) {
-                    throw new GXBusinessException("Created object is not a GXUpdateField: " + className);
-                }
 
                 return (GXUpdateField<?>) updateFieldObj;
             } catch (GXBusinessException e) {

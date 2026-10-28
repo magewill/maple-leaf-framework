@@ -25,6 +25,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
@@ -160,6 +161,22 @@ class GXCommonUtilsTest {
         assertFalse(GXCommonUtils.checkTelephone("010-12345678"));
         assertTrue(GXCommonUtils.checkTelephone("01012345678"));
         assertTrue(GXCommonUtils.checkTelephone(""));
+    }
+
+    @Test
+    void shouldRejectPhoneWithCommaWhenValidatingMobile() {
+        assertTrue(GXCommonUtils.checkPhone("14,12345678"));
+        assertTrue(GXCommonUtils.checkPhone("15,12345678"));
+        assertTrue(GXCommonUtils.checkPhone("17,12345678"));
+        assertTrue(GXCommonUtils.checkPhone("19,12345678"));
+    }
+
+    @Test
+    void shouldAcceptModernMobilePrefixWhenValidatingMobile() {
+        assertFalse(GXCommonUtils.checkPhone("19512345678"));
+        assertFalse(GXCommonUtils.checkPhone("19212345678"));
+        assertFalse(GXCommonUtils.checkPhone("17112345678"));
+        assertFalse(GXCommonUtils.checkPhone("16212345678"));
     }
 
     @Test
@@ -457,6 +474,16 @@ class GXCommonUtilsTest {
     }
 
     @Test
+    void shouldRejectNonUpdateFieldClassWithoutInstantiation() {
+        NonUpdateFieldTarget.INSTANTIATED.set(false);
+
+        assertThrows(GXBusinessException.class, () -> GXCommonUtils.convertUpdateFieldRequestLst(List.of(
+                new GXUpdateFieldRequest("u", "userName", NonUpdateFieldTarget.class.getName(), "alpha")
+        )));
+        assertFalse(NonUpdateFieldTarget.INSTANTIATED.get());
+    }
+
+    @Test
     void shouldReturnMinusOneWhenUrlIsEmpty() {
         assertEquals(-1, GXCommonUtils.checkURLReachable(""));
     }
@@ -466,6 +493,14 @@ class GXCommonUtilsTest {
         double loadAverage = assertDoesNotThrow(GXCommonUtils::getSystemLoadAverage);
 
         assertTrue(loadAverage >= -1.0D && loadAverage <= 1.0D);
+    }
+
+    static class NonUpdateFieldTarget {
+        static final AtomicBoolean INSTANTIATED = new AtomicBoolean(false);
+
+        public NonUpdateFieldTarget(String tableName, String fieldName, Object value) {
+            INSTANTIATED.set(true);
+        }
     }
 
     static class NullArgumentTarget {
