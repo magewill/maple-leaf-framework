@@ -9,6 +9,8 @@ import cn.maple.core.datasource.it.listener.OrderEventRecorder;
 import cn.maple.core.datasource.it.listener.OrderItemEventRecorder;
 import cn.maple.core.datasource.it.listener.SyncOrderEventRecorder;
 import cn.maple.core.datasource.it.listener.SyncOrderItemEventRecorder;
+import cn.maple.core.datasource.it.listener.ThrowingUserListener;
+import cn.maple.core.datasource.it.listener.UserBatchChangeRecorder;
 import cn.maple.core.datasource.it.listener.UserChangeRecorder;
 import cn.maple.core.datasource.it.mapper.ListenerOrderItemMapper;
 import cn.maple.core.datasource.it.mapper.ListenerOrderItemSyncMapper;
@@ -16,10 +18,12 @@ import cn.maple.core.datasource.it.mapper.ListenerOrderMapper;
 import cn.maple.core.datasource.it.mapper.ListenerOrderSyncMapper;
 import cn.maple.core.datasource.it.mapper.ListenerUserAsyncMapper;
 import cn.maple.core.datasource.it.mapper.ListenerUserMapper;
+import cn.maple.core.datasource.it.service.ListenerUserBatchService;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
 import cn.maple.core.framework.dto.inner.field.GXUpdateStrField;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import org.apache.ibatis.executor.BatchResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -32,12 +36,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -79,6 +85,9 @@ class MyBatisListenerIT {
     private ListenerOrderItemSyncMapper syncOrderItemMapper;
 
     @Autowired
+    private ListenerUserBatchService userBatchService;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Autowired
@@ -95,6 +104,8 @@ class MyBatisListenerIT {
         OrderItemEventRecorder.reset();
         SyncOrderEventRecorder.reset();
         SyncOrderItemEventRecorder.reset();
+        UserBatchChangeRecorder.reset();
+        ThrowingUserListener.reset();
     }
 
     @Test
@@ -270,6 +281,71 @@ class MyBatisListenerIT {
         assertEquals(0, SyncOrderEventRecorder.OBSERVED_ITEM_COUNTS.getFirst());
         assertEquals(0, countRowsOf("t_listener_order"));
         assertEquals(0, countRowsOf("t_listener_order_item"));
+    }
+
+    @Test
+    void conditionlessUpdateIsRejectedBeforeAnyPayloadIsBuilt() {
+        ListenerUserEntity entity = insert("carol", 30);
+
+        UpdateWrapper<ListenerUserEntity> wrapper = new UpdateWrapper<>();
+        wrapper.set("status", "archived");
+
+        // BlockAttackInnerInterceptor rejects a full-table update, so the "no condition" branch of the
+        // payload parser is defensive: the database is never reached and nothing is published.
+        assertThrows(RuntimeException.class, () -> userMapper.update(null, wrapper));
+
+        assertTrue(UserChangeRecorder.UPDATE_EVENTS.isEmpty(), "A rejected write must not deliver any event");
+        assertEquals("enabled", jdbcTemplate.queryForObject(
+                        "SELECT status FROM " + TABLE_NAME + " WHERE id = ?", String.class, entity.getId()),
+                "A full-table update must be blocked before touching data");
+    }
+
+    @Test
+    void officialCollectionInsertBypassesTheListenerChain() {
+        ListenerUserEntity first = newEntity("official-a", 1);
+        ListenerUserEntity second = newEntity("official-b", 2);
+
+        List<BatchResult> batchResults = userMapper.insert(List.of(first, second));
+
+        assertFalse(batchResults.isEmpty(), "The official JDBC batch API must report its statement results");
+        assertEquals(2, countRowsOf(TABLE_NAME), "Both rows must be persisted");
+        assertTrue(UserChangeRecorder.SAVE_EVENTS.isEmpty(),
+                "BaseMapper.insert(Collection) bypasses the intercepted per-row insert, so no event is delivered");
+        assertTrue(UserBatchChangeRecorder.BATCH_EVENTS.isEmpty(),
+                "The official batch API is not covered by the service-layer batch aspect");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void saveBatchDeliversOneEventWithDetachedEntityValues() {
+        ListenerUserEntity first = newEntity("batch-a", 1);
+        first.setExt(Dict.create().set("trace", "original"));
+        ListenerUserEntity second = newEntity("batch-b", 2);
+        second.setExt(Dict.create().set("trace", "original"));
+
+        assertTrue(userBatchService.saveBatch(List.of(first, second)));
+
+        assertEquals(2, countRowsOf(TABLE_NAME));
+        assertEquals(1, UserBatchChangeRecorder.BATCH_EVENTS.size(),
+                "A batch write must deliver exactly one event");
+        List<Dict> rows = UserBatchChangeRecorder.BATCH_EVENTS.getFirst();
+        assertEquals(2, rows.size());
+        assertEquals("batch-a", rows.getFirst().getStr("username"));
+        assertEquals("batch-b", rows.get(1).getStr("username"));
+
+        Object payloadExt = rows.getFirst().get("ext");
+        assertTrue(payloadExt instanceof Map<?, ?>, "The entity `ext` must stay a map in the payload");
+        assertNotSame(first.getExt(), payloadExt,
+                "Entity-owned values must be copied into the batch payload");
+
+        ((Map<Object, Object>) payloadExt).put("trace", "listener-mutation");
+
+        assertEquals("original", first.getExt().getStr("trace"),
+                "A listener mutating the batch payload must not reach the business entity");
+        assertEquals("original", jdbcTemplate.queryForObject(
+                        "SELECT JSON_UNQUOTE(JSON_EXTRACT(ext, '$.trace')) FROM " + TABLE_NAME + " WHERE id = ?",
+                        String.class, first.getId()),
+                "The persisted JSON must stay unchanged");
     }
 
     private ListenerOrderEntity newOrder(String orderNo, int amount) {

@@ -22,6 +22,7 @@ import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.task.TaskRejectedException;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.lang.reflect.Method;
 import java.util.List;
@@ -31,6 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -225,7 +227,7 @@ class GXMyBatisListenerIsolationTest {
     }
 
     @Test
-    void syncAfterCommitCallbackFailureIsIsolatedEvenWhenPropagating() throws Throwable {
+    void syncAfterCommitInsideActiveTransactionIsolatesTheCallbackFailure() throws Throwable {
         GXMyBatisListenerProperties properties = new GXMyBatisListenerProperties();
         properties.setSyncAfterCommit(true);
         properties.setPropagateException(true);
@@ -235,6 +237,9 @@ class GXMyBatisListenerIsolationTest {
         BetaListener beta = new BetaListener();
         List<GXMyBatisModelSaveEntityEvent<Dict>> deferredEvents = new CopyOnWriteArrayList<>();
 
+        // Only a real transaction with an active synchronization defers a sync-after-commit callback.
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
         try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class);
              MockedStatic<GXSpringContextUtils> springContext = Mockito.mockStatic(GXSpringContextUtils.class)) {
             stubListenerBeans(springContext, beta);
@@ -252,6 +257,9 @@ class GXMyBatisListenerIsolationTest {
             GXMyBatisSyncListener syncListener = new GXMyBatisSyncListener();
             assertDoesNotThrow(() -> deferredEvents.forEach(syncListener::listenerSaveEntity),
                     "A deferred callback failure must never escape to the executor thread");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
         }
 
         assertEquals(1, beta.calls.get(), "A failing deferred listener must not stop the next one");
@@ -260,6 +268,42 @@ class GXMyBatisListenerIsolationTest {
         assertNotNull(deferredEvents.getFirst().getParam(), "Deferred events keep their param map");
         assertNull(deferredEvents.getFirst().getParam().get(GXMyBatisEventConstant.PENDING_CALLBACK_FAILURE),
                 "A deferred callback must not stash a pending failure nobody can consume");
+    }
+
+    @Test
+    void syncAfterCommitWithoutActiveTransactionKeepsPropagationSemantics() throws Throwable {
+        GXMyBatisListenerProperties properties = new GXMyBatisListenerProperties();
+        properties.setSyncAfterCommit(true);
+        properties.setPropagateException(true);
+        GXMyBatisPlusSaveEntityAspect aspect = aspectWith(properties);
+        ProceedingJoinPoint point = savePoint();
+        long failedBefore = GXMyBatisListenerMetrics.snapshot().failed();
+        long deliveredBefore = GXMyBatisListenerMetrics.snapshot().delivered();
+        assertFalse(TransactionSynchronizationManager.isActualTransactionActive(),
+                "This case covers the inline path, which only applies when no transaction is active");
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class);
+             MockedStatic<GXSpringContextUtils> springContext = Mockito.mockStatic(GXSpringContextUtils.class)) {
+            stubListenerBeans(springContext, new BetaListener());
+            GXMyBatisSyncListener syncListener = new GXMyBatisSyncListener();
+            // Without an actual transaction nothing can be deferred, so the event must be published
+            // inline and the callback failure must reach the caller exactly like the default
+            // synchronous path (contracts/listener-callback.md 异常语义).
+            eventPublisher.when(() -> GXEventPublisherUtils.publishEvent(any()))
+                    .thenAnswer(invocation -> {
+                        syncListener.listenerSaveEntity(invocation.getArgument(0));
+                        return null;
+                    });
+            IllegalStateException failure = assertThrows(IllegalStateException.class, () -> aspect.around(point));
+            assertEquals("listener boom", failure.getMessage(),
+                    "An inline sync-after-commit callback failure must surface as-is");
+            eventPublisher.verify(() -> GXEventPublisherUtils.publishEventAfterCommit(any()), Mockito.never());
+        }
+
+        assertEquals(failedBefore + 1, GXMyBatisListenerMetrics.snapshot().failed(),
+                "The propagating callback failure must be counted exactly once");
+        assertEquals(deliveredBefore, GXMyBatisListenerMetrics.snapshot().delivered(),
+                "A propagating callback failure must not be counted as delivered");
     }
 
     @SuppressWarnings("unchecked")

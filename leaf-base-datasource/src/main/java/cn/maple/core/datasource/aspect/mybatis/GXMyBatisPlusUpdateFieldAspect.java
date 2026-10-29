@@ -25,7 +25,6 @@ import java.util.List;
 @Aspect
 @Component
 @Slf4j
-@SuppressWarnings("all")
 public class GXMyBatisPlusUpdateFieldAspect {
     private final GXMyBatisListenerEventPublisher eventPublisher;
 

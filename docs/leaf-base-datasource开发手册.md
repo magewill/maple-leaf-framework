@@ -499,8 +499,18 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, OrderEntity> impl
 | `GXMyBatisModelUpdateFieldEvent` | 指定字段更新 |
 | `GXMyBatisModelDeleteEvent` | 条件物理删除 |
 | `GXMyBatisModelDeleteSoftEvent` | 条件软删除 |
-| `GXMyBatisModelSaveBatchEntityEvent` | 批量保存 / 批量新增或更新 |
-| `GXMyBatisModelSaveBatchEntitySnapshotEvent` | 多监听方共享的只读批量快照 |
+| `GXMyBatisModelSaveBatchEntitySnapshotEvent` | 批量保存 / 批量新增或更新（`GXMyBatisModelSaveBatchEntityEvent` 的子类，四种批量事件类型**一律**由它承载） |
+| `GXMyBatisModelSaveBatchEntityEvent` | 上面事件的基类，承载 `entityData`/`batchEntities` 载荷契约；发布组件不会直接实例化它 |
+
+批量事件只有一个监听方时，载荷就是切面构建的那一份（行 `Dict` 与行列表都可写，SC-005 的零拷贝预算）；有多个监听方时，同一个载荷被包装为只读视图共享给每个监听方。两种形态下，实体自有的可变值（`Date`、`Calendar`、数组、集合、`Map`，例如 `ext`）都已在切面内复制为载荷私有副本，监听方修改载荷不会改写业务实体（FR-008）。
+
+批量载荷的分离走查是**有界**的：深度上限 32，超出后保留实体引用并置 `snapshotDegraded=true` 与 `UNSNAPSHOTABLE_VALUE` 降级原因（计入 `degraded` 并输出 `payload degraded` 告警），不会伪装成已校验的干净快照。三处预算相互独立：
+
+| 机制 | 位置 | 上限 | 超限表现 |
+| --- | --- | --- | --- |
+| 单条事件防御性快照 | `GXBaseEvent` | 深度 64、100 000 节点 | 抛 `IllegalArgumentException`；发布层计入 `failed` 并隔离，业务写仍成功 |
+| 严格快照扫描（`strict-snapshot=true`） | `GXMyBatisListenerEventPublisher#scanPayload` | 深度 8、4096 节点 | `snapshotScanTruncated=true` + `degraded` + `reason=scan-truncated` |
+| 批量载荷分离走查 | `GXMyBatisPlusSaveBatchEntityAspect#detachMutableValue` | 深度 32 | `snapshotDegraded=true` + `UNSNAPSHOTABLE_VALUE` + `degraded` |
 
 `GXMyBatisModelCreatingEntityEvent`、`GXMyBatisModelUpdatingEntityEvent` 是保留的"写入前"事件类型，当前切面不会发布，不能依赖它们在写入前做校验。
 
@@ -633,13 +643,15 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, OrderEntity> impl
 | **按条件物理删除** | 是 | 仅拦截 `deleteCondition` |
 | **按主键物理删除** | **否** | 可能被配置为逻辑删除，无法判定真实语义 |
 | 通用服务层批量保存/批量新增或更新 | 是 | 整批一个事件 |
+| `BaseMapper.insert(Collection)`、`updateById(Collection)`、`insertOrUpdate(Collection[, int | BiPredicate])` 等官方 JDBC 批量 API | **否** | 由 `BatchSqlSession` 直接执行语句，不经过被拦截的单条写方法，Mapper 代理层拿不到逐条结果；需要监听时改用 `saveBatch`/`saveOrUpdateBatch`，或把监听声明放到调用这些 API 的 Service 类型级声明上 |
 | 自定义批量、原生批量 SQL | **否** | 不经过被拦截的调用路径 |
 
 **条件还原与降级**
 
 - 条件可被无损还原时，回调可读到 `conditionFields` 与对应操作符。
+- 条件为空（例如只带 `set(...)` 的 `UpdateWrapper`，WHERE 段为空）视为**可无损还原**：结构化条件与原始条件文本都为空，不追加降级原因，也不计入 `degraded`。
 - 含 `OR`、函数/表达式左侧、重复字段、占位符不匹配或解析失败时，结构化条件为空，只提供原始条件文本，并通过 `degradeReasons` 标记原因；**不会伪造字段值或错位填充**。
-- 取值不可克隆时保留引用，并标记 `snapshotDegraded`；监听方必须把载荷视为只读。标记发生在 `strict-snapshot=true` 时，同时追加 `UNSNAPSHOTABLE_VALUE` 降级原因并计入 `degraded`；关闭时保持历史行为（保留引用、不扫描），以维持无监听路径的零开销。
+- 取值不可克隆、或批量载荷超出分离走查深度时保留引用，并标记 `snapshotDegraded`；监听方必须把载荷视为只读。标记发生在 `strict-snapshot=true` 时，同时追加 `UNSNAPSHOTABLE_VALUE` 降级原因并计入 `degraded`；关闭时保持历史行为（保留引用、不扫描），以维持无监听路径的零开销。
 - 严格快照的扫描是**有界尽力而为**：最大深度 8、最多 4096 个节点。载荷超出预算时停止扫描并置 `snapshotScanTruncated=true`、计入一次 `degraded`、输出 `reason=scan-truncated` 的结构化告警；框架不会把"未检查完"当成"已校验为干净"，因此大载荷下请结合该标记与 `degraded` 判断。
 
 **异常与开关**
@@ -673,7 +685,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, OrderEntity> impl
 
 监听方在回调中再次写库、且被同一声明命中时，投递链会继续触发。框架在每次回调外层累计投递深度并把该深度携带到异步任务中：达到上限（`GXMyBatisListenerEventPublisher.MAX_DELIVERY_DEPTH = 5`）后不再投递，按 `failed` 计一次并输出 `reason=recursion-limit` 的结构化告警（含 `operationId`、`depth`），业务写操作返回值不受影响。确有多级联动需求时，请让监听方改走不经过被拦截声明的写入路径（原生 SQL 或未被声明的 Mapper）。
 
-`degraded` 的计数口径：更新条件无法无损还原（含 `OR`、函数左侧、重复字段、参数不匹配、解析失败）时按事件计一次；`strict-snapshot=true` 时，载荷中出现不可克隆值再计一次；同一模式下扫描因超出预算被截断时，同样计一次（载荷标记为 `snapshotScanTruncated`）。
+`degraded` 的计数口径：**按载荷计数，每个载荷最多计一次**。以下都属于同一载荷的降级事实，同时命中时仍只计一次：更新条件无法无损还原（含 `OR`、函数左侧、重复字段、参数不匹配、解析失败）、`strict-snapshot=true` 时载荷中出现不可克隆值、扫描因超出预算被截断（`snapshotScanTruncated`）、批量载荷分离走查超出深度被截断（`snapshotDegraded` + `UNSNAPSHOTABLE_VALUE`）。计数与标记分离：标记由切面与扫描各自写入，计数统一在 `GXMyBatisListenerEventPublisher#recordDegradedIfMarked` 完成。
 
 **升级说明（4.3.0）**
 

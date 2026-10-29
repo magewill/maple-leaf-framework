@@ -169,8 +169,10 @@ public class GXMyBatisListenerEventPublisher {
         }
         boolean asyncModeEnabled = isAsyncModeEnabled();
         String operationId = buildOperationId(invokedMethod);
-        recordDegradedIfMarked(source);
+        // The scan annotates the payload; counting happens once afterwards so a payload that is both
+        // marked by its aspect and truncated by the scan is still one degraded payload (data-model §6).
         markSnapshotDegradedIfNeeded(source, invokedMethod, operationId);
+        recordDegradedIfMarked(source);
         // 批量事件只构建一次载荷；多监听方时改为只读快照共享，避免按监听方复制（SC-005），
         // 同时任何修改尝试都会失败，不会影响其它监听方（FR-008）。
         boolean batchEvent = syncEvent == GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY
@@ -227,11 +229,26 @@ public class GXMyBatisListenerEventPublisher {
         GXMyBatisListenerTaskContext.setOperationId(enclosingOperationId);
     }
 
+    /**
+     * Mirrors the condition used by {@code GXEventPublisherUtils#publishEventAfterCommit}: only an
+     * actual transaction with an active synchronization really defers the callback. Anything else is
+     * delivered inline on the business thread, so it must be treated as an immediate synchronous
+     * delivery (T118).
+     */
+    private boolean isAfterCommitDeferralActive() {
+        return TransactionSynchronizationManager.isSynchronizationActive()
+                && TransactionSynchronizationManager.isActualTransactionActive();
+    }
+
     private void deliver(GXMyBatisListenerConfigResolver.ResolvedListener listener,
                          GXModelEventNamingEnums syncEvent, GXModelEventNamingEnums asyncEvent,
                          Dict source, boolean asyncModeEnabled, String operationId) {
         boolean async = listener.async() && asyncModeEnabled;
-        boolean deferred = async || properties.isSyncAfterCommit();
+        // sync-after-commit only defers a callback when a real transaction can defer it: without one
+        // GXEventPublisherUtils#publishEventAfterCommit publishes inline, so the legacy
+        // propagate-exception semantics and the slow-callback measurement must still apply
+        // (contracts/listener-callback.md 异常语义).
+        boolean deferred = async || (properties.isSyncAfterCommit() && isAfterCommitDeferralActive());
         GXModelEventNamingEnums naming = async ? asyncEvent : syncEvent;
         Dict eventParam = Dict.create()
                 .set(GXMyBatisEventConstant.LISTENER_CLAZZ_NAME, listener.listenerClazz().getSimpleName())
@@ -333,15 +350,18 @@ public class GXMyBatisListenerEventPublisher {
     }
 
     /**
-     * Counts payloads the aspects already marked as degraded, so every aspect goes through one
-     * counting point instead of repeating the check (and potentially forgetting it).
+     * Counts a degraded payload exactly once, whatever marked it: the aspect (lossy condition,
+     * retained references) or the strict scan (retained references, exhausted budget). Every marker is
+     * inspected here instead of being counted where it is set, so a payload carrying several markers is
+     * still one degraded payload in the metrics (data-model §6).
      */
     private void recordDegradedIfMarked(Dict source) {
         boolean conditionLossless = !Boolean.FALSE.equals(source.get(CONDITION_LOSSLESS));
         boolean snapshotDegraded = Boolean.TRUE.equals(source.getBool(SNAPSHOT_DEGRADED));
+        boolean scanTruncated = Boolean.TRUE.equals(source.getBool(SNAPSHOT_SCAN_TRUNCATED));
         Object reasons = source.get(DEGRADE_REASONS);
         boolean hasReasons = reasons instanceof Collection<?> collection && !collection.isEmpty();
-        if (!conditionLossless || snapshotDegraded || hasReasons) {
+        if (!conditionLossless || snapshotDegraded || scanTruncated || hasReasons) {
             GXMyBatisListenerMetrics.recordDegraded();
         }
     }
@@ -351,9 +371,11 @@ public class GXMyBatisListenerEventPublisher {
      * copied are marked with {@code snapshotDegraded} and an {@code UNSNAPSHOTABLE_VALUE} degrade reason.
      *
      * <p>The scan is bounded, so payloads larger than the budget cannot be verified. Those are marked
-     * with {@code snapshotScanTruncated} and counted in {@code degraded} instead of being reported as
-     * clean, otherwise a large batch would silently look like a verified snapshot (spec 边缘用例：
-     * 严格快照扫描预算).</p>
+     * with {@code snapshotScanTruncated} instead of being reported as clean, otherwise a large batch
+     * would silently look like a verified snapshot (spec 边缘用例：严格快照扫描预算).</p>
+     *
+     * <p>This method only annotates and logs; counting belongs to {@link #recordDegradedIfMarked(Dict)},
+     * which runs after it so one payload cannot be counted twice.</p>
      */
     private void markSnapshotDegradedIfNeeded(Dict source, @Nullable Method invokedMethod, String operationId) {
         if (!properties.isStrictSnapshot()) {
@@ -369,7 +391,6 @@ public class GXMyBatisListenerEventPublisher {
                 return;
             }
             source.set(SNAPSHOT_SCAN_TRUNCATED, Boolean.TRUE);
-            GXMyBatisListenerMetrics.recordDegraded();
             log.warn("MyBatis listener payload scan truncated: operationId={}, method={}, maxDepth={}, maxNodes={}, reason=scan-truncated",
                     operationId, methodName, MAX_SNAPSHOT_SCAN_DEPTH, MAX_SNAPSHOT_SCAN_NODES);
             return;
@@ -379,7 +400,6 @@ public class GXMyBatisListenerEventPublisher {
         }
         source.set(SNAPSHOT_DEGRADED, Boolean.TRUE);
         source.set(DEGRADE_REASONS, mergeDegradeReasons(source.get(DEGRADE_REASONS)));
-        GXMyBatisListenerMetrics.recordDegraded();
         log.warn("MyBatis listener payload keeps references to unsnapshotable values: operationId={}, method={}",
                 operationId, methodName);
     }

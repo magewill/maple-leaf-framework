@@ -39,6 +39,8 @@
 13. 监听回调内的写操作会再次触发同一投递链，投递深度上限（`GXMyBatisListenerEventPublisher.MAX_DELIVERY_DEPTH`）与跨任务深度传播不得移除或放开；超限必须计入 `failed` 并输出 `reason=recursion-limit` 的结构化告警。
 14. `strict-snapshot` 的载荷扫描必须有界，超出预算必须以 `snapshotScanTruncated` 与 `degraded` 显式暴露，不得静默按"干净载荷"处理。
 15. 载荷构建属于投递路径：条件解析、字段校验或事件快照失败必须计入 `failed` 并隔离，不得让已成功的写操作向调用方抛异常。事务后投递（异步或 `sync-after-commit`）的回调不会被业务调用方看到，其异常一律隔离。
+16. 批量监听覆盖边界：只拦截通用服务层的 `saveBatch`/`saveOrUpdateBatch`；MyBatis-Plus 官方 `BaseMapper.insert(Collection)`、`updateById(Collection)`、`insertOrUpdate(Collection, ...)` 经 `BatchSqlSession` 直接执行语句，不产生事件。该缺口必须保留在开发手册的能力边界表中，不得悄悄删除说明，也不得声称已覆盖。
+17. 批量载荷由切面一次构建后直接投递，不再二次快照；因此切面必须把实体自有的可变值（`Date`、`Calendar`、数组、集合、`Map`）复制为载荷私有副本，保证监听方修改载荷不影响业务实体。分离走查深度上限 32，超限必须置 `snapshotDegraded` 与 `UNSNAPSHOTABLE_VALUE`（计入 `degraded`），不得静默；也不得就地改写调用方传入的 `Dict`/`Map` 行（`Convert` 在这类入参下返回调用方实例）。
 
 ## 测试要求
 

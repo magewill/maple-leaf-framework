@@ -333,6 +333,50 @@ description: "Task list for MyBatis-Plus 操作监听加固"
 
 ---
 
+## Phase 23: Convergence
+
+**Purpose**: 收敛 2026-10-29 第十四次复核发现的剩余差距：F1 为 `deferred` 与实际投递时机不一致导致 `sync-after-commit` 无事务路径丢失传播语义（HIGH），F2 为无条件更新的"降级"标记与契约不变式冲突，F3 为 MyBatis-Plus 官方批量写 API 未覆盖且未登记，F4 为单监听方批量载荷与业务对象共享可变引用，其余为契约/手册口径漂移与静态检查抑制残留。既有 117 条任务已逐条对照当前代码复核（124 条监听用例全绿）。
+
+- [X] T118 **HIGH** 让 `deferred` 反映真实投递时机：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerEventPublisher.java` 的 `deliver`（234 行）以 `async || properties.isSyncAfterCommit()` 判定 `deferred`，与实际是否存在事务无关；`GXEventPublisherUtils#publishEventAfterCommit`（60 行）在无活动事务时是内联立即投递，但载荷仍写入 `deferredDelivery=true`，`GXMyBatisBaseListener#dispatch`（146-157 行）据此把回调异常一律隔离、不暂存 `pendingCallbackFailure`，导致 `propagate-exception=true` + `sync-after-commit=true` + 无事务时异常不再传给业务调用方，与 `specs/001-mybatis-listener-audit/contracts/listener-callback.md`（53 行）"无事务时 `sync-after-commit` 立即投递，传播语义与默认同步路径一致"及 `docs/leaf-base-datasource开发手册.md`（662 行）相反；同一根因还使内联回调的慢回调告警（296-300 行）被跳过。改为仅在 `async` 或"`syncAfterCommit` 且 `TransactionSynchronizationManager.isActualTransactionActive()`"时置 `deferred`，并补回归用例：无事务 + `propagate-exception=true` 时异常原样传播且慢回调告警生效；有活动事务时仍隔离且不传播 per FR-006/contracts: listener-callback (contradicts)
+- [X] T119 **MEDIUM** 修正无条件更新的降级口径：`GXMyBatisPlusUpdateEntityAspect.java` 的 `parseWhereSQL`（168-175 行）在 `getTargetSql()` 为空（如仅 `set(...)` 的 `UpdateWrapper`，无 WHERE）时输出 `conditionLossless=false`、`degradeReasons=[]`、`rawConditionSql=""`，既违反 `specs/001-mybatis-listener-audit/data-model.md` §3（80 行）"`conditionLossless=false` 时 `rawConditionSql` 必须非空"的不变式，又让 `GXMyBatisListenerEventPublisher#recordDegradedIfMarked` 为一次可完全还原的载荷虚增 `degraded`（FR-020 口径），且日志中无任何降级原因可查；按"无条件=可无损表达"处理该分支（或用新增降级原因显式表达并保证原始条件语义），并补无条件更新用例断言 `conditionLossless`、`rawConditionSql` 与 `degraded` 不增 per FR-009/FR-010/data-model §3 (contradicts)
+- [X] T120 **MEDIUM** 覆盖或登记 MyBatis-Plus 官方批量写 API：`GXMyBatisPlusSaveEntityAspect.java` 切点为 `execution(int insert(Object))`、`GXMyBatisPlusUpdateEntityAspect.java` 为 `update(Object, Wrapper)`/`updateById(Object)`，而官方 `BaseMapper.insert(Collection)`、`updateById(Collection)`、`insertOrUpdate(Collection[,int|BiPredicate])` 返回 `List<BatchResult>` 且经 `BatchSqlSession` 执行，完全不触发任何投递；`docs/leaf-base-datasource开发手册.md` §3.3.5 能力边界表（627-636 行）与本模块 `AGENTS.md` 的监听约束均未登记该缺口。为这批官方方法补齐监听（复用批量事件的"整批一次快照、只投递一次"语义），或在能力边界表与 `AGENTS.md` 显式登记"不支持范围 + 原因 + 替代方案（改用 `saveBatch`/`saveOrUpdateBatch`）" per FR-012/Constitution 附加约束 §9 (missing)
+- [X] T121 **MEDIUM** 消除单监听方批量载荷与业务对象的可变引用共享：`GXMyBatisListenerEventPublisher#createEvent`（506-507 行）对所有批量投递使用 `GXMyBatisModelSaveBatchEntitySnapshotEvent`（其 `getSource()` 直接返回载荷、跳过 `GXBaseEvent` 的防御性快照），而 `GXMyBatisPlusSaveBatchEntityAspect#handlePointArgs`（59-73 行）用 `Convert.convert` 生成的 `List<Dict>` 中，`Date`/嵌套对象等叶子仍是业务实体字段的同一引用；监听方就地修改会改写业务对象，而 `specs/001-mybatis-listener-audit/contracts/event-payload.md`（50 行）只声明"可变副本／仅该监听方可写"，未登记该逃逸（对比 T068/T097 已对多监听方只读载荷做的处理）。对可克隆叶子做有界快照（受 `MAX_SNAPSHOT_SCAN_*` 同量级预算保护，避免破坏 SC-005），或在契约与手册显式登记该边界，并补"监听方修改嵌套可变值不影响业务实体"或用例化的边界断言 per FR-008 (partial)
+- [X] T122 **LOW** 修正 `specs/001-mybatis-listener-audit/contracts/listener-callback.md` §方法语义（29 行）：`deleteSoftListener` 的载荷要点仍写"条件字段 + 被置为删除标记的字段"，与 `contracts/event-payload.md`（43 行）"框架追加的逻辑删除列不出现在载荷中"、`docs/leaf-base-datasource开发手册.md`（433、632 行）及 `GXMyBatisPlusDeleteSoftAspect#handlePointArgs`（80-92 行，仅取 `args[1]`）的现行口径相反；按实现改写为"条件字段 + 调用方显式传入的更新字段"，使四份文档口径一致 per T104/contracts: listener-callback (contradicts)
+- [X] T123 **LOW** 修正事件载体与扫描标记的文档漂移：`docs/leaf-base-datasource开发手册.md` §3.3.3.5（495-503 行）把 `GXMyBatisModelSaveBatchEntityEvent` 描述为"批量保存 / 批量新增或更新"的发布载体、把 `GXMyBatisModelSaveBatchEntitySnapshotEvent` 限定为"多监听方共享的只读批量快照"，而 `createEvent` 对四种批量命名一律构造后者（单监听方也用它、基类从不实例化），与 T095 已修正的类 Javadoc 表述不一致；同时 `contracts/event-payload.md` 的载荷字段表（29-39 行）未登记实现中真实存在的 `snapshotScanTruncated`（`data-model.md` §3 已登记）。按实现重写该表并补齐字段行 per T095/FR-012 (contradicts)
+- [X] T124 **LOW** 收敛剩余的全量警告抑制：`GXMyBatisPlusSaveEntityAspect.java`（16 行）、`GXMyBatisPlusUpdateFieldAspect.java`（28 行）、`GXMyBatisPlusUpdateEntityAspect.java`（47 行）仍带类级 `@SuppressWarnings("all")`，而 DeleteSoft/Delete 两个同类切面已按 T075/T098 移除；逐类复核实际告警来源，无依赖则删除，有依赖则收窄为具体警告类型，并确认 `mvn clean install -DskipTests` 仍无 ErrorProne/NullAway 错误 per T075/T098/Constitution VI (partial)
+
+**Phase 23 验证记录（2026-10-29，真实 MySQL 8.4.11 @ 192.168.56.105/test）**
+
+- 构建门禁（T124）：`mvn -o -pl leaf-base-datasource clean install -DskipTests` → BUILD SUCCESS，移除三处类级 `@SuppressWarnings("all")` 后 ErrorProne/NullAway 无错误（顺带清理了随之暴露的 `java.util.Collections` 未使用导入）。
+- 单元/回归：`mvn -o -pl leaf-base-datasource test -Dmaple.perf.enabled=true` → 242 用例通过、0 跳过。新增：T118 的 `syncAfterCommitWithoutActiveTransactionKeepsPropagationSemantics`、`syncAfterCommitInsideActiveTransactionIsolatesTheCallbackFailure`、`syncAfterCommitInlineDeliveryStillMeasuresTheRealCallbackDuration`；T119 的 `conditionlessUpdateIsLosslessInsteadOfDegraded`、`conditionlessUpdateDoesNotInflateTheDegradedCounter`；T121 的 `saveBatchPayloadDetachesEntityOwnedMutableValues`。
+- 性能门禁：`-Dmaple.perf.enabled=true` → `GXMyBatisListenerOverheadTest` 8 例通过（SC-003 批量绝对预算、SC-005 ≤2× 载荷分配未被 T121 的复制逻辑破坏）。
+- 真实数据库 IT：`-Dmaple.it.enabled=true` 运行 `MyBatisListenerIT`、`MyBatisListenerSyncAfterCommitIT`、`MyBatisListenerSyncAfterCommitFailureIT` → 17 例通过。
+- 反向验证：临时 `git stash` 回滚 T118/T121 的主代码后重跑，两条新 IT 精确失败（`inlineSyncAfterCommitKeepsThePropagationSemantics` 期望抛出 `IllegalStateException` 实际未抛；`saveBatchDeliversOneEventWithDetachedEntityValues` 的 `assertNotSame` 失败，载荷 `ext` 与实体为同一实例），恢复后全绿 —— 用例捕获的是真实缺陷。
+- T119 可达性实证：真实库上 `update(null, UpdateWrapper.set(...))`（WHERE 为空）被 `BlockAttackInnerInterceptor` 在到达数据库前拒绝，`UPDATE_EVENTS` 为空且行数据未变（`MyBatisListenerIT#conditionlessUpdateIsRejectedBeforeAnyPayloadIsBuilt`），故该分支为防御性修复，口径已写入 `contracts/event-payload.md` §降级规则与开发手册 §3.3.5。
+- T120 实证：真实库上 `BaseMapper.insert(Collection)` 正常落库 2 行但 `SAVE_EVENTS`/`BATCH_EVENTS` 均为空；缺口已登记到开发手册能力边界表与 `AGENTS.md` 第 16 条；同时用 `ListenerUserBatchService` 实证 `saveBatch` 只投递 1 次批量事件。
+
+**PR Review 修复记录（2026-10-29，`/speckit.review.run` 发现的收口）**
+
+- 重要 #1（静默截断）：`GXMyBatisPlusSaveBatchEntityAspect#detachMutableValue` 超出深度 32 时不再静默——分离走查截断即置 `snapshotDegraded=true` 与 `degradeReasons=[UNSNAPSHOTABLE_VALUE]`，由发布组件统一计入 `degraded` 并输出 `payload degraded` 告警（AGENTS.md 14 / FR-020）。
+- 重要 #2（改写调用方行）：实证 `Convert` 在 `Dict`/`Map` 入参下返回调用方实例，故切面按输入类型选择"新建行"或"就地替换"，不再改写调用方对象。
+- 建议 #3：修正 `MAX_DETACH_DEPTH` 注释（严格扫描预算仅 8 层，无法为深度 32 的截断兜底）。
+- 建议 #4：补 5 个用例——Date/数组/Set 复制、共享容器只复制一次、调用方行不被改写、截断降级计数、单监听方可写列表。
+- 建议 #5：隔离用例增加 `isActualTransactionActive()` 前置断言，避免相邻用例状态泄漏。
+- 建议 #6：单监听方批量行列表改为可变 `ArrayList`，与 `contracts/event-payload.md` "可变副本" 一致。
+- 建议 #7：手册新增"三处预算（64/100000、8/4096、32）"对照表；`AGENTS.md` 第 17 条补充截断与调用方行约束。
+- 回归：`test -Dmaple.perf.enabled=true` → 247 通过 / 0 跳过；`clean install -DskipTests` → BUILD SUCCESS；真实库 IT 17 通过；回滚切面后 6 个批量载荷用例精确失败（含 `snapshotDegraded expected true but was null`、调用方行 `assertNotSame` 失败、列表 `UnsupportedOperationException`）。
+
+**PR Review 第二轮（复核轮）建议的收口（2026-10-29）**
+
+- 建议 1（`degraded` 重复计数）：计数与标记分离——`markSnapshotDegradedIfNeeded` 只负责标注与日志，计数统一收敛到 `recordDegradedIfMarked`（并把 `snapshotScanTruncated` 纳入触发条件），调用顺序改为"先标注后计数"。同一载荷同时命中"切面标记 + 扫描截断"时只计一次；口径写入 `data-model.md` §6 与手册"计数口径"段落。
+- 建议 2（类型不变量）：`DetachContext` 的行归属改为构造参数（`copyRows` 变成 `final`），把"行归属在走查前确定"前置到编译期。
+- 建议 3（交叉用例）：新增 `batchPayloadCountsOnceWhenAspectAndScanBothTruncate`，断言两类截断同时命中时 `degraded` 恰好 +1 且两个标记都在；回滚计数改造后该用例失败（`expected: <6> but was: <7>`）。
+- 建议 4（只读对称断言）：`multipleListenersShareOneReadOnlyBatchPayload` 补 `sharedEntities.add(...)` 抛 `UnsupportedOperationException`，与单监听方可写列表形成对照。
+- 建议 5（简化）：截断标记抽为 `markDetachTruncated(Dict)`，主流程只表达"建行 → 标记"。
+- 回归：`test -Dmaple.perf.enabled=true` → 248 通过 / 0 跳过；真实库 IT 17 通过；`clean install -DskipTests` → BUILD SUCCESS。
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

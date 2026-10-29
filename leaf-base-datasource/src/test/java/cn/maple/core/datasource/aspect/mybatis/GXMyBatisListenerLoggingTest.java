@@ -175,6 +175,32 @@ class GXMyBatisListenerLoggingTest {
     }
 
     @Test
+    void syncAfterCommitInlineDeliveryStillMeasuresTheRealCallbackDuration() throws Exception {
+        GXMyBatisListenerProperties properties = new GXMyBatisListenerProperties();
+        properties.setSyncAfterCommit(true);
+        properties.setSlowCallbackThresholdMs(1L);
+        GXMyBatisListenerEventPublisher publisher = publisher(properties);
+        Method method = LogMapper.class.getMethod("insert", Object.class);
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            // No active transaction: nothing can be deferred, so the event is published inline and the
+            // measured duration is the real callback duration (contracts/listener-callback.md).
+            eventPublisher.when(() -> GXEventPublisherUtils.publishEvent(any())).thenAnswer(invocation -> {
+                Thread.sleep(10L);
+                return null;
+            });
+            publisher.publish(new LogMapperImpl(), method,
+                    GXModelEventNamingEnums.SYNC_SAVE_ENTITY, GXModelEventNamingEnums.ASYNC_SAVE_ENTITY,
+                    Dict.create().set("id", 1));
+        }
+
+        String slowLog = firstMessageContaining("Slow MyBatis listener callback");
+        assertTrue(slowLog.contains("eventType=sync_save_entity"), slowLog);
+        assertTrue(slowLog.contains("mode=sync"), slowLog);
+        assertTrue(slowLog.contains("reason=slow-callback"), slowLog);
+    }
+
+    @Test
     void deliveryFailureIsCountedAndLoggedWhenPropagating() throws Exception {
         GXMyBatisListenerProperties properties = new GXMyBatisListenerProperties();
         properties.setPropagateException(true);

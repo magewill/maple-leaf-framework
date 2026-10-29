@@ -18,7 +18,10 @@ import cn.maple.core.datasource.it.listener.OrderEventRecorder;
 import cn.maple.core.datasource.it.listener.OrderItemEventRecorder;
 import cn.maple.core.datasource.it.listener.SyncOrderEventRecorder;
 import cn.maple.core.datasource.it.listener.SyncOrderItemEventRecorder;
+import cn.maple.core.datasource.it.listener.ThrowingUserListener;
+import cn.maple.core.datasource.it.listener.UserBatchChangeRecorder;
 import cn.maple.core.datasource.it.listener.UserChangeRecorder;
+import cn.maple.core.datasource.it.service.ListenerUserBatchService;
 import cn.maple.core.datasource.listener.GXMyBatisAsyncListener;
 import cn.maple.core.datasource.listener.GXMyBatisSyncListener;
 import cn.maple.core.datasource.properties.GXDynamicDataSourceProperties;
@@ -63,7 +66,10 @@ import org.springframework.scheduling.annotation.EnableAsync;
         OrderEventRecorder.class,
         OrderItemEventRecorder.class,
         SyncOrderEventRecorder.class,
-        SyncOrderItemEventRecorder.class
+        SyncOrderItemEventRecorder.class,
+        ThrowingUserListener.class,
+        UserBatchChangeRecorder.class,
+        ListenerUserBatchService.class
 })
 public class MyBatisListenerITApplication {
     @Bean

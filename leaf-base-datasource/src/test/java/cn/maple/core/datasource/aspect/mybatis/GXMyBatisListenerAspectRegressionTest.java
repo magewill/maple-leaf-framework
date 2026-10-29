@@ -42,15 +42,19 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -716,6 +720,233 @@ class GXMyBatisListenerAspectRegressionTest {
     }
 
     @Test
+    void conditionlessUpdateIsLosslessInsteadOfDegraded() {
+        UpdateWrapper<Object> wrapper = new UpdateWrapper<>();
+        wrapper.set("status", "archived");
+        ProceedingJoinPoint point = Mockito.mock(ProceedingJoinPoint.class);
+        MethodSignature signature = Mockito.mock(MethodSignature.class);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{null, wrapper});
+        Mockito.when(point.getSignature()).thenReturn(signature);
+        Mockito.when(signature.getName()).thenReturn("update");
+
+        Dict source = ReflectionTestUtils.invokeMethod(updateEntityAspect, "handlePointArgs", point);
+
+        // A wrapper without conditions has nothing to lose: the empty condition set is lossless, so
+        // the payload must not claim a degrade it cannot justify with raw SQL or a reason (FR-009).
+        assertEquals(Boolean.TRUE, source.get("conditionLossless"));
+        assertTrue(((List<?>) source.get("degradeReasons")).isEmpty());
+        assertEquals("", source.getStr("rawWhereSql"));
+        assertEquals("", source.getStr("rawConditionSql"));
+        assertTrue(((Dict) source.get("keyValuePairs")).isEmpty());
+        assertTrue(((Dict) source.get("keyOperatorPairs")).isEmpty());
+    }
+
+    @Test
+    void conditionlessUpdateDoesNotInflateTheDegradedCounter() throws Exception {
+        UpdateWrapper<Object> wrapper = new UpdateWrapper<>();
+        wrapper.set("status", "archived");
+        ProceedingJoinPoint point = Mockito.mock(ProceedingJoinPoint.class);
+        MethodSignature signature = Mockito.mock(MethodSignature.class);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{null, wrapper});
+        Mockito.when(point.getSignature()).thenReturn(signature);
+        Mockito.when(signature.getName()).thenReturn("update");
+        Dict source = ReflectionTestUtils.invokeMethod(updateEntityAspect, "handlePointArgs", point);
+        long degradedBefore = GXMyBatisListenerMetrics.snapshot().degraded();
+        Method method = DualMapperOne.class.getMethod("insert", Object.class);
+        GXMyBatisListenerEventPublisher publisher = newEventPublisher(new GXMyBatisListenerProperties());
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            publisher.publishWithCandidates(List.of(DualMapperOne.class), method,
+                    GXModelEventNamingEnums.SYNC_UPDATE_ENTITY, GXModelEventNamingEnums.ASYNC_UPDATE_ENTITY, source);
+            eventPublisherMock.verify(() -> GXEventPublisherUtils.publishEvent(any()));
+        }
+
+        assertEquals(degradedBefore, GXMyBatisListenerMetrics.snapshot().degraded(),
+                "A condition-less update must not be counted as a degraded payload");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void saveBatchPayloadDetachesEntityOwnedMutableValues() throws Exception {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Dict entityExt = Dict.create().set("trace", "original");
+        List<Object> entityTags = new ArrayList<>(List.of("alpha"));
+        Map<String, Object> entity = new HashMap<>();
+        entity.put("username", "alpha");
+        entity.put("ext", entityExt);
+        entity.put("tags", entityTags);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of(entity)});
+
+        Dict source = ReflectionTestUtils.invokeMethod(saveBatchEntityAspect, "handlePointArgs", point);
+
+        Dict row = ((List<Dict>) source.get("batchEntities")).getFirst();
+        // The batch event returns the aspect payload without a second defensive snapshot (SC-005), so
+        // entity-owned containers must already be private copies here (FR-008).
+        assertNotSame(entityExt, row.get("ext"), "Entity-owned maps must be copied into the payload");
+        assertNotSame(entityTags, row.get("tags"), "Entity-owned collections must be copied into the payload");
+
+        ((Dict) row.get("ext")).set("trace", "listener-mutation");
+        ((List<Object>) row.get("tags")).add("listener-mutation");
+
+        assertEquals("original", entityExt.getStr("trace"),
+                "A listener mutating the payload must not change the business entity");
+        assertEquals(List.of("alpha"), entityTags,
+                "A listener mutating the payload must not change the business entity");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void saveBatchPayloadCopiesDatesArraysAndSets() throws Exception {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Date createdAt = new Date(1_000L);
+        int[] scores = {1, 2};
+        Set<Object> tags = new LinkedHashSet<>(List.of("alpha"));
+        Map<String, Object> entity = new HashMap<>();
+        entity.put("createdAt", createdAt);
+        entity.put("scores", scores);
+        entity.put("tags", tags);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of(entity)});
+
+        Dict source = ReflectionTestUtils.invokeMethod(saveBatchEntityAspect, "handlePointArgs", point);
+
+        Dict row = ((List<Dict>) source.get("batchEntities")).getFirst();
+        assertNotSame(createdAt, row.get("createdAt"), "Dates must be cloned");
+        assertEquals(createdAt, row.get("createdAt"), "The copy must keep the value");
+        assertNotSame(scores, row.get("scores"), "Arrays must be copied");
+        assertArrayEquals(scores, (int[]) row.get("scores"), "The copy must keep the value");
+        assertNotSame(tags, row.get("tags"), "Sets must be copied");
+        assertInstanceOf(Set.class, row.get("tags"));
+        assertEquals(tags, row.get("tags"), "The copy must keep the value");
+        assertFalse(Boolean.TRUE.equals(source.get("snapshotDegraded")),
+                "A payload within the depth budget must not be marked degraded");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void saveBatchPayloadCopiesSharedContainersOnlyOnce() throws Exception {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Dict sharedExt = Dict.create().set("trace", "original");
+        Map<String, Object> first = new HashMap<>();
+        first.put("username", "alpha");
+        first.put("ext", sharedExt);
+        Map<String, Object> second = new HashMap<>();
+        second.put("username", "beta");
+        second.put("ext", sharedExt);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of(first, second)});
+
+        Dict source = ReflectionTestUtils.invokeMethod(saveBatchEntityAspect, "handlePointArgs", point);
+
+        List<Dict> rows = (List<Dict>) source.get("batchEntities");
+        assertNotSame(sharedExt, rows.getFirst().get("ext"));
+        assertSame(rows.getFirst().get("ext"), rows.get(1).get("ext"),
+                "One copy per shared instance keeps the batch payload inside the SC-005 budget");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void saveBatchPayloadDoesNotRewriteCallerOwnedRows() throws Exception {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Dict callerExt = Dict.create().set("trace", "original");
+        Dict callerRow = Dict.create().set("username", "alpha").set("ext", callerExt);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of(callerRow)});
+
+        Dict source = ReflectionTestUtils.invokeMethod(saveBatchEntityAspect, "handlePointArgs", point);
+
+        Dict payloadRow = ((List<Dict>) source.get("batchEntities")).getFirst();
+        // Convert hands back the caller's own dictionaries for Dict/Map rows, so the payload row must
+        // be a copy instead of a rewritten caller object.
+        assertNotSame(callerRow, payloadRow);
+        assertSame(callerExt, callerRow.get("ext"), "The caller's row must not be rewritten");
+        assertNotSame(callerExt, payloadRow.get("ext"), "The payload still receives a private copy");
+    }
+
+    @Test
+    void saveBatchPayloadMarksAnExhaustedDetachWalkAsDegraded() throws Exception {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Dict nested = Dict.create().set("leaf", "value");
+        for (int level = 0; level < 40; level++) {
+            nested = Dict.create().set("next", nested);
+        }
+        Map<String, Object> entity = new HashMap<>();
+        entity.put("username", "deep");
+        entity.put("ext", nested);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of(entity)});
+
+        Dict source = ReflectionTestUtils.invokeMethod(saveBatchEntityAspect, "handlePointArgs", point);
+
+        assertEquals(Boolean.TRUE, source.get("snapshotDegraded"),
+                "A walk that stopped at its depth budget must never look like a verified snapshot");
+        assertTrue(((List<?>) source.get("degradeReasons"))
+                        .contains(GXMyBatisListenerDegradeReasonEnums.UNSNAPSHOTABLE_VALUE),
+                "The truncated walk must be visible as a degrade reason");
+
+        long degradedBefore = GXMyBatisListenerMetrics.snapshot().degraded();
+        Method publishMethod = DualMapperOne.class.getMethod("insert", Object.class);
+        GXMyBatisListenerEventPublisher publisher = newEventPublisher(new GXMyBatisListenerProperties());
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            publisher.publishWithCandidates(List.of(DualMapperOne.class), publishMethod,
+                    GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY, GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY,
+                    source);
+            eventPublisherMock.verify(() -> GXEventPublisherUtils.publishEvent(any()));
+        }
+        assertEquals(degradedBefore + 1, GXMyBatisListenerMetrics.snapshot().degraded(),
+                "The truncated payload must be counted exactly once as degraded");
+    }
+
+    @Test
+    void batchPayloadCountsOnceWhenAspectAndScanBothTruncate() throws Exception {
+        GXMyBatisListenerProperties properties = new GXMyBatisListenerProperties();
+        properties.setStrictSnapshot(true);
+        GXMyBatisListenerEventPublisher strictPublisher = newEventPublisher(properties);
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Dict nested = Dict.create().set("leaf", "value");
+        for (int level = 0; level < 40; level++) {
+            nested = Dict.create().set("next", nested);
+        }
+        Map<String, Object> entity = new HashMap<>();
+        entity.put("username", "deep");
+        entity.put("ext", nested);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of(entity)});
+        Dict source = ReflectionTestUtils.invokeMethod(saveBatchEntityAspect, "handlePointArgs", point);
+        long degradedBefore = GXMyBatisListenerMetrics.snapshot().degraded();
+        Method publishMethod = DualMapperOne.class.getMethod("insert", Object.class);
+
+        try (MockedStatic<GXEventPublisherUtils> ignored = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            strictPublisher.publishWithCandidates(List.of(DualMapperOne.class), publishMethod,
+                    GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY, GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY,
+                    source);
+        }
+
+        assertEquals(Boolean.TRUE, source.getBool("snapshotDegraded"),
+                "The exhausted detach walk must be reported");
+        assertEquals(Boolean.TRUE, source.getBool("snapshotScanTruncated"),
+                "The strict scan exhausts its own budget on the same payload");
+        assertEquals(degradedBefore + 1L, GXMyBatisListenerMetrics.snapshot().degraded(),
+                "One payload carrying several degrade markers must still be counted once");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void saveBatchPayloadRowsStayWritableForASingleListener() throws Exception {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of(Map.of("username", "alpha"))});
+
+        Dict source = ReflectionTestUtils.invokeMethod(saveBatchEntityAspect, "handlePointArgs", point);
+
+        List<Dict> rows = (List<Dict>) source.get("batchEntities");
+        assertDoesNotThrow(() -> rows.add(Dict.create().set("username", "listener-added")),
+                "The single-listener batch payload is a writable copy (contracts/event-payload.md)");
+        assertEquals(2, rows.size());
+    }
+
+    @Test
     void saveBatchPublishesOperationAndPayloadKeysThroughSharedSupport() throws Throwable {
         Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
         ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
@@ -789,6 +1020,8 @@ class GXMyBatisListenerAspectRegressionTest {
         @SuppressWarnings("unchecked")
         List<Dict> sharedEntities = (List<Dict>) sharedPayload.get("batchEntities");
         assertThrows(UnsupportedOperationException.class, () -> sharedEntities.getFirst().set("id", 99L));
+        assertThrows(UnsupportedOperationException.class, () -> sharedEntities.add(Dict.create().set("id", 3L)),
+                "The shared row list must be read-only as well; only the single-listener copy is writable");
         assertEquals("saveBatch", source.getStr("operation"), "Original payload must stay untouched");
     }
 

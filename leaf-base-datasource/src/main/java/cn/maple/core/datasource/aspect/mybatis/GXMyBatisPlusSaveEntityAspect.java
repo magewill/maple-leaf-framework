@@ -13,7 +13,6 @@ import org.springframework.stereotype.Component;
 
 @Aspect
 @Component
-@SuppressWarnings("all")
 public class GXMyBatisPlusSaveEntityAspect {
     private final GXMyBatisListenerEventPublisher eventPublisher;
 

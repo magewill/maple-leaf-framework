@@ -33,7 +33,6 @@ import org.springframework.stereotype.Component;
 
 import java.time.temporal.Temporal;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -44,7 +43,6 @@ import java.util.regex.Pattern;
 @Aspect
 @Component
 @Slf4j
-@SuppressWarnings("all")
 public class GXMyBatisPlusUpdateEntityAspect {
     private static final Cache<String, ConditionParseResult> WHERE_SQL_CONDITION_CACHE = Caffeine.newBuilder()
             .maximumSize(2048)
@@ -166,10 +164,14 @@ public class GXMyBatisPlusUpdateEntityAspect {
         String whereSQL = updateWrapper.getTargetSql();
         Map<String, Object> paramNameValuePairs = updateWrapper.getParamNameValuePairs();
         if (CharSequenceUtil.isBlank(whereSQL)) {
+            // A wrapper without any condition (for example an UpdateWrapper that only carries
+            // set(...) clauses) has nothing to restore, so the empty condition set is lossless.
+            // Claiming a degrade here would contradict data-model §3 (a degraded payload must carry
+            // the original condition text) and would inflate `degraded` for a faithful payload.
             return result
-                    .set(RAW_WHERE_SQL, whereSQL)
-                    .set(RAW_CONDITION_SQL, whereSQL)
-                    .set(CONDITION_LOSSLESS, Boolean.FALSE)
+                    .set(RAW_WHERE_SQL, "")
+                    .set(RAW_CONDITION_SQL, "")
+                    .set(CONDITION_LOSSLESS, Boolean.TRUE)
                     .set(DEGRADE_REASONS, List.of())
                     .set(SNAPSHOT_DEGRADED, Boolean.FALSE);
         }

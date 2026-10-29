@@ -26,7 +26,7 @@ public interface GXMybatisListenerService<T> {
 | `updateEntityListener`（3 参） | 按条件更新 / 按主键更新成功 | 更新字段 + 条件字段与操作符 |
 | `updateEntityListener`（4 参） | 同上 | 追加原始条件文本；默认委托给 3 参版本，保证旧实现继续可用 |
 | `updateFieldListener` | 指定字段更新成功 | 更新字段 + 条件字段 |
-| `deleteSoftListener` | 条件软删除成功 | 条件字段 + 被置为删除标记的字段 |
+| `deleteSoftListener` | 条件软删除成功 | 条件字段 + 调用方显式传入的更新字段；框架追加的逻辑删除列不出现在载荷中 |
 | `deleteListener` | 条件物理删除成功 | 条件字段 |
 | `saveBatchListener` | 批量保存成功 | 批次实体列表，保持顺序 |
 | `batchChangeListener` | 批量新增或更新成功 | 同上；默认委托给 `saveBatchListener` |
@@ -56,8 +56,9 @@ public interface GXMybatisListenerService<T> {
 
 - 单条保存/更新的泛型 `T` 取自实现类声明的类型参数；无法解析时按原始类型传入，不得抛异常。
 - 条件类回调的键为驼峰字段名，值可能为单值、列表（`in`/`between`）或 `null`（`is null`）。
-- 载荷为快照：回调修改不得影响业务对象、数据库参数或其他监听器。
-- 条件无法无损还原时，结构化字段为空，`rawWhereSql` 为唯一可靠信息。
+- 载荷为快照：回调修改不得影响业务对象、数据库参数或其他监听器。批量事件的载荷由切面构建后直接投递（不再二次快照），因此切面 MUST 把实体自有的可变值（`Date`、`Calendar`、数组、集合、`Map`，如 `ext`）复制为载荷私有副本，使"修改载荷不影响业务对象"在批量路径同样成立。
+- 条件无法无损还原时，结构化字段为空，`rawWhereSql`（删除类事件为 `rawConditionSql`）为唯一可靠信息。
+- 条件为空（WHERE 段为空）时视为可无损还原：结构化条件与原始条件文本均为空、`degradeReasons` 为空，且不计入 `degraded`。
 
 ## 兼容性规则
 
