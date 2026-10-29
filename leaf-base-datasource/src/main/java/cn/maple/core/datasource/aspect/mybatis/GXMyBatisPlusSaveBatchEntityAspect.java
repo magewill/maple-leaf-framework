@@ -3,10 +3,10 @@ package cn.maple.core.datasource.aspect.mybatis;
 import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.TypeReference;
-import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerAspectSupport;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
+import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXMyBatisListenerDegradeReasonEnums;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.framework.util.GXCommonUtils;
@@ -54,10 +54,6 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
      */
     private static final int MAX_DETACH_DEPTH = 32;
 
-    private static final String SNAPSHOT_DEGRADED = "snapshotDegraded";
-
-    private static final String DEGRADE_REASONS = "degradeReasons";
-
     private final GXMyBatisListenerEventPublisher eventPublisher;
 
     public GXMyBatisPlusSaveBatchEntityAspect(GXMyBatisListenerEventPublisher eventPublisher) {
@@ -103,9 +99,9 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
         List<Dict> payloadRows = new ArrayList<>(nonNullEntities.size());
         nonNullEntities.forEach(row -> payloadRows.add(detachMutableValues(row, detachContext, 0)));
         Dict payload = Dict.create()
-                .set("operation", ((MethodSignature) point.getSignature()).getName())
-                .set("entityData", payloadRows)
-                .set("batchEntities", payloadRows);
+                .set(GXMyBatisEventConstant.OPERATION, ((MethodSignature) point.getSignature()).getName())
+                .set(GXMyBatisEventConstant.ENTITY_DATA, payloadRows)
+                .set(GXMyBatisEventConstant.BATCH_ENTITIES, payloadRows);
         if (detachContext.truncated) {
             markDetachTruncated(payload);
         }
@@ -118,8 +114,8 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
      * counter/log picks it up (AGENTS.md 14, FR-020).
      */
     private static void markDetachTruncated(Dict payload) {
-        payload.set(SNAPSHOT_DEGRADED, Boolean.TRUE)
-                .set(DEGRADE_REASONS, List.of(GXMyBatisListenerDegradeReasonEnums.UNSNAPSHOTABLE_VALUE));
+        payload.set(GXMyBatisEventConstant.SNAPSHOT_DEGRADED, Boolean.TRUE)
+                .set(GXMyBatisEventConstant.DEGRADE_REASONS, List.of(GXMyBatisListenerDegradeReasonEnums.UNSNAPSHOTABLE_VALUE));
     }
 
     /**
@@ -217,7 +213,7 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
                 .orElse(null);
 
         Method invokedMethod = GXMyBatisListenerAspectSupport.invokedMethod(point);
-        boolean batchChange = CharSequenceUtil.equals("saveOrUpdateBatch", invokedMethod.getName());
+        boolean batchChange = "saveOrUpdateBatch".equals(invokedMethod.getName());
         GXModelEventNamingEnums syncEvent = batchChange
                 ? GXModelEventNamingEnums.SYNC_BATCH_CHANGE
                 : GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY;
@@ -230,13 +226,12 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
                 syncEvent, asyncEvent, () -> handlePointArgs(point));
     }
 
-    private Class<?> resolveMapperClass(Class<?> targetClass) {
+    private static @Nullable Class<?> resolveMapperClass(Class<?> targetClass) {
         Type mapperType = GXCommonUtils.getGenericClassType(targetClass, 0);
-        return ObjectUtil.isNull(mapperType) ? null : convertTypeToClass(mapperType);
-    }
-
-    private Class<?> convertTypeToClass(Type type) {
+        if (ObjectUtil.isNull(mapperType)) {
+            return null;
+        }
         return Convert.convert(new TypeReference<>() {
-        }, type);
+        }, mapperType);
     }
 }

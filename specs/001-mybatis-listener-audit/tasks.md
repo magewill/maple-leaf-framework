@@ -464,3 +464,25 @@ Task: "扩展执行器用例 GXMyBatisAsyncListenerExecutorConfigTest.java"
 - 性能夹具默认跳过，避免污染常规 CI；数据需记录机器信息
 - 不得修改注解属性、回调方法签名、事件标识字符串与既有配置键
 - 每次提交保持单一目的，提交信息遵循 `feat(fix): ...` / `test: ...` / `docs: ...`
+
+---
+
+## Phase 24: Convergence
+
+**Purpose**: 收敛 2026-10-29 第十五次复核发现的剩余差距：F1 为监听投递顺序口径与实现不一致（文档为两级排序、实现仅按监听器类型名排序，且无断言），F2 为 `operation` 载荷键未登记，F3/F4 为支撑类命名与公共方法收敛未按宪法 VII 与 plan 口径登记。运行时代码已由 248 条模块用例验证通过，缺口集中在排序语义与契约/命名登记。
+
+- [X] T125 **MEDIUM** 对齐监听投递顺序口径：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerConfigResolver.java` 的 `doResolve`（148 行）在按候选接口顺序收集完成后又整体重排为 `LISTENER_ORDER`（仅监听器类型全名），候选接口顺序因此被丢弃，而 `specs/001-mybatis-listener-audit/contracts/event-payload.md`（85 行）与 `docs/leaf-base-datasource开发手册.md`（412、632 行）均声明"按接口全限定名 → 监听器类型全名"排序；例如接口 `AMapper→ZetaListener`、`ZMapper→AlphaListener` 两个声明，文档顺序为先 `ZMapper` 的 `AlphaListener`，实现顺序为先 `AlphaListener`，`propagate-exception=true` 时"首个失败监听器"与"后续监听器不再执行"的实际结果因此与文档不一致。让实现按"接口全限定名主键 + 监听器类型名次键"排序（保持确定性），或把三处文档统一为"仅按监听器类型全名排序"；并在 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisListenerDeduplicationTest.java` 补"不同接口声明不同监听器时的投递顺序与文档一致"的断言 per contracts/event-payload.md §投递与顺序 (contradicts)
+- [X] T126 **LOW** 登记 `operation` 载荷键：`GXMyBatisPlusUpdateEntityAspect`、`GXMyBatisPlusDeleteAspect`、`GXMyBatisPlusSaveBatchEntityAspect` 均向载荷写入 `operation`（取值为被拦截方法名，键常量见 `GXMyBatisEventConstant.OPERATION`），而 `GXMyBatisPlusSaveEntityAspect`/`GXMyBatisPlusUpdateFieldAspect`/`GXMyBatisPlusDeleteSoftAspect` 不写；`specs/001-mybatis-listener-audit/contracts/event-payload.md` 的载荷字段表（29-40 行）、`docs/leaf-base-datasource开发手册.md` 的载荷说明与 `data-model.md` 的载荷章节均未登记该键（`data-model.md` §1 只把它列为事件字段）。在契约字段表中补 `operation` 行并注明"仅更新/物理删除/批量三类事件携带"，或在实现中按"未使用字段不写入"口径移除该键并同步清理 `GXMyBatisEventConstant` 中的对应常量 per contracts/event-payload.md §载荷字段 (partial)
+- [X] T127 **LOW** 收敛支撑类的命名与宪法 VII 对齐：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerPayload.java`（本分支新增）与同包的 `GXReadOnlyPayload.java` 都是"私有构造 + 全静态方法"的工具类，命名未采用宪法 VII 后缀表的 `GX<用途>Utils`，`leaf-base-datasource/AGENTS.md` 也未登记该偏差；改名为 `GXMyBatisListenerPayloadUtils`/`GXReadOnlyPayloadUtils`（同步 `GXMyBatisListenerEventPublisher`、三个条件类切面与相关测试的引用），或在 `AGENTS.md` 的命名约定中登记"载荷支撑类沿用 `Payload` 后缀"的理由 per Constitution VII (contradicts)
+- [X] T128 **LOW** 复核并登记 `GXMyBatisListenerAnnotationUtils` 的公共方法收敛：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/util/GXMyBatisListenerAnnotationUtils.java` 现只保留 `findTypeDeclaration`/`findMethodDeclaration`，本次简化删除了 `findTypeAnnotation`/`findMethodAnnotation` 两个 public 静态方法（`master` 上不存在该文件，属本分支新增；删除前全仓无调用方），与 `specs/001-mybatis-listener-audit/plan.md`（97 行）"复用，不改签名"的表述冲突，且开发手册的升级说明未登记该收敛。确认无下游引用后，在开发手册升级说明或本任务记录中登记"该类为本分支新增、方法删除不影响已发布契约"（未登记则恢复两个方法，保持与 plan 一致）per plan.md: util/GXMyBatisListenerAnnotationUtils 复用不改签名 (contradicts)
+
+---
+
+## Phase 25: Architecture Guard Apply
+
+**Purpose**: 将 2026-10-29 `ag-review-implementation` 的非阻塞结论落为可排期任务（0 CRITICAL / 0 HIGH，风险 LOW）。Phase 24 已完成，本阶段只登记 LOW/MEDIUM 的收敛项，不改变既有契约与事件语义。
+
+- [ ] T129 **LOW** 收敛单调用点的载荷工具方法：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerPayloadUtils.java`（111-116 行）的 `snapshotValue` 全仓只有 1 处调用（`GXMyBatisPlusUpdateEntityAspect.java:187`），低于"逻辑被两处以上复用才抽取"的门槛（宪法附加约束 §4、§8），而同文件 `isUnsnapshotable`（90 行）有 2 处调用（更新切面与 `GXMyBatisListenerEventPublisher.java:448`）确实需要共享。把 `snapshotValue` 的 try/clone 内联回更新切面，或在其 Javadoc 中声明"与 `isUnsnapshotable` 为强制配对、单独调用即违反快照口径"，二者择一并在 `AGENTS.md` 关键行为 19 旁注明口径 per Constitution §8 / 附加约束 §4 (unrequested)
+- [ ] T130 **LOW** 明确投递排序键的语义来源：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerConfigResolver.java`（43 行）用 `Comparator.comparing(ResolvedListener::declaredFrom)` 作为主排序键，而 `declaredFrom` 是诊断字符串（类型级为 `FQN`、方法级为 `FQN#method`，见 166-172、223 行），将来仅调整该展示格式就会静默改变投递顺序与 `propagate-exception=true` 时"首个失败监听器"的取舍。为排序语义提供显式访问器（如从同一来源导出的 `declaringTypeName()`），或在比较器旁写明格式依赖不变量，并在 `GXMyBatisListenerDeduplicationTest` 补一条"`declaredFrom` 格式变更即失败"的守卫断言 per contracts/event-payload.md §投递与顺序 (partial)
+- [ ] T131 **MEDIUM** 拆掉更新实体载荷构建的位置布尔：`GXMyBatisPlusUpdateEntityAspect.java` 的 `updateConditionPayload`（210-213 行）有 6 个参数、其中 `conditionLossless`（第 4 个）与 `snapshotDegraded`（第 6 个）是位置布尔，三个调用点（152、194、202 行）出现 `..., true, List.of(), false` 这类盲传，读者需回看签名才能判断语义。拆为 `losslessConditionPayload(keyOperatorPairs, keyValuePairs, rawSql, degradeReasons, snapshotDegraded)` 与 `degradedConditionPayload(rawSql, degradeReasons)` 两个意图明确的方法，保持现有键集合与插入顺序不变 per Sonar `brain-overload::too-many-parameters` (partial)
+- [ ] T132 **MEDIUM** 替换已弃用的条件列表 API：`GXMyBatisPlusUpdateEntityAspect.java` 的 319 行与 355 行仍调用 `ExpressionList#getExpressions()`，该方法在 jsqlparser 5.x 已标记弃用（IDE 告警 67109867），而这两处位于本次重写的 `ConditionTokenVisitor` 内。确认 `ExpressionList` 在当前固定版本是否已实现 `List<Expression>`：若是则直接遍历/取 `size()`；若否，就地加一条带日期与升级路径的抑制注释并在 `AGENTS.md` 登记原因，禁止留裸弃用调用。（注意：该模式不在 `deprecated-and-dangerous-code` 规则目录内，不按 CRITICAL 处理）per Sonar `deprecated-api::jsqlparser` (partial)

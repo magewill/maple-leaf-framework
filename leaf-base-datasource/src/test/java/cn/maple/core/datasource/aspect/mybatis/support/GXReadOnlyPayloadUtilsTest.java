@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-class GXReadOnlyPayloadTest {
+class GXReadOnlyPayloadUtilsTest {
     @Test
     void sharedEntityListIsWrappedOnce() {
         List<Dict> entities = List.of(Dict.create().set("id", 1L), Dict.create().set("id", 2L));
@@ -21,7 +21,7 @@ class GXReadOnlyPayloadTest {
                 .set("entityData", entities)
                 .set("batchEntities", entities);
 
-        Dict wrapped = GXReadOnlyPayload.wrap(payload);
+        Dict wrapped = GXReadOnlyPayloadUtils.wrap(payload);
 
         assertSame(wrapped.get("entityData"), wrapped.get("batchEntities"),
                 "The batch aspect publishes one entity list under two keys; it must be copied once");
@@ -34,7 +34,7 @@ class GXReadOnlyPayloadTest {
         Dict row = Dict.create().set("id", 1L);
         Dict payload = Dict.create().set("first", row).set("second", row);
 
-        Dict wrapped = GXReadOnlyPayload.wrap(payload);
+        Dict wrapped = GXReadOnlyPayloadUtils.wrap(payload);
 
         assertSame(wrapped.get("first"), wrapped.get("second"));
         assertThrows(UnsupportedOperationException.class, () -> ((Dict) wrapped.get("first")).set("id", 2L));
@@ -43,7 +43,7 @@ class GXReadOnlyPayloadTest {
     @Test
     void entrySetToleratesNullValues() {
         // Contract payload fields use empty defaults, but a null value must still not break the view.
-        Dict wrapped = GXReadOnlyPayload.wrap(
+        Dict wrapped = GXReadOnlyPayloadUtils.wrap(
                 Dict.create().set("operation", "saveBatch").set("optionalValue", null));
 
         Map.Entry<String, Object> nullValueEntry = wrapped.entrySet().stream()
@@ -57,7 +57,7 @@ class GXReadOnlyPayloadTest {
 
     @Test
     void wrappedArraysAreReadOnly() {
-        Dict wrapped = GXReadOnlyPayload.wrap(
+        Dict wrapped = GXReadOnlyPayloadUtils.wrap(
                 Dict.create().set("operation", "saveBatch").set("ids", new String[]{"alpha", "beta"}));
 
         Object wrappedValues = wrapped.get("ids");
@@ -74,7 +74,7 @@ class GXReadOnlyPayloadTest {
         List<Dict> entities = List.of(Dict.create().set("id", 1L));
         Dict payload = Dict.create().set("operation", "saveBatch").set("batchEntities", entities);
 
-        GXReadOnlyPayload.wrap(payload);
+        GXReadOnlyPayloadUtils.wrap(payload);
 
         payload.set("operation", "still-writable");
         assertEquals("still-writable", payload.getStr("operation"));

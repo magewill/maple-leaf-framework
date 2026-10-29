@@ -24,16 +24,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.lang.reflect.Array;
 import java.lang.reflect.Method;
-import java.time.temporal.Temporal;
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Collection;
-import java.util.Date;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -51,10 +47,6 @@ import java.util.concurrent.atomic.AtomicLong;
 public class GXMyBatisListenerEventPublisher {
     public static final String ENABLED_KEY = "maple.framework.enable.mybatis-listener";
     public static final String ASYNC_ENABLED_KEY = "maple.framework.enable.mybatis-listener-async";
-    private static final String DEGRADE_REASONS = "degradeReasons";
-    private static final String SNAPSHOT_DEGRADED = "snapshotDegraded";
-    private static final String SNAPSHOT_SCAN_TRUNCATED = "snapshotScanTruncated";
-    private static final String CONDITION_LOSSLESS = "conditionLossless";
     private static final AtomicLong OPERATION_SEQUENCE = new AtomicLong();
     private static final int MAX_SNAPSHOT_SCAN_DEPTH = 8;
     private static final int MAX_SNAPSHOT_SCAN_NODES = 4096;
@@ -177,7 +169,7 @@ public class GXMyBatisListenerEventPublisher {
         // 同时任何修改尝试都会失败，不会影响其它监听方（FR-008）。
         boolean batchEvent = syncEvent == GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY
                 || syncEvent == GXModelEventNamingEnums.SYNC_BATCH_CHANGE;
-        Dict payload = batchEvent && listeners.size() > 1 ? GXReadOnlyPayload.wrap(source) : source;
+        Dict payload = batchEvent && listeners.size() > 1 ? GXReadOnlyPayloadUtils.wrap(source) : source;
         // The operation id must stay visible to every asynchronous delivery of this write: the
         // executor's task decorator reads it when the task is submitted at after-commit time
         // (FR-020). It is published once around the whole loop and released once afterwards, so no
@@ -202,12 +194,7 @@ public class GXMyBatisListenerEventPublisher {
     }
 
     private boolean hasAsyncListener(List<GXMyBatisListenerConfigResolver.ResolvedListener> listeners) {
-        for (GXMyBatisListenerConfigResolver.ResolvedListener listener : listeners) {
-            if (listener.async()) {
-                return true;
-            }
-        }
-        return false;
+        return listeners.stream().anyMatch(GXMyBatisListenerConfigResolver.ResolvedListener::async);
     }
 
     /**
@@ -356,14 +343,18 @@ public class GXMyBatisListenerEventPublisher {
      * still one degraded payload in the metrics (data-model §6).
      */
     private void recordDegradedIfMarked(Dict source) {
-        boolean conditionLossless = !Boolean.FALSE.equals(source.get(CONDITION_LOSSLESS));
-        boolean snapshotDegraded = Boolean.TRUE.equals(source.getBool(SNAPSHOT_DEGRADED));
-        boolean scanTruncated = Boolean.TRUE.equals(source.getBool(SNAPSHOT_SCAN_TRUNCATED));
-        Object reasons = source.get(DEGRADE_REASONS);
-        boolean hasReasons = reasons instanceof Collection<?> collection && !collection.isEmpty();
-        if (!conditionLossless || snapshotDegraded || scanTruncated || hasReasons) {
+        boolean conditionLossy = Boolean.FALSE.equals(source.get(GXMyBatisEventConstant.CONDITION_LOSSLESS));
+        boolean hasReasons = source.get(GXMyBatisEventConstant.DEGRADE_REASONS) instanceof Collection<?> reasons
+                && !reasons.isEmpty();
+        if (conditionLossy || hasReasons
+                || isMarked(source, GXMyBatisEventConstant.SNAPSHOT_DEGRADED)
+                || isMarked(source, GXMyBatisEventConstant.SNAPSHOT_SCAN_TRUNCATED)) {
             GXMyBatisListenerMetrics.recordDegraded();
         }
+    }
+
+    private boolean isMarked(Dict source, String key) {
+        return Boolean.TRUE.equals(source.getBool(key));
     }
 
     /**
@@ -381,78 +372,37 @@ public class GXMyBatisListenerEventPublisher {
         if (!properties.isStrictSnapshot()) {
             return;
         }
-        SnapshotScan scan = scanPayload(source);
+        SnapshotScan scan = new SnapshotScanner().scan(source, 0);
         if (scan == SnapshotScan.CLEAN) {
             return;
         }
         String methodName = Objects.isNull(invokedMethod) ? null : invokedMethod.getName();
         if (scan == SnapshotScan.TRUNCATED) {
-            if (Boolean.TRUE.equals(source.getBool(SNAPSHOT_SCAN_TRUNCATED))) {
+            if (isMarked(source, GXMyBatisEventConstant.SNAPSHOT_SCAN_TRUNCATED)) {
                 return;
             }
-            source.set(SNAPSHOT_SCAN_TRUNCATED, Boolean.TRUE);
+            source.set(GXMyBatisEventConstant.SNAPSHOT_SCAN_TRUNCATED, Boolean.TRUE);
             log.warn("MyBatis listener payload scan truncated: operationId={}, method={}, maxDepth={}, maxNodes={}, reason=scan-truncated",
                     operationId, methodName, MAX_SNAPSHOT_SCAN_DEPTH, MAX_SNAPSHOT_SCAN_NODES);
             return;
         }
-        if (Boolean.TRUE.equals(source.getBool(SNAPSHOT_DEGRADED))) {
+        if (isMarked(source, GXMyBatisEventConstant.SNAPSHOT_DEGRADED)) {
             return;
         }
-        source.set(SNAPSHOT_DEGRADED, Boolean.TRUE);
-        source.set(DEGRADE_REASONS, mergeDegradeReasons(source.get(DEGRADE_REASONS)));
+        source.set(GXMyBatisEventConstant.SNAPSHOT_DEGRADED, Boolean.TRUE);
+        source.set(GXMyBatisEventConstant.DEGRADE_REASONS,
+                mergeDegradeReasons(source.get(GXMyBatisEventConstant.DEGRADE_REASONS)));
         log.warn("MyBatis listener payload keeps references to unsnapshotable values: operationId={}, method={}",
                 operationId, methodName);
     }
 
     private void logDegradedPayloadIfNeeded(Dict source, GXModelEventNamingEnums naming, boolean async, String operationId) {
-        Object reasons = source.get(DEGRADE_REASONS);
+        Object reasons = source.get(GXMyBatisEventConstant.DEGRADE_REASONS);
         if (!(reasons instanceof Collection<?> collection) || collection.isEmpty()) {
             return;
         }
         log.warn("MyBatis listener payload degraded: operationId={}, eventType={}, mode={}, reasons={}",
                 operationId, naming.getEventType(), async ? "async" : "sync", collection);
-    }
-
-    private SnapshotScan scanPayload(Dict source) {
-        return scanPayload(source, 0, new int[]{0});
-    }
-
-    private SnapshotScan scanPayload(@Nullable Object value, int depth, int[] visitedNodes) {
-        if (ObjectUtil.isNull(value)) {
-            return SnapshotScan.CLEAN;
-        }
-        if (depth > MAX_SNAPSHOT_SCAN_DEPTH || ++visitedNodes[0] > MAX_SNAPSHOT_SCAN_NODES) {
-            return SnapshotScan.TRUNCATED;
-        }
-        if (value instanceof Map<?, ?> map) {
-            for (Object nested : map.values()) {
-                SnapshotScan result = scanPayload(nested, depth + 1, visitedNodes);
-                if (result != SnapshotScan.CLEAN) {
-                    return result;
-                }
-            }
-            return SnapshotScan.CLEAN;
-        }
-        if (value instanceof Collection<?> collection) {
-            for (Object nested : collection) {
-                SnapshotScan result = scanPayload(nested, depth + 1, visitedNodes);
-                if (result != SnapshotScan.CLEAN) {
-                    return result;
-                }
-            }
-            return SnapshotScan.CLEAN;
-        }
-        if (value.getClass().isArray()) {
-            int length = Array.getLength(value);
-            for (int index = 0; index < length; index++) {
-                SnapshotScan result = scanPayload(Array.get(value, index), depth + 1, visitedNodes);
-                if (result != SnapshotScan.CLEAN) {
-                    return result;
-                }
-            }
-            return SnapshotScan.CLEAN;
-        }
-        return isUnsnapshotableLeaf(value) ? SnapshotScan.UNSNAPSHOTABLE : SnapshotScan.CLEAN;
     }
 
     /**
@@ -465,18 +415,47 @@ public class GXMyBatisListenerEventPublisher {
         TRUNCATED
     }
 
-    private boolean isUnsnapshotableLeaf(Object value) {
-        if (value instanceof CharSequence || value instanceof Number || value instanceof Boolean
-                || value instanceof Character || value instanceof Enum<?> || value instanceof UUID
-                || value instanceof Temporal || value instanceof Date || value instanceof Calendar) {
-            return false;
+    /**
+     * Depth- and node-bounded walk over one payload. The budget lives in the instance so the recursion
+     * can count the nodes it visited without a mutable argument.
+     */
+    private static final class SnapshotScanner {
+        private int visitedNodes;
+
+        private SnapshotScan scan(@Nullable Object value, int depth) {
+            if (ObjectUtil.isNull(value)) {
+                return SnapshotScan.CLEAN;
+            }
+            if (depth > MAX_SNAPSHOT_SCAN_DEPTH || ++visitedNodes > MAX_SNAPSHOT_SCAN_NODES) {
+                return SnapshotScan.TRUNCATED;
+            }
+            if (value instanceof Map<?, ?> map) {
+                return scanAll(map.values(), depth);
+            }
+            if (value instanceof Collection<?> collection) {
+                return scanAll(collection, depth);
+            }
+            if (value.getClass().isArray()) {
+                int length = Array.getLength(value);
+                for (int index = 0; index < length; index++) {
+                    SnapshotScan result = scan(Array.get(value, index), depth + 1);
+                    if (result != SnapshotScan.CLEAN) {
+                        return result;
+                    }
+                }
+                return SnapshotScan.CLEAN;
+            }
+            return GXMyBatisListenerPayloadUtils.isUnsnapshotable(value) ? SnapshotScan.UNSNAPSHOTABLE : SnapshotScan.CLEAN;
         }
-        try {
-            return ObjectUtil.cloneIfPossible(value) == value;
-        } catch (RuntimeException exception) {
-            log.debug("Snapshot probe failed for value type {}; treating it as unsnapshotable",
-                    value.getClass().getName(), exception);
-            return true;
+
+        private SnapshotScan scanAll(Iterable<?> nestedValues, int depth) {
+            for (Object nested : nestedValues) {
+                SnapshotScan result = scan(nested, depth + 1);
+                if (result != SnapshotScan.CLEAN) {
+                    return result;
+                }
+            }
+            return SnapshotScan.CLEAN;
         }
     }
 

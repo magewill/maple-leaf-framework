@@ -27,6 +27,20 @@ class GXMyBatisListenerDeduplicationTest {
     }
 
     @Test
+    void listenersAreOrderedByDeclaringInterfaceThenListenerName() throws Exception {
+        Method method = OrderedAlphaMapper.class.getMethod("insert", Object.class);
+
+        List<GXMyBatisListenerConfigResolver.ResolvedListener> listeners =
+                resolver.resolve(resolver.mapperCandidateTypes(new OrderedDualMapperImpl()), method);
+
+        assertEquals(List.of(ZetaListener.class, AlphaListener.class),
+                listeners.stream().map(GXMyBatisListenerConfigResolver.ResolvedListener::listenerClazz).toList(),
+                "Declaring interface name orders delivery and the listener name is only the tie-breaker, "
+                        + "so OrderedAlphaMapper's ZetaListener precedes OrderedZuluMapper's AlphaListener "
+                        + "(contracts/event-payload.md delivery-order rule)");
+    }
+
+    @Test
     void sameListenerDeclaredOnTwoInterfacesIsDeliveredOnce() throws Exception {
         Method method = GammaOneMapper.class.getMethod("insert", Object.class);
 
@@ -112,6 +126,23 @@ class GXMyBatisListenerDeduplicationTest {
         }
     }
 
+    @GXMyBatisListener(listenerClazz = ZetaListener.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+    private interface OrderedAlphaMapper {
+        Object insert(Object entity);
+    }
+
+    @GXMyBatisListener(listenerClazz = AlphaListener.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+    private interface OrderedZuluMapper {
+        Object insert(Object entity);
+    }
+
+    private static class OrderedDualMapperImpl implements OrderedAlphaMapper, OrderedZuluMapper {
+        @Override
+        public Object insert(Object entity) {
+            return entity;
+        }
+    }
+
     @GXMyBatisListener(listenerClazz = AlphaListener.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
     private interface GammaOneMapper {
         Object insert(Object entity);
@@ -188,5 +219,8 @@ class GXMyBatisListenerDeduplicationTest {
     }
 
     private static class BetaListener implements GXMybatisListenerService<Object> {
+    }
+
+    private static class ZetaListener implements GXMybatisListenerService<Object> {
     }
 }

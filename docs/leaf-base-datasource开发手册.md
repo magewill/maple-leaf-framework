@@ -434,6 +434,8 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 | `saveBatchListener(Dict data)` | 批量保存 | 批次实体列表 |
 | `batchChangeListener(Dict data)` | 批量新增或更新（默认转调 `saveBatchListener`） | 批次实体列表 |
 
+载荷键：`entityData`、`updateFieldData`、`conditionFieldData`、`keyValuePairs`、`keyOperatorPairs`、`rawWhereSql`、`rawConditionSql`、`conditionLossless`、`degradeReasons`、`batchEntities`、`snapshotDegraded`、`snapshotScanTruncated`；另有 `operation`（仅更新、物理删除、批量三类事件写入被拦截的写方法名，其余事件不含该键）。字段口径以 `specs/001-mybatis-listener-audit/contracts/event-payload.md` 为准。
+
 ```java
 @Component
 public class UserAuditListener implements GXMybatisListenerService<UserEntity> {
@@ -694,6 +696,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, OrderEntity> impl
 - 异步执行器的键名与默认值保持不变，但虚拟线程模式下 `concurrency-limit=0` 现在明确表示"取最大池化线程数"，`-1` 表示不限制；校验用执行器不再无条件使用虚拟线程，而是与 `virtual.enabled` 保持一致。
 - 新增的 `maple.framework.enable.mybatis-listener` 默认开启，与升级前"注解即生效"的行为一致。
 - 多监听方的批量事件载荷改为**只读共享快照**：此前每个监听方各拿到一份可变副本，现在共享同一份只读载荷，任何修改都会抛 `UnsupportedOperationException`。需要加工数据的监听器请先复制为新 `Dict`；只有一个监听方的批量事件与单条事件不受影响。受影响模块：`leaf-base-datasource`。
+- 监听投递顺序明确为"声明接口全限定名 → 监听器类型全名"两级排序：同一写操作在多个接口上声明了不同监听器时，`propagate-exception=true` 的首个失败监听器及其后续拦截对象由此确定。
+
+**内部类型说明（4.3.0）**
+
+- `GXMyBatisListenerAnnotationUtils` 只对外暴露 `findTypeDeclaration` / `findMethodDeclaration`；本版本未发布过 `findTypeAnnotation` / `findMethodAnnotation`，无需迁移。
+- 载荷支撑类型统一为 `...PayloadUtils`（`GXMyBatisListenerPayloadUtils`、`GXReadOnlyPayloadUtils`），属模块内部工具类。
 
 **集成验证（可选）**
 

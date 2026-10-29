@@ -3,6 +3,7 @@ package cn.maple.core.datasource.aspect.mybatis.support;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.maple.core.datasource.annotation.GXMyBatisListener;
 import cn.maple.core.datasource.config.GXMyBatisListenerProperties;
+import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
 import cn.maple.core.datasource.util.GXMyBatisListenerAnnotationUtils;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -33,8 +34,14 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class GXMyBatisListenerConfigResolver {
     private static final Comparator<Class<?>> TYPE_ORDER = Comparator.comparing(Class::getName);
+    /**
+     * Delivery order of one write operation: declaring interface fully-qualified name first, listener
+     * type name second (contracts/event-payload.md 投递与顺序). The listener name is only the
+     * tie-breaker, so two listeners declared on the same interface are still ordered reproducibly.
+     */
     private static final Comparator<ResolvedListener> LISTENER_ORDER =
-            Comparator.comparing((ResolvedListener listener) -> listener.listenerClazz().getName());
+            Comparator.comparing(ResolvedListener::declaredFrom)
+                    .thenComparing(listener -> listener.listenerClazz().getName());
     private static final ClassValue<List<Class<?>>> MAPPER_INTERFACE_CACHE = new ClassValue<>() {
         @Override
         protected List<Class<?>> computeValue(Class<?> type) {
@@ -161,8 +168,7 @@ public class GXMyBatisListenerConfigResolver {
         if (Objects.isNull(listenerClazz)) {
             return;
         }
-        boolean async = CharSequenceUtil.equals(annotation.runType(),
-                cn.maple.core.datasource.constant.GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT);
+        boolean async = CharSequenceUtil.equals(annotation.runType(), GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT);
         ResolvedListener listener = new ResolvedListener(listenerClazz, async, declaredFrom);
         boolean alreadyPresent = target.stream().anyMatch(existing ->
                 existing.listenerClazz().equals(listener.listenerClazz())

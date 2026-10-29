@@ -64,6 +64,7 @@ PUBLISHED → DELIVERED | FAILED | REJECTED
 
 | 字段 | 类型 | 适用操作 | 说明 |
 | --- | --- | --- | --- |
+| `operation` | 字符串 | 更新 / 物理删除 / 批量 | 被拦截的写方法名；其它操作不写该键 |
 | `entityData` | 键值映射 | 保存 / 更新 / 批量 | 实体字段快照 |
 | `updateFields` | 键值映射 | 条件更新字段 / 软删除 | 被修改字段及新值 |
 | `conditionFields` | 键值映射 | 更新 / 条件更新字段 / 软删除 / 物理删除 | 条件字段及取值 |

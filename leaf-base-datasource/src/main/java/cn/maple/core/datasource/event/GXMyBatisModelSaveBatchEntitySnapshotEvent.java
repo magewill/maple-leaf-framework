@@ -12,7 +12,7 @@ import cn.hutool.core.lang.Dict;
  *
  * <p>The publisher uses this event for every batch delivery. With a single listener the pre-built
  * payload is returned as is; with multiple listeners the publisher wraps it once into a read-only
- * snapshot ({@code GXReadOnlyPayload}) shared by all listeners, so there is still only one copy of
+ * snapshot ({@code GXReadOnlyPayloadUtils}) shared by all listeners, so there is still only one copy of
  * the batch data and one listener cannot affect another listener's payload ({@code FR-008},
  * {@code SC-005}).</p>
  */

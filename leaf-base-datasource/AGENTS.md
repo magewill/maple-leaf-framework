@@ -41,6 +41,9 @@
 15. 载荷构建属于投递路径：条件解析、字段校验或事件快照失败必须计入 `failed` 并隔离，不得让已成功的写操作向调用方抛异常。事务后投递（异步或 `sync-after-commit`）的回调不会被业务调用方看到，其异常一律隔离。
 16. 批量监听覆盖边界：只拦截通用服务层的 `saveBatch`/`saveOrUpdateBatch`；MyBatis-Plus 官方 `BaseMapper.insert(Collection)`、`updateById(Collection)`、`insertOrUpdate(Collection, ...)` 经 `BatchSqlSession` 直接执行语句，不产生事件。该缺口必须保留在开发手册的能力边界表中，不得悄悄删除说明，也不得声称已覆盖。
 17. 批量载荷由切面一次构建后直接投递，不再二次快照；因此切面必须把实体自有的可变值（`Date`、`Calendar`、数组、集合、`Map`）复制为载荷私有副本，保证监听方修改载荷不影响业务实体。分离走查深度上限 32，超限必须置 `snapshotDegraded` 与 `UNSNAPSHOTABLE_VALUE`（计入 `degraded`），不得静默；也不得就地改写调用方传入的 `Dict`/`Map` 行（`Convert` 在这类入参下返回调用方实例）。
+18. 监听投递顺序必须按"声明接口全限定名 → 监听器类型全名"两级排序（`GXMyBatisListenerConfigResolver` 的 `LISTENER_ORDER`），监听器类型名只是同接口内的并列键；只按监听器类型名重排会改变 `propagate-exception` 下"首个失败监听器"与后续监听器的取舍，与 `contracts/event-payload.md` 的投递顺序约定不一致。
+19. 载荷支撑类型统一使用 `PayloadUtils` 后缀（`GXReadOnlyPayloadUtils`、`GXMyBatisListenerPayloadUtils`），与宪法 VII 的 `GX<用途>Utils` 工具类命名对齐，不得再新增无后缀的静态工具类。
+20. 监听声明归属解析只经由 `GXMyBatisListenerAnnotationUtils.findTypeDeclaration` / `findMethodDeclaration`；历史上的 `findTypeAnnotation` / `findMethodAnnotation` 已收敛（该类为本特性分支新增、删除前全仓无调用方，不影响已发布契约），不得再新增无调用方的 `find*Annotation` 包装。
 
 ## 测试要求
 

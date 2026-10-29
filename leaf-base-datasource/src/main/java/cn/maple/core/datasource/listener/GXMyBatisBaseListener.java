@@ -11,6 +11,7 @@ import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerTaskCont
 import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.event.*;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
+import cn.maple.core.framework.event.GXBaseEvent;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXSpringContextUtils;
 import org.jspecify.annotations.Nullable;
@@ -54,11 +55,12 @@ interface GXMyBatisBaseListener {
 
             Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
             GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
-            Object entityData = convertEntityPayload(listenerClazz, source.get("entityData"));
-            Dict keyOperatorPairs = convertToDict(source.get("keyOperatorPairs"));
-            Dict keyValuePairs = convertToDict(source.get("keyValuePairs"));
+            Object entityData = convertEntityPayload(listenerClazz, source.get(GXMyBatisEventConstant.ENTITY_DATA));
+            Dict keyOperatorPairs = convertToDict(source.get(GXMyBatisEventConstant.KEY_OPERATOR_PAIRS));
+            Dict keyValuePairs = convertToDict(source.get(GXMyBatisEventConstant.KEY_VALUE_PAIRS));
 
-            listener.updateEntityListener(entityData, keyValuePairs, keyOperatorPairs, source.getStr("rawWhereSql"));
+            listener.updateEntityListener(entityData, keyValuePairs, keyOperatorPairs,
+                    source.getStr(GXMyBatisEventConstant.RAW_WHERE_SQL));
         });
     }
 
@@ -69,8 +71,8 @@ interface GXMyBatisBaseListener {
 
             Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
             GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
-            Dict updateFieldData = convertToDict(source.getObj("updateFieldData"));
-            Dict conditionFieldData = convertToDict(source.get("conditionFieldData"));
+            Dict updateFieldData = convertToDict(source.getObj(GXMyBatisEventConstant.UPDATE_FIELD_DATA));
+            Dict conditionFieldData = convertToDict(source.get(GXMyBatisEventConstant.CONDITION_FIELD_DATA));
 
             listener.updateFieldListener(updateFieldData, conditionFieldData);
         });
@@ -124,7 +126,7 @@ interface GXMyBatisBaseListener {
         });
     }
 
-    private void dispatch(String action, cn.maple.core.framework.event.GXBaseEvent<Dict> event, Runnable task) {
+    private void dispatch(String action, GXBaseEvent<Dict> event, Runnable task) {
         // Count the nesting depth around every callback so a listener that writes through an
         // annotated mapper cannot recurse without bound (spec edge case "递归触发"); the publisher
         // refuses deliveries beyond GXMyBatisListenerEventPublisher.MAX_DELIVERY_DEPTH.
@@ -136,14 +138,13 @@ interface GXMyBatisBaseListener {
             // modes (T024); the publish layer must not count them again.
             GXMyBatisListenerMetrics.recordFailed();
             Dict param = event.getParam();
-            String listenerName = ObjectUtil.isNull(param)
-                    ? null : param.getStr(GXMyBatisEventConstant.LISTENER_CLAZZ_NAME);
-            String operationId = ObjectUtil.isNull(param)
-                    ? null : param.getStr(GXMyBatisEventConstant.OPERATION_ID);
-            boolean propagate = !ObjectUtil.isNull(param)
+            boolean hasParam = ObjectUtil.isNotNull(param);
+            String listenerName = hasParam ? param.getStr(GXMyBatisEventConstant.LISTENER_CLAZZ_NAME) : null;
+            String operationId = hasParam ? param.getStr(GXMyBatisEventConstant.OPERATION_ID) : null;
+            boolean propagate = hasParam
                     && Boolean.TRUE.equals(param.getBool(GXMyBatisEventConstant.PROPAGATE_EXCEPTION));
             boolean asyncDelivery = isAsyncDelivery(event, param);
-            boolean deferredDelivery = !ObjectUtil.isNull(param)
+            boolean deferredDelivery = hasParam
                     && Boolean.TRUE.equals(param.getBool(GXMyBatisEventConstant.DEFERRED_DELIVERY));
             LOG.error("MyBatis listener callback failed: action={}, eventType={}, mode={}, operationId={}, listener={}, reason={}",
                     action, event.getEventType(), asyncDelivery ? "async" : "sync", operationId,
@@ -155,7 +156,7 @@ interface GXMyBatisBaseListener {
                 // would terminate the executor thread (contracts/listener-callback.md).
                 return;
             }
-            if (ObjectUtil.isNull(param)) {
+            if (!hasParam) {
                 throw exception;
             }
             // Surface as-is via the publish layer: stashing the original exception keeps the failure
@@ -173,7 +174,7 @@ interface GXMyBatisBaseListener {
      * delivery is never misclassified as synchronous and can never propagate an exception onto an
      * executor thread (contracts/listener-callback.md).
      */
-    private boolean isAsyncDelivery(cn.maple.core.framework.event.GXBaseEvent<Dict> event, @Nullable Dict param) {
+    private boolean isAsyncDelivery(GXBaseEvent<Dict> event, @Nullable Dict param) {
         if (!ObjectUtil.isNull(param)) {
             Boolean declared = param.getBool(GXMyBatisEventConstant.ASYNC_DELIVERY);
             if (!ObjectUtil.isNull(declared)) {

@@ -81,7 +81,9 @@ leaf-base-datasource/src/main/java/cn/maple/core/datasource/
 │   ├── GXMyBatisPlusSaveBatchEntityAspect.java
 │   └── support/                                   # 新增：内部支撑（package-info 同步补齐）
 │       ├── GXMyBatisListenerConfigResolver.java   # 声明解析 + 有界缓存 + 空声明短路
-│       └── GXMyBatisListenerEventPublisher.java   # 去重、分模式投递、计数、日志
+│       ├── GXMyBatisListenerEventPublisher.java    # 去重、分模式投递、计数、日志
+│       ├── GXReadOnlyPayloadUtils.java            # 多监听方共享只读载荷（同一集合只复制一次）
+│       └── GXMyBatisListenerPayloadUtils.java     # 条件/更新字段渲染与快照探针（三切面单一口径）
 ├── listener/
 │   ├── GXMyBatisBaseListener.java                 # 逐监听器隔离与降级记录
 │   ├── GXMyBatisSyncListener.java

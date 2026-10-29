@@ -13,17 +13,6 @@ public final class GXMyBatisListenerAnnotationUtils {
     private GXMyBatisListenerAnnotationUtils() {
     }
 
-    public static @Nullable GXMyBatisListener findTypeAnnotation(@Nullable Class<?> targetType) {
-        ResolvedDeclaration declaration = findTypeDeclaration(targetType);
-        return Objects.isNull(declaration) ? null : declaration.annotation();
-    }
-
-    public static @Nullable GXMyBatisListener findMethodAnnotation(@Nullable Class<?> targetType,
-                                                                   @Nullable Method method) {
-        ResolvedDeclaration declaration = findMethodDeclaration(targetType, method);
-        return Objects.isNull(declaration) ? null : declaration.annotation();
-    }
-
     /**
      * Resolves a type-level declaration together with the type that actually carries it.
      *

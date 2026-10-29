@@ -24,8 +24,8 @@ import java.util.Set;
  * listeners share the same snapshot while any mutation attempt fails instead of leaking into
  * another listener's payload ({@code FR-008}).</p>
  */
-public final class GXReadOnlyPayload {
-    private GXReadOnlyPayload() {
+public final class GXReadOnlyPayloadUtils {
+    private GXReadOnlyPayloadUtils() {
     }
 
     public static Dict wrap(Dict payload) {

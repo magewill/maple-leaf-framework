@@ -28,6 +28,7 @@
 
 | 字段 | 实现键 | 类型 | 空值语义 | 说明 |
 | --- | --- | --- | --- | --- |
+| `operation` | `operation` | 字符串 | 键缺失 | 被拦截的写方法名；仅更新（`update` / `updateById`）、物理删除（`deleteCondition`）、批量保存（`saveBatch` / `saveOrUpdateBatch`）载荷写入该键，其余事件不含该键 |
 | `entityData` | `entityData` | 键值映射 | 空映射 | 实体字段快照；键为驼峰属性名 |
 | `updateFields` | `updateFieldData` | 键值映射 | 空映射 | 被修改字段及新值 |
 | `conditionFields` | `conditionFieldData` / `keyValuePairs` | 键值映射 | 空映射 | 条件字段及取值；`in`/`between` 为列表，`is null` 为 `null`；更新回调沿用历史参数名 `keyValuePairs` |
