@@ -38,6 +38,10 @@ class GXMyBatisListenerDeduplicationTest {
                 "Declaring interface name orders delivery and the listener name is only the tie-breaker, "
                         + "so OrderedAlphaMapper's ZetaListener precedes OrderedZuluMapper's AlphaListener "
                         + "(contracts/event-payload.md delivery-order rule)");
+        assertEquals(OrderedAlphaMapper.class.getName(), listeners.getFirst().declaredFrom(),
+                "LISTENER_ORDER keys on declaredFrom, so its declaring-interface FQN prefix is part of the "
+                        + "ordering contract; changing that format must fail here instead of silently "
+                        + "re-ordering delivery");
     }
 
     @Test

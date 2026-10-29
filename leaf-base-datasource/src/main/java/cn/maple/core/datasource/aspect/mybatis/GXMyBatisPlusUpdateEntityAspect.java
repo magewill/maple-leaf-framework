@@ -31,6 +31,7 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -130,10 +131,8 @@ public class GXMyBatisPlusUpdateEntityAspect {
         if (objectWrapper instanceof AbstractWrapper<?, ?, ?> updateWrapper) {
             return parseWhereSQL(updateWrapper);
         }
-        if (objectWrapper instanceof Wrapper<?> wrapper) {
-            return degradedPayload(wrapper.getTargetSql(), GXMyBatisListenerDegradeReasonEnums.NON_ABSTRACT_WRAPPER);
-        }
-        return degradedPayload("", GXMyBatisListenerDegradeReasonEnums.NON_ABSTRACT_WRAPPER);
+        String rawSql = objectWrapper instanceof Wrapper<?> wrapper ? wrapper.getTargetSql() : "";
+        return degradedConditionPayload(rawSql, List.of(GXMyBatisListenerDegradeReasonEnums.NON_ABSTRACT_WRAPPER));
     }
 
     /**
@@ -149,17 +148,17 @@ public class GXMyBatisPlusUpdateEntityAspect {
             // set(...) clauses) has nothing to restore, so the empty condition set is lossless.
             // Claiming a degrade here would contradict data-model §3 (a degraded payload must carry
             // the original condition text) and would inflate `degraded` for a faithful payload.
-            return updateConditionPayload(Dict.create(), Dict.create(), "", true, List.of(), false);
+            return losslessConditionPayload(Dict.create(), Dict.create(), "", List.of());
         }
 
         ConditionParseResult conditionParseResult = WHERE_SQL_CONDITION_CACHE.get(whereSQL, this::extractConditionTokens);
         if (ObjectUtil.isNull(conditionParseResult)) {
-            return degradedPayload(whereSQL, GXMyBatisListenerDegradeReasonEnums.PARSE_ERROR);
+            return degradedConditionPayload(whereSQL, List.of(GXMyBatisListenerDegradeReasonEnums.PARSE_ERROR));
         }
         List<GXMyBatisListenerDegradeReasonEnums> degradeReasons = new ArrayList<>(conditionParseResult.degradeReasons());
         boolean tokensUsable = conditionParseResult.lossless() && !ObjectUtil.isEmpty(conditionParseResult.conditionTokens());
         if (!tokensUsable) {
-            return degradedPayload(whereSQL, degradeReasons);
+            return degradedConditionPayload(whereSQL, degradeReasons);
         }
 
         Map<String, Object> paramNameValuePairs = updateWrapper.getParamNameValuePairs();
@@ -167,7 +166,7 @@ public class GXMyBatisPlusUpdateEntityAspect {
         if (ObjectUtil.isNull(paramNameValuePairs)
                 || !hasMatchingWhereParameters(conditionParseResult.conditionTokens(), whereParamNames, paramNameValuePairs)) {
             degradeReasons.add(GXMyBatisListenerDegradeReasonEnums.PARAM_MISMATCH);
-            return degradedPayload(whereSQL, degradeReasons);
+            return degradedConditionPayload(whereSQL, degradeReasons);
         }
 
         Dict keyOperatorPairs = Dict.create();
@@ -184,41 +183,61 @@ public class GXMyBatisPlusUpdateEntityAspect {
             for (int index = 0; index < token.paramCount(); index++) {
                 Object rawValue = paramNameValuePairs.get(whereParamNames.get(paramNameIndex++));
                 snapshotDegraded |= GXMyBatisListenerPayloadUtils.isUnsnapshotable(rawValue);
-                values.add(GXMyBatisListenerPayloadUtils.snapshotValue(rawValue));
+                values.add(snapshotValue(rawValue));
             }
             keyValuePairs.set(token.field(), token.paramCount() == 1 ? values.get(0) : values);
         }
         if (snapshotDegraded) {
             degradeReasons.add(GXMyBatisListenerDegradeReasonEnums.UNSNAPSHOTABLE_VALUE);
         }
-        return updateConditionPayload(keyOperatorPairs, keyValuePairs, whereSQL, true, degradeReasons, snapshotDegraded);
-    }
-
-    private Dict degradedPayload(String rawSql, GXMyBatisListenerDegradeReasonEnums reason) {
-        return degradedPayload(rawSql, List.of(reason));
-    }
-
-    private Dict degradedPayload(String rawSql, List<GXMyBatisListenerDegradeReasonEnums> degradeReasons) {
-        return updateConditionPayload(Dict.create(), Dict.create(), rawSql, false, degradeReasons, false);
+        return losslessConditionPayload(keyOperatorPairs, keyValuePairs, whereSQL, degradeReasons);
     }
 
     /**
-     * Assembles the update-entity payload. Both the lossless and the degraded form carry the raw SQL,
-     * {@code conditionLossless} and the degrade reasons, so listeners always see why a condition set
-     * is incomplete (FR-009/FR-010).
+     * A degraded payload keeps the raw SQL because the structured form could not represent it, so
+     * {@code conditionLossless} is {@code false} and the reasons stay visible (FR-009/FR-010).
      */
-    private Dict updateConditionPayload(Dict keyOperatorPairs, Dict keyValuePairs, String rawSql,
-                                        boolean conditionLossless,
-                                        List<GXMyBatisListenerDegradeReasonEnums> degradeReasons,
-                                        boolean snapshotDegraded) {
+    private Dict degradedConditionPayload(String rawSql, List<GXMyBatisListenerDegradeReasonEnums> degradeReasons) {
+        return conditionPayload(Dict.create(), Dict.create(), rawSql, false, degradeReasons);
+    }
+
+    /**
+     * A lossless payload represents the whole condition structurally.
+     */
+    private Dict losslessConditionPayload(Dict keyOperatorPairs, Dict keyValuePairs, String rawSql,
+                                          List<GXMyBatisListenerDegradeReasonEnums> degradeReasons) {
+        return conditionPayload(keyOperatorPairs, keyValuePairs, rawSql, true, degradeReasons);
+    }
+
+    /**
+     * Both payload variants differ only in whether the structured form is faithful, so they are built
+     * here once. {@code snapshotDegraded} is derived from the recorded reason instead of a second flag,
+     * so the marker and the reason cannot disagree.
+     */
+    private Dict conditionPayload(Dict keyOperatorPairs, Dict keyValuePairs, String rawSql, boolean lossless,
+                                  List<GXMyBatisListenerDegradeReasonEnums> degradeReasons) {
         return Dict.create()
                 .set(GXMyBatisEventConstant.KEY_OPERATOR_PAIRS, keyOperatorPairs)
                 .set(GXMyBatisEventConstant.KEY_VALUE_PAIRS, keyValuePairs)
                 .set(GXMyBatisEventConstant.RAW_WHERE_SQL, rawSql)
                 .set(GXMyBatisEventConstant.RAW_CONDITION_SQL, rawSql)
-                .set(GXMyBatisEventConstant.CONDITION_LOSSLESS, conditionLossless)
+                .set(GXMyBatisEventConstant.CONDITION_LOSSLESS, lossless)
                 .set(GXMyBatisEventConstant.DEGRADE_REASONS, List.copyOf(degradeReasons))
-                .set(GXMyBatisEventConstant.SNAPSHOT_DEGRADED, snapshotDegraded);
+                .set(GXMyBatisEventConstant.SNAPSHOT_DEGRADED,
+                        lossless && degradeReasons.contains(GXMyBatisListenerDegradeReasonEnums.UNSNAPSHOTABLE_VALUE));
+    }
+
+    /**
+     * Copies a condition value so listeners cannot reach caller-owned mutable state; a value that
+     * cannot be copied is kept and reported through
+     * {@link GXMyBatisListenerPayloadUtils#isUnsnapshotable(Object)}.
+     */
+    private static @Nullable Object snapshotValue(@Nullable Object rawValue) {
+        try {
+            return ObjectUtil.cloneIfPossible(rawValue);
+        } catch (RuntimeException exception) {
+            return rawValue;
+        }
     }
 
     private List<String> extractWhereParamNames(String whereSqlSegment) {
@@ -316,7 +335,7 @@ public class GXMyBatisPlusUpdateEntityAspect {
             if (ObjectUtil.isNull(expressionList) || expressionList.isEmpty()) {
                 return null;
             }
-            for (Expression item : expressionList.getExpressions()) {
+            for (Expression item : expressionList) {
                 if (ObjectUtil.isNotNull(item)) {
                     item.accept(this, context);
                 }
@@ -352,7 +371,7 @@ public class GXMyBatisPlusUpdateEntityAspect {
                 return 0;
             }
             if (expression instanceof ExpressionList<?> expressionList) {
-                return expressionList.getExpressions().size();
+                return expressionList.size();
             }
             return 1;
         }

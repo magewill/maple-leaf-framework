@@ -250,13 +250,21 @@ public class GXMyBatisAsyncListenerExecutorConfig {
     }
 
     /**
+     * Propagates the datasource/MDC context onto the executor thread. Shared by both decorators so
+     * listener tasks and validation tasks carry exactly the same context.
+     */
+    private Runnable wrapContext(Runnable runnable) {
+        return GXMdcThreadUtils.wrap(
+                GXDynamicContextHolder.wrap(GXDataFilterThreadLocalUtils.wrap(runnable)),
+                MDC.getCopyOfContextMap());
+    }
+
+    /**
      * Context-only decorator for executors that do not deliver listener events, so their tasks never
      * touch listener counters or emit listener task logs.
      */
     private TaskDecorator createContextTaskDecorator() {
-        return runnable -> GXMdcThreadUtils.wrap(
-                GXDynamicContextHolder.wrap(GXDataFilterThreadLocalUtils.wrap(runnable)),
-                MDC.getCopyOfContextMap());
+        return this::wrapContext;
     }
 
     private TaskDecorator createEventTaskDecorator() {
@@ -268,10 +276,7 @@ public class GXMyBatisAsyncListenerExecutorConfig {
             // asynchronous callback chain is bounded exactly like a synchronous one (spec 边缘用例：递归触发).
             int deliveryDepth = GXMyBatisListenerTaskContext.currentDeliveryDepth();
             Runnable wrappedRunnable = GXMyBatisListenerTaskContext.withDeliveryDepth(deliveryDepth,
-                    GXMdcThreadUtils.wrap(
-                            GXDynamicContextHolder.wrap(GXDataFilterThreadLocalUtils.wrap(runnable)),
-                            MDC.getCopyOfContextMap()
-                    ));
+                    wrapContext(runnable));
             Runnable task = () -> {
                 long startTime = System.nanoTime();
                 boolean success = false;

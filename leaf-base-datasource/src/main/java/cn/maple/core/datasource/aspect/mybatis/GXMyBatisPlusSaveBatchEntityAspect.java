@@ -213,13 +213,15 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
                 .orElse(null);
 
         Method invokedMethod = GXMyBatisListenerAspectSupport.invokedMethod(point);
-        boolean batchChange = "saveOrUpdateBatch".equals(invokedMethod.getName());
-        GXModelEventNamingEnums syncEvent = batchChange
-                ? GXModelEventNamingEnums.SYNC_BATCH_CHANGE
-                : GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY;
-        GXModelEventNamingEnums asyncEvent = batchChange
-                ? GXModelEventNamingEnums.ASYNC_BATCH_CHANGE
-                : GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY;
+        GXModelEventNamingEnums syncEvent;
+        GXModelEventNamingEnums asyncEvent;
+        if ("saveOrUpdateBatch".equals(invokedMethod.getName())) {
+            syncEvent = GXModelEventNamingEnums.SYNC_BATCH_CHANGE;
+            asyncEvent = GXModelEventNamingEnums.ASYNC_BATCH_CHANGE;
+        } else {
+            syncEvent = GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY;
+            asyncEvent = GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY;
+        }
         // The mapper type is the extra declaration scope of a batch write; the shared support call
         // keeps the short-circuit, counting and payload rules identical to the other aspects (FR-018).
         GXMyBatisListenerAspectSupport.publishIfDeclared(eventPublisher, point, mapperClass,

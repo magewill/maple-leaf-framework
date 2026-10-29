@@ -14,6 +14,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 /**
  * Builds a single read-only snapshot that can be shared by several listeners.
@@ -143,30 +145,30 @@ public final class GXReadOnlyPayloadUtils {
         }
 
         @Override
-        public Object computeIfAbsent(String key, java.util.function.Function<? super String, ?> mappingFunction) {
+        public Object computeIfAbsent(String key, Function<? super String, ?> mappingFunction) {
             throw readOnly();
         }
 
         @Override
         public Object computeIfPresent(String key,
-                                       java.util.function.BiFunction<? super String, ? super Object, ?> remappingFunction) {
+                                       BiFunction<? super String, ? super Object, ?> remappingFunction) {
             throw readOnly();
         }
 
         @Override
         public Object compute(String key,
-                              java.util.function.BiFunction<? super String, ? super Object, ?> remappingFunction) {
+                              BiFunction<? super String, ? super Object, ?> remappingFunction) {
             throw readOnly();
         }
 
         @Override
         public Object merge(String key, Object value,
-                            java.util.function.BiFunction<? super Object, ? super Object, ?> remappingFunction) {
+                            BiFunction<? super Object, ? super Object, ?> remappingFunction) {
             throw readOnly();
         }
 
         @Override
-        public void replaceAll(java.util.function.BiFunction<? super String, ? super Object, ? extends Object> function) {
+        public void replaceAll(BiFunction<? super String, ? super Object, ?> function) {
             throw readOnly();
         }
 

@@ -38,6 +38,12 @@ public class GXMyBatisListenerConfigResolver {
      * Delivery order of one write operation: declaring interface fully-qualified name first, listener
      * type name second (contracts/event-payload.md 投递与顺序). The listener name is only the
      * tie-breaker, so two listeners declared on the same interface are still ordered reproducibly.
+     *
+     * <p>Format dependency: this keys on {@link ResolvedListener#declaredFrom()}, whose value starts
+     * with the declaring interface FQN (type-level: {@code FQN}, method-level: {@code FQN#method}).
+     * The FQN prefix is therefore part of the ordering contract: changing that format re-orders
+     * delivery and with it the {@code propagate-exception} first-failure identity. The attribution
+     * is pinned by {@code GXMyBatisListenerDeduplicationTest}.</p>
      */
     private static final Comparator<ResolvedListener> LISTENER_ORDER =
             Comparator.comparing(ResolvedListener::declaredFrom)

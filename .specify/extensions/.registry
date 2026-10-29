@@ -36,37 +36,6 @@
       },
       "registered_skills": [],
       "installed_at": "2026-10-23T00:35:19.604751+00:00"
-    },
-    "architecture-guard": {
-      "version": "3.3.1",
-      "source": "local",
-      "manifest_hash": "sha256:38007614803c1a9f80af7f1ebd35f1cdec08e0bd0c1070e0dd90b2c80d424b03",
-      "enabled": true,
-      "priority": 10,
-      "registered_commands": {
-        "codebuddy": [
-          "speckit.architecture-guard.ag-governed-discover",
-          "speckit.architecture-guard.ag-governed-spec",
-          "speckit.architecture-guard.ag-governed-delivery",
-          "speckit.architecture-guard.ag-governed-delivery-team",
-          "speckit.architecture-guard.ag-governed-archive",
-          "speckit.architecture-guard.ag-governed-plan",
-          "speckit.architecture-guard.ag-governed-tasks",
-          "speckit.architecture-guard.ag-governed-implement",
-          "speckit.architecture-guard.ag-workflow",
-          "speckit.architecture-guard.ag-review-artifacts",
-          "speckit.architecture-guard.ag-review-implementation",
-          "speckit.architecture-guard.ag-violation-detection",
-          "speckit.architecture-guard.ag-refactor-generator",
-          "speckit.architecture-guard.ag-apply",
-          "speckit.architecture-guard.ag-init",
-          "speckit.architecture-guard.ag-init-brownfield",
-          "speckit.architecture-guard.ag-consolidate-specs",
-          "speckit.architecture-guard.ag-verify"
-        ]
-      },
-      "registered_skills": [],
-      "installed_at": "2026-10-29T09:06:53.927144+00:00"
     }
   }
 }

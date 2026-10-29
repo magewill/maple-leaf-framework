@@ -38,28 +38,21 @@ interface GXMyBatisBaseListener {
     default void listenerSaveEntity(GXMyBatisModelSaveEntityEvent<Dict> saveEntityEvent) {
         dispatch("saveEntity", saveEntityEvent, () -> {
             Dict source = saveEntityEvent.getSource();
-            Dict param = saveEntityEvent.getParam();
-
-            Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
+            Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(saveEntityEvent.getParam());
             GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
-            Object targetParamObject = convertEntityPayload(listenerClazz, source);
-
-            listener.saveEntityListener(targetParamObject);
+            listener.saveEntityListener(convertEntityPayload(listenerClazz, source));
         });
     }
 
     default void listenerUpdateEntity(GXMyBatisModelUpdateEntityEvent<Dict> updateEntityEvent) {
         dispatch("updateEntity", updateEntityEvent, () -> {
             Dict source = updateEntityEvent.getSource();
-            Dict param = updateEntityEvent.getParam();
-
-            Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
+            Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(updateEntityEvent.getParam());
             GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
-            Object entityData = convertEntityPayload(listenerClazz, source.get(GXMyBatisEventConstant.ENTITY_DATA));
-            Dict keyOperatorPairs = convertToDict(source.get(GXMyBatisEventConstant.KEY_OPERATOR_PAIRS));
-            Dict keyValuePairs = convertToDict(source.get(GXMyBatisEventConstant.KEY_VALUE_PAIRS));
-
-            listener.updateEntityListener(entityData, keyValuePairs, keyOperatorPairs,
+            listener.updateEntityListener(
+                    convertEntityPayload(listenerClazz, source.get(GXMyBatisEventConstant.ENTITY_DATA)),
+                    convertToDict(source.get(GXMyBatisEventConstant.KEY_VALUE_PAIRS)),
+                    convertToDict(source.get(GXMyBatisEventConstant.KEY_OPERATOR_PAIRS)),
                     source.getStr(GXMyBatisEventConstant.RAW_WHERE_SQL));
         });
     }
@@ -67,25 +60,16 @@ interface GXMyBatisBaseListener {
     default void listenerUpdateField(GXMyBatisModelUpdateFieldEvent<Dict> updateFieldEvent) {
         dispatch("updateField", updateFieldEvent, () -> {
             Dict source = updateFieldEvent.getSource();
-            Dict param = updateFieldEvent.getParam();
-
-            Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
-            GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
-            Dict updateFieldData = convertToDict(source.getObj(GXMyBatisEventConstant.UPDATE_FIELD_DATA));
-            Dict conditionFieldData = convertToDict(source.get(GXMyBatisEventConstant.CONDITION_FIELD_DATA));
-
-            listener.updateFieldListener(updateFieldData, conditionFieldData);
+            GXMybatisListenerService<Object> listener = resolveListener(updateFieldEvent.getParam());
+            listener.updateFieldListener(convertToDict(source.getObj(GXMyBatisEventConstant.UPDATE_FIELD_DATA)),
+                    convertToDict(source.get(GXMyBatisEventConstant.CONDITION_FIELD_DATA)));
         });
     }
 
     default void listenerDeleteSoft(GXMyBatisModelDeleteSoftEvent<Dict> deleteSoftEvent) {
         dispatch("deleteSoft", deleteSoftEvent, () -> {
             Dict source = deleteSoftEvent.getSource();
-            Dict param = deleteSoftEvent.getParam();
-
-            Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
-            GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
-
+            GXMybatisListenerService<Object> listener = resolveListener(deleteSoftEvent.getParam());
             listener.deleteSoftListener(convertToDict(source));
         });
     }
@@ -93,11 +77,7 @@ interface GXMyBatisBaseListener {
     default void listenerDelete(GXMyBatisModelDeleteEvent<Dict> deleteEvent) {
         dispatch("delete", deleteEvent, () -> {
             Dict source = deleteEvent.getSource();
-            Dict param = deleteEvent.getParam();
-
-            Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
-            GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
-
+            GXMybatisListenerService<Object> listener = resolveListener(deleteEvent.getParam());
             listener.deleteListener(convertToDict(source));
         });
     }
@@ -105,11 +85,7 @@ interface GXMyBatisBaseListener {
     default void listenerSaveBatch(GXMyBatisModelSaveBatchEntityEvent<Dict> saveBatchEntityEvent) {
         dispatch("saveBatch", saveBatchEntityEvent, () -> {
             Dict source = saveBatchEntityEvent.getSource();
-            Dict param = saveBatchEntityEvent.getParam();
-
-            Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
-            GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
-
+            GXMybatisListenerService<Object> listener = resolveListener(saveBatchEntityEvent.getParam());
             listener.saveBatchListener(convertToDict(source));
         });
     }
@@ -117,11 +93,7 @@ interface GXMyBatisBaseListener {
     default void listenerBatchChange(GXMyBatisModelSaveBatchEntityEvent<Dict> batchChangeEvent) {
         dispatch("batchChange", batchChangeEvent, () -> {
             Dict source = batchChangeEvent.getSource();
-            Dict param = batchChangeEvent.getParam();
-
-            Class<? extends GXMybatisListenerService<?>> listenerClazz = resolveListenerClass(param);
-            GXMybatisListenerService<Object> listener = resolveListenerBean(listenerClazz);
-
+            GXMybatisListenerService<Object> listener = resolveListener(batchChangeEvent.getParam());
             listener.batchChangeListener(convertToDict(source));
         });
     }
@@ -195,6 +167,13 @@ interface GXMyBatisBaseListener {
             throw new GXBusinessException("MyBatis listener class is missing");
         }
         return listenerClazz;
+    }
+
+    /**
+     * Resolves the listener bean for a delivery, for callbacks that do not need the listener type.
+     */
+    private GXMybatisListenerService<Object> resolveListener(@Nullable Dict param) {
+        return resolveListenerBean(resolveListenerClass(param));
     }
 
     private GXMybatisListenerService<Object> resolveListenerBean(Class<? extends GXMybatisListenerService<?>> listenerClazz) {

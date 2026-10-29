@@ -1,11 +1,14 @@
 package cn.maple.core.datasource.aspect.mybatis.support;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
+import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXMyBatisListenerDegradeReasonEnums;
+import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
 import cn.maple.core.framework.dto.inner.field.GXUpdateField;
@@ -84,6 +87,30 @@ public final class GXMyBatisListenerPayloadUtils {
     }
 
     /**
+     * Builds the payload shared by the update-field and soft-delete aspects, which carry the same two
+     * arguments ({@code GXBaseQueryParamInnerDto} and the update-field list).
+     *
+     * <p>Keeping the argument handling here stops the two aspects from drifting apart in what they
+     * publish for the same write shape (FR-009/FR-010).</p>
+     */
+    public static Dict updateFieldConditionPayload(@Nullable Object queryParamArg, @Nullable Object updateFieldArg) {
+        if (ObjectUtil.isNull(queryParamArg) || ObjectUtil.isNull(updateFieldArg)) {
+            return Dict.create();
+        }
+        GXBaseQueryParamInnerDto queryParam = Convert.convert(new TypeReference<>() {
+        }, queryParamArg);
+        List<GXUpdateField<?>> updateFields = Convert.convert(new TypeReference<>() {
+        }, updateFieldArg);
+        if (ObjectUtil.isNull(queryParam) || ObjectUtil.isNull(queryParam.getCondition()) || ObjectUtil.isNull(updateFields)) {
+            return Dict.create();
+        }
+        Dict payload = Dict.create()
+                .set(GXMyBatisEventConstant.UPDATE_FIELD_DATA, updateFieldPayload(updateFields));
+        payload.putAll(conditionPayload(queryParam.getCondition()));
+        return payload;
+    }
+
+    /**
      * Whether a payload value cannot be defensively copied, so keeping it retains a reference to
      * caller-owned mutable state. Immutable leaves are never reported.
      */
@@ -102,17 +129,6 @@ public final class GXMyBatisListenerPayloadUtils {
             log.debug("Snapshot probe failed for value type {}; treating it as unsnapshotable",
                     value.getClass().getName(), exception);
             return true;
-        }
-    }
-
-    /**
-     * Copies a payload value, keeping the original when it cannot be copied.
-     */
-    public static @Nullable Object snapshotValue(@Nullable Object value) {
-        try {
-            return ObjectUtil.cloneIfPossible(value);
-        } catch (RuntimeException exception) {
-            return value;
         }
     }
 
