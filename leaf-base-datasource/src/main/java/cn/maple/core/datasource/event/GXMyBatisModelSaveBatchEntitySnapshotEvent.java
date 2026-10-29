@@ -10,9 +10,11 @@ import cn.hutool.core.lang.Dict;
  * only duplicates memory for large batches ({@code SC-005}). This subclass keeps the public event
  * type hierarchy intact and returns the pre-built payload directly.</p>
  *
- * <p>The publisher only uses this event when exactly one listener is declared. With multiple
- * listeners each event keeps its own defensive snapshot so that one listener cannot observe or
- * affect another listener's payload ({@code FR-008}).</p>
+ * <p>The publisher uses this event for every batch delivery. With a single listener the pre-built
+ * payload is returned as is; with multiple listeners the publisher wraps it once into a read-only
+ * snapshot ({@code GXReadOnlyPayload}) shared by all listeners, so there is still only one copy of
+ * the batch data and one listener cannot affect another listener's payload ({@code FR-008},
+ * {@code SC-005}).</p>
  */
 @SuppressWarnings("unchecked")
 public class GXMyBatisModelSaveBatchEntitySnapshotEvent<M extends Dict> extends GXMyBatisModelSaveBatchEntityEvent<M> {

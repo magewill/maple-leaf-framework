@@ -4,6 +4,7 @@ import cn.hutool.core.lang.Dict;
 import cn.maple.core.datasource.annotation.GXMyBatisListener;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerConfigResolver;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerMetrics;
 import cn.maple.core.datasource.config.GXMyBatisListenerProperties;
 import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
@@ -16,6 +17,7 @@ import org.springframework.mock.env.MockEnvironment;
 
 import java.lang.reflect.Method;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -53,6 +55,19 @@ class GXMyBatisListenerSwitchTest {
             eventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(1));
             eventPublisher.verify(() -> GXEventPublisherUtils.publishEventAfterCommit(any()), Mockito.never());
         }
+    }
+
+    @Test
+    void disabledSwitchDoesNotCountSkippedWrites() throws Exception {
+        MockEnvironment environment = new MockEnvironment()
+                .withProperty(GXMyBatisListenerEventPublisher.ENABLED_KEY, "false");
+        GXMyBatisListenerEventPublisher publisher = publisher(environment);
+        Method method = SwitchMapper.class.getMethod("insert", Object.class);
+
+        long skippedBefore = GXMyBatisListenerMetrics.snapshot().skipped();
+        assertFalse(publisher.hasListener(new SwitchMapperImpl(), method));
+        assertEquals(skippedBefore, GXMyBatisListenerMetrics.snapshot().skipped(),
+                "A disabled switch must not count writes as undeclared");
     }
 
     private GXMyBatisListenerEventPublisher publisher(MockEnvironment environment) {

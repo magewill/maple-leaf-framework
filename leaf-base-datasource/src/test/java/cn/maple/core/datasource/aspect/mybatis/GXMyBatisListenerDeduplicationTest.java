@@ -45,6 +45,21 @@ class GXMyBatisListenerDeduplicationTest {
                 resolver.resolve(resolver.mapperCandidateTypes(new ChildMapperImpl()), method);
 
         assertEquals(1, listeners.size());
+        assertEquals(ParentMapper.class.getName(), listeners.getFirst().declaredFrom(),
+                "An inherited declaration must be attributed to the interface that declares it");
+    }
+
+    @Test
+    void parentMethodDeclarationKeepsDeclaringInterface() throws Exception {
+        Method method = ChildMethodMapper.class.getMethod("updateFieldByCondition", Object.class);
+
+        List<GXMyBatisListenerConfigResolver.ResolvedListener> listeners =
+                resolver.resolve(resolver.mapperCandidateTypes(new ChildMethodMapperImpl()), method);
+
+        assertEquals(1, listeners.size());
+        assertEquals(BetaListener.class, listeners.getFirst().listenerClazz());
+        assertEquals(MethodLevelParentMapper.class.getName() + "#updateFieldByCondition",
+                listeners.getFirst().declaredFrom());
     }
 
     @Test
@@ -126,6 +141,22 @@ class GXMyBatisListenerDeduplicationTest {
         @Override
         public Object insert(Object entity) {
             return entity;
+        }
+    }
+
+    @GXMyBatisListener(listenerClazz = BetaListener.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+    private interface MethodLevelParentMapper {
+        @GXMyBatisListener(listenerClazz = BetaListener.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+        Object updateFieldByCondition(Object query);
+    }
+
+    private interface ChildMethodMapper extends MethodLevelParentMapper {
+    }
+
+    private static class ChildMethodMapperImpl implements ChildMethodMapper {
+        @Override
+        public Object updateFieldByCondition(Object query) {
+            return 1;
         }
     }
 

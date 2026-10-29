@@ -5,10 +5,12 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerAspectSupport;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.framework.util.GXCommonUtils;
-import lombok.extern.slf4j.Slf4j;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -20,12 +22,19 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 @Aspect
 @Component
-@Slf4j
-@SuppressWarnings("all")
 public class GXMyBatisPlusSaveBatchEntityAspect {
+    /**
+     * Resolving the mapper type walks the generic hierarchy of the proxied service, which is too
+     * expensive to repeat on every batch write (FR-018/SC-003). The cache is bounded and keyed by
+     * the target class whose generic signature is immutable at runtime.
+     */
+    private static final Cache<Class<?>, Optional<Class<?>>> MAPPER_CLASS_CACHE =
+            Caffeine.newBuilder().maximumSize(2_048L).build();
+
     private final GXMyBatisListenerEventPublisher eventPublisher;
 
     public GXMyBatisPlusSaveBatchEntityAspect(GXMyBatisListenerEventPublisher eventPublisher) {
@@ -35,24 +44,11 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
     @Around("target(com.baomidou.mybatisplus.spring.service.impl.ServiceImpl) && (execution(* saveBatch(..)) || execution(* saveOrUpdateBatch(..)))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();
-        if (!isSuccessfulResult(proceed)) {
+        if (!GXMyBatisListenerAspectSupport.isSuccessfulResult(proceed)) {
             return proceed;
         }
         publishEvent(point);
         return proceed;
-    }
-
-    private boolean isSuccessfulResult(Object result) {
-        if (ObjectUtil.isNull(result)) {
-            return false;
-        }
-        if (result instanceof Boolean boolResult) {
-            return boolResult;
-        }
-        if (result instanceof Number numResult) {
-            return numResult.longValue() > 0L;
-        }
-        return true;
     }
 
     private Dict handlePointArgs(ProceedingJoinPoint point) {
@@ -79,25 +75,27 @@ public class GXMyBatisPlusSaveBatchEntityAspect {
 
     private void publishEvent(ProceedingJoinPoint point) {
         Class<?> targetClass = AopUtils.getTargetClass(point.getTarget());
-        Type mapperType = GXCommonUtils.getGenericClassType(targetClass, 0);
-        Class<?> mapperClass = ObjectUtil.isNull(mapperType) ? null : convertTypeToClass(mapperType);
+        Class<?> mapperClass = MAPPER_CLASS_CACHE
+                .get(targetClass, type -> Optional.ofNullable(resolveMapperClass(type)))
+                .orElse(null);
 
-        Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
-        if (!eventPublisher.hasListener(point.getTarget(), mapperClass, invokedMethod)) {
-            return;
-        }
-        Dict source = handlePointArgs(point);
-        if (ObjectUtil.isEmpty(source)) {
-            return;
-        }
-        boolean batchChange = CharSequenceUtil.equals("saveOrUpdateBatch", source.getStr("operation"));
+        Method invokedMethod = GXMyBatisListenerAspectSupport.invokedMethod(point);
+        boolean batchChange = CharSequenceUtil.equals("saveOrUpdateBatch", invokedMethod.getName());
         GXModelEventNamingEnums syncEvent = batchChange
                 ? GXModelEventNamingEnums.SYNC_BATCH_CHANGE
                 : GXModelEventNamingEnums.SYNC_SAVE_BATCH_ENTITY;
         GXModelEventNamingEnums asyncEvent = batchChange
                 ? GXModelEventNamingEnums.ASYNC_BATCH_CHANGE
                 : GXModelEventNamingEnums.ASYNC_SAVE_BATCH_ENTITY;
-        eventPublisher.publish(point.getTarget(), mapperClass, invokedMethod, syncEvent, asyncEvent, source);
+        // The mapper type is the extra declaration scope of a batch write; the shared support call
+        // keeps the short-circuit, counting and payload rules identical to the other aspects (FR-018).
+        GXMyBatisListenerAspectSupport.publishIfDeclared(eventPublisher, point, mapperClass,
+                syncEvent, asyncEvent, () -> handlePointArgs(point));
+    }
+
+    private Class<?> resolveMapperClass(Class<?> targetClass) {
+        Type mapperType = GXCommonUtils.getGenericClassType(targetClass, 0);
+        return ObjectUtil.isNull(mapperType) ? null : convertTypeToClass(mapperType);
     }
 
     private Class<?> convertTypeToClass(Type type) {

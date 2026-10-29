@@ -5,8 +5,10 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerAspectSupport;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
+import cn.maple.core.datasource.enums.GXMyBatisListenerDegradeReasonEnums;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
@@ -14,17 +16,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
-import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.stereotype.Component;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
 @Aspect
 @Component
 @Slf4j
-@SuppressWarnings("all")
 public class GXMyBatisPlusDeleteAspect {
     private final GXMyBatisListenerEventPublisher eventPublisher;
 
@@ -40,61 +39,44 @@ public class GXMyBatisPlusDeleteAspect {
     @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && execution(* deleteCondition(..))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object result = point.proceed();
-        if (!isSuccessfulResult(result)) {
+        if (!GXMyBatisListenerAspectSupport.isSuccessfulResult(result)) {
             return result;
         }
-        publishEvent(point);
+        GXMyBatisListenerAspectSupport.publishIfDeclared(eventPublisher, point,
+                GXModelEventNamingEnums.SYNC_DELETE, GXModelEventNamingEnums.ASYNC_DELETE,
+                () -> handlePointArgs(point));
         return result;
     }
 
-    private boolean isSuccessfulResult(Object result) {
-        if (ObjectUtil.isNull(result)) {
-            return false;
-        }
-        if (result instanceof Boolean booleanResult) {
-            return booleanResult;
-        }
-        if (result instanceof Number numberResult) {
-            return numberResult.longValue() > 0L;
-        }
-        return true;
-    }
-
+    /**
+     * Builds the payload for the only intercepted operation. Branches for {@code deleteByMap},
+     * {@code deleteByIds} and primary-key deletes were unreachable: this aspect matches
+     * {@code deleteCondition} only, and primary-key deletion deliberately produces no event
+     * (FR-012).
+     */
     private Dict handlePointArgs(ProceedingJoinPoint point) {
         Object[] args = point.getArgs();
         if (ObjectUtil.isEmpty(args) || ObjectUtil.isNull(args[0])) {
             return Dict.create();
         }
-        String operation = ((MethodSignature) point.getSignature()).getName();
-        Dict source = Dict.create().set("operation", operation);
-        if (CharSequenceUtil.equals("deleteCondition", operation)) {
-            GXBaseQueryParamInnerDto queryParam = Convert.convert(new TypeReference<>() {
-            }, args[0]);
-            if (ObjectUtil.isNull(queryParam) || ObjectUtil.isEmpty(queryParam.getCondition())) {
-                return Dict.create();
-            }
-            List<String> rawConditions = new ArrayList<>();
-            Dict conditionFieldData = toConditionFieldData(queryParam.getCondition(), rawConditions);
-            return source
-                    .set("conditionFieldData", conditionFieldData)
-                    .set("conditionLossless", Boolean.TRUE)
-                    .set("degradeReasons", List.of())
-                    .set("rawConditionSql", String.join(" AND ", rawConditions));
+        GXBaseQueryParamInnerDto queryParam = Convert.convert(new TypeReference<>() {
+        }, args[0]);
+        if (ObjectUtil.isNull(queryParam) || ObjectUtil.isEmpty(queryParam.getCondition())) {
+            return Dict.create();
         }
-        if (CharSequenceUtil.equals("deleteByMap", operation)) {
-            return source
-                    .set("conditionFieldData", Convert.convert(Dict.class, args[0]))
-                    .set("conditionLossless", Boolean.TRUE)
-                    .set("degradeReasons", List.of())
-                    .set("rawConditionSql", "");
-        }
-        if (CharSequenceUtil.equals("deleteByIds", operation)) {
-            return source.set("ids", args[0]);
-        }
-        return source.set("id", args[0]);
+        List<String> rawConditions = new ArrayList<>();
+        List<GXMyBatisListenerDegradeReasonEnums> degradeReasons = new ArrayList<>();
+        Dict conditionFieldData = toConditionFieldData(queryParam.getCondition(), rawConditions, degradeReasons);
+        return Dict.create()
+                .set("operation", GXMyBatisListenerAspectSupport.invokedMethod(point).getName())
+                .set("conditionFieldData", conditionFieldData)
+                .set("conditionLossless", degradeReasons.isEmpty())
+                .set("degradeReasons", List.copyOf(degradeReasons))
+                .set("rawConditionSql", String.join(" AND ", rawConditions));
     }
 
-    private Dict toConditionFieldData(List<GXCondition<?>> conditions, List<String> rawConditions) {
+    private Dict toConditionFieldData(List<GXCondition<?>> conditions, List<String> rawConditions,
+                                      List<GXMyBatisListenerDegradeReasonEnums> degradeReasons) {
         Dict conditionFieldData = Dict.create();
         conditions.forEach(condition -> {
             if (condition == null) {
@@ -104,7 +86,10 @@ public class GXMyBatisPlusDeleteAspect {
                 try {
                     rawConditions.add(rawCondition.whereString());
                 } catch (RuntimeException exception) {
+                    // A skipped raw condition means the payload is no longer lossless; never claim
+                    // otherwise just because the structured fields look complete (FR-009/FR-010).
                     log.warn("Raw condition skipped from listener payload: {}", exception.getMessage());
+                    degradeReasons.add(GXMyBatisListenerDegradeReasonEnums.PARSE_ERROR);
                 }
                 return;
             }
@@ -115,18 +100,5 @@ public class GXMyBatisPlusDeleteAspect {
             conditionFieldData.set(CharSequenceUtil.toCamelCase(fieldExpression), condition.getFieldValue());
         });
         return conditionFieldData;
-    }
-
-    private void publishEvent(ProceedingJoinPoint point) {
-        Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
-        if (!eventPublisher.hasListener(point.getTarget(), invokedMethod)) {
-            return;
-        }
-        Dict source = handlePointArgs(point);
-        if (ObjectUtil.isEmpty(source)) {
-            return;
-        }
-        eventPublisher.publish(point.getTarget(), invokedMethod,
-                GXModelEventNamingEnums.SYNC_DELETE, GXModelEventNamingEnums.ASYNC_DELETE, source);
     }
 }

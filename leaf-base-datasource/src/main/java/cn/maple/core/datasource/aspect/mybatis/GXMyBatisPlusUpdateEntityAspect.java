@@ -4,8 +4,8 @@ import cn.hutool.core.convert.Convert;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerAspectSupport;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
-import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerMetrics;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.datasource.enums.GXMyBatisListenerDegradeReasonEnums;
 import com.baomidou.mybatisplus.core.conditions.AbstractWrapper;
@@ -31,7 +31,6 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.stereotype.Component;
 
-import java.lang.reflect.Method;
 import java.time.temporal.Temporal;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -81,24 +80,13 @@ public class GXMyBatisPlusUpdateEntityAspect {
             """)
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();
-        if (!isSuccessfulResult(proceed)) {
+        if (!GXMyBatisListenerAspectSupport.isSuccessfulResult(proceed)) {
             return proceed;
         }
-        publishEvent(point);
+        GXMyBatisListenerAspectSupport.publishIfDeclared(eventPublisher, point,
+                GXModelEventNamingEnums.SYNC_UPDATE_ENTITY, GXModelEventNamingEnums.ASYNC_UPDATE_ENTITY,
+                () -> handlePointArgs(point));
         return proceed;
-    }
-
-    private boolean isSuccessfulResult(Object result) {
-        if (ObjectUtil.isNull(result)) {
-            return false;
-        }
-        if (result instanceof Boolean boolResult) {
-            return boolResult;
-        }
-        if (result instanceof Number numResult) {
-            return numResult.longValue() > 0L;
-        }
-        return true;
     }
 
     private Dict handlePointArgs(ProceedingJoinPoint point) {
@@ -120,6 +108,9 @@ public class GXMyBatisPlusUpdateEntityAspect {
                     .set(KEY_VALUE_PAIRS, Dict.create())
                     .set(CONDITION_LOSSLESS, Boolean.TRUE)
                     .set(DEGRADE_REASONS, List.of())
+                    // The primary-key condition is carried by entityData, so the raw condition is
+                    // intentionally empty rather than absent (contracts/event-payload.md 空值语义).
+                    .set(RAW_WHERE_SQL, "")
                     .set(RAW_CONDITION_SQL, "");
         }
         if (args.length < 2) {
@@ -139,30 +130,6 @@ public class GXMyBatisPlusUpdateEntityAspect {
                 .set(CONDITION_LOSSLESS, Convert.toBool(updateCondition.get(CONDITION_LOSSLESS), Boolean.FALSE))
                 .set(DEGRADE_REASONS, updateCondition.get(DEGRADE_REASONS))
                 .set(SNAPSHOT_DEGRADED, Convert.toBool(updateCondition.get(SNAPSHOT_DEGRADED), Boolean.FALSE));
-    }
-
-    private void publishEvent(ProceedingJoinPoint point) {
-        Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
-        if (!eventPublisher.hasListener(point.getTarget(), invokedMethod)) {
-            return;
-        }
-        Dict source = handlePointArgs(point);
-        if (ObjectUtil.isEmpty(source)) {
-            return;
-        }
-        if (isDegradedPayload(source)) {
-            GXMyBatisListenerMetrics.recordDegraded();
-        }
-        eventPublisher.publish(point.getTarget(), invokedMethod,
-                GXModelEventNamingEnums.SYNC_UPDATE_ENTITY, GXModelEventNamingEnums.ASYNC_UPDATE_ENTITY, source);
-    }
-
-    private boolean isDegradedPayload(Dict source) {
-        if (Boolean.TRUE.equals(source.getBool(SNAPSHOT_DEGRADED))) {
-            return true;
-        }
-        Object reasons = source.get(DEGRADE_REASONS);
-        return reasons instanceof java.util.Collection<?> collection && !collection.isEmpty();
     }
 
     private <T> Dict handleUpdateWrapper(Object objectWrapper) {

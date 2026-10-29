@@ -57,6 +57,8 @@ class GXMyBatisAsyncListenerExecutorConfigTest {
         CountDownLatch release = new CountDownLatch(1);
         Future<?> submission = null;
         java.util.concurrent.ExecutorService probe = java.util.concurrent.Executors.newSingleThreadExecutor();
+        long rejectedBefore = GXMyBatisListenerMetrics.snapshot().rejected();
+        GXLogCapture capture = GXLogCapture.attach(GXMyBatisAsyncListenerExecutorConfig.class);
         try {
             executor.execute(() -> await(started, release));
             assertTrue(started.await(1, TimeUnit.SECONDS));
@@ -71,12 +73,46 @@ class GXMyBatisAsyncListenerExecutorConfigTest {
             assertTrue(submission.isDone());
             ExecutionException exception = assertThrows(ExecutionException.class, submission::get);
             assertInstanceOf(RejectedExecutionException.class, exception.getCause());
+            // FR-020: a throttled virtual-thread rejection must stay distinguishable from failures.
+            assertEquals(rejectedBefore + 1, GXMyBatisListenerMetrics.snapshot().rejected(),
+                    "Virtual-thread rejections must be counted in the rejected metric");
+            assertTrue(capture.hasEvent(org.apache.logging.log4j.Level.ERROR, "event task rejected"),
+                    "Virtual-thread rejections must produce a structured rejection log");
         } finally {
+            capture.detach();
             release.countDown();
             if (submission != null) {
                 submission.cancel(true);
             }
             probe.shutdownNow();
+            executor.close();
+        }
+    }
+
+    @Test
+    void virtualThreadShutdownCountsInFlightTasksAsCancelled() throws Exception {
+        GXMyBatisAsyncListenerExecutorConfig config = configured(true);
+        SimpleAsyncTaskExecutor executor = (SimpleAsyncTaskExecutor) config.myBatisEventAsyncTaskExecutor();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        long cancelledBefore = GXMyBatisListenerMetrics.snapshot().cancelled();
+        GXLogCapture capture = GXLogCapture.attach(GXMyBatisAsyncListenerExecutorConfig.class);
+        try {
+            executor.execute(() -> await(started, release));
+            assertTrue(started.await(1, TimeUnit.SECONDS));
+
+            // Virtual threads have no queue; in-flight work is the unfinished work at shutdown.
+            config.recordUnexecutedTasksOnShutdown();
+
+            int unfinished = GXMyBatisListenerMetrics.snapshot().activeTasks();
+            assertTrue(unfinished >= 1, "The blocking task must still be in flight");
+            assertEquals(cancelledBefore + unfinished, GXMyBatisListenerMetrics.snapshot().cancelled(),
+                    "Shutdown must count in-flight virtual-thread tasks as cancelled");
+            assertTrue(capture.hasEvent(org.apache.logging.log4j.Level.WARN, "unexecuted tasks"),
+                    "Shutdown must warn about the number of unexecuted tasks");
+        } finally {
+            capture.detach();
+            release.countDown();
             executor.close();
         }
     }
@@ -164,22 +200,8 @@ class GXMyBatisAsyncListenerExecutorConfigTest {
         ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor) config.myBatisEventAsyncTaskExecutor();
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
-        java.util.List<String> messages = new java.util.concurrent.CopyOnWriteArrayList<>();
-        org.apache.logging.log4j.core.appender.AbstractAppender appender =
-                new org.apache.logging.log4j.core.appender.AbstractAppender("executor-log-capture", null,
-                        org.apache.logging.log4j.core.layout.PatternLayout.createDefaultLayout(), false,
-                        org.apache.logging.log4j.core.config.Property.EMPTY_ARRAY) {
-                    @Override
-                    public void append(org.apache.logging.log4j.core.LogEvent event) {
-                        messages.add(event.getMessage().getFormattedMessage());
-                    }
-                };
-        appender.start();
-        org.apache.logging.log4j.core.Logger logger = (org.apache.logging.log4j.core.Logger)
-                org.apache.logging.log4j.LogManager.getLogger(GXMyBatisAsyncListenerExecutorConfig.class);
-        org.apache.logging.log4j.Level previousLevel = logger.getLevel();
-        logger.setLevel(org.apache.logging.log4j.Level.WARN);
-        logger.addAppender(appender);
+        // Use the shared capture helper so the logger level and appender are restored reliably.
+        GXLogCapture capture = GXLogCapture.attach(GXMyBatisAsyncListenerExecutorConfig.class);
         try {
             executor.execute(() -> await(started, release));
             assertTrue(started.await(2, TimeUnit.SECONDS));
@@ -189,13 +211,11 @@ class GXMyBatisAsyncListenerExecutorConfigTest {
             assertThrows(RejectedExecutionException.class, () -> executor.execute(() -> {
             }));
 
-            assertTrue(messages.stream().anyMatch(message -> message.contains("operationId=it-op-1")),
-                    () -> "Rejection log must carry the operation id: " + messages);
+            assertTrue(capture.hasEvent(org.apache.logging.log4j.Level.ERROR, "operationId=it-op-1"),
+                    "Rejection log must carry the operation id");
         } finally {
             GXMyBatisListenerTaskContext.clear();
-            logger.removeAppender(appender);
-            logger.setLevel(previousLevel);
-            appender.stop();
+            capture.detach();
             release.countDown();
             executor.shutdown();
         }
@@ -228,12 +248,20 @@ class GXMyBatisAsyncListenerExecutorConfigTest {
             });
             executor.execute(() -> {
             });
-            assertEquals(2, executor.getThreadPoolExecutor().getQueue().size());
+            int queuedBeforeClose = executor.getThreadPoolExecutor().getQueue().size();
+            assertEquals(2, queuedBeforeClose);
 
-            context.close();
+            GXLogCapture capture = GXLogCapture.attach(GXMyBatisAsyncListenerExecutorConfig.class);
+            try {
+                context.close();
+            } finally {
+                capture.detach();
+            }
 
-            assertTrue(GXMyBatisListenerMetrics.snapshot().cancelled() - cancelledBefore >= 2L,
-                    "Closing the context must count the queued tasks as cancelled");
+            assertEquals(cancelledBefore + queuedBeforeClose, GXMyBatisListenerMetrics.snapshot().cancelled(),
+                    "Closing the context must count every unexecuted queued task as cancelled");
+            assertTrue(capture.hasEvent(org.apache.logging.log4j.Level.WARN, "unexecuted tasks"),
+                    "Shutdown must warn about the number of unexecuted tasks");
         } finally {
             release.countDown();
             if (context.isActive()) {

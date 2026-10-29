@@ -5,8 +5,10 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerAspectSupport;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
+import cn.maple.core.datasource.enums.GXMyBatisListenerDegradeReasonEnums;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
@@ -15,10 +17,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
-import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.stereotype.Component;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -36,24 +36,13 @@ public class GXMyBatisPlusUpdateFieldAspect {
     @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && execution(* updateFieldByCondition(..))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();
-        if (!isSuccessfulResult(proceed)) {
+        if (!GXMyBatisListenerAspectSupport.isSuccessfulResult(proceed)) {
             return proceed;
         }
-        publishEvent(point);
+        GXMyBatisListenerAspectSupport.publishIfDeclared(eventPublisher, point,
+                GXModelEventNamingEnums.SYNC_UPDATE_FIELD, GXModelEventNamingEnums.ASYNC_UPDATE_FIELD,
+                () -> handlePointArgs(point));
         return proceed;
-    }
-
-    private boolean isSuccessfulResult(Object result) {
-        if (ObjectUtil.isNull(result)) {
-            return false;
-        }
-        if (result instanceof Boolean boolResult) {
-            return boolResult;
-        }
-        if (result instanceof Number numResult) {
-            return numResult.longValue() > 0L;
-        }
-        return true;
     }
 
     private Dict handlePointArgs(ProceedingJoinPoint point) {
@@ -70,6 +59,19 @@ public class GXMyBatisPlusUpdateFieldAspect {
             return Dict.create();
         }
 
+        List<String> rawConditions = new ArrayList<>();
+        List<GXMyBatisListenerDegradeReasonEnums> degradeReasons = new ArrayList<>();
+        Dict conditionFieldData = buildConditionFieldData(baseQueryParam.getCondition(), rawConditions, degradeReasons);
+
+        return Dict.create()
+                .set("updateFieldData", buildUpdateFieldData(updateFieldList))
+                .set("conditionFieldData", conditionFieldData)
+                .set("conditionLossless", degradeReasons.isEmpty())
+                .set("degradeReasons", List.copyOf(degradeReasons))
+                .set("rawConditionSql", String.join(" AND ", rawConditions));
+    }
+
+    private Dict buildUpdateFieldData(List<GXUpdateField<?>> updateFieldList) {
         Dict updateFieldData = Dict.create();
         updateFieldList.forEach(field -> {
             if (field == null) {
@@ -80,10 +82,17 @@ public class GXMyBatisPlusUpdateFieldAspect {
                 updateFieldData.set(CharSequenceUtil.toCamelCase(fieldName), field.getFieldValue());
             }
         });
+        return updateFieldData;
+    }
 
-        List<String> rawConditions = new ArrayList<>();
+    /**
+     * Collects the structured condition fields and the raw SQL pieces. A raw condition that cannot be
+     * rendered is recorded as a {@code PARSE_ERROR} degrade reason instead of being dropped silently
+     * (FR-009/FR-010).
+     */
+    private Dict buildConditionFieldData(List<GXCondition<?>> conditionList, List<String> rawConditions,
+                                         List<GXMyBatisListenerDegradeReasonEnums> degradeReasons) {
         Dict conditionFieldData = Dict.create();
-        List<GXCondition<?>> conditionList = baseQueryParam.getCondition();
         conditionList.forEach(condition -> {
             if (condition == null) {
                 return;
@@ -93,6 +102,7 @@ public class GXMyBatisPlusUpdateFieldAspect {
                     rawConditions.add(rawCondition.whereString());
                 } catch (RuntimeException exception) {
                     log.warn("Raw condition skipped from listener payload: {}", exception.getMessage());
+                    degradeReasons.add(GXMyBatisListenerDegradeReasonEnums.PARSE_ERROR);
                 }
                 return;
             }
@@ -102,25 +112,6 @@ public class GXMyBatisPlusUpdateFieldAspect {
             }
             conditionFieldData.set(CharSequenceUtil.toCamelCase(fieldExpression), condition.getFieldValue());
         });
-
-        return Dict.create()
-                .set("updateFieldData", updateFieldData)
-                .set("conditionFieldData", conditionFieldData)
-                .set("conditionLossless", Boolean.TRUE)
-                .set("degradeReasons", List.of())
-                .set("rawConditionSql", String.join(" AND ", rawConditions));
-    }
-
-    private void publishEvent(ProceedingJoinPoint point) {
-        Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
-        if (!eventPublisher.hasListener(point.getTarget(), invokedMethod)) {
-            return;
-        }
-        Dict source = handlePointArgs(point);
-        if (ObjectUtil.isEmpty(source)) {
-            return;
-        }
-        eventPublisher.publish(point.getTarget(), invokedMethod,
-                GXModelEventNamingEnums.SYNC_UPDATE_FIELD, GXModelEventNamingEnums.ASYNC_UPDATE_FIELD, source);
+        return conditionFieldData;
     }
 }

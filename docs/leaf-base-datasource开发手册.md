@@ -399,343 +399,129 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 }
 ```
 
-#### 3.3.3 事件监听
+#### 3.3.3 MyBatis 事件监听与 `@GXMyBatisListener`
 
-##### 3.3.3.1 相关类
+`@GXMyBatisListener` 只负责把某个写操作的声明指向一个监听器实现，监听逻辑写在 `GXMybatisListenerService` 的实现类里。
 
-- `GXMyBatisListener`：MyBatis 监听器注解，标记一个类为MyBatis事件监听器
-- `GXMyBatisBaseListener`：MyBatis 基础监听器接口，定义了处理各种事件的基本方法
-- `GXMyBatisAsyncListener`：MyBatis 异步监听器，在独立线程中处理事件，不阻塞主流程
-- `GXMyBatisSyncListener`：MyBatis 同步监听器，在当前线程中处理事件，可参与事务
-- `GXMybatisListenerService`：MyBatis 监听器服务接口，定义了实体操作的监听方法
-- `GXMyBatisAsyncListenerExecutorConfig`：异步监听器线程池配置类
+##### 3.3.3.1 声明位置与解析规则
 
-##### 3.3.3.2 支持的事件类型
+- 可标注在 **Mapper 接口类型**、**Mapper 接口中重声明的被拦截写方法**、**批量保存所在的 Service 类型**（`ServiceImpl` 子类，如 `GXMyBatisDao`）或其 `saveBatch`/`saveOrUpdateBatch` 方法上；`@Inherited` 只对类继承生效，接口上的声明由框架沿父接口/父类主动回溯。
+- 方法级声明只在被切面拦截的写方法上生效（清单见 3.3.5 能力覆盖边界）；自定义 SQL 方法即使标注 `@GXMyBatisListener` 也不会产生任何投递。
+- 注解 **不会** 因为标注在监听器实现类上而生效：框架不扫描监听器类，只解析被拦截写操作的目标类型（Mapper 代理接口、批量服务类型）及其父接口/父类。给监听器类加注解不会产生任何投递。
+- 优先级：方法级声明优先于类型级；类型级优先取候选类型自身的声明，再回溯父接口/父类。父接口上的声明会被归因到真正声明它的类型（日志中的 `declaredFrom`）。
+- 去重：同一次写操作中，同一 `listenerClazz` 且同一执行模式只投递一次；多个接口声明不同监听器时各投递一次，顺序按接口全限定名稳定排序。`deduplicate=false` 仅用于兼容验证旧的多投递行为。
+- `listenerClazz` 指向的 Bean 必须实现 `GXMybatisListenerService`：框架按类名首字母小写查找，找不到或类型不匹配会抛 `GXBusinessException`，按 `failed` 计一次后被隔离，业务写操作不受影响。
 
-- `GXMyBatisModelCreatingEntityEvent`：实体创建前事件，在实体保存到数据库前触发
-- `GXMyBatisModelSaveEntityEvent`：实体保存事件，在实体保存到数据库后触发
-- `GXMyBatisModelSaveBatchEntityEvent`：批量保存事件，在批量保存实体后触发
-- `GXMyBatisModelUpdatingEntityEvent`：实体更新前事件，在实体更新前触发
-- `GXMyBatisModelUpdateEntityEvent`：实体更新事件，在实体更新后触发
-- `GXMyBatisModelUpdateFieldEvent`：字段更新事件，在更新特定字段后触发
-- `GXMyBatisModelDeleteEvent`：删除事件，在物理删除实体后触发
-- `GXMyBatisModelDeleteSoftEvent`：软删除事件，在软删除实体后触发
+##### 3.3.3.2 注解参数
 
-##### 3.3.3.3 工作原理
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `listenerClazz` | `Class<? extends GXMybatisListenerService<?>>` | 是 | 无 | 监听器实现的 Spring Bean 类型 |
+| `runType` | `String` | 否 | `GXMyBatisEventConstant.MYBATIS_SYNC_EVENT` | `MYBATIS_SYNC_EVENT`：业务线程内执行，事务尚未提交；`MYBATIS_ASYNC_EVENT`：提交后由 `myBatisEventAsyncTaskExecutor` 执行 |
 
-事件监听系统深度整合了 Spring 的事件发布订阅机制与 AOP 技术，以非侵入式的方式对 MyBatis 的核心操作（增、删、改）进行监听。其核心流程如下：
+##### 3.3.3.3 监听器实现
 
-1.  **注解扫描与监听器注册**：
-    *   系统启动时，会扫描带有 `@GXMyBatisListener` 注解的类、Service 或 Mapper 方法。
-    *   对于标记在类上的注解，如果指定了 `listenerClazz`，则将该服务类注册为对应实体操作的监听器。
-    *   对于标记在 Service 类或 Mapper 方法上的注解，系统会动态地将注解中指定的 `listenerClazz` (实现了 `GXMybatisListenerService` 接口的服务) 与这些数据操作关联起来。
-    *   `runType` 参数（默认为同步 `GXMyBatisEventConstant.MYBATIS_SYNC_EVENT`）决定了监听器执行的模式（同步或异步）。
+实现 `cn.maple.core.datasource.service.GXMybatisListenerService<T>`，按需覆写默认方法。泛型 `T` 是单条事件回调的实体类型，框架会按 `T` 转换载荷。
 
-2.  **AOP 拦截与事件发布**：
-    *   通过一系列精心设计的 AOP 切面（例如 `GXMyBatisPlusSaveEntityAspect` 用于监听保存操作，`GXMyBatisPlusUpdateEntityAspect` 用于监听更新操作，`GXMyBatisPlusDeleteEntityAspect` 用于监听删除操作）来拦截 MyBatis 的 `insert`, `update`, `delete` 等关键数据操作方法。这些切面通常作用于 `GXMyBatisBaseServiceImpl` 中的标准方法或直接作用于 Mapper 接口的方法调用。
-    *   在被拦截的方法执行前或执行后，切面会根据操作类型和结果，构建并发布相应的事件对象（如 `GXMyBatisModelSaveEntityEvent`, `GXMyBatisModelUpdateEntityEvent` 等）。这些事件对象封装了操作的上下文信息，如被操作的实体、更新的字段等。
-
-3.  **事件分发与处理**：
-    *   Spring 的 `ApplicationEventMulticaster` 负责将发布的事件分发给所有匹配的监听器。
-    *   `GXMyBatisBaseListener` (及其子类 `GXMyBatisSyncListener`, `GXMyBatisAsyncListener`) 实现了 Spring 的 `ApplicationListener` 接口，能够接收这些事件。
-    *   监听器内部会根据事件的具体类型（如 `instanceof UserEntity`）和注解配置，调用 `GXMybatisListenerService` 实现类中对应的方法（如 `saveEntityListener`, `updateEntityListener`）。
-
-4.  **同步与异步执行**：
-    *   **同步监听器** (`GXMyBatisSyncListener` 或 `runType` 为同步时)：事件处理逻辑在当前业务线程中执行。这意味着监听器的执行会阻塞主流程，并且可以参与到主流程的事务中。适用于需要强一致性、事务性保障的后置处理。
-    *   **异步监听器** (`GXMyBatisAsyncListener` 或 `runType` 为异步时)：事件处理逻辑会被提交到专门的异步监听器线程池 (`GXMyBatisAsyncListenerExecutorConfig` 配置的 `myBatisEventAsyncTaskExecutor`) 中执行。这使得监听器操作与主业务流程解耦，不会阻塞主线程，适用于耗时较长或不需要立即反馈的非核心业务逻辑，如发送通知、记录日志等。异步监听器通常需要自行管理事务。
-
-通过这种机制，开发者可以方便地对数据持久化操作的各个生命周期点进行扩展，实现如操作审计、缓存更新、消息通知等附加功能，而无需修改核心的业务代码。
-
-##### 3.3.3.4 同步与异步监听器
-
-**同步监听器**：
-- 在当前线程中执行，会阻塞主流程
-- 可以参与当前事务，适合需要事务支持的操作
-- 异常会直接影响主流程，需要妥善处理异常
-- 适用场景：与主业务强相关的操作，如更新关联数据、校验数据一致性等
-
-**异步监听器**：
-- 在独立线程池中执行，不阻塞主流程
-- 无法参与主流程的事务，需要自行处理事务
-- 异常不会影响主流程，但需要妥善记录和处理异常
-- 适用场景：与主业务弱相关的操作，如发送通知、记录日志、统计分析等
-
-### 3.3.2 MyBatis 事件监听与 `@GXMyBatisListener`
-
-`@GXMyBatisListener` 注解用于定义和配置MyBatis操作事件的监听器。通过此注解，开发者可以方便地在数据持久化操作（如增、删、改）的不同阶段插入自定义逻辑，例如记录审计日志、更新缓存、发送通知等。
-
-该注解可以标记在实现了 `cn.maple.core.datasource.listener.GXMybatisListenerService` 接口的监听器类上，或者直接标记在 `Service` 类或 `Mapper` 接口的方法上，以指定特定的监听行为。框架会自动扫描带有此注解的组件，并根据配置的事件类型（同步/异步）和作用范围来触发相应的监听器方法。
-
-##### 3.3.2.1 核心接口与类
-
-- **`cn.maple.core.datasource.annotation.GXMyBatisListener`**: 核心注解，用于声明一个类或方法作为MyBatis事件监听器，并配置其行为。
-- **`cn.maple.core.datasource.listener.GXMyBatisBaseListener`**: 监听器基础接口，定义了MyBatis操作（如保存、更新、删除等）的事件回调方法。开发者需要实现此接口中的一个或多个方法来处理特定事件。它包含以下主要方法：
-    - `onSaveEntity(GXMyBatisModelSaveEntityEvent event)`: 监听实体保存操作。
-    - `onUpdateEntity(GXMyBatisModelUpdateEntityEvent event)`: 监听实体更新操作。
-    - `onUpdateField(GXMyBatisModelUpdateFieldEvent event)`: 监听实体特定字段更新操作。
-    - `onDeleteLogic(GXMyBatisModelDeleteLogicEvent event)`: 监听实体逻辑删除操作。
-    - `onSaveBatch(GXMyBatisModelSaveBatchEvent event)`: 监听实体批量保存操作。
-- **`cn.maple.core.datasource.listener.GXMyBatisSyncListener`**: 同步监听器抽象类，实现了 `GXMyBatisBaseListener`。同步监听器的逻辑会在主业务操作的同一个事务内、同一个线程中执行。适用于需要强一致性或事务保证的场景。
-- **`cn.maple.core.datasource.listener.GXMyBatisAsyncListener`**: 异步监听器抽象类，实现了 `GXMyBatisBaseListener`。异步监听器的逻辑会在独立的线程中执行，不阻塞主业务流程，通常通过配置的线程池进行管理。适用于耗时操作或对主流程性能影响较大的场景。
-- **`cn.maple.core.datasource.listener.GXMybatisListenerService`**: 一个标记接口。如果 `@GXMyBatisListener` 注解的 `listenerClazz` 属性指定的是一个实现了此接口的类，框架会认为这是一个需要被管理的监听器服务。通常，监听器类会直接继承 `GXMyBatisSyncListener` 或 `GXMyBatisAsyncListener`，并被Spring容器管理（例如使用 `@Component` 注解）。
-- **事件对象 (位于 `cn.maple.core.datasource.event` 包下)**:
-    - `GXMyBatisModelEvent`: 所有MyBatis模型事件的基类。
-    - `GXMyBatisModelSaveEntityEvent`: 实体保存事件对象，包含被保存的实体信息。
-    - `GXMyBatisModelUpdateEntityEvent`: 实体更新事件对象，包含更新前后的实体信息或更新参数。
-    - `GXMyBatisModelUpdateFieldEvent`: 实体特定字段更新事件对象。
-    - `GXMyBatisModelDeleteLogicEvent`: 实体逻辑删除事件对象。
-    - `GXMyBatisModelSaveBatchEvent`: 实体批量保存事件对象，包含被批量保存的实体列表。
-- **`cn.maple.core.datasource.constant.GXMyBatisEventConstant`**: 事件常量类，定义了监听器执行类型的常量：
-    - `MYBATIS_SYNC_EVENT`: 表示同步执行事件。
-    - `MYBATIS_ASYNC_EVENT`: 表示异步执行事件。
-
-1. 创建监听器服务接口实现：
+| 方法 | 触发操作 | 回调载荷 |
+| --- | --- | --- |
+| `saveEntityListener(T data)` | 单条插入 | 实体快照 |
+| `updateEntityListener(T data, Dict keyValuePairs, Dict keyOperatorPairs)` | 按条件更新 / 按主键更新 | 实体、条件字段、操作符 |
+| `updateEntityListener(T data, Dict keyValuePairs, Dict keyOperatorPairs, String rawWhereSql)` | 同上（默认方法，默认转调三参版本） | 追加原始条件文本 |
+| `updateFieldListener(Dict updateFieldData, Dict conditionFieldData)` | 指定字段更新 | 更新字段、条件字段 |
+| `deleteListener(Dict data)` | 条件物理删除 | 条件字段、原始条件 |
+| `deleteSoftListener(Dict data)` | 条件软删除 | 条件字段、调用方显式传入的更新字段 |
+| `saveBatchListener(Dict data)` | 批量保存 | 批次实体列表 |
+| `batchChangeListener(Dict data)` | 批量新增或更新（默认转调 `saveBatchListener`） | 批次实体列表 |
 
 ```java
-public interface UserListenerService extends GXMybatisListenerService<UserEntity> {
-    // 可以定义特定于用户实体的监听方法
-}
+@Component
+public class UserAuditListener implements GXMybatisListenerService<UserEntity> {
+    private static final Logger LOG = LoggerFactory.getLogger(UserAuditListener.class);
 
+    @Override
+    public void saveEntityListener(UserEntity user) {
+        LOG.info("user saved: {}", user.getUsername());
+    }
+
+    @Override
+    public void deleteSoftListener(Dict data) {
+        // 条件字段在 conditionFieldData；updateFieldData 只含调用方显式传入的更新字段
+        LOG.info("user soft deleted: {}", data.get("conditionFieldData"));
+    }
+}
+```
+
+##### 3.3.3.4 声明示例
+
+> 只有 3.3.5「能力覆盖边界」列出的写方法会产生事件。自定义 SQL 方法（如 `decreaseStock`）不在拦截范围内，即使标注 `@GXMyBatisListener` 也不会有任何投递。
+
+Mapper 类型级（推荐；该 Mapper 上所有被拦截的写方法都触发）：
+
+```java
+@Mapper
+@GXMyBatisListener(listenerClazz = UserAuditListener.class)
+public interface UserMapper extends GXBaseMapper<UserEntity> {
+}
+```
+
+批量保存所在的 Service 类型级：
+
+```java
 @Service
-public class UserListenerServiceImpl implements UserListenerService {
-    private final Logger logger = LoggerFactory.getLogger(getClass());
-    
+@GXMyBatisListener(listenerClazz = OrderAuditListener.class, runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT)
+public class OrderServiceImpl extends ServiceImpl<OrderMapper, OrderEntity> implements OrderService {
+}
+```
+
+方法级（仅该方法触发；与上例二选一）：在 `ServiceImpl` 子类中重写 `saveBatch`/`saveOrUpdateBatch` 并标注。
+
+```java
+@Service
+public class OrderServiceImpl extends ServiceImpl<OrderMapper, OrderEntity> implements OrderService {
+
     @Override
-    public void saveEntityListener(UserEntity entity) {
-        // 处理用户保存事件
-        logger.info("用户已保存: {}", entity.getUsername());
-        // 执行其他业务逻辑...
-    }
-    
-    @Override
-    public void updateEntityListener(UserEntity entity, Dict keyValuePairs, Dict keyOperatorPairs) {
-        // 处理用户更新事件
-        logger.info("用户已更新: {}", entity.getUsername());
-        // 执行其他业务逻辑...
-    }
-    
-    @Override
-    public void deleteEntityListener(Dict condition) {
-        // 处理用户删除事件
-        logger.info("用户已删除，条件: {}", condition);
-        // 执行其他业务逻辑...
+    @GXMyBatisListener(listenerClazz = OrderAuditListener.class)
+    public boolean saveBatch(Collection<OrderEntity> entityList) {
+        return super.saveBatch(entityList);
     }
 }
 ```
 
-##### 3.3.2.2 `@GXMyBatisListener` 注解使用示例
+##### 3.3.3.5 事件载体
 
-1.  **创建监听器实现类**：
-    继承 `GXMyBatisSyncListener` (同步) 或 `GXMyBatisAsyncListener` (异步)，并重写需要关注的事件处理方法。使用 `@Component` (或其他Spring stereotype注解) 使其被Spring容器管理，并使用 `@GXMyBatisListener` 标记该类。
+事件类位于 `cn.maple.core.datasource.event`，由对应切面发布：
 
-    **同步监听器示例：**
-    ```java
-    package com.example.listener;
+| 事件类 | 对应操作 |
+| --- | --- |
+| `GXMyBatisModelSaveEntityEvent` | 单条插入 |
+| `GXMyBatisModelUpdateEntityEvent` | 按条件/按主键更新 |
+| `GXMyBatisModelUpdateFieldEvent` | 指定字段更新 |
+| `GXMyBatisModelDeleteEvent` | 条件物理删除 |
+| `GXMyBatisModelDeleteSoftEvent` | 条件软删除 |
+| `GXMyBatisModelSaveBatchEntityEvent` | 批量保存 / 批量新增或更新 |
+| `GXMyBatisModelSaveBatchEntitySnapshotEvent` | 多监听方共享的只读批量快照 |
 
-    import cn.maple.core.datasource.annotation.GXMyBatisListener;
-    import cn.maple.core.datasource.event.GXMyBatisModelSaveEntityEvent;
-    import cn.maple.core.datasource.event.GXMyBatisModelUpdateEntityEvent;
-    import cn.maple.core.datasource.listener.GXMyBatisSyncListener;
-    import com.example.entity.UserEntity; // 假设的实体类
-    import org.slf4j.Logger;
-    import org.slf4j.LoggerFactory;
-    import org.springframework.stereotype.Component;
-    import org.apache.commons.collections.MapUtils; // 假设使用commons-collections
-    import java.util.Map;
+`GXMyBatisModelCreatingEntityEvent`、`GXMyBatisModelUpdatingEntityEvent` 是保留的"写入前"事件类型，当前切面不会发布，不能依赖它们在写入前做校验。
 
-    @Component
-    @GXMyBatisListener // 标记此类为MyBatis事件监听器，默认同步执行
-    public class UserAuditSyncListener extends GXMyBatisSyncListener {
+##### 3.3.3.6 异步执行器配置
 
-        private static final Logger logger = LoggerFactory.getLogger(UserAuditSyncListener.class);
+异步回调固定使用 `myBatisEventAsyncTaskExecutor`（由 `GXMyBatisAsyncListenerExecutorConfig` 定义），注解没有 `asyncExecutor`、`order` 参数。执行器参数位于 `maple.framework.mybatis.async.listener.*`：
 
-        @Override
-        public void onSaveEntity(GXMyBatisModelSaveEntityEvent event) {
-            if (event.getSource() instanceof UserEntity) {
-                UserEntity user = (UserEntity) event.getSource();
-                logger.info("[SYNC] User saved: {}", user.getUsername());
-                // 在同一事务中执行审计日志记录等操作
-            }
-        }
+| 配置键 | 默认值 | 说明 |
+| --- | --- | --- |
+| `core-pool-size-factor` | `1.0` | 核心池大小 = CPU 核数 × 系数（向上取整，最小 1） |
+| `max-pool-size-factor` | `1.0` | 最大池大小 = 核心池大小 × 系数（向上取整） |
+| `queue-capacity` | `1000` | 池化模式队列容量 |
+| `keep-alive-seconds` | `120` | 空闲线程存活时间 |
+| `long-task-threshold-ms` | `30000` | 长任务告警阈值 |
+| `await-termination-seconds` | `60` | 停机等待窗口 |
+| `virtual.enabled` | 取 `spring.threads.virtual.enabled`（缺省 `false`） | 是否使用虚拟线程执行异步回调 |
+| `virtual.concurrency-limit` | `0` | 虚拟线程并发上限；`0` 取最大池化线程数，`-1` 表示不限制 |
 
-        @Override
-        public void onUpdateEntity(GXMyBatisModelUpdateEntityEvent event) {
-            Object source = event.getSource();
-            if (source instanceof Map) { // 更新操作可能传递Map类型的参数
-                Map<?, ?> params = (Map<?, ?>) source;
-                Object entityData = params.get("entityData"); // GXMyBatisBaseServiceImpl中更新方法传递的实体通常在entityData中
-                if (entityData instanceof UserEntity) {
-                    UserEntity user = (UserEntity) entityData;
-                    logger.info("[SYNC] User updated: {}", user.getUsername());
-                    // 在同一事务中执行审计日志记录等操作
-                }
-            } else if (source instanceof UserEntity) { // 也可能直接是实体对象
-                 UserEntity user = (UserEntity) source;
-                 logger.info("[SYNC] User updated directly: {}", user.getUsername());
-            }
-        }
-        // 可以根据需要重写其他事件方法，如 onDeleteLogic, onUpdateField 等
-    }
-    ```
+回调的事务语义、载荷只读、降级与递归约束见 3.3.5。
 
-    **异步监听器示例：**
-    ```java
-    package com.example.listener;
-
-    import cn.maple.core.datasource.annotation.GXMyBatisListener;
-    import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
-    import cn.maple.core.datasource.event.GXMyBatisModelSaveEntityEvent;
-    import cn.maple.core.datasource.listener.GXMyBatisAsyncListener;
-    import com.example.entity.UserEntity;
-    import org.slf4j.Logger;
-    import org.slf4j.LoggerFactory;
-    import org.springframework.stereotype.Component;
-
-    @Component
-    @GXMyBatisListener(
-        runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT, // 设置为异步执行
-        asyncExecutor = "myBatisEventAsyncTaskExecutor" // 指定异步执行器Bean名称 (可选)
-    )
-    public class WelcomeNotificationAsyncListener extends GXMyBatisAsyncListener {
-
-        private static final Logger logger = LoggerFactory.getLogger(WelcomeNotificationAsyncListener.class);
-
-        @Override
-        public void onSaveEntity(GXMyBatisModelSaveEntityEvent event) {
-            if (event.getSource() instanceof UserEntity) {
-                UserEntity user = (UserEntity) event.getSource();
-                logger.info("[ASYNC] New user registered: {}. Preparing to send welcome email.", user.getUsername());
-                try {
-                    // 模拟发送邮件等耗时操作
-                    Thread.sleep(2000); // 模拟耗时
-                    logger.info("[ASYNC] Welcome email sent to {}.
-", user.getEmail());
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    logger.error("[ASYNC] Error sending welcome email for user {}: {}", user.getUsername(), e.getMessage());
-                } catch (Exception e) {
-                    logger.error("[ASYNC] Unexpected error sending welcome email for user {}: {}", user.getUsername(), e.getMessage());
-                }
-            }
-        }
-        // 其他异步事件处理
-    }
-    ```
-
-2.  **在Service类或Mapper方法上使用 `@GXMyBatisListener`** (可选，用于更细粒度的控制)
-
-    如果不想全局监听某个实体的所有操作，或者想为特定的Service操作或Mapper方法指定不同的监听器，可以直接在它们上面使用 `@GXMyBatisListener` 注解，并指定 `listenerClazz`。
-
-    **在Service类上使用示例：**
-    ```java
-    package com.example.service;
-
-    import cn.maple.core.datasource.annotation.GXMyBatisListener;
-    import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
-    import cn.maple.core.datasource.service.impl.GXMyBatisBaseServiceImpl;
-    import com.example.entity.OrderEntity;
-    import com.example.listener.OrderSpecificAsyncListener; // 假设这是为Order定制的异步监听器
-    import com.example.mapper.OrderMapper;
-    import org.springframework.stereotype.Service;
-
-    @Service
-    @GXMyBatisListener(
-        listenerClazz = OrderSpecificAsyncListener.class, // 指定特定的监听器类
-        runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT
-    )
-    public class OrderServiceImpl extends GXMyBatisBaseServiceImpl<OrderMapper, OrderEntity> implements OrderService {
-        // 此Service中所有GXMyBatisBaseServiceImpl提供的标准增删改查方法，
-        // 以及通过OrderMapper执行的数据操作，都将异步触发OrderSpecificAsyncListener。
-    }
-    ```
-
-    **在Mapper方法上使用示例：**
-    ```java
-    package com.example.mapper;
-
-    import cn.maple.core.datasource.annotation.GXMyBatisListener;
-    import cn.maple.core.datasource.mapper.GXBaseMapper;
-    import com.example.entity.ProductEntity;
-    import com.example.listener.ProductStockSyncListener; // 假设这是产品库存同步监听器
-    import org.apache.ibatis.annotations.Mapper;
-    import org.apache.ibatis.annotations.Param;
-
-    @Mapper
-    public interface ProductMapper extends GXBaseMapper<ProductEntity> {
-
-        @GXMyBatisListener(listenerClazz = ProductStockSyncListener.class) // 仅此方法触发同步监听
-        int decreaseStock(@Param("productId") Long productId, @Param("quantity") int quantity);
-    }
-    ```
-
-3.  **配置异步监听器线程池** (如果使用异步监听器)
-
-    如果使用了异步监听器 (`runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT`)，建议配置一个专用的线程池来执行这些异步任务。可以在Spring配置类中定义一个 `Executor` Bean，并将其名称通过 `@GXMyBatisListener` 的 `asyncExecutor` 属性指定。
-
-    ```java
-    package com.example.config;
-
-    import org.springframework.context.annotation.Bean;
-    import org.springframework.context.annotation.Configuration;
-    import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-    import java.util.concurrent.Executor;
-
-    @Configuration
-    public class AsyncExecutionConfig {
-
-        public static final String ASYNC_EXECUTOR_NAME = "myBatisEventAsyncTaskExecutor";
-
-        @Bean(name = ASYNC_EXECUTOR_NAME)
-        public Executor myBatisEventAsyncTaskExecutor() {
-            ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-            executor.setCorePoolSize(5);       // 核心线程数
-            executor.setMaxPoolSize(10);      // 最大线程数
-            executor.setQueueCapacity(25);    // 队列容量
-            executor.setThreadNamePrefix("MyBatisEvent-"); // 线程名前缀
-            executor.initialize();
-            return executor;
-        }
-    }
-    ```
-    如果未指定 `asyncExecutor` 或找不到对应的Bean，框架可能会尝试使用默认的异步执行机制（例如Spring的 `@Async` 默认线程池，但这取决于具体实现和版本）。
-
-##### 3.3.2.3 注解参数说明
-
-| 参数名          | 类型                                      | 是否必填 | 默认值                                   | 描述                                                                                                                                                              |
-|-----------------|-------------------------------------------|----------|------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------| 
-| `listenerClazz` | `Class<? extends cn.maple.core.datasource.listener.GXMybatisListenerService>` | 否       | `cn.maple.core.datasource.listener.GXMybatisListenerService.class`         | 指定实现了 `GXMybatisListenerService` 接口的监听器服务类。当注解直接标记在监听器类上时（监听器类本身实现了 `GXMyBatisBaseListener` 并通常被Spring管理），此参数可省略。当注解标记在Service或Mapper方法上，用于指定一个外部的监听器类时，此参数是必需的。 |
-| `runType`       | `String`                                  | 否       | `GXMyBatisEventConstant.MYBATIS_SYNC_EVENT` | 指定监听器的执行类型，可选值为：<br> - `GXMyBatisEventConstant.MYBATIS_SYNC_EVENT` (默认): 同步执行，监听器逻辑与主业务逻辑在同一事务中，会影响主流程性能。<br> - `GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT`: 异步执行，监听器逻辑在独立的线程中执行，不阻塞主业务流程，通常用于耗时操作或非核心业务。                               | 
-| `order`         | `int`                                     | 否       | `Ordered.LOWEST_PRECEDENCE`              | 定义多个监听器时的执行顺序，值越小，优先级越高。                                                                                                                            |
-| `asyncExecutor` | `String`                                  | 否       | `"myBatisEventAsyncTaskExecutor"`        | 当 `runType` 为异步时，指定执行异步任务的线程池Bean名称。如果未指定或找不到对应的Bean，会尝试使用默认的异步执行器。                                                                 |
-
-##### 3.3.2.4 注意事项
-
-- **事务传播**：
-    - 同步监听器 (`GXMyBatisSyncListener`) 默认情况下会参与到当前主业务的事务中。如果监听器内部发生异常，可能会导致主事务回滚。
-    - 异步监听器 (`GXMyBatisAsyncListener`) 在独立的线程中执行，默认不参与主业务事务。如果异步监听器需要事务支持，需要在其内部方法上单独配置事务注解（如 `@Transactional`），并确保异步线程池能够正确传播事务上下文。
-- **异步执行与线程池**：
-    - 使用异步监听器时，建议配置专用的线程池（通过 `asyncExecutor` 参数指定），并合理设置线程池参数（核心线程数、最大线程数、队列容量等），以避免资源耗尽或性能瓶颈。
-    - 异步任务的异常处理需要特别注意，因为它们不会直接影响主流程。应在异步监听器内部做好充分的异常捕获和日志记录。
-- **监听范围**：
-    - `@GXMyBatisListener` 可以标记在实现了 `GXMyBatisListenerService` 的监听器类上，也可以直接标记在 `Service` 类或 `Mapper` 接口的方法上。
-    - 当标记在 `Service` 类上时，该 `Service` 中所有通过 `GXMyBatisBaseServiceImpl` 提供的标准增删改查方法，以及其调用的 `Mapper` 方法，都会触发监听。
-    - 当标记在 `Mapper` 方法上时，仅该特定方法会触发监听。
-- **事件对象**：
-    - 监听器方法接收的事件对象（如 `GXMyBatisModelSaveEntityEvent`、`GXMyBatisModelUpdateEntityEvent` 等）包含了触发事件的实体、原始SQL、执行结果等信息，可以根据这些信息执行相应的业务逻辑。
-- **性能考虑**：
-    - 同步监听器会增加主业务流程的执行时间，应避免在同步监听器中执行耗时操作。
-    - 过多的监听器或复杂的监听逻辑可能会对系统性能产生影响，需要谨慎设计和使用。
-- **与 `@Transactional` 的结合**：
-    - 当 `@GXMyBatisListener` 与 `@Transactional` 同时作用于一个方法或类时，需要注意它们的执行顺序和事务边界。通常，AOP拦截的顺序会影响行为，建议通过 `order` 参数明确控制监听器的执行顺序。
-
-
-        executor.initialize();
-        return executor;
-    }
-}
-```
-
-#### 3.3.3 整体使用流程概览
+#### 3.3.4 整体使用流程概览
 
 1.  **定义实体类**：确保实体类继承自 `cn.maple.core.datasource.model.GXMyBatisModel` (或其子类)，这是事件能够正确识别和处理实体的前提。
 
@@ -807,57 +593,19 @@ public class UserListenerServiceImpl implements UserListenerService {
         public void registerUser(UserEntity user) {
             // 进行一些业务校验或处理
             // ...
-            this.save(user); // 调用GXMyBatisBaseServiceImpl的save方法，会触发onSaveEntity事件
-            // 如果配置了监听器，此时相关的监听逻辑会被执行
+            this.save(user); // 转发到 UserMapper.insert，由切面触发 saveEntityListener
+            // 如果该 Mapper 上声明了监听器，此时对应的监听逻辑会被执行
         }
     }
     ```
 
-4.  **创建并配置监听器**：按照 **3.3.2.2** 中的示例创建监听器类，并使用 `@GXMyBatisListener` 注解。
+4.  **实现监听器**：按照 **3.3.3.3** 实现 `GXMybatisListenerService` 并用 `@Component` 注册；监听器类本身不需要（也不会生效）标注 `@GXMyBatisListener`。
 
-5.  **(可选) 配置异步线程池**：如果使用了异步监听器，按照 **3.3.2.2 (步骤3)** 中的示例配置线程池。
+5.  **(可选) 调整异步执行器**：如果使用了异步监听器，按 **3.3.3.6** 调整 `maple.framework.mybatis.async.listener.*`，默认配置可直接使用。
 
-6.  **执行操作触发事件**：当调用 `GXMyBatisBaseServiceImpl` 提供的标准增删改查方法（如 `save`, `updateById`, `removeById` 等），或者调用被 `@GXMyBatisListener` 注解的 `Mapper` 方法时，相应的事件会被发布，并由匹配的监听器处理。
+6.  **声明并触发事件**：在 Mapper 接口类型/被拦截的方法上，或批量保存所在的 Service 类型及其 `saveBatch`/`saveOrUpdateBatch` 方法上标注 `@GXMyBatisListener`，然后调用被拦截的写操作（`insert`、`update`（`BaseMapper.update(entity, wrapper)`）、`updateById`、`updateFieldByCondition`、`deleteCondition`、`deleteSoftCondition`、`saveBatch`/`saveOrUpdateBatch`）。`GXMyBatisBaseServiceImpl` 与 `GXMyBatisDao` 的对应方法最终都会走到这些 Mapper 调用；`removeById`、自定义 SQL 方法、原生批量 SQL 等未被拦截的路径不会产生事件。
 
-1. 创建实体类继承 `GXMyBatisModel`：
-
-```java
-@Data
-@TableName("tb_user")
-public class UserEntity extends GXMyBatisModel {
-    private String username;
-    private String password;
-    // 其他字段...
-}
-```
-
-2. 创建Mapper接口继承 `GXBaseMapper`：
-
-```java
-@Mapper
-public interface UserMapper extends GXBaseMapper<UserEntity> {
-    // 自定义方法...
-}
-```
-
-3. 创建Service接口继承 `GXMyBatisBaseService`：
-
-```java
-public interface UserService extends GXMyBatisBaseService<UserEntity> {
-    // 自定义方法...
-}
-```
-
-4. 创建Service实现类继承 `GXMyBatisBaseServiceImpl`：
-
-```java
-@Service
-public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEntity> implements UserService {
-    // 实现自定义方法...
-}
-```
-
-#### 3.3.3 监听语义、能力边界与开关
+#### 3.3.5 监听语义、能力边界与开关
 
 **触发时机**
 
@@ -881,7 +629,7 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 | 单条插入 | 是 | 仅当影响行数 > 0 |
 | 按条件更新 / 按主键更新 | 是 | 按主键更新无结构化条件，只有实体快照 |
 | 指定字段更新 | 是 | 需提供更新字段列表 |
-| 条件软删除 | 是 | 含条件字段与更新字段 |
+| 条件软删除 | 是 | 含条件字段与调用方显式传入的更新字段；框架追加的逻辑删除列不在载荷内 |
 | **按条件物理删除** | 是 | 仅拦截 `deleteCondition` |
 | **按主键物理删除** | **否** | 可能被配置为逻辑删除，无法判定真实语义 |
 | 通用服务层批量保存/批量新增或更新 | 是 | 整批一个事件 |
@@ -892,6 +640,7 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 - 条件可被无损还原时，回调可读到 `conditionFields` 与对应操作符。
 - 含 `OR`、函数/表达式左侧、重复字段、占位符不匹配或解析失败时，结构化条件为空，只提供原始条件文本，并通过 `degradeReasons` 标记原因；**不会伪造字段值或错位填充**。
 - 取值不可克隆时保留引用，并标记 `snapshotDegraded`；监听方必须把载荷视为只读。标记发生在 `strict-snapshot=true` 时，同时追加 `UNSNAPSHOTABLE_VALUE` 降级原因并计入 `degraded`；关闭时保持历史行为（保留引用、不扫描），以维持无监听路径的零开销。
+- 严格快照的扫描是**有界尽力而为**：最大深度 8、最多 4096 个节点。载荷超出预算时停止扫描并置 `snapshotScanTruncated=true`、计入一次 `degraded`、输出 `reason=scan-truncated` 的结构化告警；框架不会把"未检查完"当成"已校验为干净"，因此大载荷下请结合该标记与 `degraded` 判断。
 
 **异常与开关**
 
@@ -900,24 +649,31 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 | `maple.framework.enable.mybatis-listener` | `true` | 整体开关；关闭后不解析声明、不构造事件 |
 | `maple.framework.enable.mybatis-listener-async` | `true` | 关闭后异步声明退化为同步执行 |
 | `maple.framework.mybatis.listener.deduplicate` | `true` | 同一监听器同操作去重 |
-| `maple.framework.mybatis.listener.propagate-exception` | `false` | 是否把回调异常抛回业务调用方（旧行为） |
+| `maple.framework.mybatis.listener.propagate-exception` | `false` | 同步回调异常是否抛回业务调用方（旧行为）；异步回调始终隔离 |
 | `maple.framework.mybatis.listener.sync-after-commit` | `false` | 同步回调延后到提交后 |
 | `maple.framework.mybatis.listener.strict-snapshot` | `false` | 严格快照模式，记录不可克隆值的降级 |
 | `maple.framework.mybatis.listener.metadata-cache-size` | `2048` | 声明解析缓存容量 |
 | `maple.framework.mybatis.listener.metadata-cache-expire-seconds` | `3600` | 声明解析缓存空闲过期（秒） |
 | `maple.framework.mybatis.listener.slow-callback-threshold-ms` | `30000` | 同步回调长耗时告警阈值 |
 
-默认情况下单个监听器异常会被隔离并计入失败计数，业务写操作保持成功。需要用旧行为（异常向调用方传播）时设置 `propagate-exception=true`。
+默认情况下单个监听器异常会被隔离并计入失败计数，业务写操作保持成功。需要用旧行为（同步回调异常向调用方传播、后续监听器停止执行）时设置 `propagate-exception=true`。注意：
+
+- 异步回调异常始终隔离（与开关取值无关），不会终止执行器线程，业务调用方无法观察到异步回调异常。
+- 开启 `sync-after-commit` 且存在活动事务时，回调在事务提交后执行，异常被隔离并记录（事务已提交、调用方已越过提交点）；`propagate-exception` 的传播语义仅在立即投递路径（默认同步、无事务的 `sync-after-commit`）生效。
 
 **可观测性**
 
-`GXMyBatisListenerMetricsService#snapshot()` 提供 `delivered` / `failed` / `rejected` / `cancelled` / `degraded` / `skipped` / `activeTasks` / `queueSize` 八项只读计数，进程内单调递增、重启归零。队列饱和、停机未执行、条件降级都会输出带事件类型与监听器名的结构化日志；投递失败、慢回调、降级、队列拒绝四类日志还包含 `operationId`（方法名 + 自增序号）与运行模式，便于把一次写操作的所有回调与拒绝记录串起来排查。
+`GXMyBatisListenerMetricsService#snapshot()` 提供 `delivered` / `failed` / `rejected` / `cancelled` / `degraded` / `skipped` / `activeTasks` / `queueSize` 八项只读指标：前六项为累计计数，进程内单调递增、重启归零；`activeTasks` 与 `queueSize` 为瞬时值（gauge），会随任务开始/结束与入队/出队升降，不能按"只增"配置告警。计数口径：`delivered` 表示投递调用成功返回（异步为提交或注册成功，回调可能尚未执行），`failed` 表示回调或投递层失败（每个失败只计一次，回调失败由回调分发层计数、投递层失败由发布层计数；异步提交被拒绝时只计入 `rejected` 并由执行器输出拒绝日志，不重复计入 `failed`）；被隔离的回调失败会同时计入 `delivered`（投递成功）与 `failed`（回调失败），两组计数不互斥。队列饱和、停机未执行、条件降级都会输出带事件类型与监听器名的结构化日志；投递失败、慢回调、降级、队列拒绝四类日志还包含 `operationId`（方法名 + 自增序号）与运行模式，便于把一次写操作的所有回调与拒绝记录串起来排查。慢回调告警（`slow-callback-threshold-ms`）只度量同步立即投递的真实回调耗时：异步投递在该处只测量提交耗时，`sync-after-commit` 在存在活动事务时只测量注册耗时，两类路径都不会触发慢回调告警，需要覆盖时应结合回调内部埋点。虚拟线程模式下并发限流触发的拒绝同样计入 `rejected` 并输出 `mode=virtual` 的拒绝日志；该模式没有队列，停机时以在途任务数计入 `cancelled` 并输出未执行任务告警。
 
 **批量载荷与监听方隔离**
 
 批量事件只构建一次载荷：只有一个监听方时直接复用该载荷；存在多个监听方时，共享同一份**只读快照**——任何修改尝试都会抛 `UnsupportedOperationException`，因此既不会让监听方互相影响，也不会让内存随监听方数量线性增长。监听方如需加工数据，请先复制为新的 `Dict`。
 
-`degraded` 的计数口径：更新条件无法无损还原（含 `OR`、函数左侧、重复字段、参数不匹配、解析失败）时按事件计一次；`strict-snapshot=true` 时，载荷中出现不可克隆值再计一次。
+**递归触发**
+
+监听方在回调中再次写库、且被同一声明命中时，投递链会继续触发。框架在每次回调外层累计投递深度并把该深度携带到异步任务中：达到上限（`GXMyBatisListenerEventPublisher.MAX_DELIVERY_DEPTH = 5`）后不再投递，按 `failed` 计一次并输出 `reason=recursion-limit` 的结构化告警（含 `operationId`、`depth`），业务写操作返回值不受影响。确有多级联动需求时，请让监听方改走不经过被拦截声明的写入路径（原生 SQL 或未被声明的 Mapper）。
+
+`degraded` 的计数口径：更新条件无法无损还原（含 `OR`、函数左侧、重复字段、参数不匹配、解析失败）时按事件计一次；`strict-snapshot=true` 时，载荷中出现不可克隆值再计一次；同一模式下扫描因超出预算被截断时，同样计一次（载荷标记为 `snapshotScanTruncated`）。
 
 **升级说明（4.3.0）**
 
@@ -2196,37 +1952,33 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 
 ### 5.3 事件监听实现
 
+监听器实现 `GXMybatisListenerService` 并用 `@Component` 注册；`@GXMyBatisListener` 声明写在 Mapper/批量服务上，标注在监听器类上不会生效：
+
 ```java
 @Component
-@GXMyBatisListener
-public class UserEventListener extends GXMyBatisSyncListener {
-    private final Logger logger = LoggerFactory.getLogger(getClass());
-    
-    /**
-     * 监听用户创建事件
-     */
+public class UserEventListener implements GXMybatisListenerService<UserEntity> {
+    private static final Logger LOG = LoggerFactory.getLogger(UserEventListener.class);
+
     @Override
-    public void onSaveEntity(GXMyBatisModelSaveEntityEvent event) {
-        if (event.getSource() instanceof UserEntity) {
-            UserEntity user = (UserEntity) event.getSource();
-            logger.info("用户创建事件：{}", user.getUsername());
-            // 执行其他业务逻辑
-        }
+    public void saveEntityListener(UserEntity user) {
+        LOG.info("用户创建事件：{}", user.getUsername());
     }
-    
-    /**
-     * 监听用户更新事件
-     */
+
     @Override
-    public void onUpdateEntity(GXMyBatisModelUpdateEntityEvent event) {
-        if (event.getSource() instanceof UserEntity) {
-            UserEntity user = (UserEntity) event.getSource();
-            logger.info("用户更新事件：{}", user.getUsername());
-            // 执行其他业务逻辑
-        }
+    public void updateEntityListener(UserEntity user, Dict keyValuePairs, Dict keyOperatorPairs) {
+        LOG.info("用户更新事件：{}，条件字段：{}", user.getUsername(), keyValuePairs);
     }
 }
 ```
+
+```java
+@Mapper
+@GXMyBatisListener(listenerClazz = UserEventListener.class)
+public interface UserMapper extends GXBaseMapper<UserEntity> {
+}
+```
+
+需要异步执行时，把声明改成 `runType = GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT`；同步/异步语义、只读载荷与降级规则见 §3.3.5。
 
 ## 6. 常见问题
 

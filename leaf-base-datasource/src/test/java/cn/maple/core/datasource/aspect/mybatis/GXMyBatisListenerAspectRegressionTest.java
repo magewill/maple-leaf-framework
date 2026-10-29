@@ -36,17 +36,21 @@ import org.springframework.transaction.annotation.AnnotationTransactionAttribute
 import org.springframework.transaction.interceptor.TransactionAttribute;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -128,6 +132,54 @@ class GXMyBatisListenerAspectRegressionTest {
     }
 
     @Test
+    void payloadThatCannotBeBuiltDoesNotFailTheWrite() throws Throwable {
+        long failedBefore = GXMyBatisListenerMetrics.snapshot().failed();
+        Method method = ChildAnnotatedMapper.class.getMethod("insert", Object.class);
+        ProceedingJoinPoint point = mockJoinPoint(new ChildAnnotatedMapperImpl(), method);
+        Mockito.when(point.proceed()).thenReturn(1);
+        // More nodes than GXBaseEvent accepts, so the event constructor rejects the payload.
+        List<String> oversizedChildren = new ArrayList<>(100_500);
+        for (int index = 0; index < 100_500; index++) {
+            oversizedChildren.add("child-" + index);
+        }
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{Map.of("id", 1, "children", oversizedChildren)});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            Object result = assertDoesNotThrow(() -> saveEntityAspect.around(point),
+                    "Building the payload must never fail an already completed write");
+            assertEquals(1, result);
+            eventPublisherMock.verifyNoInteractions();
+        }
+
+        assertEquals(failedBefore + 1L, GXMyBatisListenerMetrics.snapshot().failed(),
+                "An unbuildable payload must be counted as a failed delivery instead of escaping");
+    }
+
+    @Test
+    void payloadBuilderFailureDoesNotFailTheCompletedWrite() throws Throwable {
+        long failedBefore = GXMyBatisListenerMetrics.snapshot().failed();
+        ProceedingJoinPoint point = mockJoinPoint(new DeleteMapperImpl(),
+                DeleteMapper.class.getMethod("deleteCondition", Object.class));
+        Mockito.when(point.proceed()).thenReturn(1);
+        // Condition field validation rejects the expression while the payload is being built, after
+        // the DELETE already succeeded.
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+                .condition(List.of(new GXConditionEQ(null, "id; drop table t_listener", 1)))
+                .build();
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{queryParam});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            Object result = assertDoesNotThrow(() -> deleteAspect.around(point),
+                    "A payload builder failure must never fail an already completed write");
+            assertEquals(1, result);
+            eventPublisherMock.verifyNoInteractions();
+        }
+
+        assertEquals(failedBefore + 1L, GXMyBatisListenerMetrics.snapshot().failed(),
+                "An unbuildable payload must be counted as a failed delivery instead of escaping");
+    }
+
+    @Test
     void saveEntityDefersAsyncListenerUntilCommit() throws Throwable {
         ProceedingJoinPoint point = mockJoinPoint(new AsyncSaveMapperImpl(), AsyncSaveMapper.class.getMethod("insert", Object.class));
         Mockito.when(point.proceed()).thenReturn(1);
@@ -149,7 +201,7 @@ class GXMyBatisListenerAspectRegressionTest {
         pointcut.setExpression(around.value().substring(around.value().indexOf("execution")));
 
         assertTrue(pointcut.matches(InsertTarget.class.getMethod("insert", Object.class), InsertTarget.class));
-        assertTrue(!pointcut.matches(InsertTarget.class.getMethod("insert", Collection.class), InsertTarget.class));
+        assertFalse(pointcut.matches(InsertTarget.class.getMethod("insert", Collection.class), InsertTarget.class));
     }
 
     @Test
@@ -219,6 +271,126 @@ class GXMyBatisListenerAspectRegressionTest {
             assertDoesNotThrow(() -> deleteSoftAspect.around(point));
             eventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(1));
         }
+    }
+
+    @Test
+    void deleteSoftKeepsUpdateFieldDataEmptyWhenCallerSuppliesNone() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new DeleteSoftMapperImpl(),
+                DeleteSoftMapper.class.getMethod("deleteSoftCondition", Object.class, Object.class));
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+                .condition(List.of(new GXConditionEQ(null, "id", 7)))
+                .build();
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{queryParam, List.of()});
+
+        AtomicReference<GXBaseEvent<?>> published = new AtomicReference<>();
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisher.when(() -> GXEventPublisherUtils.publishEvent(any()))
+                    .thenAnswer(invocation -> {
+                        published.set(invocation.getArgument(0));
+                        return null;
+                    });
+            assertDoesNotThrow(() -> deleteSoftAspect.around(point));
+            eventPublisher.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(1));
+        }
+
+        Dict source = publishedSource(published);
+        Dict conditionFieldData = (Dict) source.get("conditionFieldData");
+        Dict updateFieldData = (Dict) source.get("updateFieldData");
+        assertEquals(7, conditionFieldData.getInt("id"));
+        assertTrue(updateFieldData.isEmpty(),
+                "The payload only reflects update fields supplied by the caller; the framework-appended"
+                        + " logical-delete column is not part of it (contracts/event-payload.md)");
+        assertEquals(Boolean.TRUE, source.get("conditionLossless"));
+    }
+
+    @Test
+    void rawConditionFailureDegradesUpdateFieldPayload() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new UpdateFieldMapperImpl(),
+                UpdateFieldMapper.class.getMethod("updateFieldByCondition", Object.class, Object.class));
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+                .condition(List.of(throwingRawCondition()))
+                .build();
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{queryParam,
+                List.of(new GXUpdateNumberField(null, "score", 1))});
+
+        long degradedBefore = GXMyBatisListenerMetrics.snapshot().degraded();
+        AtomicReference<GXBaseEvent<?>> published = new AtomicReference<>();
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisher.when(() -> GXEventPublisherUtils.publishEvent(any()))
+                    .thenAnswer(invocation -> {
+                        published.set(invocation.getArgument(0));
+                        return null;
+                    });
+            assertDoesNotThrow(() -> updateFieldAspect.around(point));
+        }
+
+        Dict source = publishedSource(published);
+        assertEquals(Boolean.FALSE, source.get("conditionLossless"));
+        assertEquals(List.of(GXMyBatisListenerDegradeReasonEnums.PARSE_ERROR), source.get("degradeReasons"));
+        assertEquals("", source.getStr("rawConditionSql"));
+        assertEquals(degradedBefore + 1L, GXMyBatisListenerMetrics.snapshot().degraded(),
+                "A skipped raw condition must count as a degraded payload");
+    }
+
+    @Test
+    void rawConditionFailureDegradesDeleteSoftPayload() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new DeleteSoftMapperImpl(),
+                DeleteSoftMapper.class.getMethod("deleteSoftCondition", Object.class, Object.class));
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+                .condition(List.of(throwingRawCondition()))
+                .build();
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{queryParam,
+                List.of(new GXUpdateNumberField(null, "deletedFlag", 1))});
+
+        long degradedBefore = GXMyBatisListenerMetrics.snapshot().degraded();
+        AtomicReference<GXBaseEvent<?>> published = new AtomicReference<>();
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisher.when(() -> GXEventPublisherUtils.publishEvent(any()))
+                    .thenAnswer(invocation -> {
+                        published.set(invocation.getArgument(0));
+                        return null;
+                    });
+            assertDoesNotThrow(() -> deleteSoftAspect.around(point));
+        }
+
+        Dict source = publishedSource(published);
+        assertEquals(Boolean.FALSE, source.get("conditionLossless"));
+        assertEquals(List.of(GXMyBatisListenerDegradeReasonEnums.PARSE_ERROR), source.get("degradeReasons"));
+        assertEquals("", source.getStr("rawConditionSql"));
+        assertEquals(degradedBefore + 1L, GXMyBatisListenerMetrics.snapshot().degraded(),
+                "A skipped raw condition must count as a degraded payload");
+    }
+
+    @Test
+    void rawConditionFailureDegradesDeletePayload() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new DeleteMapperImpl(),
+                DeleteMapper.class.getMethod("deleteCondition", Object.class));
+        GXBaseQueryParamInnerDto queryParam = GXBaseQueryParamInnerDto.builder()
+                .condition(List.of(throwingRawCondition()))
+                .build();
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{queryParam});
+
+        long degradedBefore = GXMyBatisListenerMetrics.snapshot().degraded();
+        AtomicReference<GXBaseEvent<?>> published = new AtomicReference<>();
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisher.when(() -> GXEventPublisherUtils.publishEvent(any()))
+                    .thenAnswer(invocation -> {
+                        published.set(invocation.getArgument(0));
+                        return null;
+                    });
+            assertDoesNotThrow(() -> deleteAspect.around(point));
+        }
+
+        Dict source = publishedSource(published);
+        assertEquals(Boolean.FALSE, source.get("conditionLossless"));
+        assertEquals(List.of(GXMyBatisListenerDegradeReasonEnums.PARSE_ERROR), source.get("degradeReasons"));
+        assertEquals("", source.getStr("rawConditionSql"));
+        assertEquals(degradedBefore + 1L, GXMyBatisListenerMetrics.snapshot().degraded(),
+                "A skipped raw condition must count as a degraded payload");
     }
 
     @Test
@@ -296,6 +468,7 @@ class GXMyBatisListenerAspectRegressionTest {
         Dict source = ReflectionTestUtils.invokeMethod(updateEntityAspect, "handlePointArgs", point);
 
         assertEquals(wrapper.getTargetSql(), source.getStr("rawWhereSql"));
+        assertEquals(wrapper.getTargetSql(), source.getStr("rawConditionSql"));
         assertEquals(Boolean.FALSE, source.get("conditionLossless"));
         assertEquals(List.of(GXMyBatisListenerDegradeReasonEnums.OR_EXPRESSION), source.get("degradeReasons"));
     }
@@ -374,8 +547,9 @@ class GXMyBatisListenerAspectRegressionTest {
     void updateEntityMarksParameterMismatchDegrade() {
         @SuppressWarnings("unchecked")
         AbstractWrapper<Object, ?, ?> wrapper = Mockito.mock(AbstractWrapper.class);
-        Mockito.when(wrapper.getTargetSql()).thenReturn(
-                "id = #{ew.paramNameValuePairs.MPGENVAL1} AND name = #{ew.paramNameValuePairs.MPGENVAL2}");
+        // Real wrappers expose JDBC placeholders via getTargetSql() and MyBatis placeholders via
+        // getSqlSegment(); only MPGENVAL1 is backed by a value, so the where parameters do not match.
+        Mockito.when(wrapper.getTargetSql()).thenReturn("(id = ? AND name = ?)");
         Mockito.when(wrapper.getSqlSegment()).thenReturn(
                 "id = #{ew.paramNameValuePairs.MPGENVAL1} AND name = #{ew.paramNameValuePairs.MPGENVAL2}");
         Mockito.when(wrapper.getParamNameValuePairs()).thenReturn(Map.of("MPGENVAL1", 1L));
@@ -384,6 +558,7 @@ class GXMyBatisListenerAspectRegressionTest {
 
         assertEquals(Boolean.FALSE, parsed.get("conditionLossless"));
         assertEquals(wrapper.getTargetSql(), parsed.getStr("rawWhereSql"));
+        assertEquals(wrapper.getTargetSql(), parsed.getStr("rawConditionSql"));
         assertEquals(List.of(GXMyBatisListenerDegradeReasonEnums.PARAM_MISMATCH), parsed.get("degradeReasons"));
         assertTrue(((Dict) parsed.get("keyValuePairs")).isEmpty());
     }
@@ -425,6 +600,7 @@ class GXMyBatisListenerAspectRegressionTest {
         assertTrue(((Dict) parsed.get("keyOperatorPairs")).isEmpty());
         assertTrue(((Dict) parsed.get("keyValuePairs")).isEmpty());
         assertEquals(wrapper.getTargetSql(), parsed.get("rawWhereSql"));
+        assertEquals(wrapper.getTargetSql(), parsed.getStr("rawConditionSql"));
     }
 
     @Test
@@ -473,6 +649,54 @@ class GXMyBatisListenerAspectRegressionTest {
     }
 
     @Test
+    void writeWithoutDeclarationIsCountedAsSkipped() throws Throwable {
+        ProceedingJoinPoint point = mockJoinPoint(new PlainWriteMapperImpl(),
+                PlainWriteMapper.class.getMethod("insert", Object.class));
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{Map.of("id", 1)});
+        long skippedBefore = GXMyBatisListenerMetrics.snapshot().skipped();
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            assertDoesNotThrow(() -> saveEntityAspect.around(point));
+            eventPublisherMock.verifyNoInteractions();
+        }
+        assertEquals(skippedBefore + 1L, GXMyBatisListenerMetrics.snapshot().skipped(),
+                "A short-circuited write must be visible in the skipped counter");
+    }
+
+    @Test
+    void unannotatedBatchWriteShortCircuitsAndIsCountedAsSkipped() throws Throwable {
+        Method method = PlainBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new PlainBatchService(), method);
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of(Map.of("id", 1))});
+        long skippedBefore = GXMyBatisListenerMetrics.snapshot().skipped();
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            assertDoesNotThrow(() -> saveBatchEntityAspect.around(point));
+            eventPublisherMock.verifyNoInteractions();
+        }
+        assertEquals(skippedBefore + 1L, GXMyBatisListenerMetrics.snapshot().skipped(),
+                "An unannotated batch write must be counted once, and only once");
+    }
+
+    @Test
+    void batchMapperTypeCacheKeepsSingleDeliveryPerListener() throws Throwable {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of(Map.of("id", 1))});
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            // The first invocation resolves the mapper type, the second is served by the cache; both
+            // must deliver exactly one event to the single declared listener.
+            assertDoesNotThrow(() -> saveBatchEntityAspect.around(point));
+            assertDoesNotThrow(() -> saveBatchEntityAspect.around(point));
+            eventPublisherMock.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(2));
+        }
+    }
+
+    @Test
     void saveBatchKeepsEntityOrderInPayload() throws Exception {
         Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
         ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
@@ -489,6 +713,31 @@ class GXMyBatisListenerAspectRegressionTest {
         List<Dict> batchEntities = (List<Dict>) source.get("batchEntities");
         assertEquals(List.of("alpha", "beta", "gamma"),
                 batchEntities.stream().map(entity -> entity.getStr("username")).toList());
+    }
+
+    @Test
+    void saveBatchPublishesOperationAndPayloadKeysThroughSharedSupport() throws Throwable {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Mockito.when(point.proceed()).thenReturn(true);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of(Map.of("id", 1))});
+
+        AtomicReference<GXBaseEvent<?>> published = new AtomicReference<>();
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisherMock.when(() -> GXEventPublisherUtils.publishEvent(any()))
+                    .thenAnswer(invocation -> {
+                        published.set(invocation.getArgument(0));
+                        return null;
+                    });
+            assertDoesNotThrow(() -> saveBatchEntityAspect.around(point));
+            eventPublisherMock.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(1));
+        }
+
+        Dict source = publishedSource(published);
+        assertEquals("saveBatch", source.getStr("operation"));
+        assertEquals(List.of("operation", "entityData", "batchEntities"), List.copyOf(source.keySet()),
+                "Delegating to the shared support must not change the batch payload keys");
+        assertEquals(1, ((List<?>) source.get("batchEntities")).size());
     }
 
     @Test
@@ -544,6 +793,75 @@ class GXMyBatisListenerAspectRegressionTest {
     }
 
     @Test
+    void largeBatchWriteKeepsItsResultAndDeliversOnce() throws Throwable {
+        // 1,000 rows x 120 fields is more than the GXBaseEvent snapshot node budget: re-snapshotting
+        // the batch payload inside the event constructor would throw and fail the already-written
+        // batch, so the payload built by the aspect must be reused as-is (FR-006/FR-011).
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{wideBatch(1_000, 120)});
+        AtomicReference<GXBaseEvent<?>> captured = new AtomicReference<>();
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisherMock.when(() -> GXEventPublisherUtils.publishEvent(any())).thenAnswer(invocation -> {
+                captured.set(invocation.getArgument(0));
+                return null;
+            });
+            Object result = assertDoesNotThrow(() -> saveBatchEntityAspect.around(point));
+            assertEquals(1, result, "A successful batch write must keep its result");
+            eventPublisherMock.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(1));
+        }
+
+        assertInstanceOf(GXMyBatisModelSaveBatchEntitySnapshotEvent.class, captured.get());
+        Dict payload = (Dict) captured.get().getSource();
+        @SuppressWarnings("unchecked")
+        List<Dict> batchEntities = (List<Dict>) payload.get("batchEntities");
+        assertEquals(1_000, batchEntities.size());
+        assertEquals(0, batchEntities.getFirst().getInt("id"));
+        assertEquals(999, batchEntities.getLast().getInt("id"));
+    }
+
+    @Test
+    void hundredThousandRowBatchWriteKeepsItsResultAndDeliversOnce() throws Throwable {
+        Method method = MethodAnnotatedBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = mockJoinPoint(new MethodAnnotatedBatchService(), method);
+        Mockito.when(point.proceed()).thenReturn(1);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{wideBatch(100_000, 1)});
+        AtomicReference<GXBaseEvent<?>> captured = new AtomicReference<>();
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisherMock = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            eventPublisherMock.when(() -> GXEventPublisherUtils.publishEvent(any())).thenAnswer(invocation -> {
+                captured.set(invocation.getArgument(0));
+                return null;
+            });
+            Object result = assertDoesNotThrow(() -> saveBatchEntityAspect.around(point));
+            assertEquals(1, result, "A successful batch write must keep its result");
+            eventPublisherMock.verify(() -> GXEventPublisherUtils.publishEvent(any()), Mockito.times(1));
+        }
+
+        Dict payload = (Dict) captured.get().getSource();
+        @SuppressWarnings("unchecked")
+        List<Dict> batchEntities = (List<Dict>) payload.get("batchEntities");
+        assertEquals(100_000, batchEntities.size());
+        assertEquals(0, batchEntities.getFirst().getInt("id"));
+        assertEquals(99_999, batchEntities.getLast().getInt("id"));
+    }
+
+    private List<Map<String, Object>> wideBatch(int rows, int fields) {
+        List<Map<String, Object>> entities = new ArrayList<>(rows);
+        for (int row = 0; row < rows; row++) {
+            Map<String, Object> entity = new HashMap<>(fields + 1);
+            entity.put("id", row);
+            for (int field = 0; field < fields; field++) {
+                entity.put("field" + field, row + field);
+            }
+            entities.add(entity);
+        }
+        return entities;
+    }
+
+    @Test
     void strictSnapshotMarksUnsnapshotableValuesAndCountsDegrade() throws Exception {
         GXMyBatisListenerProperties properties = new GXMyBatisListenerProperties();
         properties.setStrictSnapshot(true);
@@ -567,6 +885,35 @@ class GXMyBatisListenerAspectRegressionTest {
         assertTrue(((List<?>) captured.get().get("degradeReasons"))
                 .contains(GXMyBatisListenerDegradeReasonEnums.UNSNAPSHOTABLE_VALUE));
         assertEquals(degradedBefore + 1L, GXMyBatisListenerMetrics.snapshot().degraded());
+    }
+
+    @Test
+    void strictSnapshotFlagsTruncatedScanInsteadOfReportingClean() throws Exception {
+        GXMyBatisListenerProperties properties = new GXMyBatisListenerProperties();
+        properties.setStrictSnapshot(true);
+        GXMyBatisListenerEventPublisher strictPublisher = newEventPublisher(properties);
+        long degradedBefore = GXMyBatisListenerMetrics.snapshot().degraded();
+        // More nodes than the bounded scan budget allows, with the unsnapshotable value placed past
+        // the budget: a silent "clean" verdict would hide it from degraded and from the logs (T101).
+        List<Dict> rows = new ArrayList<>(2_500);
+        for (int index = 0; index < 2_500; index++) {
+            rows.add(Dict.create().set("id", index));
+        }
+        rows.add(Dict.create().set("payload", new Object()));
+        Dict source = Dict.create().set("batchEntities", rows);
+
+        try (MockedStatic<GXEventPublisherUtils> ignored = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            strictPublisher.publish(new ChildAnnotatedMapperImpl(),
+                    ChildAnnotatedMapper.class.getMethod("insert", Object.class),
+                    GXModelEventNamingEnums.SYNC_SAVE_ENTITY, GXModelEventNamingEnums.ASYNC_SAVE_ENTITY, source);
+        }
+
+        assertEquals(Boolean.TRUE, source.getBool("snapshotScanTruncated"),
+                "The scan budget must be reported instead of being treated as a clean payload");
+        assertNull(source.getBool("snapshotDegraded"),
+                "A truncated scan must not claim the payload keeps references to unsnapshotable values");
+        assertEquals(degradedBefore + 1L, GXMyBatisListenerMetrics.snapshot().degraded(),
+                "A truncated scan must be counted so it stays distinguishable from a clean payload");
     }
 
     @Test
@@ -652,6 +999,26 @@ class GXMyBatisListenerAspectRegressionTest {
             TransactionAttribute transactionAttribute = txAttributeSource.getTransactionAttribute(method, GXMyBatisSyncListener.class);
             assertNull(transactionAttribute, method.getName());
         });
+    }
+
+    /**
+     * A raw condition whose SQL rendering fails, simulating a condition that cannot be carried into
+     * the payload (FR-009/FR-010).
+     */
+    private static GXConditionRaw throwingRawCondition() {
+        return new GXConditionRaw("1 = 1") {
+            @Override
+            public String whereString() {
+                throw new IllegalStateException("raw condition unavailable");
+            }
+        };
+    }
+
+    private Dict publishedSource(AtomicReference<GXBaseEvent<?>> published) {
+        assertNotNull(published.get(), "A degraded payload must still be published");
+        Object source = published.get().getSource();
+        assertInstanceOf(Dict.class, source);
+        return (Dict) source;
     }
 
     private ProceedingJoinPoint mockJoinPoint(Object target, Method method) {
@@ -745,6 +1112,23 @@ class GXMyBatisListenerAspectRegressionTest {
 
     private static class MethodAnnotatedBatchService {
         @GXMyBatisListener(listenerClazz = FirstListener.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)
+        public Object saveBatch(Collection<?> entities) {
+            return entities;
+        }
+    }
+
+    private interface PlainWriteMapper {
+        Object insert(Object entity);
+    }
+
+    private static class PlainWriteMapperImpl implements PlainWriteMapper {
+        @Override
+        public Object insert(Object entity) {
+            return entity;
+        }
+    }
+
+    private static class PlainBatchService {
         public Object saveBatch(Collection<?> entities) {
             return entities;
         }

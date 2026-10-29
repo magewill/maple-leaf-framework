@@ -5,8 +5,10 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerAspectSupport;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
+import cn.maple.core.datasource.enums.GXMyBatisListenerDegradeReasonEnums;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXCondition;
 import cn.maple.core.framework.dto.inner.condition.GXConditionRaw;
@@ -15,17 +17,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
-import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.stereotype.Component;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
 @Aspect
 @Component
 @Slf4j
-@SuppressWarnings("all")
 public class GXMyBatisPlusDeleteSoftAspect {
     private final GXMyBatisListenerEventPublisher eventPublisher;
 
@@ -36,24 +35,13 @@ public class GXMyBatisPlusDeleteSoftAspect {
     @Around("target(cn.maple.core.datasource.mapper.GXBaseMapper) && execution(* deleteSoftCondition(..))")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         Object proceed = point.proceed();
-        if (!isSuccessfulResult(proceed)) {
+        if (!GXMyBatisListenerAspectSupport.isSuccessfulResult(proceed)) {
             return proceed;
         }
-        publishEvent(point);
+        GXMyBatisListenerAspectSupport.publishIfDeclared(eventPublisher, point,
+                GXModelEventNamingEnums.SYNC_DELETE_SOFT, GXModelEventNamingEnums.ASYNC_DELETE_SOFT,
+                () -> handlePointArgs(point));
         return proceed;
-    }
-
-    private boolean isSuccessfulResult(Object result) {
-        if (ObjectUtil.isNull(result)) {
-            return false;
-        }
-        if (result instanceof Boolean boolResult) {
-            return boolResult;
-        }
-        if (result instanceof Number numResult) {
-            return numResult.longValue() > 0L;
-        }
-        return true;
     }
 
     private Dict handlePointArgs(ProceedingJoinPoint point) {
@@ -71,6 +59,7 @@ public class GXMyBatisPlusDeleteSoftAspect {
         }
 
         List<String> rawConditions = new ArrayList<>();
+        List<GXMyBatisListenerDegradeReasonEnums> degradeReasons = new ArrayList<>();
         Dict conditionFieldData = Dict.create();
         List<GXCondition<?>> conditionList = baseQueryParam.getCondition();
         conditionList.forEach(condition -> {
@@ -78,7 +67,7 @@ public class GXMyBatisPlusDeleteSoftAspect {
                 return;
             }
             if (condition instanceof GXConditionRaw rawCondition) {
-                addRawCondition(rawConditions, rawCondition);
+                addRawCondition(rawConditions, degradeReasons, rawCondition);
                 return;
             }
             String fieldExpression = condition.getFieldExpression();
@@ -93,36 +82,34 @@ public class GXMyBatisPlusDeleteSoftAspect {
                     if (updateField == null) {
                         return;
                     }
-                    updateFieldData.set(CharSequenceUtil.toCamelCase(updateField.getFieldName()), updateField.getFieldValue());
+                    String fieldName = updateField.getFieldName();
+                    // Same guard as the update-field payload: an entry without a column name must not
+                    // inject a null key into the payload listeners read (contracts/event-payload.md).
+                    if (CharSequenceUtil.isNotEmpty(fieldName)) {
+                        updateFieldData.set(CharSequenceUtil.toCamelCase(fieldName), updateField.getFieldValue());
+                    }
                 }
         );
 
         return Dict.create()
                 .set("conditionFieldData", conditionFieldData)
                 .set("updateFieldData", updateFieldData)
-                .set("conditionLossless", Boolean.TRUE)
-                .set("degradeReasons", List.of())
+                .set("conditionLossless", degradeReasons.isEmpty())
+                .set("degradeReasons", List.copyOf(degradeReasons))
                 .set("rawConditionSql", String.join(" AND ", rawConditions));
     }
 
-    private void addRawCondition(List<String> rawConditions, GXConditionRaw rawCondition) {
+    private void addRawCondition(List<String> rawConditions,
+                                 List<GXMyBatisListenerDegradeReasonEnums> degradeReasons,
+                                 GXConditionRaw rawCondition) {
         try {
             rawConditions.add(rawCondition.whereString());
         } catch (RuntimeException exception) {
+            // A skipped raw condition means the payload is no longer lossless; never claim
+            // otherwise just because the structured fields look complete (FR-009/FR-010).
             log.warn("Raw condition skipped from listener payload: {}", exception.getMessage());
+            degradeReasons.add(GXMyBatisListenerDegradeReasonEnums.PARSE_ERROR);
         }
     }
 
-    private void publishEvent(ProceedingJoinPoint point) {
-        Method invokedMethod = ((MethodSignature) point.getSignature()).getMethod();
-        if (!eventPublisher.hasListener(point.getTarget(), invokedMethod)) {
-            return;
-        }
-        Dict source = handlePointArgs(point);
-        if (ObjectUtil.isEmpty(source)) {
-            return;
-        }
-        eventPublisher.publish(point.getTarget(), invokedMethod,
-                GXModelEventNamingEnums.SYNC_DELETE_SOFT, GXModelEventNamingEnums.ASYNC_DELETE_SOFT, source);
-    }
 }

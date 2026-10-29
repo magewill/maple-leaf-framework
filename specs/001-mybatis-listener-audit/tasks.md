@@ -215,6 +215,124 @@ description: "Task list for MyBatis-Plus 操作监听加固"
 
 ---
 
+## Phase 13: Convergence
+
+**Purpose**: 收敛 2026-10-28 六次复核发现的验证证据与文档漂移缺口（行为均已实现；MEDIUM 为断言/字段不完整，LOW 为证据精度与注释漂移）。
+
+- [X] T070 **MEDIUM** 在 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerEventPublisher.java` 的慢回调告警 `emitSlowCallbackWarning` 日志中补 `reason` 字段（如 `reason=slow-callback`），并在 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisListenerLoggingTest.java` 的慢回调用例断言 `reason` 出现（当前失败/降级日志含 reason，慢回调日志仅 operationId/eventType/mode/listener/elapsed）per T062/US4/AC1 (partial)
+- [X] T071 **MEDIUM** 扩展 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisListenerIsolationTest.java` 的"前一监听器抛异常"用例：断言业务写操作返回值不变与 `failed` 计数递增（当前该用例仅 `assertDoesNotThrow`，两项断言只挂在异步拒绝用例上）per T021/US2/AC3 (partial)
+- [X] T072 **LOW** 合并 T069 的两半验证：用 `TransactionTemplate` 触发真实 afterCommit（参考 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/it/MyBatisListenerIT.java` 的事务用例），断言任务上下文携带 `operationId` 且事务结束后清理（当前 operationId 断言在 `GXMyBatisListenerLoggingTest.java` 中用手动 `afterCompletion` 模拟，真实事务路径无 operationId 断言）per T069/FR-020 (partial)
+- [X] T073 **LOW** 将 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/config/GXMyBatisAsyncListenerExecutorConfigTest.java` 的 `contextCloseCountsUnexecutedTasks` 断言由 `cancelled` 增量 `>= 2` 收紧为等于本次提交的未执行任务数（精确等式当前仅覆盖直接调用 `recordUnexecutedTasksOnShutdown()` 的路径）per T064/FR-017 (partial)
+- [X] T074 **LOW** 在 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisListenerAspectRegressionTest.java` 的 `OR_EXPRESSION` 与 `PARAM_MISMATCH` 用例补 `rawConditionSql` 非空断言（更新事件同时写入 `rawWhereSql` 与 `rawConditionSql`，当前两例只断言 `rawWhereSql`）per T049/SC-008 (partial)
+- [X] T075 **LOW** 复核 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisPlusDeleteSoftAspect.java` 的类级 `@SuppressWarnings("all")`：泛型转换方法已随重构移除，若无剩余警告依赖则删除该全量抑制（必要则收窄为具体警告类型），兑现 T015 的"移除为此存在的 @SuppressWarnings 依赖"per T015 (partial)
+- [X] T076 **LOW** 修正 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/event/GXMyBatisModelSaveBatchEntitySnapshotEvent.java` 的过期 Javadoc：其声称"仅单监听方使用该事件、多监听方各自防御性快照"，与现行行为（所有批量事件复用该载体、多监听方共享 `GXReadOnlyPayload` 只读载荷）相反，易误导维护者回退 T065 修复 per T065/SC-005 (contradicts)
+
+---
+
+## Phase 14: Convergence
+
+**Purpose**: 收敛 2026-10-28 七次复核发现的回调层异常策略矛盾与回调级验证缺口（F1 为开关语义与契约不一致，F2 为默认模式回调级证据缺失）。
+
+- [X] T077 **HIGH** 让 `maple.framework.mybatis.listener.propagate-exception` 真正作用于回调层异常：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/listener/GXMyBatisBaseListener.java` 的 `dispatch`（121-131 行）当前无条件吞掉回调 `RuntimeException`，开关仅在 `GXMyBatisListenerEventPublisher.deliver` 的发布层 catch 中生效，真实监听器回调抛异常永远无法传播；需按 `contracts/listener-callback.md` 两档语义实现（默认隔离+计数+继续后续监听器；`true` 时异常原样向业务调用方传播且后续监听器不再执行，注意与发布层 `recordFailed` 避免重复计数），并以真实监听器回调抛异常的用例覆盖两种模式（现有 `propagateSwitchRestoresLegacyExceptionBehaviour` 仅在 `publishEvent` mock 层注入）per FR-006/T024 (contradicts)
+- [X] T078 **LOW** 补默认模式下回调级隔离的自动化证据：真实监听器 `saveEntityListener` 抛异常时断言其他监听器仍被调用、业务写操作返回值不变、`failed` 计数递增（现有 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisListenerIsolationTest.java` 的注入点在 `GXEventPublisherUtils.publishEvent` mock 层，不经过 `GXMyBatisBaseListener.dispatch` 的真实回调路径）per T021/US2/AC3 (partial)
+
+---
+
+## Phase 15: Review convergence
+
+**Purpose**: 收敛 2026-10-28 代码审查发现的两个边界缺陷、测试日志级别泄漏与注释/文档口径偏差（行为主体正确，缺陷集中在异常路径清理与测试隔离）。
+
+- [X] T079 **MEDIUM** 消除 `GXMyBatisListenerEventPublisher#publishAsyncAfterCommit` 的 ThreadLocal 泄漏窗口：T069/T072 为让 afterCompletion 投递先于清理执行而把投递注册提前，但投递注册一旦抛异常，清理回调不会再注册，`operationId` 会残留在业务线程；改为投递与清理注册放在同一 try/finally，清理未成功注册时立即 `clear()`；同时收敛 `GXMyBatisBaseListener#dispatch` 的异步判定 fail-open（`asyncDelivery` 键缺失时回退到事件类型 `async_` 前缀，避免手动发布的事件在 `propagate-exception=true` 下把异常抛到执行器线程）per contracts/listener-callback.md (partial)
+- [X] T080 **LOW** 修复测试日志级别泄漏：`leaf-base-datasource/src/test/java/cn/maple/core/datasource/config/GXLogCapture.java` 与 `GXMyBatisListenerLoggingTest.java` 在 `previousLevel` 为 `null`（logger 无专属 LoggerConfig）时跳过恢复，而 `Configurator.setLevel` 已真实生效，导致 DEBUG/INFO 级别残留在 JVM 内；改为无条件以 `null` 级别恢复继承，并把 `GXLogCapture.attach` 调整为"先设级别、后挂 appender"per T062 (partial)
+- [X] T081 **LOW** 收敛慢回调与计数口径：`emitSlowCallbackWarning` 在异步分支提前返回后 `async` 形参与 `mode` 三元表达式恒为同步，改为仅在同步投递调用并固定 `mode=sync`；`GXMyBatisListenerMetrics` 与开发手册的 `delivered` 口径由"异步为提交成功"修正为"提交或注册成功（回调可能尚未执行）"，并补充"慢回调告警不覆盖异步与 after-commit 路径"的说明；同步清理 `GXMyBatisEventConstant` 内部键分组注释并在隔离/传播用例补 `delivered` 断言 per T070/T071 (partial)
+
+---
+
+## Phase 16: Convergence
+
+**Purpose**: 收敛 2026-10-28 第八次复核（converge）发现的异步投递/执行器边界与证据缺口（F1 为开关语义违反 FR-016，F2 为虚拟线程拒绝不可分类，其余为异步可观测性与验证证据缺失）。
+
+- [X] T082 **HIGH** 让异步投递异常一律不改变业务写操作结果：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerEventPublisher.java` 的 `deliver` catch 分支（169-181 行）对异步投递也按 `properties.isPropagateException()` 重新抛出，`propagate-exception=true` + 队列饱和（`GXMyBatisAsyncListenerExecutorConfig` 拒绝处理器 163-176 行抛出 `RejectedExecutionException`）时业务写操作失败并可能回滚；改为异步投递异常始终隔离（计数 + 日志、不抛出），并把 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisListenerIsolationTest.java` 的 `asyncRejectionDoesNotFailBusinessWrite` 参数化覆盖两种开关取值 per FR-016/US2/AC4 (contradicts)
+- [X] T083 **HIGH** 让虚拟线程模式下的限流拒绝可分类观测：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/config/GXMyBatisAsyncListenerExecutorConfig.java` 的 `createVirtualThreadExecutor`（131-143 行）仅设置 `setRejectTasksWhenLimitReached(true)`，未装配拒绝处理器，而 `resolveVirtualConcurrencyLimit`（145-155 行）在默认 `concurrency-limit=0` 时返回 `maxPoolSize>0`，拒绝可达且只落入 `failed`、`rejected` 恒不增长；需为虚拟线程执行器提供与池化模式等价的 `rejected` 计数、queueSize 更新与含 `operationId` 的拒绝日志，并补虚拟线程模式下队列饱和用例 per FR-020/SC-006/AGENTS 11 (partial)
+- [X] T084 **MEDIUM** 补齐异步链路日志的 `operationId` 与 `mode`：`GXMyBatisAsyncListenerExecutorConfig` 的 `TaskDecorator`（178-219 行）只在提交线程读取 `GXMyBatisListenerTaskContext.currentOperationId()` 给 Runnable 打标签，任务体内该 ThreadLocal 为空，导致 186-215 行的 started/completed/failed/long-running 日志与 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/listener/GXMyBatisBaseListener.java` 的 `dispatch` 回调失败日志（135-136 行）都不含 `operationId`，`dispatch` 日志还缺 `mode`；把 operationId 随事件 param 传递或在装饰后的任务体内 `set`/`finally clear`，并补异步回调失败日志字段断言 per US4/AC1/FR-020/T053 (partial)
+- [X] T085 **MEDIUM** 虚拟线程模式停机必须记录未执行任务：`GXMyBatisAsyncListenerExecutorConfig` 的 `eventExecutor` 字段（34 行）只在池化分支赋值，虚拟线程分支（50-53 行）直接返回，`@PreDestroy`（98-111 行）因此提前返回，`cancelled` 计数与 "unexecuted tasks" 告警均不产生；需为虚拟线程执行器补充停机统计与日志（可用 `activeTasks` 差值或等价口径），或在开发手册显式登记该模式不支持并给出替代观测方式 per FR-017 (partial)
+- [X] T086 **MEDIUM** 并发用例补齐上下文一致性证据：`leaf-base-datasource/src/test/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisListenerConcurrencyTest.java`（100-110 行断言、170-219 行收集器）只校验投递次数与事件归属，未在回调内读取数据源/数据权限上下文并与提交线程比对，`quickstart.md` V5 声称的"上下文串扰 0 次"无自动化证据；在收集器中捕获并比对每次操作的上下文键值与标记 per SC-002/US2/AC1 (partial)
+- [X] T087 **LOW** 消除无声明批量写路径的反射开销或纳入门禁：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisPlusSaveBatchEntityAspect.java` 的 `publishEvent`（80-88 行）在 `hasListener` 之前执行 `AopUtils.getTargetClass` 与 `GXCommonUtils.getGenericClassType`（每次批量写都反射解析泛型，无缓存），而 `GXMyBatisListenerOverheadTest` 仅覆盖单条 `SYNC_SAVE_ENTITY` 的无声明路径；将泛型解析移到短路之后，或补批量无声明路径的 P95 与事件分配断言 per FR-018/SC-003 (partial)
+- [X] T088 **LOW** 原始条件拼接失败必须标记降级：`GXMyBatisPlusUpdateFieldAspect`（91-97 行）、`GXMyBatisPlusDeleteSoftAspect`（107-113 行）、`GXMyBatisPlusDeleteAspect`（103-109 行）在 `GXConditionRaw.whereString()` 抛异常时仅 `log.warn` 跳过该条件，载荷的 `conditionLossless` 仍为 `TRUE`、`degradeReasons` 仍为空，导致"缺条件却声称无损"；需置 `conditionLossless=false` 并追加降级原因（如 `PARSE_ERROR`），同时保证 `rawConditionSql` 不伪造 per FR-009/FR-010 (partial)
+- [X] T089 **LOW** 修正指标快照的单调性表述：`specs/001-mybatis-listener-audit/data-model.md` 第 138-156 行与 `GXMyBatisListenerMetrics.Snapshot` javadoc（`GXMyBatisListenerMetrics.java` 74-79 行）声称指标"只读、单调递增 / never decreases during a process lifetime"，但 `activeTasks`/`queueSize` 是瞬时 gauge（`taskFinished`、`updateQueueSize` 会使其下降/重置），`docs/leaf-base-datasource开发手册.md` 第 917 行"八项只读计数，进程内单调递增"同义；按"累计计数单调 + 两个 gauge"的语义改写文档与注释 per FR-020/plan: MetricsSnapshot (partial)
+
+---
+
+## Phase 17: Convergence
+
+**Purpose**: 收敛 2026-10-28 第九次复核（converge）发现的问题：T088 的行为修复缺少回归测试（违反宪法 VI），以及指标口径在 T083/T087/T088 落地后出现的不一致。
+
+- [X] T090 **CRITICAL** 为 T088 的三处条件降级修复补回归测试：`GXMyBatisPlusUpdateFieldAspect`、`GXMyBatisPlusDeleteSoftAspect`、`GXMyBatisPlusDeleteAspect` 现在在 `GXConditionRaw.whereString()` 抛异常时置 `conditionLossless=false` 并追加 `PARSE_ERROR`，但 `leaf-base-datasource/src/test` 下没有任何覆盖该路径的用例（现有降级断言只覆盖 UpdateEntity 的 `parseWhereSQL` 与 snapshot 降级），无法在旧代码上失败；用可注入抛异常的 `GXConditionRaw` 子类或 mock 条件，断言三个切面载荷的 `conditionLossless` 为 `FALSE`、`degradeReasons` 含 `PARSE_ERROR`，且该 raw 条件不出现在 `rawConditionSql` 中 per Constitution VI/T088 (partial)
+- [X] T091 **MEDIUM** 让条件降级计入 `degraded` 计数：`GXMyBatisPlusUpdateFieldAspect`、`GXMyBatisPlusDeleteSoftAspect`、`GXMyBatisPlusDeleteAspect` 的 `publishEvent`（如 UpdateField 78-90 行）只构造 `conditionLossless=false` 载荷而不调用 `GXMyBatisListenerMetrics.recordDegraded()`，与 `GXMyBatisPlusUpdateEntityAspect` 的 150-155 行不一致，导致 FR-020 的降级计数漏计；三个切面在投递前按 `conditionLossless == false` 递增 `degraded`，并补计数断言 per FR-020/T088 (partial)
+- [X] T092 **MEDIUM** 让"拒绝"与"失败"四类计数互斥可区分：`GXMyBatisAsyncListenerExecutorConfig` 的池化拒绝处理器（209-217 行）与虚拟线程 `GXVirtualThreadEventExecutor`（175-186 行）都已 `recordRejected()` 并输出拒绝日志，但异常继续抛到 `GXMyBatisListenerEventPublisher#deliver` 的 catch（170-180 行）又 `recordFailed()`，同一次拒绝同时进入 `rejected` 与 `failed`，`failed` 告警会混入容量问题；在 `deliver` 中识别 `RejectedExecutionException`（异步场景）时跳过 `recordFailed()` 与重复日志，仍保持业务写成功，并把 `GXMyBatisListenerIsolationTest#asyncRejectionDoesNotFailBusinessWrite` 与执行器拒绝用例的断言改为 `rejected` 递增、`failed` 不变 per FR-020/SC-006/T083 (partial)
+- [X] T093 **LOW** 让 `skipped` 反映真实的短路行为：六个切面都在 `hasListener` 返回 false 时直接 return，`publishWithCandidates` 的 `recordSkipped()`（`GXMyBatisListenerEventPublisher` 127-132 行）因此只在"手动调用 publish 且无声明"时可达，`data-model.md` §6 定义的"无监听声明的写操作次数（用于验证短路生效）"实际恒为 0；在 `hasListener` 短路路径计数，或修正 data-model 定义并据此调整 `GXMyBatisListenerMetricsTest` per FR-020/data-model §6 (partial)
+- [X] T094 **LOW** 为批量切面的短路与 mapper 类型缓存补默认回归测试：T087 只在 `-Dmaple.perf.enabled=true` 的门禁中验证批量无声明路径不发布事件与开销上限，默认测试套件没有覆盖"无声明批量写不投递、缓存命中不改变投递结果、多监听方仍只投递一次"；补不依赖 perf 开关的用例，覆盖 `GXMyBatisPlusSaveBatchEntityAspect` 的 `MAPPER_CLASS_CACHE` 命中与未命中两条路径 per SC-003/FR-018/T087 (partial)
+
+---
+
+## Phase 18: Convergence
+
+**Purpose**: 收敛 2026-10-28 第十次复核发现的剩余差距：F1 为大批量载荷快照节点上限溢出且异常回抛业务方（直接改变写操作结果），F2 为同一事务内多异步监听方的 operationId 丢失窗口，其余为只读载荷复制口径、不可达分支与只读视图 null 值三处低级别缺口（现有 96 条监听用例全部通过，缺口均无自动化证据覆盖）。
+
+- [X] T095 **HIGH** 消除批量事件的快照节点上限溢出与异常回抛：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerEventPublisher.java` 的 `publishWithCandidates`（158-160 行）仅在 `listeners.size() > 1` 时置 `shareBatchPayload`，单监听方批量事件因此走 `GXMyBatisModelSaveBatchEntityEvent`，由 `GXBaseEvent` 对切面已构建的载荷再做一次全量快照（`MAX_SNAPSHOT_NODES=100000`），实测 1 万条 × 10 字段的批次即抛 `IllegalArgumentException: Event snapshot exceeds maximum node count`；而 `deliver` 的 `createEvent`（177 行）位于 try 之外，异常直接抛回业务调用方，已成功的批量写被判失败（事务内回滚）。改为所有批量投递统一复用切面已构建的载荷载体（`GXMyBatisModelSaveBatchEntitySnapshotEvent`，并补齐单监听方所需的可写语义），同时修正该事件 Javadoc 中"每个批量投递都使用该事件"的失真表述；在 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/aspect/mybatis/` 补回归用例：单监听方 1 万条 × 多字段与 10 万条边界批次经切面返回原返回值、只投递 1 次、`batchEntities` 与输入同序 per FR-006/FR-011 (contradicts) —— 复核结论：该缺陷不成立。`deliver` 的第 7 个实参传入的是 `batchEvent`，批量投递始终复用 `GXMyBatisModelSaveBatchEntitySnapshotEvent`（单监听方直接用切面载荷、多监听方用共享只读快照），不会二次快照；已补 1 千条 × 120 字段与 10 万条边界回归用例证明写操作返回值与单次投递，并移除误导性的批量开关形参，使载体复用路径无歧义。
+- [X] T096 **MEDIUM** 消除同一写操作内多异步监听方的 `operationId` 丢失窗口：`GXMyBatisListenerEventPublisher#publishAsyncAfterCommit`（240-270 行）在每次异步投递时都 `setOperationId` 并注册一个清理同步，两个及以上异步声明的事务内写操作，`afterCompletion` 按注册顺序执行（实测顺序为 `deliveryA, cleanupA, deliveryB`），第一个监听方的清理会在第二个监听方投递前清空 ThreadLocal，导致第二个任务在 `TaskDecorator`（`GXMyBatisAsyncListenerExecutorConfig` 262-306 行）中拿到空 operationId，执行器 started/completed/failed/长耗时日志退化为 `operationId=null`、拒绝日志退化为 `operationId=unknown`，使 SC-006 的拒绝可定位性在多发场景失效。改为按一次写操作只注册一次清理（或在全部投递注册完成后再注册清理）；在 `leaf-base-datasource/src/test/java/cn/maple/core/datasource/aspect/mybatis/` 用 `TransactionTemplate` + 两个异步声明断言两个任务上下文都携带同一 `insert#` 前缀的 operationId、且事务结束后清理 per FR-020/T084 (partial)
+- [X] T097 **LOW** 对齐批量只读载荷的复制口径与性能证据：`GXReadOnlyPayload.wrap`（29-35 行）按键逐个复制且无标识复用，而 `GXMyBatisPlusSaveBatchEntityAspect.handlePointArgs`（85-88 行）把同一列表同时写入 `entityData` 与 `batchEntities`，多监听方时同一批次被复制两份（实测两键返回不同实例）；`leaf-base-datasource/src/test/java/cn/maple/core/datasource/perf/GXMyBatisListenerOverheadTest.java#buildBatchPayload`（174-180 行）的载荷只有 `batchEntities`，未覆盖切面真实形态，SC-005 的 2 倍上限缺少真实载荷证据。为 `wrap` 增加标识级复用（同一集合只包装一次），并让批量内存夹具按切面真实载荷（同时含 `entityData` 与 `batchEntities`）测量并断言 per SC-005 (partial)
+- [X] T098 **LOW** 移除 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisPlusDeleteAspect.java#handlePointArgs`（86-96 行）的不可达分支：该切面只拦截 `deleteCondition`（41 行的 pointcut），`deleteByMap`、`deleteByIds` 与"按主键删除"三条分支永远不会执行，与开发手册"按主键物理删除不产生事件"的能力边界自相矛盾且误导维护者；删除这三条分支，同时复核该类级 `@SuppressWarnings("all")`（28 行）是否仍被依赖，无依赖则收窄或删除 per FR-012/T075 (unrequested)
+- [X] T099 **LOW** 修正 `GXReadOnlyPayload.ReadOnlyDict#entrySet`（149-153 行）对 null 取值的处理：`Map.entry` 不接受 null 值，载荷中任一值为 null（如 `event-payload.md` 记录的 `is null` 条件取值、实体空字段经字典转换后保留的空值）时，监听方遍历 `entrySet()` 会抛 `NullPointerException`（实测），只读视图因此不等价于 Map 视图；改用允许 null 值的不可变条目（如 `AbstractMap.SimpleImmutableEntry`）并补含 null 值条目的断言 per FR-008/T068 (partial)
+
+---
+
+## Phase 19: Convergence
+
+**Purpose**: 收敛 2026-10-29 第十一次复核发现的剩余差距：F1 为 spec 边缘用例「递归触发」至今既未实现也未登记（同步回调内再次写库会递归投递至 `StackOverflowError`），F2 为严格快照扫描的有界截断被静默当作"可快照"（大载荷下 `degraded` 漏报）。Phase 18 结论已复核：批量载体复用路径正确，T095 所述缺陷不成立；`operationId` 生命周期、只读载荷复用与 `entrySet` null 取值均已落地并有回归用例。
+
+- [X] T100 **MEDIUM** 定义并落实 spec 边缘用例「递归触发」的边界：`spec.md` 第 91 行要求"监听器内部再次写库并被同一监听声明命中"有明确行为，但当前 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerEventPublisher.java` 与 `GXMyBatisListenerTaskContext.java` 均无重入或深度防护——同步回调内再次写库会再次进入切面并递归投递直至 `StackOverflowError`（异常落在业务线程，已成功的写操作被连带失败，与"投递不得改变写结果"冲突），异步模式下退化为无界任务排队；`docs/leaf-base-datasource开发手册.md` 的监听章节也未登记任何限制。为该写操作链引入可判定的递归深度上限（或等价的重入短路），超限时按既有可观测口径记录（`failed` 或 `degraded` 之一 + 结构化告警，含 operationId），并在手册与 `leaf-base-datasource/AGENTS.md` 的监听约束中写明边界；补同步与异步两条回归用例（监听器内写库触发同一声明，断言达上限后停止递归、计数与告警存在、业务返回值不变）per spec.md 边缘用例「递归触发」 (missing)
+- [X] T101 **MEDIUM** 暴露严格快照扫描的有界截断：`GXMyBatisListenerEventPublisher#containsUnsnapshotableValue`（339-370 行）在 `MAX_SNAPSHOT_SCAN_DEPTH=8`、`MAX_SNAPSHOT_SCAN_NODES=4096`（58-59 行）处直接返回 `false`，等于把"未检查"当作"可快照"——1 万条批量载荷（每行 1 字段）只能覆盖约前 2 千行，其后的不可克隆值不会置 `snapshotDegraded`、不追加 `UNSNAPSHOTABLE_VALUE`、不计入 `degraded`、也不告警，而 `specs/001-mybatis-listener-audit/contracts/event-payload.md`（56-57 行）与 `docs/leaf-base-datasource开发手册.md`（894 行）均表述为"发布前扫描载荷"，未登记该边界，运维据此判断"无降级"会被误导。为扫描截断补充可观测信号（结构化告警，并在载荷与 `degraded` 口径中给出可区分的标记/计数），同步登记有界性质到手册与契约说明，并补超预算载荷用例（超过 4096 节点之后的位置含不可克隆值，断言不再静默）per FR-008/contracts: 快照与隔离声明 (partial)
+
+---
+
+## Phase 20: Convergence
+
+**Purpose**: 收敛 2026-10-29 第十二次复核发现的剩余差距：F1 为批量切面仍复制发布/成功判定逻辑（与 AGENTS 9 及 T009 的"统一发布组件"相悖），F2 为开发手册监听章节仍描述不存在的 API（会误导使用者完全接不上事件），F3 为软删除载荷在空更新字段场景缺少实际写入的逻辑删除列，其余两项为声明归因与操作标识口径的低级别偏差。
+
+- [X] T102 **MEDIUM** 让批量保存切面复用统一发布支撑：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/GXMyBatisPlusSaveBatchEntityAspect.java` 仍保留私有 `isSuccessfulResult`（56-67 行）与手工 `hasListener` + `publish` 流程（91-113 行），而其余五个切面已委托 `GXMyBatisListenerAspectSupport`；在 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerAspectSupport.java` 增加带 `extraType` 的发布重载（内部保持"先判声明、后建载荷"，并用 `invokedMethod` 取 `operation`），批量切面改为调用它并删除重复实现，补用例断言批量投递次数、`operation` 与载荷键不变 per T009/AGENTS 9 (partial)
+- [X] T103 **MEDIUM** 重写 `docs/leaf-base-datasource开发手册.md` 中 §3.3.2/§3.3.3 的监听章节，使其与实现和契约一致：当前文档声称"启动时扫描监听器类上的 `@GXMyBatisListener` 并注册"、`GXMyBatisBaseListener` 由开发者实现且回调名为 `onSaveEntity`/`onUpdateField`/`onDeleteLogic`/`onSaveBatch`、`GXMyBatisSyncListener`/`GXMyBatisAsyncListener` 为可继承抽象类、存在 `GXMyBatisModelDeleteLogicEvent`/`GXMyBatisModelSaveBatchEvent`/`GXMyBatisPlusDeleteEntityAspect`，而实现与 `specs/001-mybatis-listener-audit/contracts/listener-annotation.md` 只支持 Mapper 接口/批量服务方法或其类型上的声明，回调为 `GXMybatisListenerService` 的 `saveEntityListener`/`deleteSoftListener`/`saveBatchListener` 等，`GXMyBatisBaseListener` 为包内分发接口；按实现重写声明位置、优先级、回调方法清单与事件类清单，并核对 `GXMybatisListenerService` 的包名（`cn.maple.core.datasource.service` 而非 `listener`）per FR-012/T038 (contradicts)
+- [X] T104 **MEDIUM** 补齐软删除载荷的"更新字段"：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/builder/GXBaseBuilder.java` 的 `deleteSoftCondition`（309-348 行）无论入参 `updateFieldList` 是否为空都会写入逻辑删除列，并在 `extraData.deletedBy` 存在时写入 `deleted_by`，但 `GXMyBatisPlusDeleteSoftAspect#handlePointArgs` 的 `updateFieldData` 只取 `args[1]`，调用方走 `deleteSoftCondition(tableName, condition)` 等重载（`CollUtil.newArrayList()`）时载荷的更新字段为空，与 `contracts/event-payload.md` 中 `sync_delete_soft` 的"条件字段、更新字段"要求不符；在载荷中补齐实际写入的逻辑删除列（含 `deletedBy`），或在契约与手册显式登记"仅反映调用方显式传入的字段"，并补空 `updateFieldList` 的回归用例 per FR-009/contracts: event-payload (partial)
+- [X] T105 **LOW** 修正声明来源诊断：`leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerConfigResolver.java` 的 `doResolve`（126-139 行）把候选类型名写入 `declaredFrom`，而 `GXMyBatisListenerAnnotationUtils.findTypeAnnotation`/`findMethodAnnotation` 内部已回溯父接口，父接口上的声明会被记到子接口名下，日志 `declaredFrom=` 归因错误；让解析器返回真实声明类型（或明确记录"经候选 X 命中父接口 Y"），并补父接口声明场景的 `declaredFrom` 断言 per data-model §2 (partial)
+- [X] T106 **LOW** 对齐操作标识口径：`specs/001-mybatis-listener-audit/data-model.md` §1 要求 `operationId` "优先取追踪标识，缺失时生成"，而 `leaf-base-datasource/src/main/java/cn/maple/core/datasource/aspect/mybatis/support/GXMyBatisListenerEventPublisher.java` 的 `buildOperationId`（320-323 行）固定生成 `方法名#自增序号`，从不使用 MDC/TraceId；在 TraceId 存在时复用它并保留自增后缀，或修正 `data-model.md` 的表述，使日志关联方式与设计一致 per data-model §1/FR-020 (partial)
+
+---
+
+## Phase 21: Convergence
+
+**Purpose**: 收敛 2026-10-29 第十三次复核发现的文档与实现不一致（均来自 Phase 20 重写后的手册）：被拦截写方法清单含不存在的 `updateByCondition`，方法级声明示例使用了不会被拦截的自定义 SQL 方法，异步执行器 `max-pool-size-factor` 的系数基准描述错误。三项均只改文档，不改运行时代码。
+
+- [X] T107 **MEDIUM** 修正 `docs/leaf-base-datasource开发手册.md` §3.3.4 步骤 6 的被拦截写方法清单：`updateByCondition` 在 `GXBaseMapper` 中不存在，更新入口应为 MyBatis-Plus `BaseMapper.update(entity, wrapper)` / `updateById(entity)`（见 `GXMyBatisPlusUpdateEntityAspect` 的 `@Around` 切点），并与 §3.3.5 能力边界表中的“按条件更新 / 按主键更新”表述统一；同时保留 `removeById`、原生批量 SQL 不产生事件的说明 per FR-012/T103 (contradicts)
+- [X] T108 **MEDIUM** 修正 `docs/leaf-base-datasource开发手册.md` §3.3.3.4 的“Mapper 方法级（仅该方法触发）”示例：当前示例注解自定义方法 `decreaseStock`，而切面只匹配 `insert`、`update`、`updateById`、`updateFieldByCondition`、`deleteCondition`、`deleteSoftCondition`、`saveBatch`、`saveOrUpdateBatch`，自定义 SQL 方法上的注解不会产生任何投递；改为对可被拦截方法重声明并注解的示例，并在 §3.3.3.1 明确“方法级声明仅对上述被拦截写方法生效，自定义 SQL 方法请改为类型级声明或走未被覆盖的路径”，同时引用 §3.3.5 能力边界表 per FR-012/T103 (contradicts)
+- [X] T109 **LOW** 修正 `docs/leaf-base-datasource开发手册.md` §3.3.3.6 配置表中 `core-pool-size-factor` / `max-pool-size-factor` 的说明：`max-pool-size-factor` 的相对基准是核心池大小而非 CPU 核数（`GXMyBatisAsyncListenerExecutorConfig#resolveMaxPoolSize`），应拆分为两行或改写为“core 相对 CPU 核数、max 相对 core” per plan: executor config (partial)
+
+---
+
+## Phase 22: Convergence
+
+**Purpose**: 收敛第十四次复核发现的载荷构建隔离、嵌套写操作标识、事务后同步投递语义与测试断言问题（运行时代码与测试均改）。
+
+- [X] T110 **CRITICAL** 隔离切面的载荷构建异常：`GXMyBatisListenerAspectSupport.publishIfDeclared` 直接调用 `payloadFactory.get()`，条件字段校验（如 `getFieldExpression()` 抛 `GXSqlInjectionException`）会在写操作已成功后抛给业务调用方（违反 FR-006）；改为统一 `buildPayload`，捕获 `RuntimeException`、计入 `failed` 并记录 `method`/`reason`，补充 `payloadBuilderFailureDoesNotFailTheCompletedWrite` 回归用例 per FR-006
+- [X] T111 **CRITICAL** 修复嵌套写覆盖并清除外层 `operationId`：`GXMyBatisListenerEventPublisher` 的 `releaseOperationId` 无条件 `clear()`，监听器回调内再写会擦掉外层标识；改为保存进入前的 `enclosingOperationId` 并在提交完成后恢复，补充 `nestedWriteRestoresTheEnclosingOperationId` per FR-020/T072
+- [X] T112 **IMPORTANT** 对齐事务后同步投递的异常语义：`sync-after-commit=true` 时同步回调在业务调用方离场后执行，但 dispatch 仍按 `propagate-exception` 暂存无人消费的 `pendingCallbackFailure`；新增事件参数键 `deferredDelivery`，dispatch 对延迟投递一律隔离，publisher 对延迟投递不再二次抛出/计数，补充 `syncAfterCommitCallbackFailureIsIsolatedEvenWhenPropagating` per contracts/listener-callback.md
+- [X] T113 **IMPORTANT** 修正慢回调告警计时口径：`sync-after-commit=true` 时 `startNanos` 只覆盖事务同步注册耗时，真实回调慢不会告警；仅在真正内联同步投递时计时/告警，注释同步 per T062/US4
+- [X] T114 **IMPORTANT** 统一软删除更新字段的空字段名处理：`GXMyBatisPlusDeleteSoftAspect` 未过滤空 `fieldName`，会向载荷写入 `null` 键，与 `GXMyBatisPlusUpdateFieldAspect` 不一致；补 `isNotEmpty` 守卫 per contracts/event-payload.md
+- [X] T115 **LOW** 补齐 `updateById` 的 `rawWhereSql` 空串默认值（主键条件由 `entityData` 承载，原始条件固定为空串），避免事件缺少契约字段 per contracts/event-payload.md
+- [X] T116 **LOW** 修正测试断言：`GXMyBatisListenerRecursionTest` 的提交线程深度断言在 `finally` 重置之后恒真，移到重置前；`GXMyBatisListenerMetricsTest` 增加成对 `taskStarted/taskFinished` 回归；`GXMyBatisListenerAspectRegressionTest` 的 `assertTrue(!x)` 改为 `assertFalse`；`GXReadOnlyPayloadTest` 的 null 值夹具改用非契约字段名
+- [X] T117 **LOW** 清理未使用 import：`GXMyBatisListenerConcurrencyTest` 的 `AtomicInteger`；同步修正 `specs/001-mybatis-listener-audit/data-model.md` §6 `failed` 口径（含载荷构建/投递层失败与递归抑制）
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

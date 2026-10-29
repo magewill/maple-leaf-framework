@@ -8,6 +8,16 @@ import java.util.concurrent.atomic.LongAdder;
  *
  * <p>The counters are intentionally static so that aspects and listener beans can record outcomes
  * without introducing a bean dependency in the dispatch path. They reset on process restart.</p>
+ *
+ * <p>Counting semantics: {@code delivered} counts events whose delivery call returned successfully
+ * (for asynchronous deliveries: successful submission or after-commit registration, the callback
+ * itself may still be pending), while {@code failed} counts callback or delivery-layer failures.
+ * Each failure is counted exactly once: callback failures are counted by the dispatch layer,
+ * delivery-layer failures by the publish layer. A rejected asynchronous submission is counted only
+ * in {@code rejected} by the executor and is not counted again in {@code failed}, so the four
+ * categories stay distinguishable. An isolated callback failure therefore increments both
+ * {@code delivered} (the delivery succeeded) and {@code failed} (the callback failed); the two
+ * counters are not mutually exclusive.</p>
  */
 public final class GXMyBatisListenerMetrics {
     private static final LongAdder DELIVERED = new LongAdder();
@@ -64,7 +74,9 @@ public final class GXMyBatisListenerMetrics {
     }
 
     /**
-     * Read-only view of the counters. Never negative, never decreases during a process lifetime.
+     * Read-only view of the counters. The first six values are cumulative counters: never negative
+     * and never decreasing during a process lifetime (they reset only on restart), while
+     * {@code activeTasks} and {@code queueSize} are instantaneous gauges that rise and fall.
      */
     public record Snapshot(long delivered, long failed, long rejected, long cancelled,
                            long degraded, long skipped, int activeTasks, int queueSize) {

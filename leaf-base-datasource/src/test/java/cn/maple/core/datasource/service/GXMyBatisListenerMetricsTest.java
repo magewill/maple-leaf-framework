@@ -32,11 +32,23 @@ class GXMyBatisListenerMetricsTest {
 
     @Test
     void activeTaskCounterNeverGoesBelowZero() {
+        // The gauge is process-wide, so only its invariant (non-negative, non-increasing on finish)
+        // is asserted rather than an absolute zero that depends on test execution order.
+        int before = metricsService.snapshot().activeTasks();
         GXMyBatisListenerMetrics.taskFinished();
         GXMyBatisListenerMetrics.taskFinished();
 
-        GXMyBatisListenerMetrics.Snapshot snapshot = metricsService.snapshot();
-        assertTrue(snapshot.activeTasks() >= 0);
-        assertEquals(0, snapshot.activeTasks());
+        int after = metricsService.snapshot().activeTasks();
+        assertTrue(after >= 0, "Active tasks must never go negative");
+        assertTrue(after <= before, "Finishing a task must never increase active tasks");
+
+        // A balanced start/finish pair must return the gauge to its baseline instead of only
+        // verifying the clamp, so a lost decrement would be observable.
+        GXMyBatisListenerMetrics.taskStarted();
+        GXMyBatisListenerMetrics.taskStarted();
+        GXMyBatisListenerMetrics.taskFinished();
+        GXMyBatisListenerMetrics.taskFinished();
+        assertEquals(before, metricsService.snapshot().activeTasks(),
+                "A balanced start/finish pair must restore the active task gauge");
     }
 }

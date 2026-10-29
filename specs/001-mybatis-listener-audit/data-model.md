@@ -17,7 +17,7 @@
 | `eventName` | 字符串 | 是 | 面向日志的可读名 | FR-020 |
 | `listenerType` | 类型引用 | 是 | 本次投递的目标监听器 | FR-002 |
 | `payload` | 回调载荷 | 是 | 见第 3 节 | FR-008～FR-012 |
-| `operationId` | 字符串 | 否 | 关联标识，优先取追踪标识，缺失时生成 | FR-020 |
+| `operationId` | 字符串 | 否 | 关联标识，格式为 `方法名#进程内自增序号`；TraceId 由 MDC 独立输出，不并入该字段 | FR-020 |
 | `occurredAt` | 时间戳 | 是 | 事件构造时刻 | FR-020 |
 
 **校验规则**
@@ -73,6 +73,7 @@ PUBLISHED → DELIVERED | FAILED | REJECTED
 | `degradeReasons` | 枚举集合 | 全部条件类操作 | 降级原因，见第 5 节 |
 | `batchEntities` | 列表 | 批量 | 本批次实体快照，保持原顺序 |
 | `snapshotDegraded` | 布尔 | 全部 | 是否出现不可快照的值（引用被原样保留） |
+| `snapshotScanTruncated` | 布尔 | 全部（仅 `strict-snapshot=true`） | 严格快照扫描是否因超出深度/节点预算而截断，此时载荷未被完整校验 |
 
 **校验规则**
 
@@ -137,12 +138,12 @@ QUEUED → CANCELLED（停机超时未执行）
 
 ## 6. 指标快照（MetricsSnapshot）
 
-只读、单调递增（进程生命周期内），用于告警与验收。
+只读，用于告警与验收。`delivered` 至 `skipped` 六项为累计计数，进程生命周期内单调递增；`activeTasks` 与 `queueSize` 为瞬时 gauge，会随任务开始/结束与入队/出队上升和下降。
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `delivered` | 长整型 | 成功投递次数 |
-| `failed` | 长整型 | 监听器异常次数 |
+| `failed` | 长整型 | 监听器异常、载荷构建/投递层失败，以及递归上限抑制的投递次数（每项恰好计一次） |
 | `rejected` | 长整型 | 异步拒绝次数 |
 | `cancelled` | 长整型 | 停机超时未执行次数 |
 | `degraded` | 长整型 | 载荷降级次数（按原因可分项） |
@@ -152,7 +153,8 @@ QUEUED → CANCELLED（停机超时未执行）
 
 **校验规则**
 
-- 计数只增不减，重启后归零（不跨进程持久化）。
+- 累计计数（`delivered` / `failed` / `rejected` / `cancelled` / `degraded` / `skipped`）只增不减，重启后归零（不跨进程持久化）。
+- `activeTasks` 与 `queueSize` 为 gauge，可为任意非负瞬时值，不得按"只增"配置告警。
 - 快照读取必须无锁或低竞争，不得阻塞写路径。
 
 ---

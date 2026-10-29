@@ -10,7 +10,7 @@
 | `sync_save_entity` | `syncSaveEntity` | 同步 | 单条插入 | 实体快照 |
 | `sync_update_entity` | `syncUpdateEntity` | 同步 | 按条件/按主键更新 | 实体、条件字段、操作符、原始条件 |
 | `sync_update_field` | `syncUpdateField` | 同步 | 指定字段更新 | 更新字段、条件字段 |
-| `sync_delete_soft` | `syncDeleteSoft` | 同步 | 条件软删除 | 条件字段、更新字段 |
+| `sync_delete_soft` | `syncDeleteSoft` | 同步 | 条件软删除 | 条件字段、更新字段（仅调用方显式传入） |
 | `sync_delete` | `syncDelete` | 同步 | 条件物理删除 | 条件字段、原始条件 |
 | `sync_save_batch_entity` | `syncSaveBatchEntity` | 同步 | 批量保存 | 批次实体列表 |
 | `sync_batch_change` | `syncBatchChange` | 同步 | 批量新增或更新 | 批次实体列表 |
@@ -40,6 +40,8 @@
 
 **命名说明**：`实现键` 列为载荷中的实际键名。历史回调参数（`keyValuePairs`、`keyOperatorPairs`、`rawWhereSql`）属于已发布契约，保持不变；新代码统一按 `实现键` 读取，语义与左侧契约字段一一对应。
 
+**软删除的更新字段口径**：`sync_delete_soft` / `async_delete_soft` 的 `updateFields` 只包含调用方通过 `updateFieldList` 显式传入的字段。框架会按 `@TableLogic` 为软删除语句追加逻辑删除列（并可能追加 `deletedBy`），这些列由 SQL 构建器决定、不出现在载荷中；监听方应按"软删除已发生"的语义处理，不要依赖载荷中出现删除标记列。
+
 ## 载荷可变性
 
 | 场景 | 载荷可变性 | 说明 |
@@ -55,6 +57,7 @@
 - 支持防御性复制的类型：映射、集合、数组、日期、日历；复制后监听方修改无效。
 - 不支持的类型：保留引用，并置 `snapshotDegraded=true`、追加 `UNSNAPSHOTABLE_VALUE` 降级原因。
 - 检测时机：`maple.framework.mybatis.listener.strict-snapshot=true` 时，发布前扫描载荷并对不可克隆值置位、计数与告警；关闭时保持历史行为（保留引用但不标记），以维持无监听路径的零扫描开销。
+- 扫描为有界尽力而为：最大深度 8、最多 4096 个节点。超出预算即停止扫描，置 `snapshotScanTruncated=true`、计入一次 `degraded` 并输出 `reason=scan-truncated` 的结构化告警；不得把"未检查完"判定为"干净"。
 - 明确禁止：依赖 Java 序列化或反射克隆任意对象（见项目宪法 V）。
 - 批量事件对整个批次只做一次快照，不重复复制。
 

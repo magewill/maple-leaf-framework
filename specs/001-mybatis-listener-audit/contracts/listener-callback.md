@@ -46,10 +46,11 @@ public interface GXMybatisListenerService<T> {
 | 配置 | 行为 |
 | --- | --- |
 | 默认（`propagate-exception=false`） | 单个回调异常被捕获：记录事件类型、监听器、异常摘要，计入 `failed`，继续执行下一个监听器；业务写操作保持成功 |
-| `propagate-exception=true` | 异常按原样向业务调用方传播（旧行为），后续监听器不再执行 |
+| `propagate-exception=true` | 同步投递的异常按原样向业务调用方传播（旧行为），后续监听器不再执行 |
 
-- 无论哪种配置，异常 MUST NOT 导致事件被静默丢弃而不计数。
-- 异步模式下异常 MUST NOT 终止执行器线程。
+- 无论哪种配置，异常 MUST NOT 导致事件被静默丢弃而不计数：回调异常由回调分发层计入 `failed` 并记录，投递层异常由发布层计入 `failed` 并记录，二者互不重复计数。
+- 异步模式下异常 MUST NOT 终止执行器线程：异步回调异常始终隔离（无论 `propagate-exception` 取值），业务调用方无法观察到异步回调异常；`propagate-exception=true` 仅对同步投递生效。
+- 开启 `sync-after-commit` 且存在活动事务时，回调在事务提交后执行；此时异常被隔离并记录（事务已提交、调用方已越过提交点），`propagate-exception` 的传播与"停止后续监听器"语义不适用于该路径。无事务时 `sync-after-commit` 立即投递，传播语义与默认同步路径一致。
 
 ## 泛型与载荷
 

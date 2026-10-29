@@ -4,9 +4,12 @@ import cn.hutool.core.lang.Dict;
 import cn.maple.core.datasource.annotation.GXMyBatisListener;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerConfigResolver;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
+import cn.maple.core.datasource.config.GXDynamicContextHolder;
 import cn.maple.core.datasource.config.GXMyBatisListenerProperties;
 import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
+import cn.maple.core.datasource.dto.GXDataFilterContext;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
+import cn.maple.core.datasource.util.GXDataFilterThreadLocalUtils;
 import cn.maple.core.framework.config.aware.GXApplicationContextSingleton;
 import cn.maple.core.framework.dto.inner.GXBaseQueryParamInnerDto;
 import cn.maple.core.framework.dto.inner.condition.GXConditionEQ;
@@ -32,7 +35,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -83,11 +85,16 @@ class GXMyBatisListenerConcurrencyTest {
                     ready.countDown();
                     try {
                         start.await();
+                        GXDynamicContextHolder.push("ds-" + marker);
+                        GXDataFilterThreadLocalUtils.setDataFilterContext(
+                                new GXDataFilterContext("filter-" + marker));
                         invokeOperation(operation, marker, saveAspect, updateAspect, updateFieldAspect,
                                 deleteSoftAspect, deleteAspect, saveBatchAspect);
                     } catch (Throwable throwable) {
                         failure.compareAndSet(null, throwable);
                     } finally {
+                        GXDynamicContextHolder.clear();
+                        GXDataFilterThreadLocalUtils.cleanDataFilterContext();
                         done.countDown();
                     }
                 });
@@ -107,6 +114,13 @@ class GXMyBatisListenerConcurrencyTest {
                         .filter(marker -> marker % OPERATION_KINDS == currentOperation)
                         .count();
                 assertEquals(expected, actual, "Operation " + operation + " delivered a wrong number of events");
+            }
+            // SC-002: no context crosstalk; every callback observes the context of its own write.
+            for (int marker = 0; marker < CONCURRENCY; marker++) {
+                assertEquals("ds-" + marker, collector.dataSourceKey(marker),
+                        "Data source context must not leak across concurrent writes");
+                assertEquals("filter-" + marker, collector.filterSql(marker),
+                        "Data filter context must not leak across concurrent writes");
             }
         } finally {
             GXApplicationContextSingleton.INSTANCE.clearApplicationContext();
@@ -170,6 +184,8 @@ class GXMyBatisListenerConcurrencyTest {
     static class CollectingListener implements ApplicationListener<ApplicationEvent> {
         private final Set<Integer> deliveredOnce = ConcurrentHashMap.newKeySet();
         private final List<Integer> deliveredMarkers = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private final Map<Integer, String> dataSourceByMarker = new ConcurrentHashMap<>();
+        private final Map<Integer, String> filterByMarker = new ConcurrentHashMap<>();
 
         @Override
         public void onApplicationEvent(ApplicationEvent event) {
@@ -183,6 +199,9 @@ class GXMyBatisListenerConcurrencyTest {
             }
             deliveredMarkers.add(marker);
             deliveredOnce.add(marker);
+            dataSourceByMarker.put(marker, GXDynamicContextHolder.peek());
+            GXDataFilterContext filter = GXDataFilterThreadLocalUtils.getDataFilterContext();
+            filterByMarker.put(marker, filter == null ? null : filter.getSqlFilter());
         }
 
         List<Integer> deliveredMarkers() {
@@ -191,6 +210,14 @@ class GXMyBatisListenerConcurrencyTest {
 
         Set<Integer> deliveredOnce() {
             return deliveredOnce;
+        }
+
+        String dataSourceKey(int marker) {
+            return dataSourceByMarker.get(marker);
+        }
+
+        String filterSql(int marker) {
+            return filterByMarker.get(marker);
         }
 
         private Integer extractMarker(Dict source) {

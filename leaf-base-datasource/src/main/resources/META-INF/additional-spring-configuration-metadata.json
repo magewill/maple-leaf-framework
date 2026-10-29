@@ -22,7 +22,7 @@
       "name": "maple.framework.mybatis.listener.propagate-exception",
       "type": "java.lang.Boolean",
       "defaultValue": false,
-      "description": "Rethrow listener exceptions to the business caller. Default isolates failures so committed writes are not rolled back."
+      "description": "Rethrow listener exceptions to the business caller. Default isolates failures so committed writes are not rolled back. Applies to synchronous deliveries only: asynchronous callbacks are always isolated, and failures after a committed sync-after-commit transaction are contained and logged."
     },
     {
       "name": "maple.framework.mybatis.listener.sync-after-commit",

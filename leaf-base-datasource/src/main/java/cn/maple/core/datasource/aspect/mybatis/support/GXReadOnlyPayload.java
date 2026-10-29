@@ -4,10 +4,12 @@ import cn.hutool.core.lang.Dict;
 import org.jspecify.annotations.Nullable;
 
 import java.lang.reflect.Array;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -27,39 +29,60 @@ public final class GXReadOnlyPayload {
     }
 
     public static Dict wrap(Dict payload) {
-        Map<String, Object> values = new LinkedHashMap<>();
-        payload.forEach((key, value) -> values.put(key, wrapValue(value)));
-        return new ReadOnlyDict(values);
+        return wrapDict(payload, new IdentityHashMap<>());
     }
 
-    private static @Nullable Object wrapValue(@Nullable Object value) {
+    private static Dict wrapDict(Dict payload, Map<Object, Object> wrapped) {
+        ReadOnlyDict copy = new ReadOnlyDict();
+        // Register the copy before recursing: the batch aspect writes one entity list under both
+        // entityData and batchEntities, so the same container is reached twice and must be copied
+        // only once to stay within the SC-005 2x budget.
+        wrapped.put(payload, copy);
+        payload.forEach((key, value) -> copy.seed(key, wrapValue(value, wrapped)));
+        return copy;
+    }
+
+    private static @Nullable Object wrapValue(@Nullable Object value, Map<Object, Object> wrapped) {
+        if (value == null) {
+            return null;
+        }
+        Object existing = wrapped.get(value);
+        if (existing != null) {
+            return existing;
+        }
         if (value instanceof Dict dict) {
-            Map<String, Object> values = new LinkedHashMap<>();
-            dict.forEach((key, nested) -> values.put(key, wrapValue(nested)));
-            return new ReadOnlyDict(values);
+            return wrapDict(dict, wrapped);
         }
         if (value instanceof Map<?, ?> map) {
-            Map<Object, Object> values = new LinkedHashMap<>();
-            map.forEach((key, nested) -> values.put(key, wrapValue(nested)));
-            return Collections.unmodifiableMap(values);
+            Map<Object, Object> values = new HashMap<>(map.size() * 2);
+            Map<Object, Object> copy = Collections.unmodifiableMap(values);
+            wrapped.put(value, copy);
+            map.forEach((key, nested) -> values.put(key, wrapValue(nested, wrapped)));
+            return copy;
         }
         if (value instanceof Set<?> set) {
             Set<Object> values = new LinkedHashSet<>();
-            set.forEach(nested -> values.add(wrapValue(nested)));
-            return Collections.unmodifiableSet(values);
+            Set<Object> copy = Collections.unmodifiableSet(values);
+            wrapped.put(value, copy);
+            set.forEach(nested -> values.add(wrapValue(nested, wrapped)));
+            return copy;
         }
         if (value instanceof Collection<?> collection) {
             List<Object> values = new ArrayList<>(collection.size());
-            collection.forEach(nested -> values.add(wrapValue(nested)));
-            return Collections.unmodifiableList(values);
+            List<Object> copy = Collections.unmodifiableList(values);
+            wrapped.put(value, copy);
+            collection.forEach(nested -> values.add(wrapValue(nested, wrapped)));
+            return copy;
         }
-        if (value != null && value.getClass().isArray()) {
+        if (value.getClass().isArray()) {
             int length = Array.getLength(value);
             List<Object> values = new ArrayList<>(length);
+            List<Object> copy = Collections.unmodifiableList(values);
+            wrapped.put(value, copy);
             for (int index = 0; index < length; index++) {
-                values.add(wrapValue(Array.get(value, index)));
+                values.add(wrapValue(Array.get(value, index), wrapped));
             }
-            return values;
+            return copy;
         }
         return value;
     }
@@ -68,8 +91,15 @@ public final class GXReadOnlyPayload {
      * Read-only {@link Dict}; every mutator throws so a listener cannot affect other listeners.
      */
     private static final class ReadOnlyDict extends Dict {
-        private ReadOnlyDict(Map<String, Object> source) {
-            source.forEach(super::put);
+        private ReadOnlyDict() {
+        }
+
+        /**
+         * Fills the view while it is being built; the shared snapshot is handed to listeners only
+         * after the whole payload has been wrapped.
+         */
+        private void seed(String key, @Nullable Object value) {
+            super.put(key, value);
         }
 
         @Override
@@ -142,11 +172,16 @@ public final class GXReadOnlyPayload {
 
         /**
          * Returns immutable entry copies, so {@code entry.setValue(...)} cannot bypass the read-only view.
+         *
+         * <p>{@link AbstractMap.SimpleImmutableEntry} rather than {@link Map#entry}: payload values may
+         * legitimately be {@code null} (is-null conditions, entity fields without a value) and
+         * {@code Map.entry} rejects them with a {@link NullPointerException}.</p>
          */
         @Override
         public Set<Map.Entry<String, Object>> entrySet() {
             Set<Map.Entry<String, Object>> entries = new LinkedHashSet<>();
-            super.entrySet().forEach(entry -> entries.add(Map.entry(entry.getKey(), entry.getValue())));
+            super.entrySet().forEach(entry -> entries.add(
+                    new AbstractMap.SimpleImmutableEntry<>(entry.getKey(), entry.getValue())));
             return Collections.unmodifiableSet(entries);
         }
 

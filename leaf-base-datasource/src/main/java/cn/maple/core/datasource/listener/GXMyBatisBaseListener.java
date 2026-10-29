@@ -7,6 +7,8 @@ import cn.hutool.core.text.CharSequenceUtil;
 import cn.hutool.core.util.ObjectUtil;
 import cn.hutool.core.util.TypeUtil;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerMetrics;
+import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerTaskContext;
+import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.event.*;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
 import cn.maple.core.framework.exception.GXBusinessException;
@@ -21,8 +23,12 @@ import java.lang.reflect.Type;
 /**
  * Shared dispatch logic for MyBatis CRUD events.
  *
- * <p>Each callback is isolated: a failing listener is logged and counted, the remaining listeners
- * and the business write operation are unaffected.</p>
+ * <p>By default each callback is isolated: a failing listener is logged and counted, the remaining
+ * listeners and the business write operation are unaffected. With {@code propagate-exception=true}
+ * the original exception is surfaced to the business caller as-is and subsequent listeners stop.
+ * Deferred deliveries (asynchronous, or synchronous with {@code sync-after-commit=true}) are always
+ * isolated regardless of the switch, because the business caller is already gone and a callback
+ * failure can never terminate the executor thread (contracts/listener-callback.md).</p>
  */
 @SuppressWarnings("unchecked")
 interface GXMyBatisBaseListener {
@@ -119,19 +125,68 @@ interface GXMyBatisBaseListener {
     }
 
     private void dispatch(String action, cn.maple.core.framework.event.GXBaseEvent<Dict> event, Runnable task) {
+        // Count the nesting depth around every callback so a listener that writes through an
+        // annotated mapper cannot recurse without bound (spec edge case "递归触发"); the publisher
+        // refuses deliveries beyond GXMyBatisListenerEventPublisher.MAX_DELIVERY_DEPTH.
+        GXMyBatisListenerTaskContext.enterDelivery();
         try {
             task.run();
         } catch (RuntimeException exception) {
+            // Callback failures are always counted and logged exactly once here, in both switch
+            // modes (T024); the publish layer must not count them again.
             GXMyBatisListenerMetrics.recordFailed();
             Dict param = event.getParam();
-            String listenerName = ObjectUtil.isNull(param) ? null : param.getStr("listenerClazzName");
-            LOG.error("MyBatis listener callback failed: action={}, eventType={}, listener={}, reason={}",
-                    action, event.getEventType(), listenerName, exception.getMessage(), exception);
+            String listenerName = ObjectUtil.isNull(param)
+                    ? null : param.getStr(GXMyBatisEventConstant.LISTENER_CLAZZ_NAME);
+            String operationId = ObjectUtil.isNull(param)
+                    ? null : param.getStr(GXMyBatisEventConstant.OPERATION_ID);
+            boolean propagate = !ObjectUtil.isNull(param)
+                    && Boolean.TRUE.equals(param.getBool(GXMyBatisEventConstant.PROPAGATE_EXCEPTION));
+            boolean asyncDelivery = isAsyncDelivery(event, param);
+            boolean deferredDelivery = !ObjectUtil.isNull(param)
+                    && Boolean.TRUE.equals(param.getBool(GXMyBatisEventConstant.DEFERRED_DELIVERY));
+            LOG.error("MyBatis listener callback failed: action={}, eventType={}, mode={}, operationId={}, listener={}, reason={}",
+                    action, event.getEventType(), asyncDelivery ? "async" : "sync", operationId,
+                    listenerName, exception.getMessage(), exception);
+            if (!propagate || asyncDelivery || deferredDelivery) {
+                // Isolated: the failure is already counted and logged. Deferred deliveries
+                // (asynchronous, or synchronous with sync-after-commit) stay isolated even when
+                // propagating because the business caller is already gone and an escaping exception
+                // would terminate the executor thread (contracts/listener-callback.md).
+                return;
+            }
+            if (ObjectUtil.isNull(param)) {
+                throw exception;
+            }
+            // Surface as-is via the publish layer: stashing the original exception keeps the failure
+            // accounting exact (callback failures counted here, delivery failures there) while the
+            // business caller still observes it and the publish loop stops (T077).
+            param.set(GXMyBatisEventConstant.PENDING_CALLBACK_FAILURE, exception);
+        } finally {
+            GXMyBatisListenerTaskContext.exitDelivery();
         }
     }
 
+    /**
+     * Resolves whether the delivery is asynchronous. The explicit param key wins; when it is absent
+     * (events published outside the framework publisher) the event type decides, so an unknown
+     * delivery is never misclassified as synchronous and can never propagate an exception onto an
+     * executor thread (contracts/listener-callback.md).
+     */
+    private boolean isAsyncDelivery(cn.maple.core.framework.event.GXBaseEvent<Dict> event, @Nullable Dict param) {
+        if (!ObjectUtil.isNull(param)) {
+            Boolean declared = param.getBool(GXMyBatisEventConstant.ASYNC_DELIVERY);
+            if (!ObjectUtil.isNull(declared)) {
+                return declared;
+            }
+        }
+        return CharSequenceUtil.startWith(event.getEventType(),
+                GXMyBatisEventConstant.MYBATIS_ASYNC_EVENT + "_");
+    }
+
     private Class<? extends GXMybatisListenerService<?>> resolveListenerClass(@Nullable Dict param) {
-        Object listenerClazzValue = ObjectUtil.isNull(param) ? null : param.getObj("listenerClazz");
+        Object listenerClazzValue = ObjectUtil.isNull(param)
+                ? null : param.getObj(GXMyBatisEventConstant.LISTENER_CLAZZ);
         Class<? extends GXMybatisListenerService<?>> listenerClazz =
                 Convert.convert(new TypeReference<>() {
                 }, listenerClazzValue);

@@ -2,6 +2,7 @@ package cn.maple.core.datasource.perf;
 
 import cn.hutool.core.lang.Dict;
 import cn.maple.core.datasource.annotation.GXMyBatisListener;
+import cn.maple.core.datasource.aspect.mybatis.GXMyBatisPlusSaveBatchEntityAspect;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerConfigResolver;
 import cn.maple.core.datasource.aspect.mybatis.support.GXMyBatisListenerEventPublisher;
 import cn.maple.core.datasource.config.GXMyBatisListenerProperties;
@@ -9,6 +10,8 @@ import cn.maple.core.datasource.constant.GXMyBatisEventConstant;
 import cn.maple.core.datasource.enums.GXModelEventNamingEnums;
 import cn.maple.core.datasource.service.GXMybatisListenerService;
 import cn.maple.core.framework.util.GXEventPublisherUtils;
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.mockito.MockedStatic;
@@ -20,7 +23,9 @@ import java.lang.management.ManagementFactory;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -171,7 +176,12 @@ class GXMyBatisListenerOverheadTest {
         for (int index = 0; index < BATCH_SIZE; index++) {
             entities.add(Dict.create().set("id", index));
         }
-        return Dict.create().set("operation", "saveBatch").set("batchEntities", entities);
+        // Mirrors GXMyBatisPlusSaveBatchEntityAspect#handlePointArgs: one entity list is published
+        // under both keys, so the read-only wrap must reuse it instead of copying it twice (SC-005).
+        return Dict.create()
+                .set("operation", "saveBatch")
+                .set("entityData", entities)
+                .set("batchEntities", entities);
     }
 
     @Test
@@ -192,6 +202,61 @@ class GXMyBatisListenerOverheadTest {
                     disabledP95 / 1_000.0D, noDeclarationP95 / 1_000.0D, delta / 1_000.0D);
             assertTrue(delta <= 10_000L, () -> "Switch-off baseline deviates by " + delta + " ns");
         }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "maple.perf.enabled", matches = "true")
+    void unannotatedBatchPathStaysWithinBudgetAndPublishesNothing() throws Throwable {
+        Method method = PlainBatchService.class.getMethod("saveBatch", Collection.class);
+        ProceedingJoinPoint point = Mockito.mock(ProceedingJoinPoint.class);
+        MethodSignature signature = Mockito.mock(MethodSignature.class);
+        Mockito.when(point.getTarget()).thenReturn(new PlainBatchService());
+        Mockito.when(point.getSignature()).thenReturn(signature);
+        Mockito.when(signature.getMethod()).thenReturn(method);
+        Mockito.when(point.getArgs()).thenReturn(new Object[]{List.of(Map.of("id", 1))});
+        Mockito.when(point.proceed()).thenReturn(1);
+
+        try (MockedStatic<GXEventPublisherUtils> eventPublisher = Mockito.mockStatic(GXEventPublisherUtils.class)) {
+            GXMyBatisPlusSaveBatchEntityAspect aspect =
+                    new GXMyBatisPlusSaveBatchEntityAspect(publisher(new GXMyBatisListenerProperties()));
+            MockEnvironment disabledEnvironment = new MockEnvironment()
+                    .withProperty(GXMyBatisListenerEventPublisher.ENABLED_KEY, "false");
+            GXMyBatisPlusSaveBatchEntityAspect disabledAspect = new GXMyBatisPlusSaveBatchEntityAspect(
+                    publisher(new GXMyBatisListenerProperties(), disabledEnvironment));
+
+            long p95 = measureAspectP95(aspect, point);
+            long disabledP95 = measureAspectP95(disabledAspect, point);
+            long delta = Math.max(0L, p95 - disabledP95);
+
+            System.out.printf(
+                    "MyBatis listener unannotated batch path: p95=%.3f us, disabled-baseline p95=%.3f us, delta=%.3f us%n",
+                    p95 / 1_000.0D, disabledP95 / 1_000.0D, delta / 1_000.0D);
+            // SC-003/FR-018: the batch aspect resolves the mapper type before the short-circuit, so
+            // the listener-specific overhead is measured against the switch-off baseline (the mock
+            // interception cost is shared by both runs) and must stay within the 2% budget.
+            assertTrue(delta <= TYPICAL_WRITE_NANOS / 50L,
+                    () -> "Unannotated batch path added " + delta + " ns over the switch-off baseline");
+            eventPublisher.verifyNoInteractions();
+        }
+    }
+
+    private long measureAspectP95(GXMyBatisPlusSaveBatchEntityAspect aspect, ProceedingJoinPoint point)
+            throws Throwable {
+        for (int index = 0; index < WARMUP_ITERATIONS; index++) {
+            aspect.around(point);
+        }
+        long[] samples = new long[ROUNDS * ITERATIONS];
+        int cursor = 0;
+        for (int round = 0; round < ROUNDS; round++) {
+            for (int iteration = 0; iteration < ITERATIONS; iteration++) {
+                long start = System.nanoTime();
+                aspect.around(point);
+                samples[cursor++] = System.nanoTime() - start;
+            }
+        }
+        Arrays.sort(samples);
+        int index = (int) Math.ceil(samples.length * 0.95D) - 1;
+        return samples[Math.max(0, Math.min(samples.length - 1, index))];
     }
 
     private long measureP95(GXMyBatisListenerEventPublisher publisher, Object target, Method method, Dict payload) {
@@ -248,6 +313,12 @@ class GXMyBatisListenerOverheadTest {
     }
 
     private static class PlainListener implements GXMybatisListenerService<Object> {
+    }
+
+    private static class PlainBatchService {
+        public Object saveBatch(Collection<?> entities) {
+            return entities;
+        }
     }
 
     @GXMyBatisListener(listenerClazz = MultiListenerOne.class, runType = GXMyBatisEventConstant.MYBATIS_SYNC_EVENT)

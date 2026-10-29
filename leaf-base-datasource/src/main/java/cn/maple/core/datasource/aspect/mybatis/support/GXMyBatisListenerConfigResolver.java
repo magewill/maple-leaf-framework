@@ -127,14 +127,18 @@ public class GXMyBatisListenerConfigResolver {
         List<ResolvedListener> methodLevel = new ArrayList<>();
         List<ResolvedListener> typeLevel = new ArrayList<>();
         for (Class<?> candidate : sortedTypes) {
-            GXMyBatisListener methodAnnotation =
-                    GXMyBatisListenerAnnotationUtils.findMethodAnnotation(candidate, invokedMethod);
-            if (Objects.nonNull(methodAnnotation)) {
-                addListener(methodLevel, methodAnnotation, candidate.getName() + "#" + invokedMethod.getName());
+            GXMyBatisListenerAnnotationUtils.ResolvedDeclaration methodDeclaration =
+                    GXMyBatisListenerAnnotationUtils.findMethodDeclaration(candidate, invokedMethod);
+            if (Objects.nonNull(methodDeclaration)) {
+                // The annotation may live on a parent interface method; attribute it to the type that
+                // really declares it so the diagnostic origin matches the source (data-model §2).
+                addListener(methodLevel, methodDeclaration.annotation(),
+                        methodDeclaration.declaringType().getName() + "#" + invokedMethod.getName());
             }
-            GXMyBatisListener typeAnnotation = GXMyBatisListenerAnnotationUtils.findTypeAnnotation(candidate);
-            if (Objects.nonNull(typeAnnotation)) {
-                addListener(typeLevel, typeAnnotation, candidate.getName());
+            GXMyBatisListenerAnnotationUtils.ResolvedDeclaration typeDeclaration =
+                    GXMyBatisListenerAnnotationUtils.findTypeDeclaration(candidate);
+            if (Objects.nonNull(typeDeclaration)) {
+                addListener(typeLevel, typeDeclaration.annotation(), typeDeclaration.declaringType().getName());
             }
         }
         List<ResolvedListener> selected = methodLevel.isEmpty() ? typeLevel : methodLevel;

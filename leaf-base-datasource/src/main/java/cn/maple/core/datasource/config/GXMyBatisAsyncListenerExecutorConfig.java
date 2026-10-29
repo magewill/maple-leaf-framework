@@ -13,11 +13,13 @@ import org.springframework.core.env.Environment;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.core.task.TaskDecorator;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Executor configuration for MyBatis write-operation listeners.
@@ -32,6 +34,7 @@ public class GXMyBatisAsyncListenerExecutorConfig {
     private final Environment environment;
 
     private volatile ThreadPoolTaskExecutor eventExecutor;
+    private volatile AsyncTaskExecutor virtualEventExecutor;
 
     public GXMyBatisAsyncListenerExecutorConfig(GXMyBatisAsyncListenerProperties properties,
                                                 Environment environment) {
@@ -48,8 +51,11 @@ public class GXMyBatisAsyncListenerExecutorConfig {
         int normalizedAwaitTerminationSeconds = Math.max(0, properties.getAwaitTerminationSeconds());
 
         if (virtualThreadsEnabled()) {
-            return createVirtualThreadExecutor("event", "maple-framework-mybatis-event-virtual-",
-                    maxPoolSize, normalizedAwaitTerminationSeconds);
+            AsyncTaskExecutor executor = createVirtualThreadExecutor("event",
+                    "maple-framework-mybatis-event-virtual-", maxPoolSize,
+                    normalizedAwaitTerminationSeconds, true, true);
+            this.virtualEventExecutor = executor;
+            return executor;
         }
 
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -59,8 +65,8 @@ public class GXMyBatisAsyncListenerExecutorConfig {
         executor.setKeepAliveSeconds(normalizedKeepAliveSeconds);
         executor.setThreadNamePrefix("maple-framework-mybatis-event-async-");
         executor.setThreadGroupName("maple-framework-mybatis-event-group");
-        executor.setRejectedExecutionHandler(createRejectedExecutionHandler());
-        executor.setTaskDecorator(createTaskDecorator());
+        executor.setRejectedExecutionHandler(createRejectedExecutionHandler("event", true));
+        executor.setTaskDecorator(createEventTaskDecorator());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(normalizedAwaitTerminationSeconds);
         executor.initialize();
@@ -78,7 +84,7 @@ public class GXMyBatisAsyncListenerExecutorConfig {
         int normalizedAwaitTerminationSeconds = Math.max(0, properties.getAwaitTerminationSeconds());
         if (virtualThreadsEnabled()) {
             return createVirtualThreadExecutor("validation", "maple-framework-mybatis-validation-virtual-",
-                    maxPoolSize, normalizedAwaitTerminationSeconds);
+                    maxPoolSize, normalizedAwaitTerminationSeconds, false, false);
         }
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(1);
@@ -86,8 +92,10 @@ public class GXMyBatisAsyncListenerExecutorConfig {
         executor.setQueueCapacity(Math.max(0, properties.getQueueCapacity()));
         executor.setThreadNamePrefix("maple-framework-mybatis-validation-");
         executor.setThreadGroupName("maple-framework-mybatis-validation-group");
-        executor.setRejectedExecutionHandler(createRejectedExecutionHandler());
-        executor.setTaskDecorator(createTaskDecorator());
+        // Database validation is not event delivery: its rejections and task timings must not be
+        // mixed into the listener counters (FR-020).
+        executor.setRejectedExecutionHandler(createRejectedExecutionHandler("validation", false));
+        executor.setTaskDecorator(createContextTaskDecorator());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(normalizedAwaitTerminationSeconds);
         executor.initialize();
@@ -98,16 +106,31 @@ public class GXMyBatisAsyncListenerExecutorConfig {
     @PreDestroy
     public void recordUnexecutedTasksOnShutdown() {
         ThreadPoolTaskExecutor executor = this.eventExecutor;
-        if (executor == null) {
+        if (executor != null) {
+            recordCancelledTasks(executor.getThreadPoolExecutor().getQueue().size());
             return;
         }
-        int remaining = executor.getThreadPoolExecutor().getQueue().size();
-        for (int index = 0; index < remaining; index++) {
+        AsyncTaskExecutor virtualExecutor = this.virtualEventExecutor;
+        if (virtualExecutor == null) {
+            return;
+        }
+        // Virtual threads have no queue, so any in-flight task is the work that can remain unfinished.
+        // The executor's own counter is used instead of the metrics snapshot, which also reflects tasks
+        // that already completed but have not been accounted for yet.
+        int unexecutedTasks = virtualExecutor instanceof GXVirtualThreadEventExecutor trackingExecutor
+                ? trackingExecutor.inFlightTasks()
+                : GXMyBatisListenerMetrics.snapshot().activeTasks();
+        recordCancelledTasks(unexecutedTasks);
+    }
+
+    private void recordCancelledTasks(int unexecutedTasks) {
+        if (unexecutedTasks <= 0) {
+            return;
+        }
+        for (int index = 0; index < unexecutedTasks; index++) {
             GXMyBatisListenerMetrics.recordCancelled();
         }
-        if (remaining > 0) {
-            log.warn("MyBatis event executor shut down with {} unexecuted tasks", remaining);
-        }
+        log.warn("MyBatis event executor shut down with {} unexecuted tasks", unexecutedTasks);
     }
 
     private int resolveCorePoolSize() {
@@ -129,10 +152,13 @@ public class GXMyBatisAsyncListenerExecutorConfig {
     }
 
     private AsyncTaskExecutor createVirtualThreadExecutor(String executorType, String threadNamePrefix,
-                                                          int maxPoolSize, int awaitTerminationSeconds) {
-        SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor(threadNamePrefix);
+                                                          int maxPoolSize, int awaitTerminationSeconds,
+                                                          boolean trackRejections, boolean trackMetrics) {
+        SimpleAsyncTaskExecutor executor = trackRejections
+                ? new GXVirtualThreadEventExecutor(threadNamePrefix)
+                : new SimpleAsyncTaskExecutor(threadNamePrefix);
         executor.setVirtualThreads(true);
-        executor.setTaskDecorator(createTaskDecorator());
+        executor.setTaskDecorator(trackMetrics ? createEventTaskDecorator() : createContextTaskDecorator());
         executor.setTaskTerminationTimeout((long) awaitTerminationSeconds * 1000L);
         executor.setCancelRemainingTasksOnClose(false);
         executor.setRejectTasksWhenLimitReached(true);
@@ -140,6 +166,52 @@ public class GXMyBatisAsyncListenerExecutorConfig {
         log.info("MyBatis {} async executor initialized with virtual threads: concurrencyLimit={}, taskTerminationTimeoutSeconds={}",
                 executorType, executor.getConcurrencyLimit(), awaitTerminationSeconds);
         return executor;
+    }
+
+    /**
+     * Counts and logs throttled rejections, which {@link SimpleAsyncTaskExecutor} would otherwise
+     * report only by throwing, so {@code rejected} stays distinguishable from {@code failed}
+     * (FR-020).
+     */
+    private static final class GXVirtualThreadEventExecutor extends SimpleAsyncTaskExecutor {
+        private static final long serialVersionUID = 1L;
+
+        private final AtomicInteger inFlightTasks = new AtomicInteger();
+
+        private GXVirtualThreadEventExecutor(String threadNamePrefix) {
+            super(threadNamePrefix);
+        }
+
+        // Overriding the deprecated overload is required: submit() and @Async both route through it,
+        // so this is the only place where a throttled virtual-thread rejection can be counted.
+        @SuppressWarnings("deprecation")
+        @Override
+        public void execute(Runnable task, long startTimeout) {
+            inFlightTasks.incrementAndGet();
+            try {
+                super.execute(() -> {
+                    try {
+                        task.run();
+                    } finally {
+                        inFlightTasks.decrementAndGet();
+                    }
+                }, startTimeout);
+            } catch (TaskRejectedException exception) {
+                inFlightTasks.decrementAndGet();
+                GXMyBatisListenerMetrics.recordRejected();
+                GXMyBatisListenerMetrics.updateQueueSize(0);
+                String operationId = GXMyBatisListenerTaskContext.currentOperationId();
+                log.error("MyBatis event task rejected: operationId={}, mode=virtual, concurrencyLimit={}, activeTasks={}, reason={}",
+                        operationId == null ? GXMyBatisListenerTaskContext.operationIdOf(task) : operationId,
+                        getConcurrencyLimit(), GXMyBatisListenerMetrics.snapshot().activeTasks(),
+                        exception.getMessage());
+                throw exception;
+            }
+        }
+
+        private int inFlightTasks() {
+            return inFlightTasks.get();
+        }
     }
 
     private int resolveVirtualConcurrencyLimit(int maxPoolSize) {
@@ -160,42 +232,60 @@ public class GXMyBatisAsyncListenerExecutorConfig {
         return factor;
     }
 
-    private RejectedExecutionHandler createRejectedExecutionHandler() {
+    private RejectedExecutionHandler createRejectedExecutionHandler(String executorType, boolean trackMetrics) {
         return (runnable, pool) -> {
-            GXMyBatisListenerMetrics.recordRejected();
-            GXMyBatisListenerMetrics.updateQueueSize(pool.getQueue().size());
-            log.error("MyBatis event task rejected: operationId={}, activeCount={}, queueSize={}, poolSize={}, corePoolSize={}, maximumPoolSize={}, shutdown={}",
-                    GXMyBatisListenerTaskContext.operationIdOf(runnable),
+            if (trackMetrics) {
+                GXMyBatisListenerMetrics.recordRejected();
+                GXMyBatisListenerMetrics.updateQueueSize(pool.getQueue().size());
+            }
+            log.error("MyBatis {} task rejected: operationId={}, activeCount={}, queueSize={}, poolSize={}, corePoolSize={}, maximumPoolSize={}, shutdown={}",
+                    executorType, GXMyBatisListenerTaskContext.operationIdOf(runnable),
                     pool.getActiveCount(), pool.getQueue().size(), pool.getPoolSize(),
                     pool.getCorePoolSize(), pool.getMaximumPoolSize(), pool.isShutdown());
             if (pool.isShutdown()) {
-                throw new RejectedExecutionException("MyBatis event executor has been shut down");
+                throw new RejectedExecutionException("MyBatis " + executorType + " executor has been shut down");
             }
-            throw new RejectedExecutionException("MyBatis event executor is saturated");
+            throw new RejectedExecutionException("MyBatis " + executorType + " executor is saturated");
         };
     }
 
-    private TaskDecorator createTaskDecorator() {
+    /**
+     * Context-only decorator for executors that do not deliver listener events, so their tasks never
+     * touch listener counters or emit listener task logs.
+     */
+    private TaskDecorator createContextTaskDecorator() {
+        return runnable -> GXMdcThreadUtils.wrap(
+                GXDynamicContextHolder.wrap(GXDataFilterThreadLocalUtils.wrap(runnable)),
+                MDC.getCopyOfContextMap());
+    }
+
+    private TaskDecorator createEventTaskDecorator() {
         long longTaskThresholdMs = properties.getLongTaskThresholdMs();
         return runnable -> {
             String operationId = GXMyBatisListenerTaskContext.currentOperationId();
-            Runnable wrappedRunnable = GXMdcThreadUtils.wrap(
-                    GXDynamicContextHolder.wrap(GXDataFilterThreadLocalUtils.wrap(runnable)),
-                    MDC.getCopyOfContextMap()
-            );
+            // A callback that writes again would otherwise restart the recursion counter at 0 on the
+            // fresh executor thread, so the depth of the submitting write travels with the task and an
+            // asynchronous callback chain is bounded exactly like a synchronous one (spec 边缘用例：递归触发).
+            int deliveryDepth = GXMyBatisListenerTaskContext.currentDeliveryDepth();
+            Runnable wrappedRunnable = GXMyBatisListenerTaskContext.withDeliveryDepth(deliveryDepth,
+                    GXMdcThreadUtils.wrap(
+                            GXDynamicContextHolder.wrap(GXDataFilterThreadLocalUtils.wrap(runnable)),
+                            MDC.getCopyOfContextMap()
+                    ));
             Runnable task = () -> {
                 long startTime = System.nanoTime();
                 boolean success = false;
                 GXMyBatisListenerMetrics.taskStarted();
                 if (log.isDebugEnabled()) {
-                    log.debug("MyBatis event task started");
+                    log.debug("MyBatis event task started: operationId={}", operationId);
                 }
                 try {
                     wrappedRunnable.run();
                     success = true;
                 } catch (Throwable throwable) {
                     long executionTime = toElapsedMillis(startTime);
-                    log.error("MyBatis event task failed: executionTime={} ms", executionTime, throwable);
+                    log.error("MyBatis event task failed: operationId={}, executionTime={} ms",
+                            operationId, executionTime, throwable);
                     if (throwable instanceof RuntimeException runtimeException) {
                         throw runtimeException;
                     }
@@ -208,9 +298,11 @@ public class GXMyBatisAsyncListenerExecutorConfig {
                     updateQueueSizeQuietly();
                     long executionTime = toElapsedMillis(startTime);
                     if (longTaskThresholdMs > 0 && executionTime > longTaskThresholdMs) {
-                        log.warn("Long running MyBatis event task detected: executionTime={} ms", executionTime);
+                        log.warn("Long running MyBatis event task detected: operationId={}, executionTime={} ms",
+                                operationId, executionTime);
                     } else if (success && log.isDebugEnabled()) {
-                        log.debug("MyBatis event task completed: executionTime={} ms", executionTime);
+                        log.debug("MyBatis event task completed: operationId={}, executionTime={} ms",
+                                operationId, executionTime);
                     }
                 }
             };
