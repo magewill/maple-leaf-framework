@@ -35,8 +35,9 @@
 - 行为：
   - 读取 `Environment.getProperty("dubbo.provider.filter")`；
   - 若为空 → ERROR：未排除内置 `exception`，业务码可能丢失；
-  - 若非空但既不含 `-exception` 也不含 `dubboExceptionFilter` → ERROR/WARN（按严重度）；
-  - `check-strict=true` 时抛 `GXBusinessException` 阻断启动。
+  - 若缺少 `-exception` → 同上 ERROR；若缺少 `dubboExceptionFilter` → ERROR：异常不再被统一收敛（Sentinel 阻断不转 `GXSentinelFlowException`、provider 内部异常不被包装）；两者统一为 ERROR；
+  - **不阻断启动**：不提供 `check-strict` 类开关（YAGNI，宪法附加约束 §8）。
+- 过滤链解析按逗号拆分后做 token 精确匹配：`my-exception-filter` 之类名称不得被判为已排除内置 filter。
 - 输出必须 ASCII、包含修复指引与目标配置。
 
 ## 5. 日志与门面（F-14/F-10）
@@ -59,5 +60,5 @@
 | --- | --- |
 | 不新增配置键 | 校验器仅 ERROR 告警，不改变既有启动行为 |
 | `@Log4j2` → `@Slf4j` | 输出目标不变 |
-| 启动 ERROR 告警 | 不阻断启动（`check-strict=false`） |
+| 启动 ERROR 告警 | 不阻断启动（无阻断开关） |
 | 静态 `appName` 缓存 | 生产单上下文无感；测试/热部署用 `resetAppNameCache()` |

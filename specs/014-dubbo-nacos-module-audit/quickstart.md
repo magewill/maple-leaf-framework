@@ -74,11 +74,22 @@ Select-String -Path "config\online-nacos-dubbo-demo.yml" -Pattern "filter"
 
 **流程**：先在任务说明中写明"需要的 Nacos 能力（注册/配置）、期望验证点、预计用例"，**向用户申请**；由用户提供真实 Nacos 地址/namespace/group/凭据后再执行。**禁止**臆造连接参数；缺环境时用例须 `assumeTrue` 优雅跳过，不得让流水线失败。
 
+**已落地的真实中间件用例（2026-11-01）**：
+
+```powershell
+# 真实本地 Nacos 配置中心：发布 dubbo.provider.filter 后由 GXDubboProviderFilterValidator 判定（不可达自动跳过）
+mvn -o -pl leaf-base-dubbo-nacos test "-Dtest=GXDubboNacosConfigCenterTest"
+# 真实 Dubbo 调用链（injvm，无需中间件）：SPI 装配 + -exception 排除 + 异常/TraceId 端到端
+mvn -o -pl leaf-base-dubbo-nacos test "-Dtest=GXDubboFilterChainEndToEndTest"
+```
+
+地址默认 `127.0.0.1:8848`（同 `config/application-4.0-dev.yml`），可用 `-Dgx.nacos.serverAddr` / `NACOS_SERVER_ADDR`、`-Dgx.nacos.namespace` / `NACOS_NAMESPACE` 覆盖。注册中心层（`dubbo-registry-nacos`）验证未做：该依赖不在模块类路径，且 plan 约束"零新增依赖、不改 pom.xml"。
+
 ## 6. 修复后验收清单
 
-1. `mvn -o -pl leaf-base-dubbo-nacos clean test` 全绿，用例数 ≥ 31（只增不减）。
+1. `mvn -o -pl leaf-base-dubbo-nacos clean test` 全绿，用例数只增不减（当前基线 **13 个测试类 / 74 条用例**）。
 2. 每个修复项都有"旧代码失败"的用例证据（FR-021），并在 `audit-report.md` 记录。
 3. `mvn -o -pl leaf-base-dubbo-nacos clean install -DskipTests` 通过（ErrorProne + NullAway 零错误）。
 4. `Select-String -Path "leaf-base-dubbo-nacos\src\main\java" -Pattern "@Log4j2"` 无输出。
 5. `docs/leaf-base-dubbo-nacos开发手册.md` 存在且包含：SPI 扩展名、TraceId 优先级表、异常分类矩阵、**强制装配配置**、`serialize.allowlist` 说明、不支持范围。
-6. `AGENTS.md` 第 5 节与"9 个测试类 / ≥31 条用例"一致。
+6. `AGENTS.md` 第 5 节的测试基线与 `mvn -o -pl leaf-base-dubbo-nacos clean test` 实测一致（当前 13 个测试类 / 74 条用例）。

@@ -15,6 +15,7 @@ import org.apache.dubbo.rpc.RpcContext;
 import org.apache.dubbo.rpc.RpcException;
 import org.apache.dubbo.rpc.filter.ExceptionFilter;
 import org.apache.dubbo.rpc.service.GenericService;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,14 +25,26 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Provider-side exception filter that preserves declared exceptions and hides undeclared runtime details.
+ * Provider-side exception filter that keeps the business {@code code/msg/data} of
+ * {@code GXBusinessException}, converts Sentinel blocks and hides undeclared runtime details.
+ *
+ * <p>Decision order: Sentinel block (class prefix, {@code BlockException} type or message prefix) is
+ * converted to {@code GXSentinelFlowException(406)}; checked / declared exceptions,
+ * {@code MyBatisSystemException}, {@code GXBusinessException}, {@code java.*} / {@code jakarta.*} and
+ * {@code RpcException} pass through; every other undeclared runtime exception is wrapped as
+ * {@code GXBusinessException(500, errorType=providerRuntime)}. Error data only carries the TraceId,
+ * {@code errorType}, service/method names and the parameter types - never argument values.
+ *
+ * <p>An {@code Exception} raised by the filter itself is counted in {@link #filterFailureCount()} and
+ * logged at WARN so the RPC still completes (FR-009). JVM {@code Error}s are deliberately not caught:
+ * fatal conditions must not be masked as business responses.
  */
 @Activate(group = CommonConstants.PROVIDER)
 public class GXDubboExceptionFilter extends ExceptionFilter {
     private static final Logger LOGGER = LoggerFactory.getLogger(GXDubboExceptionFilter.class);
     private static final String SENTINEL_BLOCK_PACKAGE = "com.alibaba.csp.sentinel.slots.block.";
-    private static final String SENTINEL_FLOW_MESSAGE = "SentinelBlockException: FlowException";
-    private static final Class<?> SENTINEL_BLOCK_EXCEPTION = resolveBlockExceptionClass();
+    private static final String SENTINEL_BLOCK_MESSAGE_PREFIX = "SentinelBlockException";
+    private static final @Nullable Class<?> SENTINEL_BLOCK_EXCEPTION = resolveBlockExceptionClass();
     private static final AtomicLong FILTER_FAILURE_COUNT = new AtomicLong();
 
     @Override
@@ -101,11 +114,10 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
                     exception = new GXBusinessException("Provider error, please contact provider.", HttpStatus.HTTP_INTERNAL_ERROR, data, exception);
                 }
                 appResponse.setException(exception);
-            } catch (Throwable e) {
+            } catch (Exception e) {
                 FILTER_FAILURE_COUNT.incrementAndGet();
-                LOGGER.warn("Failed to run Dubbo exception filter called by {}. service: {}, method: {}, exception: {}: {}",
-                        RpcContext.getServiceContext().getRemoteHost(), serviceName(invoker),
-                        invocation.getMethodName(), e.getClass().getName(), e.getMessage(), e);
+                LOGGER.warn("Failed to run Dubbo exception filter. service: {}, method: {}, exception: {}: {}",
+                        serviceName(invoker), invocation.getMethodName(), e.getClass().getName(), e.getMessage(), e);
             }
         }
     }
@@ -116,7 +128,7 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
             String message = current.getMessage();
             if (current.getClass().getName().startsWith(SENTINEL_BLOCK_PACKAGE)
                     || isAssignableToBlockException(current)
-                    || CharSequenceUtil.contains(message, SENTINEL_FLOW_MESSAGE)) {
+                    || startsWithSentinelBlockMessage(message)) {
                 return true;
             }
             current = current.getCause();
@@ -126,6 +138,15 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
 
     private boolean isAssignableToBlockException(Throwable exception) {
         return Objects.nonNull(SENTINEL_BLOCK_EXCEPTION) && SENTINEL_BLOCK_EXCEPTION.isAssignableFrom(exception.getClass());
+    }
+
+    /**
+     * Last-resort fallback for deployments that wrap Sentinel blocks in a plain exception: only a
+     * message that starts with the Sentinel marker counts, so a business message merely mentioning
+     * it is not treated as a rate limit.
+     */
+    private boolean startsWithSentinelBlockMessage(String message) {
+        return Objects.nonNull(message) && message.strip().startsWith(SENTINEL_BLOCK_MESSAGE_PREFIX);
     }
 
     private static Class<?> resolveBlockExceptionClass() {
@@ -140,9 +161,17 @@ public class GXDubboExceptionFilter extends ExceptionFilter {
         return FILTER_FAILURE_COUNT.get();
     }
 
+    /**
+     * Diagnostic helper that must never throw: the invoker may be exactly the broken collaborator that
+     * caused the failure, and FR-009 still requires the counter plus a log line.
+     */
     private String serviceName(Invoker<?> invoker) {
-        Class<?> serviceInterface = invoker.getInterface();
-        return Objects.isNull(serviceInterface) ? "unknown" : serviceInterface.getName();
+        try {
+            Class<?> serviceInterface = invoker.getInterface();
+            return Objects.isNull(serviceInterface) ? "unknown" : serviceInterface.getName();
+        } catch (RuntimeException e) {
+            return "unknown";
+        }
     }
 
     private Dict buildErrorData(Invoker<?> invoker, Invocation invocation, String errorType) {

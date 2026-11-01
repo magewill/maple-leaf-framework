@@ -48,14 +48,14 @@
 
 ### 1.2 既定契约（P-OK，不得破坏）
 
-| ID | 契约 | 锁定用例 |
+| ID | 契约 | 锁定用例（括号内为**审查时基线**，只增不减，当前见 `AGENTS.md` §5） |
 | --- | --- | --- |
-| P-OK-01 | TraceId Filter 的 `finally` 恢复 + 异步 `whenCompleteWithContext` 二次捕获/恢复，MDC 不泄漏 | `GXDubboTraceIdFilterTest`（5 条） |
+| P-OK-01 | TraceId Filter 的 `finally` 恢复 + 异步 `whenCompleteWithContext` 二次捕获/恢复，MDC 不泄漏 | `GXDubboTraceIdFilterTest`（审查时 5 条，现 11 条） |
 | P-OK-02 | `buildErrorData` 不泄露参数值（仅 `argumentCount`/`parameterTypes`） | `convertsSentinelFlowExceptionByMessageWithoutLeakingArguments` |
-| P-OK-03 | `GXBusinessException` 透传、`GenericService` 跳过、checked/声明/JDK/jakarta/`RpcException`/MyBatis 异常分别透传 | `GXDubboExceptionFilterTest`（11 条） |
-| P-OK-04 | Selector 只透传 TraceId（1 项）、优先级、null 安全 | `GXPenetrateAttachmentSelectorTest`（5 条） |
-| P-OK-05 | BeanPostProcessor 各跳过/成功分支、返回原 bean | `GXDubboRpcApiBeanPostProcessorTest`（4 条）+ `...SpringBootTest`（1 条） |
-| P-OK-06 | 既有 31 条用例全绿 | `mvn -o -pl leaf-base-dubbo-nacos test` |
+| P-OK-03 | `GXBusinessException` 透传、`GenericService` 跳过、checked/声明/JDK/jakarta/`RpcException`/MyBatis 异常分别透传 | `GXDubboExceptionFilterTest`（审查时 11 条，现 16 条） |
+| P-OK-04 | Selector 只透传 TraceId（1 项）、优先级、null 安全 | `GXPenetrateAttachmentSelectorTest`（审查时 5 条，现 9 条） |
+| P-OK-05 | BeanPostProcessor 各跳过/成功分支、返回原 bean | `GXDubboRpcApiBeanPostProcessorTest`（审查时 4 条，现 5 条）+ `...SpringBootTest`（1 条） |
+| P-OK-06 | 既有 31 条用例全绿 | `mvn -o -pl leaf-base-dubbo-nacos test`（当前 74 条） |
 
 ---
 
@@ -155,7 +155,7 @@
 | --- | --- | --- | --- |
 | `GXCommonUtils.getEnvironmentValue` 调用 | 1（每个 TraceId Filter） | 0（读静态缓存） | 代码审查 + 日志/断点计数 |
 | `getApplicationContext()` 读取 | ≥1 | 0（热路径） | 同上 |
-| INFO 日志条数（TraceId Filter） | 1 | 0（降 DEBUG） | 测试中 `ListAppender` 计数 |
+| INFO 日志条数（TraceId Filter） | 1 | 0（降 DEBUG） | 源码断言（`#traceIdLoggingIsDebugLevel`） |
 | attachment 读取（`getObjectAttachment` + `getAttachment`） | 每来源最多 2 | 保持 ≤2，不新增 | 单测 mock 计数 |
 | `getBean`/反射次数（异常路径） | 0（异常 filter 不取 bean） | 0 | 代码审查 |
 | `Arrays.stream(...).toList()`（`buildErrorData`） | 1（异常路径） | 保持 | 代码审查 |
@@ -181,21 +181,21 @@
 
 | 发现 | 旧代码失败用例（设计） | 断言点 | 类型 |
 | --- | --- | --- | --- |
-| F-01 | `GXDubboFilterChainSpringBootTest#businessExceptionLosesCodeWhenBuiltInFilterActive` | 不排除内置时，consumer 收到 `RuntimeException` 且 `code` 不可读 | 真实 Dubbo 链（injvm/direct） |
-| F-01 | `GXDubboFilterChainSpringBootTest#businessExceptionPreservedWhenBuiltInFilterExcluded` | 排除后，`GXBusinessException` 的 `code/msg/data` 保真 | 真实 Dubbo 链 |
-| F-02 | `GXDubboCallExceptionHandlerSpringBootTest#rpcExceptionUsesDedicatedHandlerUnderComponentScan` | 真实 `@SpringBootTest` + `@ComponentScan("cn.maple")` 下，`data.errorType` 存在（非"系统内部错误"） | Spring Boot 组件扫描 |
+| F-01 | `GXDubboFilterChainBehaviorTest#businessExceptionLosesCodeWhenBuiltInFilterActive` | 不排除内置时，consumer 收到 `RuntimeException` 且 `code` 不可读 | 按真实链顺序调用内置与自定义 `onResponse` |
+| F-01 | `GXDubboFilterChainBehaviorTest#businessExceptionPreservedWhenBuiltInFilterExcluded` | 排除后，`GXBusinessException` 的 `code/msg/data` 保真 | 同上（对照） |
+| F-02 | `GXDubboCallExceptionHandlerSpringBootTest#rpcExceptionAdviceHandlesRealMvcRequest` | 真实 `@SpringBootTest`（`GXDubboTestApp` 以 `@Import` 装配双 advice，等价性见 `audit-report.md` §6.3）下，`data.errorType` 存在（非"系统内部错误"） | Spring Boot 真实上下文 |
 | F-03 | `GXDubboExceptionFilterTest#convertsDegradeAndAuthorityExceptions` | `DegradeException`/`AuthorityException` 类名 → `GXSentinelFlowException` | 单元 |
 | F-03 | `GXDubboExceptionFilterTest#doesNotMisclassifyBusinessMessageContainingFlowException` | 普通异常消息含 "FlowException" 不被转换 | 单元 |
 | F-04 | `GXDubboExceptionFilterTest#wrapsUndeclaredRuntimeWhenMethodSignatureUnresolvable` | 参数类型不匹配时仍包装为 `GXBusinessException` | 单元 |
 | F-05 | `GXDubboExceptionFilterTest#recordsFilterInternalFailure` | filter 自身抛异常时计数递增、原始异常语义不变 | 单元 |
 | F-06 | `GXDubboCallExceptionHandlerTest#rpcExceptionSubtypesKeepStableCode` | 各子类 code=500 + `errorType` 正确 | 单元 |
-| F-07 | `GXDubboExceptionFilterTest#businessExceptionSubclassDowngradedWhenDataNull` | 记录既有语义（文档化） | 单元 |
+| F-07 | `GXDubboExceptionFilterTest#wrapsBusinessExceptionWhenDataIsNullToExposeTraceId` | 记录既有语义（文档化）：`data==null` 时新建同 code/msg 的基类异常 | 单元 |
 | F-08 | `GXPenetrateAttachmentSelectorTest#appNameCacheIsolatesAcrossReset` | 并发读一致；`resetAppNameCache()` 后重新解析 | 并发 + 单元 |
 | F-09 | `GXDubboTraceIdFilterTest#filterReusesSharedAppNameCache` | 第二次调用不再读 Environment | 单元（mock 计数） |
-| F-10 | `GXDubboTraceIdFilterTest#traceIdLoggingIsDebugLevel` | INFO 无输出、DEBUG 有输出 | 单元（ListAppender） |
-| F-11 | `GXDubboTraceIdFilterTest#resolveTraceIdKeepsPriorityChain` | 四来源优先级与既有 5 条断言一致 | 单元（P-OK-01 扩展） |
+| F-10 | `GXDubboTraceIdFilterTest#traceIdLoggingIsDebugLevel` | 源码无 `log.info`、有 `log.debug`（本仓日志后端为 Log4j2，无 Logback `ListAppender`） | 单元（源码断言，T037 实施期修订） |
+| F-11 | `GXDubboTraceIdFilterTest#resolveTraceIdKeepsClientCustomOrder` / `#resolveTraceIdKeepsServerCustomOrder` | 四来源优先级与既有 5 条断言一致 | 单元（P-OK-01 扩展） |
 | F-12 | `docs` 审查（无测试） | 手册登记 allowlist 来源与影响 | 文档 |
-| F-13 | 文档审查 | 手册存在、AGENTS.md 与 31 条用例一致 | 文档 |
+| F-13 | 文档审查 + `GXDubboAuditReproTest#f13AgentsDocClaimsNoTests` | 手册存在、AGENTS.md 与当前用例基线（13 类 / 74 条）一致 | 文档 + 单元 |
 | F-14 | `AsciiSourceGuardTest` + 代码审查 | 无 `@Log4j2` | 静态 |
 | F-15 | 编译（NullAway） | 可空返回标注 `@Nullable`，构建通过 | 构建 |
 | F-16 | 见 F-01/F-02 的真实链与真实上下文用例 | 同上 | 集成 |

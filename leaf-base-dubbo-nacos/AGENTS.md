@@ -59,12 +59,12 @@
 开发前必须理解并保持以下行为稳定：
 
 1. TraceId 获取优先级在不同阶段有明确顺序，核心来源包括 `Invocation attachment`、`RpcContext attachment` 和 `GXTraceIdContextUtils`，不得随意调整优先级。
-2. Consumer Filter 和 Provider Filter 都会把 TraceId 写回 `Invocation`、`RpcContext.getClientAttachment()`、`RpcContext.getServerAttachment()`，这是跨服务透传的核心机制。
+2. Consumer Filter 和 Provider Filter 都会把 TraceId 写回 `Invocation`、`RpcContext.getClientAttachment()`、`RpcContext.getServerAttachment()`，这是跨服务透传的核心机制。**同线程复用边界**：Dubbo `ContextFilter` 只清理 client attachment，Consumer 侧写入的 `getServerAttachment()` 会保留上一次的 TraceId，同一线程下一次调用的 `resolveTraceId` 会命中该残留（优先级高于 MDC）；injvm / 直接调用 / 线程复用场景须显式 `RpcContext.removeContext()`。该边界由 `GXDubboFilterChainEndToEndTest#documentsThreadContextBoundaryBetweenSameThreadCalls` 锁定，不得靠删除该测试来"消除"。
 3. 两个 TraceId Filter 都会保存进入前的原始 TraceId，并在 `finally` 中调用 `GXTraceIdContextUtils.restoreTraceId(originalTraceId)` 恢复线程上下文，禁止删除或绕过。
 4. `GXPenetrateAttachmentSelector` 与两个 TraceId Filter 相互配合，变更任意一方时必须一起评估请求链和响应链的透传行为。
 5. `GXDubboExceptionFilter` 只在 Provider 侧生效，并且对 `GXBusinessException`、方法签名已声明异常、`RpcException`、JDK/Jakarta 异常、MyBatis 异常、Sentinel 限流异常的处理策略不同，不得合并成单一路径。
-5.1 **强制装配**：Provider 侧必须配置 `dubbo.provider.filter: dubboExceptionFilter,-exception`。Dubbo 内置 `ExceptionFilter` 与 `GXDubboExceptionFilter` 均为 `@Activate(group=provider)`；未排除内置 filter 时，`GXBusinessException` 会被内置 filter 包装成普通 `RuntimeException`，业务 `code`/`msg`/`data` 丢失。模块启动时由 `GXDubboProviderFilterValidator` 读取 `dubbo.provider.filter`，缺失或未包含 `-exception` 时输出 ERROR（不阻断启动）。
-6. `GXDubboExceptionFilter` 对 Sentinel 限流异常的识别依赖类名和消息内容双重兜底，修改判断逻辑时必须考虑未直接引入 Sentinel 依赖的运行场景。
+5.1 **强制装配**：Provider 侧必须配置 `dubbo.provider.filter: dubboExceptionFilter,-exception`。Dubbo 内置 `ExceptionFilter` 与 `GXDubboExceptionFilter` 均为 `@Activate(group=provider)`；未排除内置 filter 时，`GXBusinessException` 会被内置 filter 包装成普通 `RuntimeException`，业务 `code`/`msg`/`data` 丢失。模块启动时由 `GXDubboProviderFilterValidator` 读取 `dubbo.provider.filter`，按逗号拆分做 token 精确匹配：未配置、缺少 `-exception`、或缺少 `dubboExceptionFilter` 时输出 ERROR（不阻断启动，无阻断开关）。已知边界（配置统一使用逗号分隔字符串写法；纯 Consumer 应用也会告警）见手册 §3。
+6. `GXDubboExceptionFilter` 对 Sentinel 限流异常的识别以类名前缀（`com.alibaba.csp.sentinel.slots.block.`）与 `BlockException` 可赋值性为准；消息兜底**仅**在消息以 `SentinelBlockException` 开头时生效，禁止扩大为"消息包含 FlowException"式宽松匹配。修改判断逻辑时必须考虑未直接引入 Sentinel 依赖的运行场景。
 7. `GXDubboRpcApiBeanPostProcessor` 依赖 Dubbo `ServiceBean#getRef()`、泛型参数解析、Spring 容器按类型取 Bean，以及反射调用 `staticBindServeServiceClass` 完成绑定。这是一条约定式链路，不得轻易变更协议。
 8. SPI 文件中的扩展名是外部装配点。修改扩展名、实现类路径或资源位置时，必须视为兼容性变更。
 9. `serialize.allowlist` 当前只包含 `com.google.common.collect.HashBasedTable`。新增 Dubbo 传输对象若触发安全校验，需要同步评估白名单是否扩展。
@@ -89,7 +89,7 @@
 
 ## 5. 测试要求
 
-模块当前已有 9 个测试类 / ≥31 条用例（`mvn -o -pl leaf-base-dubbo-nacos test` 全绿）。后续凡是修改本模块功能代码，必须在其基础上补齐与变更点对应的测试基线，不得删除或跳过既有用例。
+模块当前已有 13 个测试类 / 74 条用例（`mvn -o -pl leaf-base-dubbo-nacos test` 全绿）。后续凡是修改本模块功能代码，必须在其基础上补齐与变更点对应的测试基线，不得删除或跳过既有用例。
 
 1. 测试用例要覆盖全面，至少覆盖成功路径、失败路径、异常路径、空值路径和边界条件。
 2. 如果功能需要在 Spring Boot 应用运行后才能验证，测试用例就应该模拟真实 Spring Boot 应用启动之后再测试，优先使用 `@SpringBootTest`、真实 Bean 装配、AOP/BeanPostProcessor 生效后的上下文。

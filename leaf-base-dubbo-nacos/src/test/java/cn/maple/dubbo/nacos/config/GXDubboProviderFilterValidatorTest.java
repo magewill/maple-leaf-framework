@@ -29,6 +29,26 @@ class GXDubboProviderFilterValidatorTest {
     }
 
     @Test
+    void exclusionWithoutCustomFilterLeavesExceptionsUnnormalized() {
+        assertTrue(GXDubboProviderFilterValidator.isBuiltInExceptionFilterExcluded("-exception"));
+        assertFalse(GXDubboProviderFilterValidator.isCustomExceptionFilterEnabled("-exception"));
+    }
+
+    @Test
+    void fullWiringEnablesBothFilters() {
+        String filter = "dubboExceptionFilter,-exception";
+        assertTrue(GXDubboProviderFilterValidator.isBuiltInExceptionFilterExcluded(filter));
+        assertTrue(GXDubboProviderFilterValidator.isCustomExceptionFilterEnabled(filter));
+    }
+
+    @Test
+    void customFilterNameContainingExclusionSubstringIsNotExcluded() {
+        assertFalse(GXDubboProviderFilterValidator.isBuiltInExceptionFilterExcluded("my-exception-filter"));
+        assertFalse(GXDubboProviderFilterValidator.isBuiltInExceptionFilterExcluded("dubboExceptionFilter,-exceptionV2"));
+        assertTrue(GXDubboProviderFilterValidator.isBuiltInExceptionFilterExcluded(" dubboExceptionFilter , -exception "));
+    }
+
+    @Test
     void validatorOnlyLogsAndNeverBlocksStartup() {
         StandardEnvironment environment = new StandardEnvironment();
         environment.getPropertySources().addFirst(new MapPropertySource("test",

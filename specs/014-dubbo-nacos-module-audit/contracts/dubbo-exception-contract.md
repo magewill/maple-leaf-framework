@@ -17,7 +17,8 @@ dubbo:
 
 - `-exception`：移除内置 `ExceptionFilter`。
 - `dubboExceptionFilter`：启用本模块的异常 filter。
-- 未配置时，模块启动 `GXDubboProviderFilterValidator` **输出 ERROR**，明确提示上述配置；`maple.framework.dubbo.filter.check-strict=true` 时启动失败。
+- 未配置、缺少 `-exception`、或缺少 `dubboExceptionFilter` 时，模块启动 `GXDubboProviderFilterValidator` **输出 ERROR**，明确提示上述配置并给出三个判定结果（`builtInExceptionFilterExcluded` / `customExceptionFilterEnabled`）。
+- **不阻断启动**：本模块不提供 `check-strict` 类阻断开关（YAGNI，宪法附加约束 §8）；存量部署升级后仍可启动，告警仅用于显式可观测。
 
 **为什么**：否则 `GXBusinessException` 的 `code/msg/data` 在到达 consumer 前被内置 filter 丢弃（已由字节码实测确认，见 `research.md` R-02）。
 
@@ -42,7 +43,7 @@ dubbo:
 1. 遍历 cause 链；
 2. `className.startsWith("com.alibaba.csp.sentinel.slots.block.")` → 命中（覆盖 Flow/Degrade/Authority/System/ParamFlow/Block）；
 3. 反射兜底：类路径存在 `BlockException` 时 `isAssignableFrom` 判定；
-4. **不得**仅凭消息含 `"FlowException"` 判定（避免把业务异常误判为限流）。
+4. **不得**仅凭消息含 `"FlowException"` 判定（避免把业务异常误判为限流）；消息兜底只允许"消息以 `SentinelBlockException` 开头"这一种形态（用于包装层丢弃异常类型的部署，由 P-OK-02 用例锁定），消息中间出现该片段必须按未声明运行时异常处理。
 
 **输出**：`GXSentinelFlowException`，`code = 406`，`data` 含 `traceId`/`errorType=sentinelFlow`/`interfaceName`/`methodName`/`argumentCount`/`parameterTypes`（**不含**参数值）。
 
@@ -56,5 +57,5 @@ dubbo:
 ## 5. 不可破坏契约（P-OK-02 / P-OK-03）
 
 - 错误 `data` 只含 `argumentCount`/`parameterTypes`，**不得**含 `arguments`。
-- 既有 11 条异常分类用例的断言必须保持通过。
+- 既有 11 条异常分类用例（**审查时基线**，当前已扩充至 16 条）的断言必须保持通过，只增不减。
 - 异常分类**只增不减**：新增分支不得改变既有分支的最终异常类型与业务字段。

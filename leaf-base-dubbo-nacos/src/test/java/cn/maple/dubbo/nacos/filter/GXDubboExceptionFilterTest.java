@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -211,6 +212,18 @@ class GXDubboExceptionFilterTest {
     }
 
     @Test
+    void doesNotMisclassifyBusinessMessageEmbeddingSentinelBlockMessage() {
+        GXTraceIdContextUtils.putTraceId("trace-misclassify-embedded");
+        AppResponse response = new AppResponse();
+        response.setException(new FatalBeanException("wrapped SentinelBlockException: FlowException"));
+
+        filter.onResponse(response, invoker(TestService.class), invocation("call"));
+
+        GXBusinessException wrapped = assertInstanceOf(GXBusinessException.class, response.getException());
+        assertEquals("providerRuntime", wrapped.getData().getStr("errorType"));
+    }
+
+    @Test
     void wrapsUndeclaredRuntimeWhenMethodSignatureUnresolvable() {
         GXTraceIdContextUtils.putTraceId("trace-unresolvable");
         AppResponse response = new AppResponse();
@@ -236,6 +249,36 @@ class GXDubboExceptionFilterTest {
 
         assertEquals(before + 1, GXDubboExceptionFilter.filterFailureCount());
         assertSame(original, response.getException());
+    }
+
+    @Test
+    void doesNotSwallowFatalErrors() {
+        long before = GXDubboExceptionFilter.filterFailureCount();
+        AppResponse response = new AppResponse();
+        response.setException(new FatalBeanException("spring"));
+        Invoker<?> fatalInvoker = mock(Invoker.class);
+        when(fatalInvoker.getInterface()).thenThrow(new AssertionError("fatal"));
+
+        assertThrows(AssertionError.class, () -> filter.onResponse(response, fatalInvoker, invocation("call")));
+        assertEquals(before, GXDubboExceptionFilter.filterFailureCount(),
+                "fatal Errors must not be counted as filter failures");
+    }
+
+    @Test
+    void keepsOriginalExceptionWhenInvokerLookupThrows() {
+        long before = GXDubboExceptionFilter.filterFailureCount();
+        RuntimeException original = new FatalBeanException("spring");
+        AppResponse response = new AppResponse();
+        response.setException(original);
+        Invoker<?> brokenInvoker = mock(Invoker.class);
+        when(brokenInvoker.getInterface()).thenThrow(new IllegalStateException("invoker is broken"));
+
+        filter.onResponse(response, brokenInvoker, invocation("call"));
+
+        assertEquals(before + 1, GXDubboExceptionFilter.filterFailureCount(),
+                "the broken invoker must be reported through the failure counter");
+        assertSame(original, response.getException(),
+                "diagnostic logging must never replace or lose the original exception");
     }
 
     interface TestService {

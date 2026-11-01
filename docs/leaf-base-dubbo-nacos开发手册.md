@@ -44,12 +44,20 @@ dubbo:
 - `-exception`：移除内置 `ExceptionFilter`。
 - `dubboExceptionFilter`：启用本模块的异常 filter。
 
-模块启动时 `GXDubboProviderFilterValidator` 会读取 `dubbo.provider.filter`；缺失或未包含 `-exception` 时输出 **ERROR**（不阻断启动）：
+模块启动时 `GXDubboProviderFilterValidator` 会读取 `dubbo.provider.filter`，按逗号拆分后做 **token 精确匹配**；以下三种情况输出 **ERROR**（不阻断启动，无阻断开关）：
+
+1. 未配置；
+2. 未包含 `-exception`：内置 `ExceptionFilter` 仍激活，业务码丢失；
+3. 未包含 `dubboExceptionFilter`：异常不再统一收敛（Sentinel 阻断不转 `GXSentinelFlowException`、provider 内部异常不被包装）。
 
 ```text
-DUBBO FILTER: built-in ExceptionFilter is active; GXBusinessException code/msg/data may be lost.
-Configure dubbo.provider.filter=dubboExceptionFilter,-exception (current=...)
+DUBBO FILTER: provider filter wiring is incomplete; GXBusinessException code/msg/data may be lost or stay un-normalized.
+Configure dubbo.provider.filter=dubboExceptionFilter,-exception (current=..., builtInExceptionFilterExcluded=..., customExceptionFilterEnabled=...)
 ```
+
+> token 精确匹配意味着 `my-exception-filter` 这类仅含 `-exception` 子串的过滤名不会被误判为"已排除内置 filter"，仍会触发上表第 2 条告警。
+>
+> 两个已知边界：① `dubbo.provider.filter` 的判定是"逗号拆分 + token 精确匹配"，属性值的最终形态由 Spring 属性转换决定，请统一使用逗号分隔的字符串写法（`filter: a,b`），不要依赖非字符串写法的转换结果；② 纯 Consumer 应用（不导出 `@DubboService`）未配置该项时同样会告警——当前按"提示即安全"处理，可按需忽略。
 
 ## 4. SPI 扩展名契约（不得重命名）
 
@@ -74,6 +82,7 @@ Configure dubbo.provider.filter=dubboExceptionFilter,-exception (current=...)
 - consumer/provider 与 select/selectReverse 的顺序差异是**有意镜像**，不得统一。
 - 进入时保存 `originalTraceId`，`finally` 中 `restoreTraceId` 恢复；异步结果在回调线程二次保存/恢复。
 - `spring.application.name` 由 `GXPenetrateAttachmentSelector.getCachedAppName()` 统一缓存；测试/多上下文可用 `resetAppNameCache()` 隔离。
+- **同线程复用边界**：Dubbo `ContextFilter` 在调用结束时只清理 client attachment，Consumer 侧写入的 `RpcContext.getServerAttachment()` 会保留上一次的 TraceId；若同一线程连续发起调用且未重置上下文，下一次调用会取到上一次的 TraceId（attachment 优先级高于 MDC）。远端调用由框架清理；injvm / 直接调用 / 线程复用场景请显式 `RpcContext.removeContext()`。边界由 `GXDubboFilterChainEndToEndTest#documentsThreadContextBoundaryBetweenSameThreadCalls` 锁定。
 
 ## 6. 异常分类（Provider）
 
@@ -89,6 +98,8 @@ Configure dubbo.provider.filter=dubboExceptionFilter,-exception (current=...)
 | Sentinel `com.alibaba.csp.sentinel.slots.block.*Exception` | 转换为 `GXSentinelFlowException(msg, 406, data)` |
 | 其余未声明运行时异常 | 包装为 `GXBusinessException(500, data.errorType=providerRuntime)` |
 | 方法签名无法反射解析 | **仍包装**（fail-closed），不得透传 |
+
+Sentinel 识别顺序：① 遍历 cause 链判断类名前缀 `com.alibaba.csp.sentinel.slots.block.`；② 类路径存在 `BlockException` 时按可赋值性反射兜底；③ 消息兜底**仅**在"消息以 `SentinelBlockException` 开头"时生效（服务被包装层吞掉异常类型的场景，由 P-OK-02 用例锁定）。消息中间出现 `SentinelBlockException: FlowException` 的业务异常按未声明运行时异常包装，**不得**判为限流。
 
 > 错误 `data` 只含 `traceId` / `errorType` / `interfaceName` / `methodName` / `argumentCount` / `parameterTypes`，**不含参数值**。
 
@@ -130,7 +141,8 @@ mvn -o -pl leaf-base-dubbo-nacos test
 - 默认离线：`spring.cloud.nacos.config.import-check.enabled=false`、`spring.cloud.nacos.discovery.enabled=false`。
 - 真实 Dubbo 链用 `injvm`/直连；异常/上下文现场用可注入的 `Invoker`/`Invocation`/`Result` 替身。
 - 需要真实 Nacos（注册中心服务发现端到端）时，先向维护者申请连接信息；缺环境用例须优雅跳过。
-- 既有测试基线：9 个测试类 / ≥31 条用例，只增不减。
+- 既有测试基线：13 个测试类 / 74 条用例，只增不减。
+- 真实中间件验证（可选）：`GXDubboNacosConfigCenterTest` 用本地 Nacos（`-Dgx.nacos.serverAddr`，默认 `127.0.0.1:8848`）验证配置下发后的装配校验；`GXDubboFilterChainEndToEndTest` 用 injvm 真实 Dubbo 链验证 SPI 装配、`-exception` 排除与异常/TraceId 端到端语义。Nacos 不可达时自动跳过。
 
 ## 11. 兼容性
 

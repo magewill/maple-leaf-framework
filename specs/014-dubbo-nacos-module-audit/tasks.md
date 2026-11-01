@@ -319,3 +319,93 @@ Task: "T021 新增 GXDubboProviderFilterValidatorTest 三态"
 **Purpose**: 使审查报告的验证记录与当前实测一致。本阶段由 `/speckit.converge` 追加，不修改既有任务。
 
 - [X] T060 更新 `specs/014-dubbo-nacos-module-audit/audit-report.md` §11「验证记录」至最新实测：`Tests run: 57` → **59**；`GXDubboCallExceptionHandlerTest` 2 → **3**；`GXDubboRpcApiBeanPostProcessorTest` 4 → **5**；表头「9 个测试类，31 → 57，+26」→「**11 个测试类，31 → 59，+28**」；确保与 `mvn -o -pl leaf-base-dubbo-nacos clean test` 的当前输出一致 per FR-022 / FR-014 (partial)
+
+---
+
+## Phase 13: Convergence
+
+**Purpose**: 收敛实现与规格/计划/契约之间剩余的文档一致性与装配校验口径差距（MEDIUM → LOW）。本阶段由 `/speckit.converge` 追加，不修改既有任务。
+
+- [X] T061 修改 `specs/014-dubbo-nacos-module-audit/contracts/dubbo-exception-contract.md` §1 与 `specs/014-dubbo-nacos-module-audit/contracts/dubbo-config-observability-contract.md` §4/§6：删除"`maple.framework.dubbo.filter.check-strict=true` 时启动失败"与"不阻断启动（`check-strict=false`）"表述，统一改为"仅输出 ERROR、不阻断启动"，与 `GXDubboProviderFilterValidator` 实现、`data-model.md` §9 及 `dubbo-config-observability-contract.md` §1 的"不采纳"裁决一致 per FR-014 / 宪法 IV (contradicts)
+- [X] T062 扩展 `leaf-base-dubbo-nacos/src/main/java/cn/maple/dubbo/nacos/config/GXDubboProviderFilterValidator.java`：除 `-exception` 外同时校验 `dubboExceptionFilter` 是否在 `dubbo.provider.filter` 中（仅配 `-exception` 时按 `data-model.md` §3 判为"丢失统一收敛"并输出 ERROR），并把 `contains("-exception")` 改为按逗号拆分后精确匹配 `-exception` token（避免 `my-exception-filter` 之类名称被误判为已排除）；同步补 `GXDubboProviderFilterValidatorTest` 用例（`-exception` 单配、含 `-exception` 子串的自定义过滤名）并在 `docs/leaf-base-dubbo-nacos开发手册.md` §3 登记该两种告警 per T023 / contracts/dubbo-config-observability-contract.md §4 / FR-005 (partial)
+- [X] T063 把 `leaf-base-dubbo-nacos/src/main/java/cn/maple/dubbo/nacos/filter/GXDubboExceptionFilter.java` 的 Sentinel 消息兜底从 `CharSequenceUtil.contains(message, "SentinelBlockException: FlowException")` 收紧为"消息以 `SentinelBlockException` 开头"（保持 P-OK-02 锁定用例 `convertsSentinelFlowExceptionByMessageWithoutLeakingArguments` 通过），补一条"业务异常消息在中间出现 `SentinelBlockException: FlowException` 但不以其开头 → 包装为 `GXBusinessException`"用例，并在 `contracts/dubbo-exception-contract.md` §3 与手册 §6 登记该保留分支 per FR-007 / T024 (partial)
+- [X] T064 修正 `specs/014-dubbo-nacos-module-audit/data-model.md` §8 TestMatrix 的失效引用：`GXDubboFilterChainSpringBootTest` → `GXDubboFilterChainBehaviorTest`；`GXDubboCallExceptionHandlerSpringBootTest#rpcExceptionUsesDedicatedHandlerUnderComponentScan` → `#rpcExceptionAdviceHandlesRealMvcRequest`；`#businessExceptionSubclassDowngradedWhenDataNull` 与 `#resolveTraceIdKeepsPriorityChain` 改为实际存在的用例名（`#wrapsBusinessExceptionWhenDataNullToExposeTraceId`、`#resolveTraceIdKeepsClientCustomOrder`/`#resolveTraceIdKeepsServerCustomOrder`）；F-10 的"ListAppender"改为"源码断言"（T037 实施期修订），保证回归设计与可运行用例 1:1 per FR-015 / SC-002 (partial)
+- [X] T065 把 `leaf-base-dubbo-nacos/AGENTS.md` §5（第 92 行）与 `docs/leaf-base-dubbo-nacos开发手册.md` §10 的测试基线由"9 个测试类 / ≥31 条用例"更新为"11 个测试类 / 59 条用例"，并同步 `GXDubboAuditReproTest#f13AgentsDocClaimsNoTests` 中的断言消息，使与 `audit-report.md` §11 及 `mvn -o -pl leaf-base-dubbo-nacos clean test` 实测一致 per FR-024 / FR-013 (partial)
+
+---
+
+## 实施期验证记录（2026-11-01，Phase 13）
+
+**T061~T065 执行结果**：
+
+| 任务 | 落地内容 | 验证 |
+| --- | --- | --- |
+| T061 | 两份契约删除 `check-strict` 声明；`dubbo-config-observability-contract.md` §4 明确"三种不完整装配均 ERROR、不阻断启动"与 token 精确匹配 | 文档核对 |
+| T062 | `GXDubboProviderFilterValidator` 新增 `isCustomExceptionFilterEnabled` + `containsToken`（逗号拆分精确匹配）；ERROR 消息输出 `builtInExceptionFilterExcluded` / `customExceptionFilterEnabled` 两判定；`GXDubboProviderFilterValidatorTest` 4 → **7** 条 | 旧代码编译期红（`isCustomExceptionFilterEnabled` 不存在）→ 7/7 绿 |
+| T063 | `SENTINEL_FLOW_MESSAGE` 常量改为 `SENTINEL_BLOCK_MESSAGE_PREFIX`，消息兜底 `startsWithSentinelBlockMessage`（trim 后前缀匹配）；`GXDubboExceptionFilterTest` 15 → **16** 条 | 新增用例在旧实现上失败（消息中间含片段被误判）→ 16/16 绿，P-OK-02 保持通过 |
+| T064 | `data-model.md` §8 五处失效引用修正 + §6 日志口径改源码断言 | 用例名逐一核对存在 |
+| T065 | `AGENTS.md` §5、手册 §10 基线更新（最终 **13 个测试类 / 71 条用例**）；`GXDubboAuditReproTest#f13AgentsDocClaimsNoTests` 增加基线断言 | 用例守护文档一致性 |
+
+**新增真实中间件/真实链用例（用户要求：使用本地真实 Nacos 验证）**：
+
+- `filter/GXDubboFilterChainEndToEndTest`（5 条）：`ServiceConfig`/`ReferenceConfig` + injvm 协议导出引用，`service.filter=dubboExceptionFilter,-exception` 走真实 SPI 装配，验证 `GXBusinessException` 的 `code/msg/data` 保真、未声明非 JDK 运行时异常包装、Sentinel `DegradeException` → `GXSentinelFlowException(406)`、TraceId 透传到 provider 并恢复调用方、空 MDC 时生成并清理。
+- `config/GXDubboNacosConfigCenterTest`（3 条）：对本地 Nacos（`127.0.0.1:8848`，`NACOS_SERVER_ADDR` / `-Dgx.nacos.serverAddr` 可覆盖）发布 `dubbo.provider.filter` 三种组合并回读，驱动 `GXDubboProviderFilterValidator` 判定；Nacos 不可达时整类 `Assumptions` 跳过。
+- 未做（已登记原因）：注册中心层（`dubbo-registry-nacos`）不在模块类路径，且 plan 约束"零新增依赖、不改 `pom.xml`"；`nacos-client` 发布/回读需轮询等待（read-after-write 非即时）。
+- 观察（未改代码）：同一线程连续消费调用时，上一次 `RpcContext` 的 TraceId attachment 会命中"attachment 优先于 ThreadLocal"规则；已记录于 `audit-report.md` §11，待单独评估是否限制 Consumer 侧 `getServerAttachment()` 写入。
+
+**最终验证**：`mvn -o -pl leaf-base-dubbo-nacos clean test` → **Tests run: 71, Failures: 0, Errors: 0, Skipped: 0 / BUILD SUCCESS**（13 个测试类）；`clean install -DskipTests` → BUILD SUCCESS（ErrorProne + NullAway 零错误）。
+
+---
+
+## Phase 14: Convergence
+
+**Purpose**: 收敛真实链验证暴露的 `RpcContext` attachment 生命周期缺口，以及交付文档中滞后的测试基线数字。本阶段由 `/speckit.converge` 追加，不修改既有任务。
+
+- [X] T066 复现并收敛 `RpcContext` attachment 的"写入未成对清理"：`leaf-base-dubbo-nacos/src/main/java/cn/maple/dubbo/nacos/filter/GXDubboClientTraceIdFilter.java#39-40` 与 `.../GXDubboServerTraceIdFilter.java#39-40` 每次调用都把 TraceId 写入 `RpcContext.getClientAttachment()` 与 `RpcContext.getServerAttachment()`，但 `finally` 只恢复 MDC、从不清理 attachment；2026-11-01 的 injvm 真实链用例中，同线程第二次调用被上一次的 attachment 命中，用旧 TraceId 覆盖当前 MDC（`GXDubboFilterChainEndToEndTest` 必须 `RpcContext.removeContext()` 才能稳定）。要求：先补一条"同线程连续两次调用各自使用当前 MDC TraceId"的失败用例（进入前 attachment 为空），再在 filter 的 `finally` 中按进入前快照恢复/清理 attachment（或收敛为单一 attachment 来源），同时保持 P-OK-01 的 MDC 恢复语义、`resolveTraceId` 既有优先级链（`contracts/dubbo-trace-context-contract.md` §1/§2）与 `AGENTS.md` §3.2 的写入基线不变；若最终判定属 Dubbo 上下文生命周期而非本模块职责，则在 `AGENTS.md` §3 与 `contracts/dubbo-trace-context-contract.md` 显式登记该边界并用用例锁定，不得静默保留该副作用 per FR-018 / US3/AC1 (partial)
+- [X] T067 把 014 交付文档中的测试基线统一到当前实测（**13 个测试类 / 71 条用例**）：`specs/014-dubbo-nacos-module-audit/quickstart.md` §6 第 6 条"`AGENTS.md` 第 5 节与'9 个测试类 / ≥31 条用例'一致"改为当前基线（按现状执行会与 `AGENTS.md` §5 冲突并被误判 FAIL）；`data-model.md` §8 F-13 行的"11 类 / 63 条"改为 13 类 / 71 条；`data-model.md` §1.2 的 P-OK-01/03/04/05/06 计数（5/11/5/4/31 条）与 `contracts/dubbo-exception-contract.md` §5 的"既有 11 条"显式标注为"审查时基线（不得删除，当前已扩充）"，避免与当前基线混淆 per FR-024 / FR-014 (partial)
+
+---
+
+## 实施期验证记录（2026-11-01，Phase 14）
+
+**T066 结论（复测修正 + 兜底条款落地）**：
+
+- 探针复测推翻初始假设：真实链调用结束后 Dubbo `ContextFilter` **会**清理 client attachment（`getClientAttachment().getAttachment(TRACE_ID_KEY) == null`），但 **Consumer 侧写入的 `getServerAttachment()` 保留上一次 TraceId** —— 这才是同线程下一次调用取到旧值的来源。
+- 该 `getServerAttachment()` 写入是 P-OK-01 的锁定基线（`GXDubboTraceIdFilterTest#clientFilterPropagatesInvocationTraceIdAndRestoresOriginalTraceId` 断言调用后仍可见），在 `finally` 中清理会破坏锁定用例，违反 FR-012/SC-009"不得删除/修改既有断言"；`resolveTraceId` 的 attachment 优先级亦为锁定契约。→ 按 T066 兜底条款执行：
+  - 登记边界：`AGENTS.md` §3.2、`contracts/dubbo-trace-context-contract.md` §1、`docs/leaf-base-dubbo-nacos开发手册.md` §5；
+  - 新增加固用例 `GXDubboFilterChainEndToEndTest#documentsThreadContextBoundaryBetweenSameThreadCalls`（client 已清理 / server 保留上一次 TraceId / `RpcContext.removeContext()` 后新调用生效，三处断言；任一环节静默变化即失败）；
+  - 生产代码未改动；遗留风险（长驻线程连续 RPC 复用上下文导致 TraceId 串用）已在 `audit-report.md` §11 记录，彻底修复需变更 P-OK-01 基线，属破坏性变更，建议另立变更单。
+
+**T067 落地**：`quickstart.md` §6 第 1/6 条、`data-model.md` §8 F-13 行与 §1.2 P-OK 计数、`contracts/dubbo-exception-contract.md` §5 全部对齐当前实测 **13 个测试类 / 72 条用例**，历史计数标注为"审查时基线"；`AGENTS.md` §5、手册 §10、`audit-report.md` §11、`GXDubboAuditReproTest#f13AgentsDocClaimsNoTests` 同步为 13/72。
+
+**最终验证**：`mvn -o -pl leaf-base-dubbo-nacos clean test` → **Tests run: 72, Failures: 0, Errors: 0, Skipped: 0 / BUILD SUCCESS**（13 个测试类）；`clean install -DskipTests` → BUILD SUCCESS（ErrorProne + NullAway 零错误；仅剩 Dubbo `setApplication` 的 deprecation 警告，非错误）。
+
+---
+
+## PR 评审修复记录（2026-11-01）
+
+> 来源：`/speckit.review.run`（六个专项 agent 全开）。以下是已落地的修复，均为评审发现而非新增需求。
+
+| 评审项 | 类别 | 处置 |
+| --- | --- | --- |
+| `GXDubboExceptionFilter` 的 `catch (Throwable)` 吞掉 `VirtualMachineError` | Important | 收窄为 `catch (Exception)`；新增 `GXDubboExceptionFilterTest#doesNotSwallowFatalErrors`（16 → 17 条） |
+| `GXDubboFilterChainEndToEndTest` 的 `ReferenceConfig` 未释放 | Important | 提升为静态字段，`@AfterAll` 中 `destroy()` + `unexport()` 并置空 |
+| `GXDubboCallExceptionHandler` 错误类型重复计算 | Simplify | `resolveRpcErrorType` 只算一次，`resolveRpcMessage(String)` 复用 |
+| `GXDubboProviderFilterValidator` 常量重复 / 正则切分 | Simplify | `REQUIRED_FILTER` 由 `CUSTOM_FILTER` + `BUILT_IN_EXCLUSION` 派生；改用 `CharSequenceUtil.splitTrim`；常量降为 private |
+| 可空标注与签名表达 | Types | `SENTINEL_BLOCK_EXCEPTION`、`enrichTraceId(Dict)` 加 `@Nullable`；端到端用例抛异常方法改为 `void` |
+| Nacos 轮询预算偏紧 / 解析逻辑重复 | Tests | 轮询 20 → 50 次（10s）并抽常量；两个 `resolveXxx()` 合并为 `resolve(property, env, default)` |
+| 死脚手架与注释腐化 | Tests/Comments | 删除未使用的 `EchoService#echo`；修正过期注释；补全 `GXDubboExceptionFilter` 类注释 |
+
+**保留未改（已登记，需规格/契约变更）**：① TraceId Filter 的 `catch (Exception) { log.error; throw }` 重复上报；② 纯 Consumer 应用触发装配 ERROR；③ `dubbo.provider.filter` 仅支持逗号字符串形式。三者已写入 `AGENTS.md` §5.1、手册 §3 与 `audit-report.md` §11。
+
+**第二轮评审修复（同日）**：
+
+| 评审项 | 类别 | 处置 |
+| --- | --- | --- |
+| `catch` 块内 `invoker.getInterface()` / `RpcContext.getRemoteHost()` 可能二次抛异常 | Suggestions | `serviceName(invoker)` 内部兜底 `RuntimeException` → `unknown`；失败日志移除 `remoteHost`；新增 `GXDubboExceptionFilterTest#keepsOriginalExceptionWhenInvokerLookupThrows`（17 → 18 条） |
+| `Error` 未计入失败计数缺少断言 | Suggestions | `doesNotSwallowFatalErrors` 增加 `filterFailureCount()` 不变断言 |
+| Nacos 三用例模板重复 | Suggestions | 抽出 `assertWiring(...)`，三个用例各一行 |
+| `containsToken` 的 null 契约隐式 | Suggestions | 三个方法标注 `@Nullable` 并补"blank/null → false"注释 |
+| 测试清理意图 / 文档重复 | Suggestions | `release()` 补注释；`AGENTS.md` §5.1 的已知边界改为指向手册 §3 |
+
+**验证**：`mvn -o -pl leaf-base-dubbo-nacos clean test` → **Tests run: 74, Failures: 0, Errors: 0, Skipped: 0 / BUILD SUCCESS**；基线同步至 13 个测试类 / 74 条用例（`AGENTS.md` §5、手册 §10、`quickstart.md` §6、`data-model.md`、`audit-report.md` §11、`GXDubboAuditReproTest`）。

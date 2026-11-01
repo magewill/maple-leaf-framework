@@ -8,6 +8,7 @@ import cn.maple.core.framework.util.GXResultUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.rpc.RpcException;
+import org.jspecify.annotations.Nullable;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -37,12 +38,13 @@ public class GXDubboCallExceptionHandler extends GXExceptionHandler {
     }
 
     private Dict buildRpcErrorData(RpcException e) {
+        String errorType = resolveRpcErrorType(e);
         return Dict.create()
                 .set(GXTraceIdContextUtils.TRACE_ID_KEY, GXTraceIdContextUtils.getTraceId())
-                .set("errorType", resolveRpcErrorType(e))
+                .set("errorType", errorType)
                 .set("rpcCode", e.getCode())
                 .set("exceptionClass", e.getClass().getName())
-                .set("rpcMessage", resolveRpcMessage(e));
+                .set("rpcMessage", resolveRpcMessage(errorType));
     }
 
     private String resolveRpcErrorType(RpcException e) {
@@ -76,8 +78,8 @@ public class GXDubboCallExceptionHandler extends GXExceptionHandler {
         return "unknown";
     }
 
-    private String resolveRpcMessage(RpcException e) {
-        return switch (resolveRpcErrorType(e)) {
+    private String resolveRpcMessage(String errorType) {
+        return switch (errorType) {
             case "timeout" -> "RPC timeout";
             case "network" -> "RPC network error";
             case "serialization" -> "RPC serialization error";
@@ -91,7 +93,7 @@ public class GXDubboCallExceptionHandler extends GXExceptionHandler {
         };
     }
 
-    private Dict enrichTraceId(Dict data) {
+    private Dict enrichTraceId(@Nullable Dict data) {
         Dict result = data == null ? Dict.create() : data;
         result.set(GXTraceIdContextUtils.TRACE_ID_KEY, GXTraceIdContextUtils.getTraceId());
         return result;

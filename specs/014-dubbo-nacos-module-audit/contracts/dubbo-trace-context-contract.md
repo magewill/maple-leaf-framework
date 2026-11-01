@@ -14,6 +14,7 @@
 
 - consumer 与 provider、select 与 selectReverse 的差异是**有意镜像**（请求方向与响应方向的 attachment 归属不同），不得"统一成一版"。
 - 每一次读取都先 `getObjectAttachment`，为 null 时才 `getAttachment`（保持既有行为）。
+- **同线程复用边界（2026-11-01 真实链实测）**：Dubbo `ContextFilter` 会在调用结束时清理 client attachment，但 Consumer 侧写出的 `RpcContext.getServerAttachment()` 会保留上一次的 TraceId；同一线程连续发起调用且未重置上下文时，下一次 `resolveTraceId` 会命中该残留（attachment 优先级高于 MDC）。框架内的远端调用由 `ContextFilter` 负责清理；injvm / 直接调用 / 长驻线程复用场景须显式 `RpcContext.removeContext()`。该边界由 `GXDubboFilterChainEndToEndTest#documentsThreadContextBoundaryBetweenSameThreadCalls` 锁定，写入基线（P-OK-01）不得因此调整。
 
 ## 2. 写回与恢复（P-OK-01，不可破坏）
 

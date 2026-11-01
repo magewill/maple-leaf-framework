@@ -112,8 +112,10 @@ class GXDubboAuditReproTest {
         String agents = Files.readString(Path.of("AGENTS.md"));
 
         assertFalse(agents.contains("当前模块下没有现成的 `src/test` 测试目录"),
-                "AGENTS.md must be updated to reflect the existing 9 test classes");
+                "AGENTS.md must be updated to reflect the existing test suite");
         assertTrue(agents.contains("dubbo.provider.filter"), "AGENTS.md must document the mandatory provider filter config");
+        assertTrue(agents.contains("13 个测试类 / 74 条用例"),
+                "AGENTS.md must state the current test baseline (13 test classes / 74 cases)");
     }
 
     interface TestService {

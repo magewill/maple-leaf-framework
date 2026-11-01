@@ -211,6 +211,21 @@ Tests run: 5, Failures: 4, Errors: 0, Skipped: 0
 
 修复后：`GXDubboAuditReproTest` 5/5 通过。
 
+### Phase 13 收敛证据（2026-11-01）
+
+实现改动前运行 `mvn -o -pl leaf-base-dubbo-nacos test "-Dtest=GXDubboProviderFilterValidatorTest,GXDubboExceptionFilterTest"`：
+
+```text
+[ERROR] GXDubboProviderFilterValidatorTest.java:[34,50] 找不到符号
+[ERROR]   符号:   方法 isCustomExceptionFilterEnabled(String)
+[ERROR]   位置: 类 GXDubboProviderFilterValidator
+```
+
+- T062（装配校验口径）：旧实现只有 `isBuiltInExceptionFilterExcluded`（`contains("-exception")`），无法判定"未启用 `dubboExceptionFilter`"，且 `my-exception-filter` 会被误判为已排除 → 新增断言在旧代码上编译期即失败（`isCustomExceptionFilterEnabled` 不存在）。
+- T063（Sentinel 消息兜底）：`GXDubboExceptionFilterTest#doesNotMisclassifyBusinessMessageEmbeddingSentinelBlockMessage` 在旧实现上失败（消息中间含 `SentinelBlockException: FlowException` 片段即被误判为限流并转成 `GXSentinelFlowException`），收敛为"消息以 `SentinelBlockException` 开头"后通过；P-OK-02 锁定用例 `convertsSentinelFlowExceptionByMessageWithoutLeakingArguments` 保持通过。
+
+收敛后：`GXDubboProviderFilterValidatorTest` 7 条、`GXDubboExceptionFilterTest` 18 条、全模块 74 条全绿（含新增真实链与真实 Nacos 用例，见 §11）。
+
 ---
 
 ## 9. 性能口径
@@ -224,7 +239,7 @@ Tests run: 5, Failures: 4, Errors: 0, Skipped: 0
 | INFO 日志（TraceId Filter） | 1 | 0（降 DEBUG） | `#traceIdLoggingIsDebugLevel`（源码断言：无 `log.info`） |
 | attachment 读取 | 每来源 ≤2 | 保持 ≤2 | 代码审查 + mock 计数 |
 | `getBean`/反射（异常路径） | 0 | 0 | 代码审查 |
-| 测试墙钟 | 31 条约 5s | 59 条约 5s | `mvn` 输出 |
+| 测试墙钟 | 31 条约 5s | 74 条约 6s（含 injvm 链路与本地 Nacos 用例） | `mvn` 输出 |
 
 > 说明：`getCachedAppName()` 每请求被调用一次，但仅在首次（或 `UnknownApp`）时访问 Environment，之后为 `volatile` 读。
 
@@ -283,6 +298,70 @@ BUILD SUCCESS          # ErrorProne + NullAway 零错误
 | `GXDubboProviderFilterValidatorTest` | 4 | 新增（装配校验三态 + 不阻断） |
 
 > 保留断言：P-OK-01 ~ P-OK-06 全部保留（见附录 B）。
+
+### Phase 13/14 收敛后（2026-11-01）
+
+```text
+mvn -o -pl leaf-base-dubbo-nacos clean test
+Tests run: 74, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+用例分布变化（13 个测试类，31 → 74，+43）：
+
+| 测试类 | 用例数 | 变化 |
+| --- | --- | --- |
+| `GXDubboExceptionFilterTest` | 18 | 15 → 18（新增消息中间出现 `SentinelBlockException` 片段不误判、`Error` 不被吞、invoker 查询失败时保留原异常） |
+| `GXDubboProviderFilterValidatorTest` | 7 | 4 → 7（`-exception` 单配、完整装配、`-exception` 子串误判） |
+| `GXDubboFilterChainEndToEndTest` | 6 | 新增：真实 Dubbo 调用链（injvm，真实 SPI 装配 + `-exception` 排除）+ 同线程上下文边界锁定 |
+| `GXDubboNacosConfigCenterTest` | 3 | 新增：真实本地 Nacos 配置中心下发 `dubbo.provider.filter` 后由校验器判定 |
+| 其余 9 个测试类 | 40 | 不变 |
+
+新增/变更证据：见 §8「Phase 13 收敛证据」。
+
+#### 真实中间件验证（2026-11-01，本地 Nacos）
+
+- 环境：本地 Nacos `127.0.0.1:8848`（与 `config/application-4.0-dev.yml#6` 的 `${NACOS_SERVER_ADDR:127.0.0.1:8848}` 默认值一致），`/nacos/v1/console/health/readiness` → 200；匿名访问，无需额外凭据。
+- 命令：`mvn -o -pl leaf-base-dubbo-nacos test "-Dtest=GXDubboNacosConfigCenterTest"` → **3 走过 / 0 失败**（地址可用 `-Dgx.nacos.serverAddr` 或 `NACOS_SERVER_ADDR`、namespace 用 `-Dgx.nacos.namespace` / `NACOS_NAMESPACE` 覆盖）。
+- 覆盖点：① 真实 Nacos 发布/回读 `dubbo.provider.filter=dubboExceptionFilter,-exception` 后，校验器判定为完整装配且不告警；② 只发布 `dubboExceptionFilter`（缺 `-exception`）→ 判定内置 filter 仍激活；③ 只发布 `-exception`（缺 `dubboExceptionFilter`）→ 判定异常未统一收敛；三种情形均不阻断启动。
+- 优雅跳过：Nacos 不可达时通过 `Assumptions` 跳过整类，离线构建仍全绿（FR-025）。
+- 说明：模块类路径**不含** `dubbo-registry-nacos`（`dubbo-nacos-spring-boot-starter` 只带 `nacos-client`），而 plan 约束"零新增依赖、不改 `pom.xml`"，因此注册中心层的 Filter 激活顺序验证未做；真实 Dubbo 链路改用 injvm（`GXDubboFilterChainEndToEndTest`，6 条用例，真实 SPI + `-exception` 排除 + 异常/TraceId 端到端 + 同线程上下文边界锁定）。
+
+#### 同线程上下文边界（Phase 14，已登记并锁定）
+
+- 复测结论（2026-11-01，真实 injvm 链 + 探针断言）：调用结束时 Dubbo `ContextFilter` 会清理 **client** attachment，但 **Consumer 侧写入的 `RpcContext.getServerAttachment()` 保留上一次的 TraceId**；同一线程下一次调用的 `resolveTraceId` 会命中该残留（attachment 优先级高于 MDC），因此只有 `RpcContext.removeContext()` 之后新调用的 MDC 才会生效。
+- 该写入属于 P-OK-01 锁定基线（既有断言要求调用结束后 attachment 仍可见），改为 `finally` 清理会破坏锁定用例，违反 FR-012/SC-009"既有断言不得删除/修改"。故按 T066 兜底条款处理：在 `AGENTS.md` §3.2、`contracts/dubbo-trace-context-contract.md` §1、手册 §5 显式登记边界，并由 `GXDubboFilterChainEndToEndTest#documentsThreadContextBoundaryBetweenSameThreadCalls` 锁定（client 已清理 / server 保留 / 重置后生效 三处断言），生产代码未改动。
+- 遗留风险与建议：若业务存在"同一长驻线程连续发起多次 RPC 且复用 Dubbo 上下文"的场景，可能出现 TraceId 串用；彻底修复需变更 P-OK-01 写入基线，属破坏性行为变更，建议另立变更单（不在本次收敛范围）。
+
+#### PR 评审修复（2026-11-01）
+
+| 评审项 | 处置 |
+| --- | --- |
+| Important：`GXDubboExceptionFilter` 的 `catch (Throwable)` 吞掉致命错误 | 收窄为 `catch (Exception)`，JVM `Error` 不再被降级为业务响应；新增 `GXDubboExceptionFilterTest#doesNotSwallowFatalErrors` 锁定（16 → 17 条） |
+| Important：`GXDubboFilterChainEndToEndTest` 的 `ReferenceConfig` 未释放 | 提升为静态字段，`@AfterAll` 中 `destroy()` + `unexport()` 并置空 |
+| Simplify：`GXDubboCallExceptionHandler` 错误类型重复计算 | `resolveRpcErrorType` 只算一次，`resolveRpcMessage(String errorType)` 复用 |
+| Simplify：`GXDubboProviderFilterValidator` 常量重复 / 正则切分 | `REQUIRED_FILTER` 由 `CUSTOM_FILTER` + `BUILT_IN_EXCLUSION` 派生；改用 `CharSequenceUtil.splitTrim`；常量降为 private（仅 `PROVIDER_FILTER_KEY` 供测试） |
+| Types：可空与签名表达 | `SENTINEL_BLOCK_EXCEPTION`、`enrichTraceId(Dict)` 标注 `@Nullable`；端到端用例的抛异常方法改为 `void` |
+| Tests：Nacos 轮询预算偏紧 / 解析逻辑重复 | 轮询 20 → 50 次（10s），抽 `FETCH_ATTEMPTS` / `FETCH_INTERVAL_MILLIS`；两个 `resolveXxx()` 合并为 `resolve(property, env, default)` |
+| Tests：死脚手架与注释腐化 | 删除未使用的 `EchoService#echo`；修正 `EchoServiceImpl` 过期注释；补全 `GXDubboExceptionFilter` 类注释（决策顺序、错误数据契约、`Error` 不吞） |
+
+**保留未改（需规格/契约变更，已登记）**：① TraceId Filter 的 `catch (Exception) { log.error; throw }` 重复上报与日志噪声；② 纯 Consumer 应用会触发装配 ERROR；③ `dubbo.provider.filter` 统一按逗号分隔字符串配置（判定为逗号拆分后的 token 精确匹配，属性值形态由 Spring 属性转换决定）。
+
+**第二轮评审修复（同日）**：
+
+| 评审项 | 处置 |
+| --- | --- |
+| `catch` 内再次调用 `invoker.getInterface()` / `RpcContext.getRemoteHost()`，日志本身可能抛异常 | `serviceName(invoker)` 内部捕获 `RuntimeException` 回退为 `unknown`；失败日志去掉 `remoteHost`；新增 `keepsOriginalExceptionWhenInvokerLookupThrows`（断言计数器 +1 且原异常未被替换） |
+| `Error` 不计入失败计数缺少断言 | `doesNotSwallowFatalErrors` 增加 `filterFailureCount()` 未变化的断言 |
+| Nacos 用例三段样板重复 | 抽出 `assertWiring(dataId, filterValue, expectExcluded, expectCustomEnabled)`，三个用例各一行 |
+| `containsToken` 的 null 契约隐式 | `isBuiltInExceptionFilterExcluded` / `isCustomExceptionFilterEnabled` / `containsToken` 标注 `@Nullable`，补"blank/null → false"注释 |
+| 测试清理意图与文档重复 | `release()` 补注释说明"先销毁引用再取消导出、静态字段置空";`AGENTS.md` §5.1 的已知边界改为指向手册 §3 |
+
+**第三轮评审修复（同日）**：
+
+| 评审项 | 处置 |
+| --- | --- |
+| Comments：手册 §3 边界①"YAML 列表写法 `filter: [a, b]` 会被读成空值并误报 ERROR"与实测不符——Spring 会把 `Collection` 值转换为逗号连接字符串，校验器按 token 匹配正常通过，不会误报 | 改写手册 §3、`AGENTS.md` §5.1 与本节的表述为"判定按逗号拆分 + token 精确匹配，属性值形态由 Spring 属性转换决定，统一使用逗号分隔字符串写法"；仅改文档，不触发代码与用例变更（基线仍为 13 个测试类 / 74 条用例） |
 
 ## 12. 后续任务与维护
 
