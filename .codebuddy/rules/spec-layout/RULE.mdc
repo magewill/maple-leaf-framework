@@ -1,0 +1,63 @@
+---
+description: 规格文档采用稳定基线 + 增量变更 + 历史归档；新增小任务、bugfix、clarification 不得直接追加 spec/plan/tasks 主文档。
+alwaysApply: true
+enabled: true
+---
+
+# 规格文档维护规则
+
+- `specs/<feature>/spec.md` / `plan.md` / `tasks.md` 是稳定文档，只承载当前意图，不承载流水账。
+- 每个 `specs/<feature>/` 必须存在 `changes/INDEX.md` 与 `history/README.md`。执行 `/speckit.specify` 后必须立即创建这两个文件；缺失时不得进入下一阶段。
+- 新增小任务、bugfix、clarification：先创建 `changes/CR-YYYYMMDD-NNN.md`，并在 `changes/INDEX.md` 登记；不要直接写进 `spec.md`、`plan.md` 或 `tasks.md`。
+- `tasks.md` 只保留 active 任务；已完成任务行不得留在 `tasks.md` 中堆积。
+- 变更状态使用 `proposed` / `in-progress` / `applied` / `rejected`，在 `changes/INDEX.md` 维护。
+- 纯 bugfix 或不改变当前需求的变更：只保留 change 记录，不修改 `spec.md`。
+- 改变当前生效需求的变更：在合并 / 发布里程碑把结论原地并入 `spec.md`，并把 INDEX 状态改为 `applied`。
+- `plan.md` 只在方案或架构实质变化时原地更新；执行记录和验证结论写入 `history/`。
+
+每个 `changes/CR-YYYYMMDD-NNN.md` 至少包含：
+
+- 类型：`bugfix` / `task` / `clarification` / `converge`
+- 状态：`proposed` / `in-progress` / `applied` / `rejected`
+- 影响：`spec.md#FR-xxx` / `tasks.md#Txxx`
+- 背景 / 现象
+- 变更前后
+- 验收标准
+- 代码 / 测试落点
+
+## speckit 命令后的清理契约
+
+speckit 命令产生的追加内容视为临时中间态；提交前必须按下面规则清理：
+
+- 本节约束最终提交态：即使 speckit 命令原文要求 append / APPEND-ONLY，命令结束后仍必须按本节清理；提交前三件套不得保留追加块。
+- `/speckit.clarify`：把 `## Clarifications` / `### Session YYYY-MM-DD` 块移入 `changes/CR-YYYYMMDD-NNN.md`，并在 `changes/INDEX.md` 登记；恢复 `spec.md`。
+- `/speckit.converge`：把 `## Phase N: Convergence` 块移入 `changes/CR-YYYYMMDD-NNN.md`（类型记为 `converge`）；`tasks.md` 只保留一行 active 引用；完整任务与执行记录写入 `history/tasks-YYYY-MM-DD.md`。
+- `/speckit.implement`：把已完成任务行与验证记录写入 `history/tasks-YYYY-MM-DD.md`，并从 `tasks.md` 删除这些行。
+- `/speckit.token-budget.compact`：只作用于 `spec.md`、`plan.md`、`tasks.md`、`research.md`、`data-model.md`、`contracts/`、`quickstart.md` 与 constitution；跳过 `changes/` 与 `history/`。
+- `/speckit.archive.run`：`changes/` 必须归档；`history/` 只在归档时可读取。
+
+## 历史归档
+
+- `history/README.md` 只做索引；实际任务、执行记录与验证结论写入 `history/tasks-YYYY-MM-DD.md`。
+- `history/tasks-YYYY-MM-DD.md` 使用表格：`| 任务 | 完成日期 | 结论 / 证据 |`。
+- 每次写入 `history/tasks-YYYY-MM-DD.md` 后，在 `history/README.md` 增加一行索引。
+- 不要把所有正文继续堆进 `history/README.md`。
+
+## 上下文读取黑名单
+
+日常阶段一律跳过下列内容，除非用户明确要求：
+
+- `**/*.full.md`
+- `specs/*/history/`
+
+唯一允许读取 `.full.md` 正文的场景是执行 `/speckit.token-budget.restore`；`/speckit.token-budget.usage` 可以统计其 token 数，但不得把正文注入上下文。`.full.md` 的其他 guard 以 `AGENTS.md` 为准，不在本规则重复。
+
+## 命令回退与误伤防护
+
+- `/speckit.token-budget.scope` 若建议 “continue with the full version”，停止并报告“需先 compact”，不得读取 `.full.md`。
+- `/speckit.token-budget.compact` 若生成 `changes/**/*.full.md` 或 `history/**/*.full.md`，立即删除。
+- `/speckit.archive.run` 归档时必须排除 `*.full.md`。
+
+修改本规则后必须新建会话才会生效。
+
+本规则正文必须与另一端规则保持同步：`.codebuddy/rules/spec-docs-layout/RULE.mdc` 与 `.qoder/rules/00-spec-docs-layout.md` 除 frontmatter 外应逐字一致。

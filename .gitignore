@@ -13,7 +13,6 @@ spy.log
 .claude
 .vscode
 .codegraph
-.codebuddy
 spec-kit-cn
 *.class
 *.jar

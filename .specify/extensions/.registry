@@ -22,9 +22,12 @@
       "installed_at": "2026-10-22T05:40:07.628514+00:00"
     },
     "bug": {
-      "version": "1.0.1",
-      "source": "local",
-      "manifest_hash": "sha256:0f8ca9b828f8855be72a17cdef1f355fba81d7173b16f349d500d2ab367384fb",
+      "version": "1.0.2",
+      "source": {
+        "kind": "catalog",
+        "catalog": "default"
+      },
+      "manifest_hash": "sha256:00ec851a8e57713e9d65401e4c7fa5b4fa4a689decacb0b654ba5411c653b647",
       "enabled": true,
       "priority": 10,
       "registered_commands": {
