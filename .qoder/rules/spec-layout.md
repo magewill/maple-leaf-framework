@@ -1,0 +1,31 @@
+---
+trigger: always_on
+description: 规格文档采用稳定基线 + 增量变更 + 历史归档；新任务/bugfix/clarification 先建 CR；详细模板与自检见 PLAYBOOK.md。
+---
+
+# 规格文档维护规则
+
+**规则版本**: 1.2.0 | **更新**: 2026-11-25
+**详细模板/自检**: [PLAYBOOK.md](./PLAYBOOK.md)（按需读取）
+
+## 核心约束
+
+- `spec.md` / `plan.md` / `tasks.md` 是稳定文档，只承载当前意图，不承载流水账。
+- `research.md`、`data-model.md`、`contracts/`、`quickstart.md` 是稳定设计产物；仅在决策或方案实质变化时原地更新。`audit-report.md`、`review-report.md` 保留审查证据，执行日志与验证结论写入 `history/`。
+- 每个 `specs/<feature>/` 必须存在 `changes/INDEX.md` 与 `history/README.md`；`/speckit.specify` 后立即创建；缺失不得进入下一阶段。
+- 新任务 / bugfix / clarification 先建 `changes/CR-YYYYMMDD-NNN.md` 并在 `changes/INDEX.md` 登记；编号在仓库内全局递增；不得直接写入 `spec.md`、`plan.md`、`tasks.md`。
+- CR 类型：`bugfix` / `task` / `clarification` / `converge`；状态：`proposed` / `in-progress` / `applied` / `rejected`。CR 至少包含类型、状态、影响、背景、变更前后、验收标准、代码/测试落点。
+- 常规变更一事件一 CR；历史归档可按 feature + 类型聚合，但标题须标“归档”、影响列全范围、正文保留原始块、INDEX 只登记一行。
+- 纯 bugfix 或不改变需求的变更只保留 CR，不修改 `spec.md`；改变需求的变更在合并/发布里程碑并入 `spec.md` 并标 `applied`。
+- `plan.md` 只在方案或架构实质变化时更新；执行记录和验证结论写入 `history/`。
+- `tasks.md` 只保留 active 任务；不得保留已完成行、`## Clarifications` 或 `## Phase N: Convergence` 追加块。
+- `/speckit.clarify`、`/speckit.converge` 的追加块移入 CR；`/speckit.implement` 的完成任务与验证写入 `history/tasks-YYYY-MM-DD.md`；非 Convergence 已完成批次按 `task` CR + history 归档。
+- `history/README.md` 只做索引；`history/tasks-YYYY-MM-DD.md` 主任务表固定 `| 任务 | 完成日期 | 结论 / 证据 |`，原始记录可用独立主题表。
+- `/speckit.token-budget.compact` 只处理稳定产物，跳过 `changes/` 与 `history/`；禁止生成 `changes/**/*.full.md` 或 `history/**/*.full.md`。
+- 日常跳过 `**/*.full.md` 与 `history/tasks-*.md` 正文；允许读取 `history/README.md` 索引。
+- `/speckit.archive.run` 已安装时归档 `changes/`、归档时排除 `*.full.md`；未安装时按手动归档流程执行。
+- 详细模板、清理清单、history 表结构、自检命令与边界案例见 `PLAYBOOK.md`，按需读取。
+
+修改本规则后必须新建会话才会生效。
+
+本规则正文必须与另一端规则保持同步：`.qoder/rules/spec-layout.md` 与 `.codebuddy/rules/spec-layout/RULE.mdc` 除 frontmatter 外应逐字一致。

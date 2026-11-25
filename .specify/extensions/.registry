@@ -16,6 +16,15 @@
           "speckit.review.errors",
           "speckit.review.types",
           "speckit.review.simplify"
+        ],
+        "qodercli": [
+          "speckit.review.run",
+          "speckit.review.code",
+          "speckit.review.comments",
+          "speckit.review.tests",
+          "speckit.review.errors",
+          "speckit.review.types",
+          "speckit.review.simplify"
         ]
       },
       "registered_skills": [],
@@ -35,6 +44,11 @@
           "speckit.bug.assess",
           "speckit.bug.fix",
           "speckit.bug.test"
+        ],
+        "qodercli": [
+          "speckit.bug.assess",
+          "speckit.bug.fix",
+          "speckit.bug.test"
         ]
       },
       "registered_skills": [],
@@ -48,6 +62,13 @@
       "priority": 10,
       "registered_commands": {
         "codebuddy": [
+          "speckit.token-budget.compact",
+          "speckit.token-budget.scope",
+          "speckit.token-budget.concise",
+          "speckit.token-budget.usage",
+          "speckit.token-budget.restore"
+        ],
+        "qodercli": [
           "speckit.token-budget.compact",
           "speckit.token-budget.scope",
           "speckit.token-budget.concise",

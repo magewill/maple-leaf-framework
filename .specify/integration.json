@@ -2,14 +2,19 @@
   "version": "1.4.4",
   "integration_state_schema": 1,
   "installed_integrations": [
-    "codebuddy"
+    "codebuddy",
+    "qodercli"
   ],
   "integration_settings": {
     "codebuddy": {
       "script": "ps",
       "invoke_separator": "."
+    },
+    "qodercli": {
+      "script": "ps",
+      "invoke_separator": "-"
     }
   },
-  "integration": "codebuddy",
-  "default_integration": "codebuddy"
+  "integration": "qodercli",
+  "default_integration": "qodercli"
 }

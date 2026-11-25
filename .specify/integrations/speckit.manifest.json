@@ -3,17 +3,17 @@
   "version": "1.4.4",
   "installed_at": "2026-10-21T09:16:39.727665+00:00",
   "files": {
-    ".specify/scripts/powershell/check-prerequisites.ps1": "a2e63a7eb20e14846aba3fdf25ad189da5d68f438e62553e8b1fc34315a8cc4e",
+    ".specify/scripts/powershell/check-prerequisites.ps1": "5432d89bd471f8033ec3d45331c571bca8fd0cce1e7e746e88db9ddc882c3d9e",
     ".specify/scripts/powershell/common.ps1": "9eb4b79aa71bf7890244942ee5f3a0f7a411eef134a2d67532800a05b64b18dc",
     ".specify/scripts/powershell/create-new-feature.ps1": "f0709c64a17554d4a4f87c9093d1a779ade6ef9621e6e1e502186d6b72d94d71",
     ".specify/scripts/powershell/resolve-template.ps1": "e87810c30c8ccc15ef07a14836942a3190060ea1e17234cabfc29a273f2a46dc",
     ".specify/scripts/powershell/setup-plan.ps1": "4a880c4520470de7f27d52d24b84d32f7e49df69fb63c1a5d1ec58dd685a5e34",
-    ".specify/scripts/powershell/setup-tasks.ps1": "c379dffe64787f6f4efa84d4685a58f4319ff853b6895b0c17041d00221fb4c9",
-    ".specify/templates/checklist-template.md": "3f4124a13ffbc0c2d8e979d9a08248f29ce53cc6c324a8303a6ae0d231b78836",
+    ".specify/scripts/powershell/setup-tasks.ps1": "943bbd3b41417627342e7523a1794e4fcae00d7b4376b9f83567a9564debd921",
+    ".specify/templates/checklist-template.md": "856532b3cb66171c662cc16f16b31a5856e4655a8666aad1e545bbfc7f603ca1",
     ".specify/templates/constitution-template.md": "ce7549540fa45543cca797a150201d868e64495fdff39dc38246fb17bd4024b3",
-    ".specify/templates/plan-template.md": "5ef0e4c97b36e9f91372dc6eb8e5a7e515af8958cf1a9286e43a1ebd9bd48540",
+    ".specify/templates/plan-template.md": "7e637502d41eccf0ca672496636365691fdca62ef37b27ec07fcb412dbfa90d4",
     ".specify/templates/spec-template.md": "3945437fc35cd30a5b2bf7beea680337c3516826d3efa5a6b92c4a7eca1ba28e",
-    ".specify/templates/tasks-template.md": "c731575d8099b3f871861186fbd1a592b51b2ba57fb99e1a0dab439ff6d5608f",
+    ".specify/templates/tasks-template.md": "fc29a233f6f5a27ca31f1aa46b596af6500c627441c6e62b2bc4a1d721525842",
     ".specify/.gitignore": "0a61c5378b0bb2e0f85babff99c8b166f2170a2c12378cd17d929aa19296ec88",
     ".specify/scripts/powershell/markdown_sections.py": "189e980b7c86f54c0886be57e3113cf47fc474467a08dff851144b5cc5e1fe39"
   }

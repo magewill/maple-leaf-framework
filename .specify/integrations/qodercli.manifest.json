@@ -1,0 +1,16 @@
+{
+  "integration": "qodercli",
+  "version": "1.4.4",
+  "installed_at": "2026-11-25T09:08:16.754551+00:00",
+  "files": {
+    ".qoder/skills/speckit-analyze/SKILL.md": "5a36719e1235921254f51f49249543dfc1c44e4ed9963a253eac78423f073a4e",
+    ".qoder/skills/speckit-clarify/SKILL.md": "1f1b56cf579b17db9b73faa1817022c7c0894486deb001cdfd96c342abf550dc",
+    ".qoder/skills/speckit-constitution/SKILL.md": "0bbc38524b2d01352a63af5be06375ee6b5375c62d0933f0268894672442d5d5",
+    ".qoder/skills/speckit-implement/SKILL.md": "9b34c8d43d2b1e93debdf704f4eed0a524faecf9338684c9944879937b211503",
+    ".qoder/skills/speckit-converge/SKILL.md": "772b15b11a4bcf70dbe7c31506bcb23c7f57315e76fdf9fa8f4f5c76c8d638d5",
+    ".qoder/skills/speckit-plan/SKILL.md": "fefe3b162478298b709e77225bdef3dd3f0d2a40de71a350f839f8c61d4c4414",
+    ".qoder/skills/speckit-checklist/SKILL.md": "b05e8a0b8007a2e912eca93e7681c74a1c5ec14158aae47d91c2e8b1486fdcd1",
+    ".qoder/skills/speckit-specify/SKILL.md": "a7bffc64d39a6ed365d33c13ea587cd3206c39e87d9b7cbb24cabda2a14f69e0",
+    ".qoder/skills/speckit-tasks/SKILL.md": "dd9e77d4b599c43d362343695cfdc725d942e2ac7d810ac30e564f369ab8c488"
+  }
+}

@@ -10,7 +10,7 @@ enabled: true
 **详细模板/自检**: [PLAYBOOK.md](./PLAYBOOK.md)（按需读取）
 
 ## 核心约束
-[
+
 - `spec.md` / `plan.md` / `tasks.md` 是稳定文档，只承载当前意图，不承载流水账。
 - `research.md`、`data-model.md`、`contracts/`、`quickstart.md` 是稳定设计产物；仅在决策或方案实质变化时原地更新。`audit-report.md`、`review-report.md` 保留审查证据，执行日志与验证结论写入 `history/`。
 - 每个 `specs/<feature>/` 必须存在 `changes/INDEX.md` 与 `history/README.md`；`/speckit.specify` 后立即创建；缺失不得进入下一阶段。
@@ -25,6 +25,8 @@ enabled: true
 - `/speckit.token-budget.compact` 只处理稳定产物，跳过 `changes/` 与 `history/`；禁止生成 `changes/**/*.full.md` 或 `history/**/*.full.md`。
 - 日常跳过 `**/*.full.md` 与 `history/tasks-*.md` 正文；允许读取 `history/README.md` 索引。
 - `/speckit.archive.run` 已安装时归档 `changes/`、归档时排除 `*.full.md`；未安装时按手动归档流程执行。
-- 详细模板、清理清单、history 表结构、自检命令与边界案例见 `PLAYBOOK.md`，按需读取。]()
+- 详细模板、清理清单、history 表结构、自检命令与边界案例见 `PLAYBOOK.md`，按需读取。
 
 修改本规则后必须新建会话才会生效。
+
+本规则正文必须与另一端规则保持同步：`.qoder/rules/spec-layout.md` 与 `.codebuddy/rules/spec-layout/RULE.mdc` 除 frontmatter 外应逐字一致。
