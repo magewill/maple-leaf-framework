@@ -60,4 +60,3 @@ speckit 命令产生的追加内容视为临时中间态；提交前必须按下
 
 修改本规则后必须新建会话才会生效。
 
-本规则正文必须与另一端规则保持同步：`.codebuddy/rules/spec-docs-layout/RULE.mdc` 与 `.qoder/rules/00-spec-docs-layout.md` 除 frontmatter 外应逐字一致。
