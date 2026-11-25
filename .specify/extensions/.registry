@@ -39,6 +39,24 @@
       },
       "registered_skills": [],
       "installed_at": "2026-10-23T00:35:19.604751+00:00"
+    },
+    "token-budget": {
+      "version": "1.1.0",
+      "source": "local",
+      "manifest_hash": "sha256:be1fbbd21d0cce6cd32f048ffad331a68d268947aead092681ee5e5d8667a3d0",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "codebuddy": [
+          "speckit.token-budget.compact",
+          "speckit.token-budget.scope",
+          "speckit.token-budget.concise",
+          "speckit.token-budget.usage",
+          "speckit.token-budget.restore"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-11-25T07:09:30.328646+00:00"
     }
   }
 }
