@@ -2,7 +2,7 @@
 
 **Feature**: `specs/017-data-sync-mq-switchable` | **Date**: 2026-10-27
 
-所有决策均以仓库实测证据为前提（`leaf-base-data-sync` 23 个源文件、`leaf-base-rabbitmq` / `leaf-base-rocketmq` 的 pom 与关键类、根 POM、宪法 v1.3.0）。未决澄清项为 0；三项需运行期确认的技术事实以"验证任务 + 备选方案"形式收敛（D-04、D-08、D-12）。
+所有决策均以仓库实测证据为前提（`leaf-base-data-sync` 23 个源文件、`leaf-base-rabbitmq` / `leaf-base-rocketmq` 的 pom 与关键类、根 POM、宪法 v1.4.0）。未决澄清项为 0；三项需运行期确认的技术事实以"验证任务 + 备选方案"形式收敛（D-04、D-08、D-12）。
 
 ---
 
