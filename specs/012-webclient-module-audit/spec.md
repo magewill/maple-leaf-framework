@@ -87,26 +87,6 @@
 - **P-07**：`GXWebClientService` 全部 default 方法可覆盖；blank source/expiry<=0 显式拒绝、HMAC 委托、no-op 日志钩子安全、`getTraceId` 属性优先/MDC 回落（6 条用例锁定）。
 - **P-08**：`webClientBuilder` 为 prototype 作用域（可变 builder 不共享，用例 `webClientBuilderBeanIsPrototypeScoped` 锁定），请求/响应过滤器无可变共享状态。
 
-## Clarifications
-
-### Session 2026-10-23
-
-- Q: 本次交付是"只给审查结论"还是"结论 + 直接修复"？ → A: 按 `/speckit.specify` 职责边界，本次交付**可验收规格 + 可复核结论**；生产代码修复与配套测试在 `/speckit.plan` → `/speckit.implement` 阶段执行。用户"改完代码必须做完备测试用例"固化为 FR-019～FR-023 硬门槛。
-- Q: 下游影响面多大？能否自由修改？ → A: `leaf-base-eureka-client` 编译依赖本模块并锁定装配顺序与 Bean 契约（证据 6），属**已识别下游**；修复受宪法 II 约束，Bean 名称、作用域、配置键、默认请求头名、异常结构、过滤器顺序、重试/超时默认值全部列入冻结清单（FR-009），变更须兼容说明与迁移路径。
-- Q: `@LoadBalanced` 只支持服务名寻址是缺陷还是设计？ → A: 配合 eureka/服务发现栈是**设计意图**，保留为默认契约（Option A）；修复限定为：①合成失败与远端失败可区分（FR-011）；②语义与限制文档化；③提供语义一致的直连创建出口（新增能力，不改变默认 Bean 行为）。禁止"顺手摘掉 `@LoadBalanced`"。
-- Q: 非幂等方法自动重试、敏感头入日志、连接池泄漏这类"危险默认"能否直接改？ → A: 此三类按**缺陷修复**处理（而非行为契约）：允许收敛，但必须给出旧行为的失败用例证据、兼容说明与可关闭开关（如需要）；其余默认值（重试次数 3、延迟 1000ms、超时 30s、池参数、头名称）一律不变。
-- Q: 上下文透传修复到什么程度？ → A: 两条等价验收路线任选其一并落到文档：①在异步/响应式线程上**显式传播**请求上下文（复用框架既有的 MDC/TraceId 包装能力）；②显式声明"仅请求线程保证透传"的契约并补检测告警。无论哪条，"静默丢失"必须消失（FR-010）。
-- Q: 性能结论按什么口径判定？ → A: 不设绝对吞吐/时延门禁；保留可复算口径（每请求 token 生成次数、环境查找次数、重试时延构成、连接池参数与释放路径）与"修复前后同口径对比"要求（FR-007、SC-006）。
-- Q: 测试完备性的最低标准是什么？ → A: 任何生产改动同变更补齐受影响路径的成功/失败/异常/空值/边界用例、涉及并发/上下文/资源的补并发与生命周期用例、涉及装配/AOP/过滤器链的补 Spring Boot 集成用例；每修复项附"旧代码失败、新代码通过"证据；`mvn -pl leaf-base-webclient test` 全绿且用例数从 17 单调增长；不得删除/跳过既有用例（P-01、P-02、P-04、P-06、P-07 为必须保留断言）。
-
-### Session 2026-10-23（`/speckit.analyze` 复审补充）
-
-- Q: LB 守卫如何避免误杀合法服务名（如 `svc.ns.svc.cluster.local`）？ → A: 守卫判定为"白名单优先"：`maple.framework.web.client.lb-guard-allow-hosts`（集合，默认空）中的主机一律放行；其余按"IP 字面量 / `localhost` / 含 `.` / 带端口字面量 → 拒绝（400，0 次尝试）"判定；简单服务名 `^[A-Za-z0-9_-]+$` 放行。同时提供逃生口：正式开关为宪法 IV 命名的 `maple.framework.enable.webclient-lb-guard`（默认 `true`，配置后优先），`maple.framework.web.client.lb-guard-enabled` 保留为兼容别名；关闭后完全回到旧行为（交 LB 过滤器，含合成 503）。守卫默认开启属"危险默认收敛"范畴，按缺陷修复登记，并在手册显式声明。
-- Q: token 快照里是否生成 token？ → A: `capture()` **不生成** token（token 依赖 `Environment` 而非 ThreadLocal，本就不会随线程丢失）；快照字段为 `traceId`/`platform` + **可选** `authToken`（调用方显式提供时优先使用）；`authToken` 为空时仍由 `requestFilter` 在订阅线程生成，生成失败继续按 P-01 fail-fast。快照不承担 token 生成职责，避免在无上下文线程引入新的失败面。
-- Q: 上下文缺失告警的限流怎么实现与测试？ → A: 限流状态是 `GXWebClientConfig` 的**实例字段**（非静态，单例 Bean 按应用上下文隔离），窗口常量 `CONTEXT_WARNING_INTERVAL_MILLIS = 30_000` 为同包（package-private）可覆写字段；测试类与配置类同包，直接设置窗口而**不使用反射**（满足 FR-023）。限流不新增配置键。
-- Q: token 缓存窗口与 SC-006 的"每窗口 1 次"如何统一？ → A: 窗口定义为 **60s 且 ≤expiry/2**（`expiry=150s` 时取 60s）；SC-006 与 US5 验收场景 2 已改为"60s 窗口内 1 次、150s 有效期内 ≤3 次"，不再使用笼统的"每窗口 1 次"。
-- Q: 为什么允许新增 `GXWebClientErrorResDto`（与既有 `GXHttpInvokerApiErrorResDto` 近似）？ → A: 既有 DTO 属 `leaf-base-framework` 公共契约（宪法 II，本特性假设"禁止修改"），为其补 `msg` 字段即是跨模块破坏性变更；模块内新增双形状解析 DTO 是当前约束下的最小方案，理由与替代方案（Map/JsonNode 解析）一并记入 plan 的 Complexity Tracking，并禁止再为其它用途复制该 DTO。
-
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - 审查结论可复核 (Priority: P1)

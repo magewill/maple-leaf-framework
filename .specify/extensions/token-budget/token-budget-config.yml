@@ -52,6 +52,12 @@ compact:
   # Mirrors the concise-mode directive pattern. Set to false to opt out.
   guard_memory_file: true
 
+  # Paths that must never be compacted. These are the project's change and
+  # history records; compacting them would create forbidden .full.md backups.
+  exclude_paths:
+    - "changes/"
+    - "history/"
+
 scope:
   # Soft cap for the total reading manifest, in tokens. Token Budget will
   # mark artifacts beyond this budget as "skim" rather than "read".
@@ -59,11 +65,11 @@ scope:
 
   # Heuristics for which artifacts each phase needs. Override per project.
   phase_inputs:
-    plan:        ["constitution.md", "spec.md"]
-    tasks:       ["plan.md", "data-model.md", "contracts/", "research.md"]
-    implement:   ["tasks.md", "plan.md", "data-model.md", "contracts/"]
-    analyze:     ["spec.md", "plan.md", "tasks.md"]
-    checklist:   ["spec.md"]
+    plan:        ["constitution.md", "spec.md", "changes/INDEX.md"]
+    tasks:       ["plan.md", "data-model.md", "contracts/", "research.md", "changes/INDEX.md"]
+    implement:   ["tasks.md", "plan.md", "data-model.md", "contracts/", "changes/INDEX.md"]
+    analyze:     ["spec.md", "plan.md", "tasks.md", "changes/INDEX.md"]
+    checklist:   ["spec.md", "changes/INDEX.md"]
 
 concise:
   # Default state when the extension is first installed. The user can flip

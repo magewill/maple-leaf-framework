@@ -123,7 +123,7 @@ leaf-base-rabbitmq/
 | D-05 | 发送前用 `MessagePropertiesBuilder.fromClonedProperties` 快照，再在快照上写追踪头 | 4.1.1 无 `MessageProperties` 拷贝构造器（`javap` 验证），`fromClonedProperties` 是官方深拷贝入口 |
 | D-06 | traceId 取 `getNullableTraceId()`，为空才 `generateTraceId()`；`spring.application.name` 装配期注入缓存 | 现实现每消息新建 UUID，链路必然断开；每消息 Environment 查询属无效开销 |
 | D-07 | 创建/通道类操作失败抛 `GXRabbitMQOperationException`；"不存在"仍返回 `false` | 统一失败风格，同时保留可判定的正常结果；迁移路径写入契约与手册 |
-| D-08 | 出站继续使用 Hutool（`Date`/`LocalDateTime` 毫秒时间戳，wire format 不变）；模板用共享 `JsonMapper` 承担入站类型化转换；写 `__TypeId__=cn.hutool.core.lang.Dict` 并将 `cn.hutool.core.lang` 加入信任包 | 实测 Hutool 与 Jackson 3 的时间类型输出不同，改栈会破坏既有消息格式（宪法 II）；"单栈"收敛为"单一出站序列化器 + 入站兼容性用例"（实施期修订，见 spec Clarifications） |
+| D-08 | 出站继续使用 Hutool（`Date`/`LocalDateTime` 毫秒时间戳，wire format 不变）；模板用共享 `JsonMapper` 承担入站类型化转换；写 `__TypeId__=cn.hutool.core.lang.Dict` 并将 `cn.hutool.core.lang` 加入信任包 | 实测 Hutool 与 Jackson 3 的时间类型输出不同，改栈会破坏既有消息格式（宪法 II）；"单栈"收敛为"单一出站序列化器 + 入站兼容性用例"（实施期修订，见 `changes/CR-20261125-032.md`） |
 | D-09 | 调度的虚拟线程分支改用 `ThreadPoolTaskScheduler#setVirtualThreads(true)`，poolSize=`max(2, CPU)`，显式 `destroy()` | 现实现每次触发新建执行器并在调度线程阻塞 `.get()`，实际并发度为 1；`setVirtualThreads` 是 Spring 7 官方能力 |
 | D-10 | `rabbitTaskScheduler` 保持 Bean 暴露（兼容），新增 `maple.framework.rabbitmq.scheduler.expose`（默认 `true`）允许关闭，关闭时由 `GXRabbitMQConfig` 内部持有并 `@PreDestroy` 关闭 | 该 Bean 会顶掉 Boot 默认 `taskScheduler`；既要保持兼容，又要给下游退路 |
 | D-11 | 异步执行器保留 `ThreadPoolExecutor`，拒绝策略改 `AbortPolicy` + 失败 Future，`@PreDestroy` 优雅关闭，文档声明 `max-size` 仅在队列满时生效（`queue-capacity=0` 时用 `SynchronousQueue` 让 max 立刻生效） | 保持有界并发与背压；`CallerRunsPolicy` 会把 Broker IO 反压到调用线程 |

@@ -15,7 +15,7 @@
 审查对象与证据来源：
 
 1. `leaf-base-rabbitmq` 全部 **22 个源码文件**（12 个生产类型 + 10 个 `package-info.java`），模块无 `src/test`；
-2. 契约来源：`leaf-base-rabbitmq/AGENTS.md`、`docs/leaf-base-rabbitmq开发手册.md`、`.specify/memory/constitution.md`（v1.3.0）；
+2. 契约来源：`leaf-base-rabbitmq/AGENTS.md`、`docs/leaf-base-rabbitmq开发手册.md`、`.specify/memory/constitution.md`（v1.4.0）；
 3. 依赖基线（`mvn -o -B -pl leaf-base-rabbitmq dependency:list` 实测）：`spring-rabbit/spring-amqp 4.1.1`、`amqp-client 5.30.0`、`nacos-client 3.1.1`（compile，含 `com/alibaba/nacos/api/config/annotation/NacosConfigurationProperties.class`，已用 `jar tf` 验证）、**无** `nacos-spring-context` / `nacos-config-spring-boot` 注解处理器、**无** `spring-retry`；模块硬依赖 `leaf-base-framework`、`leaf-base-nacos`、`leaf-base-retry`；
 4. 构建基线（实测）：`mvn -o -B -pl leaf-base-rabbitmq test` → `BUILD SUCCESS`，**0 个测试用例**，`pom.xml` 中无任何 test 作用域依赖。
 
@@ -88,22 +88,6 @@
 - **P-05**：`createQueue` 的缓存双检 + `ReentrantLock` 保证同一队列在单进程内不会重复声明（第 128–140 行），并发下无重复声明风暴（但存在 F-02/F-09 的代价）。
 - **P-06**：模块可在当前基线下编译通过（ErrorProne + NullAway 无错误），`mvn -o -B -pl leaf-base-rabbitmq test` 为 `BUILD SUCCESS`。
 - **P-07**：10 个包全部提供 `package-info.java` 且统一 `@NullUnmarked`，为后续补 `@NullMarked`/`@Nullable` 提供了基线。
-
-## Clarifications
-
-### Session 2026-10-25
-
-- Q: 本次交付是"只出审查结论"还是"结论 + 直接修复 + 测试"？ → A: 结论、修复、测试三者都是交付物。用户明确要求"修改完代码之后做功能完备性的测试"，因此修复必须落地并有可执行测试证明。
-- Q: 修复是否允许改变 `GXSendRabbitMQService` 的公开签名与既有失败语义？ → A: 默认不允许。保留全部既有方法签名、配置键、异常类型语义；修正"返回 `null`/静默 `false`"这类缺陷时，以补齐 `@Nullable` 契约、显式异常或新增重载的方式实现，并在提交说明中写清兼容性。
-- Q: 真实验证是否使用仓库 `config/*/rabbit.yml` 中的 `192.168.56.x` 与 `britton` 凭据？ → A: 不使用、不写入任何新文件。真实验证一律由环境变量（`RABBITMQ_HOST`/`RABBITMQ_PORT`/`RABBITMQ_USERNAME`/`RABBITMQ_PASSWORD`/`RABBITMQ_VHOST`）门控，缺失时用例 `assumeTrue` 跳过并在报告中登记"未验证项"。
-- Q: 双配置源如何收敛？ → A: 保留 `spring.rabbitmq` 前缀与 `maple.framework.mq.rabbitmq.enable` 语义不变；两种来源必须**真实生效且互斥**，启动时打印一条可检索的实际来源日志；不新增"必须配置否则启动失败"的键。
-- Q: 消费端失败如何处置？ → A: 分层：不可解析/空消息按"不可重试"处理（记录可检索日志 + 计数，不 ack 后静默丢弃）；业务处理异常按"可重试"处理（reject/requeue 或转死信），默认不改变既有 ack 行为之外的效果，具体策略在 `AGENTS.md` 登记。
-- Q: 日志语言？ → A: 本模块所有日志文案改为 ASCII（`AGENTS.md` §3.1 强制），面向用户的异常消息仍可用中文。
-
-### Session 2026-10-25（实施期）
-
-- Q: FR-018 要求"序列化 MUST 单一一致"，是否意味着出站也要改成 Jackson？ → A: 否。实测 Hutool 将 `java.util.Date` 与 `LocalDateTime` 均写为毫秒时间戳，改用 Jackson 会改变既有 wire format（违反宪法 II）。最终方案：出站保持 Hutool（唯一出站序列化器）、入站类型化转换统一用共享 `JsonMapper`，并新增"Jackson 能读取 Hutool 输出"的兼容性用例。
-- Q: 实施期新发现是否纳入本次交付？ → A: 是。新增 3 条生产阻断级发现：`jackson-datatype-jsr353` 触发 Boot `JsonMapper` ServiceLoader 失败（F-23）、`DefaultClassMapper` 信任包未覆盖 `cn.hutool.core.lang` 子包（F-24）、两个 `RabbitProperties` Bean 导致 `RabbitAutoConfiguration` 注入歧义（F-25）；均已在本次修复并登记于 `review-report.md`。
 
 ## User Scenarios & Testing *(mandatory)*
 

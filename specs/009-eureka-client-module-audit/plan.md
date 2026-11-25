@@ -41,7 +41,7 @@
 
 | 原则 | 判定 | 依据 / 约束 |
 | --- | --- | --- |
-| I. 模块自治与按需装配 | PASS（修复后） | 当前"引入即注册、无开关"违反"对可选能力使用条件装配降级"；本计划以 `maple.framework.enable.eureka-client` + `EnvironmentPostProcessor` 补齐降级路径。**不移除** `leaf-framework` 依赖（移除会使下游静默失去服务发现，已在 spec Clarifications 判定为独立后续决策） |
+| I. 模块自治与按需装配 | PASS（修复后） | 当前"引入即注册、无开关"违反"对可选能力使用条件装配降级"；本计划以 `maple.framework.enable.eureka-client` + `EnvironmentPostProcessor` 补齐降级路径。**不移除** `leaf-framework` 依赖（移除会使下游静默失去服务发现，已在 `changes/CR-20261125-017.md` 判定为独立后续决策） |
 | II. 稳定契约优先 | PASS（附兼容性声明） | 开关默认 `true`、不自动开启 `@EnableFeignClients`、保持门面依赖 → 默认行为不变。**3 项显式行为变更**：①框架不再提供 `defaultZone` 默认值；②框架不再声明 `register-with-eureka`；③Feign 熔断键移出本模块。三项均在报告与手册的"升级必查"中列明迁移路径，不属"顺手重构" |
 | III. 统一响应与统一异常 | N/A | 本模块不产生对外响应与业务异常；新增代码不引入自定义异常类型 |
 | IV. 显式配置与双配置源 | PASS | 开关命名遵循 `maple.framework.enable.<feature>`；默认值语义写入 `additional-spring-configuration-metadata.json`；装配/降级各输出一条 ASCII 日志（禁止静默降级） |

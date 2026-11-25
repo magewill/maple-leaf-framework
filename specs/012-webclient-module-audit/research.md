@@ -26,14 +26,14 @@ Technical Context 无未知项（语言/依赖/测试/平台/规模均来自实�
 ## R-02 `@LoadBalanced` 寻址守卫与直连出口（F-01，高危）
 
 **Decision**: 三件套：
-1. **LB 守卫过滤器**（并入 `webClientBuilder` 构建，标志位 `lbMode`）：`lbMode=true` 且请求主机形态为 FQDN（含 `.`）/IP/`localhost`/带端口字面量时，**在 LB 解析前**直接返回 `Mono.error(GXBusinessException)`，错误码取 400 段（不在重试集合内），文案点明"负载均衡客户端仅支持服务名寻址，直连请使用非 LB builder"；服务名形态（无点简单名）放行。**复审补充**：合法带点服务名经 `lb-guard-allow-hosts` 白名单放行；`lb-guard-enabled=false` 时整个守卫关闭并回退旧行为（详见 spec Clarifications 复审条目与 filter-chain-contract 寻址模式表）。手工 `webClientBuilder()` 路径 `lbMode=false` 不设守卫。
+1. **LB 守卫过滤器**（并入 `webClientBuilder` 构建，标志位 `lbMode`）：`lbMode=true` 且请求主机形态为 FQDN（含 `.`）/IP/`localhost`/带端口字面量时，**在 LB 解析前**直接返回 `Mono.error(GXBusinessException)`，错误码取 400 段（不在重试集合内），文案点明"负载均衡客户端仅支持服务名寻址，直连请使用非 LB builder"；服务名形态（无点简单名）放行。**复审补充**：合法带点服务名经 `lb-guard-allow-hosts` 白名单放行；`lb-guard-enabled=false` 时整个守卫关闭并回退旧行为（详见 `changes/CR-20261125-024.md` 复审条目与 filter-chain-contract 寻址模式表）。手工 `webClientBuilder()` 路径 `lbMode=false` 不设守卫。
 2. **直连出口**：新增 prototype Bean `webClientDirectBuilder`（无 `@LoadBalanced`，其余过滤器/连接池语义与默认 builder 完全一致），命名入契约附录（新增不破坏）。
 3. **文档化**：手册与 AGENTS.md 写明"默认 `webClient` 仅服务名寻址"的既定设计（配合 eureka/服务发现栈）。
 
 **Rationale**: 已按 `spring-cloud-commons-5.0.3-sources.jar` 核实 `ReactorLoadBalancerExchangeFilterFunction.filter`（`serviceId = originalUrl.getHost()`，**无直连旁路**；无实例返回合成 503 `ClientResponse.create(HttpStatus.SERVICE_UNAVAILABLE)`，不发网络请求）。合成 503 会被现有错误转换 + 重试放大为"4 次假尝试 + 误报服务不可用"。主机形态前置判定是确定性的、可单测的，且不依赖 spring-cloud 内部实现细节（不靠嗅探合成响应）；守卫错误码选非重试段，天然短路假重试。
 
 **Alternatives considered**:
-- *去掉 `@LoadBalanced`*：被拒——eureka-client AGENTS.md 明文冻结该 Bean 契约，且是服务发现栈设计意图（spec Clarifications Q3）。
+- *去掉 `@LoadBalanced`*：被拒——eureka-client AGENTS.md 明文冻结该 Bean 契约，且是服务发现栈设计意图（`changes/CR-20261125-024.md` Q3）。
 - *嗅探合成响应（空头/报文体匹配）*：被拒——依赖 spring-cloud 报文细节，版本升级易碎。
 - *在 `handle4xx/5xxError` 中对 503 做二次分类*：被拒——响应已过 LB，无法区分合成与真实 503 的信息在响应端已丢失。
 
@@ -63,7 +63,7 @@ Technical Context 无未知项（语言/依赖/测试/平台/规模均来自实�
 3. 重试次数/延迟默认值不变（3 次 / 1000ms）。
 4. `X-Request-Start-Time` 改由**内层过滤器**逐尝试刷新（重试语义不再陈旧，E-14 闭合）。
 
-**Rationale**: 三类危险默认之一（spec Clarifications Q4 允许缺陷收敛）；按方法集合配置比布尔开关表达力强且与 HTTP 语义对齐；默认收敛到安全方法后，非可重放体（流式 body）的重放风险随方法限制基本消除（GET/HEAD/OPTIONS 常规无体）。兼容路径：`retry-methods=GET,HEAD,OPTIONS,POST,PUT,DELETE` 一行恢复旧范围。
+**Rationale**: 三类危险默认之一（`changes/CR-20261125-024.md` Q4 允许缺陷收敛）；按方法集合配置比布尔开关表达力强且与 HTTP 语义对齐；默认收敛到安全方法后，非可重放体（流式 body）的重放风险随方法限制基本消除（GET/HEAD/OPTIONS 常规无体）。兼容路径：`retry-methods=GET,HEAD,OPTIONS,POST,PUT,DELETE` 一行恢复旧范围。
 
 **Alternatives considered**:
 - *声明式 `@Idempotent` 标记*：被拒——需要调用方注解面，侵入大；配置键足够。

@@ -1,18 +1,7 @@
-<!--
-SYNC IMPACT REPORT（临时评审草稿，提交前删除）
-- Version change: 1.2.0 → 1.3.0
-- Modified principles: 无（未重命名任何既有原则）
-- Added sections:
-  - 附加约束 §9「能力完备性对齐官方特性（不欠实现）」
-  - 开发流程与质量门禁 §4 提交前检查清单：新增「未缺失官方关键特性」复核项
-- Removed sections: 无
-- Follow-up TODOs: 无
--->
-
 # Maple Leaf Framework 项目宪法
 
 <!--
-沉淀依据：本文件由对现有代码库（根 POM + 25 个 leaf-base-* 模块 + docs/ + 各模块 AGENTS.md）
+沉淀依据：本文件由对现有代码库（根 POM + 24 个 leaf-base-* 模块 + 1 个 leaf-framework 聚合门面 + docs/ + 各模块 AGENTS.md）
 的静态分析归纳而成，描述的是"项目已经遵循的约定"，而非新制定的规则。
 凡与代码现状不一致之处，以"原则 + 已知偏差"的方式显式记录，不美化、不臆测。
 -->
@@ -66,7 +55,7 @@ SYNC IMPACT REPORT（临时评审草稿，提交前删除）
 - 两套实现的互斥方式二选一，但**不允许出现"文档说支持两套、实际只有一套"**：
   - **类路径条件（默认）**：local 用 `@ConditionalOnMissingClass("com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties")`，nacos 用 `@ConditionalOnClass(...)`；
   - **显式开关（仅当类路径条件不可达时）**：例如模块以 compile 依赖引入 `leaf-base-nacos`，导致 `@ConditionalOnMissingClass` 恒为假、local 变体永不生效。此时用 `@ConditionalOnProperty(name = "<模块>.config.source", havingValue = "local" | "nacos", matchIfMissing = true)` 互斥装配，并同时满足四条护栏：① 默认值（`matchIfMissing`）保持已发布的既有行为；② 启动时以 INFO 打印实际生效源与关键默认值（不打印密钥）；③ 必须有互斥装配与默认值的测试；④ 新增键登记 `additional-spring-configuration-metadata.json` 并在模块手册的配置键表中标注。
-- 跨模块的框架能力开关统一置于 `maple.framework.enable.<feature>`，默认关闭，通过 `@ConditionalOnProperty` / `@ConditionalOnExpression` 显式开启；**单模块内部开关沿用该模块既有配置前缀**（如 `sso.config.*`、`redisson.*`），不强制迁移到 `maple.framework.enable.*`。新增开关同步写入 `META-INF/additional-spring-configuration-metadata.json`，保证 IDE 提示。
+- 跨模块的框架能力开关统一置于 `maple.framework.enable.<feature>`：新增开关默认关闭，通过 `@ConditionalOnProperty` / `@ConditionalOnExpression` 显式开启；既有开关保持已发布的默认值，若默认开启，必须在模块 `AGENTS.md` 与开发手册登记理由、影响面与关闭方式，不得以“统一默认关闭”为由破坏既有默认行为。**单模块内部开关沿用该模块既有配置前缀**（如 `sso.config.*`、`redisson.*`），不强制迁移到 `maple.framework.enable.*`。新增开关同步写入 `META-INF/additional-spring-configuration-metadata.json`，保证 IDE 提示。
 - 敏感值只允许 `${ENV_VAR:default}` 形式注入，禁止把真实密码、令牌、生产地址写入源码、测试或 `config/` 模板。
 - 配置类必须保持可覆盖、可观测：装配过程输出明确日志（如"Nacos 配置 / 本地配置"），禁止静默降级。
 
@@ -96,7 +85,7 @@ SYNC IMPACT REPORT（临时评审草稿，提交前删除）
 命名是检索与识别的基础，必须保持可预测。
 
 - 包根为 `cn.maple`。模块目录与包前缀的映射：`leaf-base-framework → cn.maple.core.framework`、`leaf-base-datasource → cn.maple.core.datasource`、`leaf-base-datasource-mongodb → cn.maple.mongodb.datasource`、`leaf-base-data-sync → cn.maple.canal`（历史例外）、`leaf-base-dubbo-nacos-sentinel → cn.maple.sentinel`（历史例外），其余 `leaf-base-X` 通常对应 `cn.maple.X`。
-- 类型统一 `GX` 前缀（当前约七成类遵循）；新增类型必须沿用，历史无前缀类型不强制重命名。
+- 类型统一 `GX` 前缀；新增类型必须沿用，历史无前缀类型不强制重命名。
 - 后缀表（新增代码必须遵守）：
 
 | 角色 | 命名规则 | 示例 |
@@ -120,11 +109,11 @@ SYNC IMPACT REPORT（临时评审草稿，提交前删除）
 
 - 分层职责固定：`controller`（协议适配、参数校验、DTO 转换）→ `service`（业务编排，接口与 `impl` 分包）→ `dao`/`repository`（数据访问）；`api` 层面向 RPC/远程调用，独立使用 `api/dto/req|res`，不得反向依赖 Web 层。
 - 数据访问方法命名保持动词一致：`findByCondition`、`findOneByCondition`、`findById`、`updateOrCreate`、`updateFieldByCondition`、`deleteCondition`、`deleteSoftCondition`、`paginate`、`checkRecordIsExists`、`count`。
-- 日志统一走 SLF4J 门面（`@Slf4j`，历史文件中的 `@Log4j2` 允许保留但不再新增）；禁止 `System.out`/`printStackTrace`。日志与断言消息优先使用 ASCII 文本，面向用户的异常消息使用中文。
+- 日志统一走 SLF4J 门面（`@Slf4j`，历史文件中的 `@Log4j2` 允许保留但不再新增）；禁止 `System.out`/`printStackTrace`。内部日志、断言消息与内部异常消息优先使用 ASCII 文本；对外 HTTP 响应消息使用中文；模块契约可要求更严格的 ASCII 约束，但不得与对外响应语言规则冲突。
 
 ## 附加约束（技术栈与依赖治理）
 
-1. 基线版本：JDK 21、Spring Boot 4.1.x、Spring Framework 7.x、Spring Cloud 2025.1.x、Spring Cloud Alibaba 2025.1.x；不得自行降级主版本。
+1. 基线版本：JDK 21、Spring Boot 4.2.x、Spring Framework 7.x、Spring Cloud 2025.1.x、Spring Cloud Alibaba 2025.1.x；不得自行降级主版本。
 2. 依赖版本只允许在根 POM `<properties>` 中声明；冲突覆盖声明必须位于 `spring-boot-dependencies` 之前，并附中文注释说明"解决哪两个组件的冲突"。**不得删除已有的冲突覆盖**，它们通常是踩坑后的沉淀。
 3. 新增第三方依赖必须说明：用途、是否与现有依赖功能重叠、体积/传递依赖影响、是否可用现有封装替代。能用 JDK/Spring Boot/Spring Framework/本模块既有工具完成的，不引入新库。
 4. 禁止重复造轮子：不要为已有能力再包一层抽象；只有在逻辑被两处以上复用或能显著降低复杂度时才抽取新类型。
@@ -136,7 +125,7 @@ SYNC IMPACT REPORT（临时评审草稿，提交前删除）
 
 ## 开发流程与质量门禁
 
-1. **分支**：按版本开发，分支名 `dev<版本号>`（当前 `dev4.3.0`）；PR 目标分支指向当前版本分支，而非 `master`。
+1. **分支**：按版本开发，分支名 `dev<版本号>`（当前 `dev4.4.0`）；PR 目标分支指向当前版本分支，而非 `master`。
 2. **提交信息**：`类型(范围): 简述`，类型取 `feat` / `fix` / `docs` / `refactor` / `test` / `chore`，例如 `feat(fix): 完善数据源模块的数据过滤`。
 3. **PR 必须说明**：改动动机、影响范围（哪些模块/公共契约受影响）、是否涉及接口或配置键变更、本地执行的验证命令与结果、兼容性策略。
 4. **提交前检查清单**：
@@ -155,7 +144,7 @@ SYNC IMPACT REPORT（临时评审草稿，提交前删除）
 ## Governance
 
 - 本宪法优先于其它开发约定；`docs/` 手册与各模块 `AGENTS.md` 是宪法在具体模块上的细化，冲突时以宪法为准。
-- 所有评审必须校验合规性：不满足"稳定契约优先""统一响应与统一异常""测试与静态检查门槛"的变更不得合入。
+- 所有评审必须校验合规性：不满足本宪法全部原则与附加约束的变更不得合入，重点包括"稳定契约优先""统一响应与统一异常""测试与静态检查门槛"。
 - 修订流程：提出变更动机 → 给出影响面分析（受影响模块、公共契约、下游兼容性）→ 更新本文件与相关 `AGENTS.md`/手册 → 在 PR 中记录。
 - 版本语义：**MAJOR** 用于移除或重定义原则、引入不兼容约束；**MINOR** 用于新增原则/章节或实质性扩展；**PATCH** 用于措辞澄清与非语义修正。
 - 复杂度必须被证明：新增抽象层、缓存、反射链路、生命周期钩子、并发模型时，需在 PR 中说明必要性、替代方案与回滚方式；评审重点复核实现是否过度设计/过度实现（见"附加约束"§8）。
@@ -165,9 +154,12 @@ SYNC IMPACT REPORT（临时评审草稿，提交前删除）
 
 | 版本 | 日期 | 类型 | 变更 | 依据 |
 | --- | --- | --- | --- | --- |
+| 1.4.0 | 2026-11-25 | MINOR | 清理临时评审草稿；基线对齐根 POM（Spring Boot 4.2.x、dev4.4.0、24 个 leaf-base-* + 1 个 leaf-framework 聚合门面）；§IV 明确新增开关默认关闭、既有开关保持已发布默认值、默认开启须登记；§VII 明确内部日志/断言/异常 ASCII、对外 HTTP 响应中文；Governance 合规范围改为全部原则与附加约束；移除不可验证的“约七成类”表述 | 2026-11-25 宪法内容审查；1.1.0 依据补充 specs/013-sso-module-audit/changes/CR-20261125-037.md 归档链接 |
 | 1.3.0 | 2026-10-25 | MINOR | 附加约束新增 §9「能力完备性对齐官方特性（不欠实现）」：封装组件必须覆盖官方核心能力，评审重点复核各 `leaf-base-<组件>` 模块是否缺失官方特性（如 `leaf-base-nacos`、`leaf-base-debezium`），缺失须补齐或显式登记不支持范围；开发流程与质量门禁 §4 提交前检查清单新增对应复核项 | 用户指示：审查、复核实现代码是否缺失官方提供的功能特性（如 nacos、debezium 模块） |
 | 1.2.0 | 2026-10-25 | MINOR | 附加约束新增 §8「反对过度设计与过度实现（YAGNI）」：实现只覆盖当前明确需求，评审重点复核是否引入投机性抽象、未被使用的公共 API/扩展点/配置开关、可被既有工具替代的自研封装等过度设计与过度实现；开发流程与质量门禁 §4 提交前检查清单新增对应复核项；Governance「复杂度必须被证明」补充评审复核要点 | 用户指示：重点审查、复核实现代码是否存在过度设计/过度实现 |
-| 1.1.0 | 2026-10-23 | MINOR | §IV：为双配置源新增"显式开关"等价互斥方式（附四条护栏），并澄清单模块内部开关沿用模块既有前缀、不强制迁移到 `maple.framework.enable.*`；§VII：后缀表新增"校验器 `GX<概念>Validator`"角色，并注明顺序/上限/标记类常量并入既有 `GX<范围>Constant` | `specs/013-sso-module-audit` T102：`leaf-base-nacos` 为 compile 依赖使 `@ConditionalOnMissingClass` 恒为假（F-06），模块改用 `sso.config.source` 显式开关并经 110 条用例验证；仓库已有 `GXRocketMQConfigSourceValidator`、`GXValidateDBExistsValidator`、`GXValidateCallRemoteServiceValidator` 三个类型在实践上使用 `Validator` 后缀但后缀表无对应角色 |
-| 1.0.0 | 2026-10-21 | MAJOR | 初始版本（由现有代码库静态分析归纳） | 根 POM + 25 个 `leaf-base-*` 模块 + `docs/` + 各模块 `AGENTS.md` |
+| 1.1.0 | 2026-10-23 | MINOR | §IV：为双配置源新增"显式开关"等价互斥方式（附四条护栏），并澄清单模块内部开关沿用模块既有前缀、不强制迁移到 `maple.framework.enable.*`；§VII：后缀表新增"校验器 `GX<概念>Validator`"角色，并注明顺序/上限/标记类常量并入既有 `GX<范围>Constant` | `specs/013-sso-module-audit` T102：`leaf-base-nacos` 为 compile 依赖使 `@ConditionalOnMissingClass` 恒为假（F-06），模块改用 `sso.config.source` 显式开关并经 110 条用例验证；仓库已有 `GXRocketMQConfigSourceValidator`、`GXValidateDBExistsValidator`、`GXValidateCallRemoteServiceValidator` 三个类型在实践上使用 `Validator` 后缀但后缀表无对应角色；归档见 `specs/013-sso-module-audit/changes/CR-20261125-037.md` |
+| 1.0.0 | 2026-10-21 | MAJOR | 初始版本（由现有代码库静态分析归纳） | 根 POM + 24 个 `leaf-base-*` 模块 + 1 个 `leaf-framework` 聚合门面 + `docs/` + 各模块 `AGENTS.md` |
 
-**Version**: 1.3.0 | **Ratified**: 2026-10-21 | **Last Amended**: 2026-10-25
+> 说明：1.2.0 与 1.3.0 早于宪法变更归档机制，依据保留为用户指示；1.1.0 的归档链接于 2026-11-25 补充。
+
+**Version**: 1.4.0 | **Ratified**: 2026-10-21 | **Last Amended**: 2026-11-25

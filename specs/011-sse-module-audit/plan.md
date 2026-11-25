@@ -136,7 +136,7 @@ leaf-base-sse/AGENTS.md                                        # 改：§3 补"�
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 | --- | --- | --- |
-| 新增 `GXSseClientSendPipeline`（单连接 FIFO 队列 + drain 串行） | FR-008 要求"首投失败 + 重试"场景保序；现状异步重试会让 M2 越过 M1 | 改为"失败即关闭、不重试"会删除既有重试能力（Clarifications 否决）；改为同步 `Thread.sleep` 退避会阻塞调用线程，广播时最坏 N × 700ms |
+| 新增 `GXSseClientSendPipeline`（单连接 FIFO 队列 + drain 串行） | FR-008 要求"首投失败 + 重试"场景保序；现状异步重试会让 M2 越过 M1 | 改为"失败即关闭、不重试"会删除既有重试能力（`changes/CR-20261125-021.md` 否决）；改为同步 `Thread.sleep` 退避会阻塞调用线程，广播时最坏 N × 700ms |
 | 新增 `GXSseMetrics` 快照类型 | FR-024 要求 6 项可获取口径，且不能靠高频 INFO 日志承载 | 返回 `Map<String, Long>` 违反宪法 III 的"禁止裸 Map"风格；新增 6 个 getter 方法会污染服务接口；复用 Micrometer 需新增依赖 |
 | 执行器拆分为"调度器 + 虚拟线程任务执行器" | FR-016 要求单慢连接不得阻塞其它连接的心跳与重试 | 单线程调度器同时做 I/O 会把头阻塞固化（现状缺陷）；用固定大小线程池需设定并发度且可能耗尽，虚拟线程按任务创建更贴合 SSE 的 I/O 密集特征 |
 | `protected createEmitter(long)` 测试缝 | FR-023 禁止反射构造失败现场，而当前创建点不可注入 | 反射改私有缓存只能测"已注册之后"的行为，无法测首帧失败；改为构造器注入 `Supplier<SseEmitter>` 会改变 `@Service` 无参构造契约 |

@@ -85,19 +85,6 @@
 - **P-04**：默认 `includes=Exception` 使 `Error` 不被重试，且 `Error` 原样抛出而非被包装（第 141–153 行用例）。
 - **P-05**：`RetryException.getCause()` 非空保证 + `throwAs` sneaky throw，受检异常类型得以保留（`IOException` 用例）。
 
-## Clarifications
-
-### Session 2026-10-23
-
-- Q: 本次交付是"只给审查结论与验证基线"，还是"结论 + 直接修复已确认缺陷"？ → A: 结论 + 可执行验证基线为本次必交付；生产代码修复由 `/speckit.plan` 依据发现分级排期，本规格只要求每条发现可复现、可写出回归测试设计，不要求本次改动生产代码。
-- Q: 审查是否需要外部系统（真实下游服务、注册中心、消息中间件）？ → A: 不需要。本模块无外部依赖，全部结论可在纯 JVM 内以既有测试 + 新增回归用例 + 本地启动的 Spring 上下文复现；不引入 Testcontainers。
-- Q: 性能结论按什么口径判定？ → A: 不设绝对吞吐/时延门禁；只保留可复算口径（每次调用的容器查询次数、键拷贝与对象分配次数、最坏阻塞时长推导、每失败尝试日志条数）与同环境重跑同量级的复现要求。
-- Q: 默认重试策略是否应改为"只重试明确声明的异常"，从而不再自动重试业务异常和线程中断？ → A: 不改默认行为（Option A）：默认异常集保持现状（`GXRetryUtil` 为所有 `Exception`，`RetryTemplate` Bean 含 `GXBusinessException`），仅通过手册章节、Javadoc 与可直接复制的显式排除示例披露风险；F-01 按"文档与可观测性收敛"处置，不计入默认值变更。
-- Q: 重试上下文的属性应当如何跨多次尝试传递，才能让"第 2 次尝试读取第 1 次写入的值"成立？ → A: 复制前递（Option A）：每次尝试新建实例，把上一次尝试的属性复制进新实例，`parent` 指向上一实例，`retryCount`/`lastThrowable` 仍表示本次尝试；不采用跨尝试共享同一实例。
-- Q: 退避策略的安全边界（总超时、抖动、次数与间隔上限）应当改到什么程度？ → A: 仅暴露能力（Option A）：新增可选总超时与抖动参数，默认仍为"无超时、无抖动"，`maxAttempts ≤ 100` 与 `maxInterval ≤ 3600000ms` 等上限保持不变；用文档给出最坏阻塞推导与"长重试必须显式设置超时"的硬性建议。
-- Q: 重试默认参数应当收敛到哪一个"单一来源"，以及容器里的 `RetryTemplate` Bean 是否必须先被工具类使用？ → A: 最小收敛（Option A）：仅把重复的默认常量集中到单点，`GXRetryUtil` 继续自建模板、不读取容器中的 `RetryTemplate` Bean，不新增配置属性，装配方式保持组件扫描；`@ConditionalOnMissingBean` 的共存冲突按文档说明处置。
-- Q: 同一个 `retryCount` 在回调、恢复回调与 `from(RetryState)` 中含义不同，应当如何统一？ → A: 统一为"重试次数，首次执行为 0"（Option A）：恢复回调改用 `RetryException.getRetryCount()`（3 次尝试的恢复上下文由 3 变 2），回调侧保留 `getRetryCount()` 作为兼容别名并新增 `getAttemptIndex()`（0 基尝试序号），`from(RetryState)` 与之对齐，配套兼容说明与断言更新。
-
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - 审查结论可复核 (Priority: P1)

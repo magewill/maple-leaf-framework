@@ -77,23 +77,6 @@
 - **P-05**：依赖冲突治理已在根 POM 集中登记（`hk2`、`woodstox-core`、`httpclient`、`jersey-hk2` 的版本与中文冲突注释），版本来源单一（E-09）。
 - **P-06**：既有 2 个用例通过，可作为回归基线（E-16）。
 
-## Clarifications
-
-### Session 2026-10-22
-
-- Q: 本次交付是"只给审查结论与验证基线"，还是"结论 + 直接修复"？ → A: 结论 + 可执行验证基线 + 修复设计为本次必交付；生产代码修复由后续 `/speckit.plan` 依据发现分级排期。本规格不修改任何生产代码，只要求每条发现具备"旧代码失败、新代码通过"的回归设计。
-- Q: 是否允许跨模块改动（根 `pom.xml`、`leaf-framework` 聚合门面、`config/` 模板）？ → A: 审查阶段不修改任何文件；修复阶段的跨模块候选限定为三处最小集合——根 POM 的版本/冲突治理条目、`leaf-framework/pom.xml` 中本模块的依赖声明、下游示例配置；每一处都必须在计划阶段单独列出影响面后再授权，禁止顺手改其它模块。
-- Q: `spring-boot-devtools` 是判定为缺陷还是既定设计？ → A: 判定为缺陷（库模块传递开发期工具）。处置方式由后续澄清收敛为"从本模块依赖中彻底移除"（本模块源码零引用 devtools），热重载能力由宿主应用自行声明，模块手册补本机开启说明。
-- Q: 库内 `src/main/resources/application.yml` 是判定为缺陷还是示例交付物？ → A: 判定为缺陷（与宿主应用同名配置位置）。修复方向为"移出 jar 根"（放置位置由后续澄清收敛为 `src/main/resources/examples/`），并保留"复制即可运行"的获取路径；不得只改文件名就宣称已修复，必须给出下游覆盖顺序的实测证据。
-- Q: 默认"集群"配置是否按缺陷处理，是否会改默认值？ → A: 按"示例配置自相矛盾"处理。`register-with-eureka=false` / `fetch-registry=false` 的单机默认值保持不变（P-04）；新增集群场景的显式配置样例与配置矩阵，并要求给出"对等复制是否发生"的实测结论，不得仅凭文档断言。
-- Q: 是否允许引入新的测试依赖或依赖外部环境？ → A: 不引入。使用 `ApplicationContextRunner` / `@SpringBootTest`、JDK 内置能力与临时目录构造验证，审查与回归设计都必须能在无外网、无外部注册中心的环境下运行。
-- Q: 性能以什么标准判定"改到位"？ → A: 不设吞吐/时延门禁。只要求给出可复算口径：引入本模块带来的启动固定成本（上下文启动耗时）、常驻线程数、注册中心相关内存基线，以及同环境重跑两次偏差不超过 30%。
-- Q: 独立的审查报告存放位置与文件名？ → A: `specs/008-eureka-server-module-audit/audit-report.md`；报告与规格同目录、同生命周期，`spec.md` 只保留摘要与该报告的引用。
-- Q: 新增的"启用注册中心"开关默认值取 `true` 还是 `false`？ → A: 默认 `false`（开关名 `maple.framework.enable.eureka-server`），同时把聚合门面 `leaf-framework` 中的本模块依赖移出；该变更声明为破坏性变更，注册中心部署方必须显式开启开关或直接依赖本模块，迁移路径与受影响应用清单在报告中列明。
-- Q: Jersey 3.1.12 连接器与 Jersey 4.0.x 同栈的依赖冲突按哪个方向收敛？ → A: 统一代际：以 `jersey-apache5-connector 4.0.2` 替换 `jersey-apache-connector 3.1.12`（实施前核实该旧坐标无 4.x 版本，Jersey 4 的 HttpClient 连接器已改名为 apache5 坐标），移除 `httpclient` 4.x 的重复声明与对应 `<exclusion>`，并以真实启动的注册中心上下文验证 Jersey 初始化与节点间调用；验证失败时记录证据并回退到 Jersey 默认连接器。**实施期实测：该方案不可行（E-18，`NoClassDefFoundError: ApacheConnectorProvider`），已按 FR-017 保留 `jersey-apache-connector 3.1.12` 并文档化为上游约束。**
-- Q: 框架默认配置里与部署环境绑定的项（`ip-address`、`hostname`、`defaultZone`）应该如何处置？ → A: 框架默认只保留与位置无关的单机语义（`register-with-eureka=false`、`fetch-registry=false`）；`ip-address`、`hostname`、`defaultZone`、`server.port` 全部移出默认配置，改为示例文档提供，默认配置中不得出现固定地址、固定域名或固定端口。
-- Q: 移出 jar 根后的单机与集群示例配置以什么形式交付？ → A: 放在本模块 `src/main/resources/examples/` 下随 jar 分发（不在 `classpath:/` 根，不会被自动加载），单机与集群各一份，并由 `docs/leaf-base-eureka-server开发手册.md` 引用并给出复制步骤。
-
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - 注册中心启动语义可复核（单机 vs 集群）(Priority: P1)
@@ -265,6 +248,6 @@
 - `eureka7001.com` / `eureka7002.com` / `eureka7003.com` 属于示例域名，需要 hosts 解析；本规格不把它当作生产契约，但要求给出"未解析时的实际表现"结论。
 - 单机形态的 `register-with-eureka=false` / `fetch-registry=false` 是既定契约，本次不改变其默认值；集群形态以新增显式样例与配置矩阵的方式补齐，不通过修改默认值实现。
 - 本次审查不引入 MockWebServer / Testcontainers / 外部注册中心，验证手段限于 `ApplicationContextRunner`、最小 `@SpringBootTest`、依赖树分析与临时目录类路径组装。
-- 审查阶段不修改任何生产代码与配置文件；Clarifications 中的 devtools、库内 `application.yml`、装配开关、依赖收敛结论用于约束后续计划阶段的修复设计，不在本次落地。
+- 审查阶段不修改任何生产代码与配置文件；`changes/CR-20261125-015.md` 中的 devtools、库内 `application.yml`、装配开关、依赖收敛结论用于约束后续计划阶段的修复设计，不在本次落地。
 - 启动耗时与线程数的比较基线为"同机、同 JDK、空应用"；结论以"可复算口径 + 同量级复现"为验收标准，不承诺生产容量。
-- 聚合门面 `leaf-framework` 的依赖清单属于跨模块事实，本规格只引用不修改；已按 Clarifications 确定"把本模块移出聚合门面"，该跨模块改动仍需在计划阶段列出影响面后执行，范围仅限 `leaf-framework/pom.xml` 中该条依赖声明。
+- 聚合门面 `leaf-framework` 的依赖清单属于跨模块事实，本规格只引用不修改；已按 `changes/CR-20261125-015.md` 确定"把本模块移出聚合门面"，该跨模块改动仍需在计划阶段列出影响面后执行，范围仅限 `leaf-framework/pom.xml` 中该条依赖声明。

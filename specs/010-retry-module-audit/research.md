@@ -2,7 +2,7 @@
 
 **Feature**: `010-retry-module-audit` | **Date**: 2026-10-23 | **Spec**: [spec.md](./spec.md) | **Plan**: [plan.md](./plan.md)
 
-本文件只记录"会影响实现与验收"的决策与事实核对。技术上下文无 `NEEDS CLARIFICATION`：语言、依赖、测试、平台、约束均已在 [plan.md](./plan.md) 的 Technical Context 中确定，5 项产品级歧义已在 spec 的 Clarifications 中闭环。
+本文件只记录"会影响实现与验收"的决策与事实核对。技术上下文无 `NEEDS CLARIFICATION`：语言、依赖、测试、平台、约束均已在 [plan.md](./plan.md) 的 Technical Context 中确定，5 项产品级歧义已在 `changes/CR-20261125-019.md` 中闭环。
 
 ## 事实核对（R-01 ~ R-06）
 
@@ -35,7 +35,7 @@
 
 - **Decision**：`GXRetryUtil` 用 `AtomicReference<GXRetryContext> previous` 串起尝试链；每次尝试构造 `new GXRetryContext(attemptIndex, lastThrowable, previous.get())`，构造器内先把 `parent` 的全部属性复制到本实例（`parent.getAttributes().forEach(this::setAttribute)`），再发布；`from(RetryState)` 增加 `from(RetryState, @Nullable GXRetryContext parent)` 重载，原签名委托。
 - **Rationale**：兑现"属性可跨尝试传递"（FR-015），同时保留"回调拿到的 `retryCount`/`lastThrowable` 不会被后续尝试改写"的现有语义；无属性时复制是空循环，热路径开销可忽略（O(属性数)，通常 0）。
-- **Alternatives considered**：全程复用同一实例（B 方案，被 Clarifications 否决：回调持有的引用会被后续尝试改写）；只删 `parent`/`from` 并声明"不跨尝试"（C 方案，被否决：能力承诺被移除）。
+- **Alternatives considered**：全程复用同一实例（B 方案，被 `changes/CR-20261125-019.md` 否决：回调持有的引用会被后续尝试改写）；只删 `parent`/`from` 并声明"不跨尝试"（C 方案，被否决：能力承诺被移除）。
 
 ### D-04 `retryCount` 统一为"重试次数"
 

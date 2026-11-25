@@ -16,7 +16,7 @@
 | `org.apache.httpcomponents:httpclient` | 根 POM `httpclient.version=4.5.14` | compile | 保留 | `eureka-client 2.0.6` 声明 4.5.3，需锚定 |
 | `org.springframework.boot:spring-boot-starter-test` | BOM | test | 否 | 不新增其它测试依赖 |
 
-**硬性约束**：不得新增第三方依赖；不得引入 MockWebServer / WireMock / Testcontainers（spec Clarifications）。
+**硬性约束**：不得新增第三方依赖；不得引入 MockWebServer / WireMock / Testcontainers（`changes/CR-20261125-017.md`）。
 
 ## 2. 版本与冲突治理规则
 
@@ -55,4 +55,4 @@ mvn -o -pl leaf-base-eureka-client dependency:tree "-Dverbose=true" "-DoutputFil
 | 声明 `spring-boot-starter-web` / `tomcat` | 本模块不提供 Web 容器能力 |
 | 声明任何注册中心服务端依赖（jersey/hk2 等） | 越界到 `leaf-base-eureka-server` |
 | 通过 `<scope>provided</scope>` 规避可传递性检查 | 会隐藏真实运行期依赖 |
-| 新增测试依赖 | spec Clarifications；JDK `HttpServer` 已足够 |
+| 新增测试依赖 | `changes/CR-20261125-017.md`；JDK `HttpServer` 已足够 |

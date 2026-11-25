@@ -78,22 +78,6 @@
 - **P-05**：模块未混入注册中心服务端逻辑（无 `@EnableEurekaServer`），未引入业务服务名、业务 Feign 接口或业务降级（E-01、E-02）。
 - **P-06**：`@ConditionalOnMissingBean` 之类的用户覆盖能力由上游 `leaf-base-webclient`/`leaf-base-feign` 提供，本模块未抢占 Bean 定义。
 
-## Clarifications
-
-### Session 2026-10-22
-
-- Q: 本次交付是"只给审查结论与验证基线"，还是"结论 + 直接修复"？ → A: 结论 + 可执行验证基线 + 修复设计为本次必交付；生产代码修复由后续 `/speckit.plan` 依据发现分级排期。本规格不修改任何生产代码，但每条发现必须具备"旧代码失败、新代码通过"的回归设计。
-- Q: 是否允许跨模块改动（根 `pom.xml`、`leaf-framework` 聚合门面、`leaf-base-feign`、`docs/`、`README.md`）？ → A: 审查阶段不修改任何文件；修复阶段的跨模块候选限定为四处最小集合——根 POM 的依赖治理条目、`leaf-framework/pom.xml` 中本模块依赖声明（本次**不**移除，见下条）、`leaf-base-feign` 承接熔断默认键、`docs/` 与 `README.md` 的模块说明；每一处必须在计划阶段单独列出影响面后再授权，禁止顺手改其它模块。
-- Q: 是否把本模块从聚合门面 `leaf-framework` 中移除？ → A: **不移除**。移除会让已依赖"通过门面获得注册发现"的下游应用在升级后静默失去服务发现能力（比"被动注册"更难观测），属高风险破坏性变更；本规格要求改为"可显式关闭 + 文档明示 + 默认地址不固化"，并把移除门面作为**独立后续决策**登记，不在本次落地。
-- Q: 新增开关的名称与默认值？ → A: 开关名 `maple.framework.enable.eureka-client`（遵循宪法第 IV 条 `maple.framework.enable.<feature>`），**默认 `true`**（保持既有行为，遵循宪法第 II 条"不得顺手改变默认行为"）；其语义是"允许显式关闭本模块带来的客户端装配与注册默认值"，关闭后不得遗留任何 `eureka.*` 默认值副作用，并输出一条 ASCII 日志说明降级来源。
-- Q: 库内 `src/main/resources/application.yml` 判定为缺陷还是示例交付物？ → A: 判定为缺陷（与宿主同名配置位置）。修复方向为"移出 jar 根"到 `src/main/resources/examples/`（随 jar 分发、不会被自动加载），单注册中心与多注册中心各一份，并由模块手册给出复制步骤；**不得只改文件名**就宣称已修复，必须给出"宿主覆盖顺序"的实测证据。
-- Q: 默认 `defaultZone` 与 `register-with-eureka` 如何处理？ → A: 框架默认**不得**出现任何固定域名、固定地址或固定端口（`eureka700*.com` 全部移除）；`register-with-eureka` 不再由框架默认配置声明（回归上游默认），未配置 `defaultZone` 时启动阶段 MUST 输出**一条** ASCII WARN 指明生效来源与配置键名；示例配置改为 `${EUREKA_DEFAULT_ZONE:...}` 形式并与服务端手册口径对齐。
-- Q: 注册中心不可达时应用是否允许启动失败？ → A: 以实测为准，结论唯一化：审查 MUST 实测"三个 `eureka700*.com` 均不可解析/不可达"时的启动结果（正常启动并后台重试 / `Failed to start bean 'eurekaAutoServiceRegistration'` 失败），并给出唯一定性；若实测为启动失败，则修复 MUST 使客户端注册不阻塞应用启动，并有回归用例锁定。
-- Q: `spring.cloud.openfeign.circuitbreaker.*` 三个键的归属？ → A: 判定为本模块越权（F-09）。修复方向为"由 `leaf-base-feign` 承接同名默认键"，且迁移前后"仅使用 feign 的应用"行为必须不变，需实测；本模块 jar 内不得再携带任何 Feign 键。该跨模块改动须在计划阶段单独列影响面，若 `leaf-base-feign` 侧评估为不可承接，则退化为"移入示例 + 模块手册明示"，不得保留在 jar 根。
-- Q: 既有失败用例如何处置？ → A: **不得**删除、跳过或用 `@Disabled` 绕过；必须先把它改写为不依赖换行符的语义断言（绑定 `Environment`/`EurekaClientConfigBean`）再继续；修复前后的失败-通过差异必须记录（对应宪法第 VI 条"Bug 修复必须附带能在旧代码上失败、在新代码上通过的回归测试"）。
-- Q: 是否允许引入新的测试依赖或依赖外部环境？ → A: 不引入。使用 `ApplicationContextRunner`、`@SpringBootTest`、JDK 内置 `com.sun.net.httpserver.HttpServer` 模拟注册端点、临时目录类路径组装完成验证；全部验证 MUST 在无外网、无外部注册中心的环境下可运行，且 MUST 在 Windows（CRLF）与 Linux（LF）下同时通过。
-- Q: 独立的审查报告存放位置与文件名？ → A: `specs/009-eureka-client-module-audit/audit-report.md`；报告与规格同目录、同生命周期，`spec.md` 只保留摘要与该报告的引用。
-
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - 引入即注册的影响面可判定，且可以关闭 (Priority: P1)
@@ -228,7 +212,7 @@
 - **FR-012**: 依赖治理 MUST 逐条核对 5 组事实：3 组 `<exclusion>` 与同坐标重声明的净效果、`error_prone_annotations` 的 guava 路径、`httpclient 4.5.14` 与 `httpclient5 5.6.4` 的并存与使用者、`eureka-client 2.0.6` 的 Jackson 2 分支、starter 版本由 BOM 管理；每组 MUST 给出"缺陷 / 冗余 / 无风险"判定与最小修正方案（对应 F-08）。
 - **FR-013**: 本模块 jar 内 MUST NOT 再携带任何 `spring.cloud.openfeign.*` 键（当前 3 个）；这些默认值 MUST 由 `leaf-base-feign` 承接，且"仅使用 feign 的应用"行为 MUST 在迁移前后一致（需实测）；若 `leaf-base-feign` 侧评估为不可承接，MUST 退化为"移入 `examples/` 并由手册明示"，MUST NOT 保留在 jar 根（对应 F-09）。
 - **FR-014**: 对外契约 MUST 与实现逐条对照并单列发现，至少覆盖：`AGENTS.md` §1 的 `@EnableFeignClients` 与 `@LoadBalanced`/`HttpServiceProxyFactory` 归属、§3 的 Feign 扫描与 `feign.hystrix.enabled` 基线、§5 的"没有现成测试"、`README.md` 模块表描述（是否说明"引入即注册"与服务端行口径一致）、`docs/` 手册缺失、配置元数据缺失（对应 F-06、F-10）。
-- **FR-015**: 审查 MUST 明确区分"缺陷"与"既定契约"：至少确认"不自动开启 `@EnableFeignClients`"、"模块保持在聚合门面内"、"开关默认 `true`"、"starter 版本由 BOM 管理"为契约；对既定契约 MUST 要求文档与测试双向对齐，而非计为缺陷（对应 P-02、P-03、Clarifications）。
+- **FR-015**: 审查 MUST 明确区分"缺陷"与"既定契约"：至少确认"不自动开启 `@EnableFeignClients`"、"模块保持在聚合门面内"、"开关默认 `true`"、"starter 版本由 BOM 管理"为契约；对既定契约 MUST 要求文档与测试双向对齐，而非计为缺陷（对应 P-02、P-03、`changes/CR-20261125-017.md`）。
 - **FR-016**: 审查活动 MUST NOT 修改任何生产代码、配置或依赖；审查报告 MUST 独立成文于 `specs/009-eureka-client-module-audit/audit-report.md`，`spec.md` 只保留摘要与该报告的引用，两者交付时 MUST 相互一致。
 - **FR-017**: 每条发现 MUST 给出"能在旧代码上失败、在新代码上通过"的回归测试设计（输入、断言点、期望差异）；该设计 MUST 说明在 Windows 与 Linux 双平台的可执行性。
 - **FR-018**: 资源与启动成本 MUST 给出可复算口径：引入本模块前后的上下文启动耗时、常驻线程增量（Eureka 心跳/注册线程）、注册相关内存基线；同环境重跑两次偏差 MUST ≤ 30%，MUST NOT 以绝对吞吐或时延数值作为通过门槛。
@@ -268,7 +252,7 @@
 - `eureka7001.com` / `eureka7002.com` / `eureka7003.com` 属示例域名，需要 hosts 解析；本规格不把它们当作生产契约，但要求给出"未解析时的实际表现"结论。
 - 开关默认 `true`、模块保留在聚合门面内，均为**保持现状**的决策；因此本规格不产生破坏性变更，也不要求下游在升级后必须改配置。
 - 本次审查不引入 MockWebServer / Testcontainers / 外部注册中心；验证手段限于 `ApplicationContextRunner`、最小 `@SpringBootTest`、JDK 内置 `HttpServer`、依赖树分析与临时目录类路径组装。
-- 审查阶段不修改任何生产代码与配置文件；Clarifications 中的开关、示例化、Feign 键迁移、失败用例处置结论用于约束后续计划阶段的修复设计，不在本次落地。
+- 审查阶段不修改任何生产代码与配置文件；`changes/CR-20261125-017.md` 中的开关、示例化、Feign 键迁移、失败用例处置结论用于约束后续计划阶段的修复设计，不在本次落地。
 - 启动耗时与线程数的比较基线为"同机、同 JDK、空应用"；结论以"可复算口径 + 同量级复现"为验收标准，不承诺生产容量。
-- 聚合门面 `leaf-framework` 的依赖清单属于跨模块事实，本规格只引用不修改；"是否把本模块移出聚合门面"已被明确判定为独立后续决策（见 Clarifications），不在本次范围。
+- 聚合门面 `leaf-framework` 的依赖清单属于跨模块事实，本规格只引用不修改；"是否把本模块移出聚合门面"已被明确判定为独立后续决策（见 `changes/CR-20261125-017.md`），不在本次范围。
 - `specs/008-eureka-server-module-audit/audit-report.md` 第 208 行登记的跨模块遗留项（本模块库内 `application.yml`）由本规格承接收敛，收敛结论需回写该处引用关系。

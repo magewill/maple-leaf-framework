@@ -292,7 +292,7 @@ mvn -o dependency:tree | Select-String "leaf-base-eureka-client|leaf-framework"
 
 1. `specs/008-eureka-server-module-audit/audit-report.md:208` 登记的"本模块库内同名 `application.yml`"**已收敛**：文件已移出 jar 根，默认值改由 `examples/` 与文档交付（本报告 §5、§7 RC-01/RC-09）。
 2. 默认值口径对齐：服务端手册集群示例使用 `${EUREKA_PEER_URLS:http://localhost:7002/eureka/,http://localhost:7003/eureka/}`（自身为 7001），客户端多注册中心示例使用 `${EUREKA_REGISTRY_URLS:...7001...,...7002...,...7003...}`（节点集合含自身），语义一致；客户端单注册中心示例回落 `localhost:8761`，与服务端"必须显式指定端口"的约束一致（框架不再替应用决定拓扑）。
-3. 未在本特性范围的遗留：`agent` 侧"是否把本模块移出聚合门面"仍是独立决策（`spec.md` Clarifications），本报告只提供影响面数据（E-12、§10）。
+3. 未在本特性范围的遗留：`agent` 侧"是否把本模块移出聚合门面"仍是独立决策（`changes/CR-20261125-017.md`），本报告只提供影响面数据（E-12、§10）。
 4. 跨模块改动范围：本特性只新增 `docs/leaf-base-eureka-client开发手册.md` 与修改 `README.md` 一行；`leaf-framework/pom.xml`、`leaf-base-feign`、`leaf-base-webclient`、根 `pom.xml` 均未改动（T039 校验）。
 
 ## 12. 实施结果与验证

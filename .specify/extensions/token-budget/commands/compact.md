@@ -46,6 +46,10 @@ decision, contract, ID, user story, or acceptance criterion**.
    `compact.preserve_code_blocks`, `compact.preserve_id_patterns`,
    `compact.keep_full_backup`.
 
+**Hard exclusion**: Never compact `changes/` or `history/`; skip them even
+when compacting the whole feature directory. These directories are the
+project's change/history record and must stay unabridged.
+
 ## Algorithm — apply in order, per artifact
 
 ### Step 1 — Backup

@@ -107,4 +107,4 @@
 
 **Decision**: Technical Context 中的全部字段均已确定（语言、依赖、测试命令、平台、性能口径、约束、规模），无待澄清项。
 
-**Rationale**: 两处实质分歧（是否包含修复、是否覆盖 stream 链路）已在 `spec.md` 的 Clarifications 中定案：本次只出结论与基线，两条链路同权审查。
+**Rationale**: 两处实质分歧（是否包含修复、是否覆盖 stream 链路）已在 `changes/CR-20261125-007.md` 中定案：本次只出结论与基线，两条链路同权审查。

@@ -15,7 +15,7 @@
 审查对象与证据来源：
 
 1. `leaf-base-data-sync` 全部 **23 个源码文件**（14 个生产类型 + 9 个 `package-info.java`）与 `src/main/resources/ymls/dev/common.yml`；
-2. 契约来源：`leaf-base-data-sync/AGENTS.md`、`docs/leaf-base-data-sync开发手册.md`、`.specify/memory/constitution.md`（v1.3.0）；
+2. 契约来源：`leaf-base-data-sync/AGENTS.md`、`docs/leaf-base-data-sync开发手册.md`、`.specify/memory/constitution.md`（v1.4.0）；
 3. 依赖基线（`leaf-base-data-sync/pom.xml` 实测）：仅 `leaf-base-framework`、`leaf-base-rabbitmq`（compile）+ `spring-boot-starter-test`（test），**无 RocketMQ 依赖、无 Nacos 依赖、无配置元数据资源、无自动装配注册**；
 4. 可复用资产（既有封装，不得改造其公开契约）：`leaf-base-rabbitmq`（包根 `cn.maple.rabbitmq`，`GXSendRabbitMQService`、`GXRabbitMQQueueListener`，配置源开关 `maple.framework.rabbitmq.config-source`）、`leaf-base-rocketmq`（包根 `cn.maple.rocketmq`，`GXSendRocketMQService`、`GXRocketMQMessageReqDto`、配置源开关 `rocketmq.config-source`，其模块手册明确声明**不承载消费容器**，且禁止在模块内并行引入另一套发送抽象）；
 5. 测试基线（实测）：3 个测试类共 16 个用例（`GXCanalMessageParseServiceImplTest` 12 + `GXCanalConfigTest` 2 + `GXCanalRabbitMQListenerTest` 2），全部为单元测试（`ApplicationContextRunner` + 反射注入 + 静态 mock `GXSpringContextUtils`），**无 `@SpringBootTest`、无并发用例、无失败处置用例、无 MQ 切换用例**。
@@ -83,19 +83,6 @@
 - **P-04**：解析入口对空值、非 JSON、库表缺失做了前置防御，且错误信息包含定位线索（第 28–49 行）。
 - **P-05**：`database + table + "_Service"` → 小驼峰 Bean 名的扩展点约定、`defaultProcessCanalDataService` 兜底、三类操作分发语义清晰且有 12 个用例锁定（`GXCanalMessageParseServiceImplTest`）。
 - **P-06**：模块 9 个包均提供 `package-info.java` 且统一 `@NullUnmarked`，为补齐 `@NullMarked`/`@Nullable` 提供基线。
-
-## Clarifications
-
-### Session 2026-10-27（规格编制期决策，供 `/speckit.clarify` 复核）
-
-- Q: MQ 选择是"互斥单选"还是"迁移期双跑（同一应用同时订阅两种 MQ）"？ → A: **互斥单选**。切换以配置改动 + 重启达成，双跑会引入重复消费与幂等责任，超出当前模块职责（宪法附加约束 §8）。双跑能力登记为不支持。
-- Q: 消息中间件抽象的落点是新建独立模块还是在 `leaf-base-data-sync` 内做适配？ → A: **本模块内做适配**。当前只有本模块有该需求，`leaf-base-rabbitmq` 与 `leaf-base-rocketmq` 的模块手册均禁止在其内部再引入并行抽象；待出现第二个消费方再按宪法 §I 抽取独立模块。
-- Q: 切换开关的默认值？ → A: **默认保持 RabbitMQ**，保证既有部署零配置升级后行为不变（宪法 §II）。
-- Q: 是否需要 RocketMQ 顺序消费？ → A: **默认并发消费**，与当前 RabbitMQ `concurrency=10` 的无序语义对齐；顺序/分区有序登记为不支持，并说明"需要严格顺序时按表维度拆分消费组"的替代方案。
-- Q: 真实中间件验证如何做？ → A: 一律由环境变量门控（`RABBITMQ_*`、`ROCKETMQ_NAME_SERVER` 等），缺失时用例跳过并在交付报告中登记"未验证项"；不在仓库写入任何地址或凭据。
-- Q（实施期回填）：RocketMQ 消费并发度是否必须可配置？ → A: **降级为固定值并显式登记**。`@RocketMQMessageListener` 的 `consumeThreadMax` / `maxReconsumeTimes` 为注解属性，不支持占位符；改用程序化 `DefaultRocketMQListenerContainer` 需以动态代理构造注解实例，复杂度与收益不匹配（宪法附加约束 §8）。因此 FR-022 增加"例外（已协商）"说明，实际值由启动日志打印，登记于 `AGENTS.md` §10 / 手册 §6.2 注。
-- Q: RocketMQ 接入的依赖载体是什么？ → A: **必须依赖 `leaf-base-rocketmq`**（用户在本次澄清中明确要求）。本模块 MUST NOT 直接声明 `rocketmq-spring-boot-starter` / `rocketmq-client` 坐标，MUST NOT 在模块内另建一套 RocketMQ 连接与配置治理；名称服务、生产者组、配置源等一律沿用该模块既有键与校验逻辑。依赖以 `<optional>true</optional>` 声明（理由见 Assumptions），使用 RocketMQ 的下游需显式引入该模块；本模块的编译与测试类路径始终包含它，因此其传递依赖带来的配置源问题必须在本次一并解决，不得靠"下游没引就不会出问题"回避。
-- Q: 是否复用 `leaf-base-rocketmq` 既有的 `GXCdc*` 消费分发链路（`GXCdcMessageDispatcher` / `GXCdcEventListener` / 统计 / 死信转发）？ → A: **不以其作为 Canal 分发主路径**，但**复用其能力面**。理由：`GXCdcEvent`/`GXCdcOperation` 是另一套规范化事件模型，直接套用会要求业务方改用 `GXCdcEventListener` 并放弃 `database_table_Service` 与 `GXProcessCanalDataService`（违反"业务零改动"），同时把 `maple.framework.cdc.enable` 这一其它能力域的开关混入数据同步。复用范围限定为：RocketMQ 连接/发送能力（`GXSendRocketMQService`、`RocketMQTemplate`）、死信转发与统计模式、配置源治理约定。该边界登记为不支持范围的补充说明（FR-038）。
 
 ## User Scenarios & Testing *(mandatory)*
 

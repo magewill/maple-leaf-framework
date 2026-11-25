@@ -18,7 +18,7 @@
 | `impact` | 影响面（调用方/下游/运维） | 不得写"可能有问题"这类无法判定表述 |
 | `evidenceIds` | `E-xx` 列表 | 至少 1 条（FR-002） |
 | `regressionDesign` | 输入 + 断言点 + 期望差异 | 必须"旧代码失败、新代码通过"（FR-012） |
-| `disposition` | `修复` / `文档收敛` / `既定契约` | 由 Clarifications 决策：F-01 = 文档收敛；F-02/F-03/F-04/F-08 = 修复；P-01 ~ P-05 = 既定契约 |
+| `disposition` | `修复` / `文档收敛` / `既定契约` | 由 `changes/CR-20261125-019.md` 决策：F-01 = 文档收敛；F-02/F-03/F-04/F-08 = 修复；P-01 ~ P-05 = 既定契约 |
 
 **校验规则**：`severity` 与 `disposition` 均非空；`高` 级别必须同时具备 `regressionDesign` 与 `trigger`；`既定契约` 不得出现在 `disposition` 为 `修复` 的条目上。
 

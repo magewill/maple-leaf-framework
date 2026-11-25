@@ -60,13 +60,6 @@
 - **F-16（中）建立在弃用 API 之上**：延迟转发链路依赖 `RDelayedQueue`，上游 4.7.0 已标注弃用并在构造时输出 error 级提示，推荐替代为 `RReliableQueue`；该链路一旦在上游被移除即整体失效，属"升级即断"的契约风险（E-13）。
 - **F-15（低）缓存语义待书面化**：`updateCacheExpiredTime` 对"无过期时间"（TTL = -1）直接返回 `true` 但不设置过期；`getBucketAllData` 全量物化键与值。二者已被既有测试锁定，需在报告中明确为"既定契约"而非缺陷。
 
-## Clarifications
-
-### Session 2026-10-22
-
-- Q: 本次交付是"只给审查结论与测试基线"，还是"结论 + 直接修复已确认缺陷"？ → A: 审查结论 + 测试基线为本次必交付；缺陷修复由后续 `/speckit.plan` 依据本规格的发现分级另行排期，本规格只要求"每条缺陷可验证、可写出回归测试设计"，不要求本次改动生产代码。
-- Q: 审查范围是否包含新增的 stream 队列体系，还是只审可靠主题与延迟队列旧链路？ → A: 两条链路同权审查：可靠主题 + 延迟队列（`GXRedissonMQUtils`/`GXRedissonDelayMQPostProcessor`）与 stream 体系（`stream/**`）全部纳入，共 51 个生产文件全覆盖。
-
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - 审查结论可复核、可定位 (Priority: P1)

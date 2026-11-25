@@ -124,7 +124,7 @@
 **Rationale**：spec FR-010/FR-011 要求语义断言、真实行为、无新依赖、双平台一致；JDK `HttpServer` 在本模块可用（`jdk.httpserver` 模块，无需第三方）。
 
 **Alternatives considered**：
-- 用 MockWebServer/WireMock：新增依赖，违反 spec Clarifications。
+- 用 MockWebServer/WireMock：新增依赖，违反 `changes/CR-20261125-017.md`。
 - 用真实 Eureka Server 模块启动：跨模块依赖 + 端口/超时不稳定，拒绝（008 已证明容器级验证成本高）。
 
 ### D-06 契约文档收敛

@@ -183,7 +183,7 @@
 | --- | --- | --- |
 | T071 | 手册示例仍含已移除的 `consume-thread-max` | §6.1 示例删除该键；§5 性能调优改为"注解常量固定 20" |
 | T072 | 监听器 4 处日志未节流 | 两套监听器改为经 `GXCanalLogThrottle` 输出，并加"日志走节流"用例 |
-| T073 | FR-022 在 RocketMQ 侧未满足 | 评估后**降级并显式登记**：改程序化容器需动态代理构造注解实例，复杂度不匹配收益（附加约束 §8）；`spec.md` FR-022 增加"例外（已协商）"，Clarifications 回填决策 |
+| T073 | FR-022 在 RocketMQ 侧未满足 | 评估后**降级并显式登记**：改程序化容器需动态代理构造注解实例，复杂度不匹配收益（附加约束 §8）；`spec.md` FR-022 增加"例外（已协商）"，`changes/CR-20261125-035.md` 回填决策 |
 | T074 | contract/手册引用不存在的键 | 统一改为 `spring.rabbitmq.listener.simple.prefetch` / 注解 `consumeThreadMax` |
 | T075 | `data-model.md` 写已移除的 `max-reconsume-times` | 改为"超过注解固定值（3 次）" |
 | T076 | 门控用例的配置从未离线验证 | 新增 `GXCanalRealBrokerBootstrapTest`（校验门控注解、Bean 方法、`@EnableRabbit`） |

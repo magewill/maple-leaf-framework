@@ -57,7 +57,7 @@
 - **F-02（高）token 生成失败即中断业务调用**：缺少 `maple.framework.web.feign.token` / `secret` 时，任意 Feign 调用在 `RequestInterceptor` 阶段抛 `GXBusinessException`，即使目标接口无需鉴权；无降级、无独立开关（E-03）。
 - **F-03（高）`@GXHttpInvokerAuthToken` 在缺失实现时使接口整体 500**：该注解默认值为 `feign`（`GXHttpInvokerAuthToken` 第 11 行），下游只要标注了它，而应用未实现 `GXFeignService`，切面即抛"请实现 cn.maple.feign.service.GXFeignService接口"；`leaf-framework` 聚合门面默认引入本模块，影响面覆盖全部使用聚合门面的应用（E-01、E-13）。
 - **F-04（高）错误解码器默认关闭且开启后错误码压平**：默认走 Feign `FeignException`（非 `GXBusinessException`），开启后 400/404/503 全部变为 code=500，远端 body 在 6 个分支被丢弃，统一响应契约丢失（E-04、E-05、E-06、E-15）。
-- **F-05（高）熔断重试默认开启并覆盖非幂等请求**：`maxRetries=3` 对 POST/PUT/DELETE 同样生效，远端返回 5xx 或连接异常时可能重复写；同时 fallback 会把 4xx 业务异常吞成默认返回值。是否重复、重试几次需实测确认（E-07、E-08）——当前为"待验证风险"而非已确认缺陷；处置结论见 Clarifications 与 FR-006。
+- **F-05（高）熔断重试默认开启并覆盖非幂等请求**：`maxRetries=3` 对 POST/PUT/DELETE 同样生效，远端返回 5xx 或连接异常时可能重复写；同时 fallback 会把 4xx 业务异常吞成默认返回值。是否重复、重试几次需实测确认（E-07、E-08）——当前为"待验证风险"而非已确认缺陷；处置结论见 `changes/CR-20261125-013.md` 与 FR-006。
 - **F-06（高）熔断配置键与实际前缀不一致，四个环境配置全部空转**：`maple.feign.*` 从未被绑定，线上实际使用代码默认值，配置与行为"看起来一致"纯属默认值巧合（E-09）。
 - **F-07（中）出站请求被注入响应安全头并强制覆盖 `User-Agent`**：请求头承载响应语义无实际效果，`Cache-Control: no-cache` 会抑制幂等 GET 的代理缓存，`User-Agent` 覆盖使服务端无法区分调用方（E-10）。
 - **F-08（中）traceId 生成不回写上下文**：非 Web 线程发起 Feign 调用时，生成的 traceId 只出现在下游，本进程日志无关联 id，链路断点（E-11）。
@@ -78,23 +78,6 @@
 - **P-04**：错误响应体读取有 8192 字符上限、截断标记与读取失败降级文案，三个分支均有测试。
 - **P-05**：熔断参数 setter 对负值/`null`/非正 multiplier 做前置拒绝，环境属性覆盖与自定义 `Customizer` 回退均有测试。
 - **P-06**：五个开关（logger、error-decoder、request-interceptor、auth-token-aspect、circuit-breaker）均支持"用户自定义 Bean 优先"语义，`AutoConfiguration.imports` 注册与 `ApplicationContextRunner` 装配有测试覆盖。
-
-## Clarifications
-
-### Session 2026-10-22
-
-- Q: 本次交付是"只给审查结论与验证基线"，还是"结论 + 直接修复"？ → A: 结论 + 可执行验证基线为本次必交付；生产代码修复由后续 `/speckit.plan` 依据发现分级排期。本规格只要求每条发现可复现、可写出"旧代码失败、新代码通过"的回归测试设计。
-- Q: 审查范围是否包含 `leaf-base-framework` 与 `leaf-base-webclient` 的对应实现？ → A: 不包含。`GXAuthCodeUtils`、`GXCurrentRequestContextUtils`、`GXTraceIdContextUtils`、`GXWebClientAuthTokenAspect` 仅作为行为对照与证据引用，不得修改；本模块只审查自己持有的封装逻辑。
-- Q: `maple.feign.*` 与 `maple.framework.feign.*` 的配置键冲突如何收敛？ → A: 以代码前缀 `maple.framework.feign.*` 为唯一契约（与宪法第 IV 条和既有测试一致）；四个环境模板按本会话后续授权项直接修正，代码侧不保留旧键别名。
-- Q: 熔断重试对 POST/PUT/DELETE 的重复写风险，是判定为缺陷还是既定契约？ → A: 先判定为"待验证风险"。规格要求用进程内可控服务端实测"同一逻辑调用实际发起几次 HTTP 请求"，再据此定性；在实测之前不得断言为缺陷，也不得据此改动默认值。
-- Q: 默认不装配错误解码器（`error-decoder.enabled` 无 `matchIfMissing`）是否属于缺陷？ → A: 属于"契约与文档不一致"而非纯缺陷：既有测试已把默认关闭固定为行为，本规格要求先明确"默认值应取哪一种"的决策，再要求文档与测试同时对齐，不得只改其中一侧。
-- Q: 真实验证是否允许引入新的测试依赖（如 MockWebServer/Testcontainers）？ → A: 不引入。使用 JDK 自带的进程内 HTTP 服务与 `ApplicationContextRunner`/`@SpringBootTest` 构造"真实 HTTP 往返"，保持依赖零增长（宪法附加约束 3）。
-- Q: 性能以什么标准判定"改到位"？ → A: 不设绝对吞吐/时延门禁；只要求给出可复算口径（每调用 header 写入次数、环境值查询次数、日志条数、`apply()` 单位时间吞吐与分位）与同环境重跑同量级（偏差 ≤ 30%）的复现要求。
-- Q: 认证 token 的配置或密钥缺失时，Feign 调用的默认行为应当是什么？ → A: 保持 fail-fast 为默认（缺配置即中断调用，向后兼容），同时新增独立开关 `maple.framework.feign.auth-token.enabled`（默认 `true`）；显式置为 `false` 时跳过 token 透传、输出 warn 并继续调用。
-- Q: 自定义错误解码器的默认开关状态应当如何确定？ → A: 保持默认关闭（不改变下游可捕获的异常类型），把 `AGENTS.md` 与文档改为"需显式开启"；缺陷修复集中在"开启后 MUST 保留远端 HTTP 状态码与响应体业务码"，而不是调整默认开关。
-- Q: 四个环境配置模板的配置键修正是否纳入本特性的交付范围？ → A: 纳入。`config/{dev,test,pre,prod}/app-environment.yml` 改为 `maple.framework.feign.circuit-breaker.*`；本次对此跨模块改动予以授权，但仅限这四个文件的该段配置，不得顺带改动其它键。
-- Q: 独立的审查报告应当存放在哪个位置、以什么文件名交付？ → A: `specs/007-feign-module-audit/audit-report.md`；报告与规格同目录、同生命周期，`spec.md` 仅保留摘要与指向该报告的引用。
-- Q: 如果实测确认非幂等请求会被重复发送，重试的默认行为应当如何处理？ → A: 默认不重试：把 `maxRetries` 默认值收敛为 `0`（与 OpenFeign 原生 `Retryer.NEVER_RETRY` 语义一致），需要重试者显式配置；熔断相关的 `enabled` / `open-timeout` / `reset-timeout` / `backoff` 语义保持不变。
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -267,6 +250,6 @@
 - `GXFeignService` 由业务工程实现是既定设计（接口只提供 `default` 方法），本规格审查的是"缺失实现时的默认行为与可观测性"，不要求框架内置默认实现。
 - `maple.framework.feign.*` 为唯一有效的配置前缀，`config/` 下的 `maple.feign.*` 属于从未生效的历史写法；四个环境模板的该段配置纳入本特性修正（已授权的跨模块改动），下游自有配置文件需由各自仓库按报告给出的迁移方式自行调整。
 - `@GXHttpInvokerAuthToken` 的实际使用场景是服务端入口鉴权（`leaf-base-sso` 的拦截器据此跳过登录校验），切面的定位是"入站 token 校验"，不是"出站 token 生成"；出站 token 由 `GXFeignService.generateHttpAuthToken()` 提供。
-- 本规格自身的审查活动不修改 `leaf-base-feign` 生产代码；Clarifications 中对 token 开关、错误码保留、重试默认值、配置模板的决策用于约束后续计划阶段的修复设计，不在本次审查中落地；不新增 fallback、批量调用等新能力，只审查现状。
+- 本规格自身的审查活动不修改 `leaf-base-feign` 生产代码；`changes/CR-20261125-013.md` 中对 token 开关、错误码保留、重试默认值、配置模板的决策用于约束后续计划阶段的修复设计，不在本次审查中落地；不新增 fallback、批量调用等新能力，只审查现状。
 - 性能数据以单机、单客户端实例、无网络延迟为前提，结论以"可复算口径 + 同量级复现"为验收标准，不承诺生产容量。
 - 熔断重试的重复写风险在实测前按"未验证假设"处理，不作为缺陷计入；实测确认重复发送后，按 FR-006 的"默认不重试"结论收敛。

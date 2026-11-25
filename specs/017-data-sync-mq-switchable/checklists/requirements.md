@@ -18,7 +18,7 @@
 
 - [x] No [NEEDS CLARIFICATION] markers remain
 
-  - 说明：本规格对 5 个高影响决策（互斥单选 / 抽象落点 / 默认 MQ / 顺序消费 / 真实验证方式）采用"取合理默认 + 显式记录"的方式处理，记录在 `## Clarifications` 的 `Session 2026-10-27` 小节，供 `/speckit.clarify` 复核推翻。
+  - 说明：本规格对 5 个高影响决策（互斥单选 / 抽象落点 / 默认 MQ / 顺序消费 / 真实验证方式）采用"取合理默认 + 显式记录"的方式处理，记录在 `changes/CR-20261125-035.md` 的 `Session 2026-10-27` 小节，供 `/speckit.clarify` 复核推翻。
 
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
@@ -62,4 +62,4 @@
   2. **E-08 / F-04**：Canal 实际投递载荷是单个对象还是 JSON 数组（结论决定 FR-009 的兼容范围与实现优先级）；
   3. **E-22 / F-18**：`rocketmq-spring-boot-starter 2.3.6` 在 Spring Boot 4.1 基线下的消费容器（`@RocketMQMessageListener`）是否可正常注册与消费（本仓库从未使用该路径）；不可用时需给出替代装配方案并登记。
 - 本规格未创建任何分支：`.specify/extensions.yml` 中未注册 `before_specify` / `after_specify` 钩子（仅有 `after_implement` 的 review 可选钩子）。
-- 宪法合规要点（`.specify/memory/constitution.md` v1.3.0）：FR-001/002/003 对应原则 §II 稳定契约；FR-032/034/045 对应 §IV 双配置源与配置元数据；FR-014/016/036 对应 §V 空值与上下文纪律；FR-040/041/042 对应 §VI 测试与静态检查门槛；FR-038 对应附加约束 §9 能力完备性登记；FR-043/044/047 对应附加约束 §2/§3 依赖治理与根 POM 版本集中；FR-046 对应附加约束 §4 反重复造轮子与 §8 反过度设计的边界划分；`## Out of Scope` 中"不新建通用抽象模块"对应附加约束 §8。
+- 宪法合规要点（`.specify/memory/constitution.md` v1.4.0）：FR-001/002/003 对应原则 §II 稳定契约；FR-032/034/045 对应 §IV 双配置源与配置元数据；FR-014/016/036 对应 §V 空值与上下文纪律；FR-040/041/042 对应 §VI 测试与静态检查门槛；FR-038 对应附加约束 §9 能力完备性登记；FR-043/044/047 对应附加约束 §2/§3 依赖治理与根 POM 版本集中；FR-046 对应附加约束 §4 反重复造轮子与 §8 反过度设计的边界划分；`## Out of Scope` 中"不新建通用抽象模块"对应附加约束 §8。

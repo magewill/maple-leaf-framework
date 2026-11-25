@@ -33,7 +33,7 @@
 
 - 审查类特性的审查对象本身就是代码，因此"无实现细节"一条按"证据定位"口径判定：`spec.md` 中的类名、依赖坐标、行号仅用于让结论可复核（对应 FR-002、FR-003），不作为实现方案的规定；行文主线仍是"结论可信、可复现、可排期"的用户价值。
 - SC 条款以覆盖率、断言点数量、依赖矩阵组数、重跑偏差为度量，均可在不依赖具体实现的前提下判定；JDK/Spring 版本、`ApplicationContextRunner` 等属于验证前提，已写入 Assumptions。
-- 澄清项已在 `spec.md` 的 Clarifications 章节闭环（12 项：交付边界、跨模块授权范围、devtools 定性与处置、库内 `application.yml` 定性与落位、集群示例定性、测试依赖约束、性能判定口径、报告存放位置、装配开关默认值、Jersey 代际收敛方向、默认配置中环境相关项处置、示例配置交付形态），无遗留 `[NEEDS CLARIFICATION]`。
+- 澄清项已在 `changes/CR-20261125-015.md` 闭环（12 项：交付边界、跨模块授权范围、devtools 定性与处置、库内 `application.yml` 定性与落位、集群示例定性、测试依赖约束、性能判定口径、报告存放位置、装配开关默认值、Jersey 代际收敛方向、默认配置中环境相关项处置、示例配置交付形态），无遗留 `[NEEDS CLARIFICATION]`。
 - 本轮 `clarify` 新落地的 5 项决策已写入 `FR-007`、`FR-008`、`FR-016`、`FR-017`、`SC-011` 与 Assumptions：开关 `maple.framework.enable.eureka-server` 默认 `false` 且本模块移出聚合门面（破坏性变更，附迁移清单）；devtools 彻底移除；以 `jersey-apache5-connector 4.0.2` 替换无 4.x 版本的 `jersey-apache-connector 3.1.12` 并移除 HttpClient 4.x 声明；默认配置只保留 `false/false` 单机语义；示例配置移入 `src/main/resources/examples/`。
 - 基线事实（本次实测）：`mvn -pl leaf-base-eureka-server test` = 2 执行 / 0 失败 / BUILD SUCCESS（耗时 6.3s），证据 E-16。
 - 已确认的证据性结论：聚合门面无条件依赖本模块且自动装配无开关（E-02、E-04）；starter 传递引入 `spring-boot-starter-web`、`starter-tomcat`、`starter-actuator`（E-05）；`spring-boot-devtools` 为 compile 作用域（E-06）；Jersey 3.1.12 与 Jersey 4.0.2/4.0.3 同栈（E-07）；`eureka.server.version=5.0.2` 与 BOM 同值（E-10）；示例配置 `register-with-eureka=false`+`fetch-registry=false`+`defaultZone`→7002/7003 自相矛盾（E-11）。

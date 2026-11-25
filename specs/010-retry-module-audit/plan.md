@@ -44,7 +44,7 @@
 | 原则 | 判定 | 依据 / 约束 |
 | --- | --- | --- |
 | I. 模块自治与按需装配 | PASS | 仍只依赖 `leaf-base-framework`；保持 `@Configuration` + 组件扫描（FR-018 明确不迁自动装配），不改下游装配前提；无新增可选中间件 |
-| II. 稳定契约优先 | PASS（附兼容性声明） | 公开方法签名与默认参数不变；**唯一的数值语义变更**是恢复上下文 `retryCount`（3→2、不可重试时 1→0），由 Clarifications 显式决策并由 FR-023 要求兼容说明 + 断言更新；删除 `GXRetryListener.clearCache()` 属内部诊断方法（仅测试引用），在手册"升级必查"中列明 |
+| II. 稳定契约优先 | PASS（附兼容性声明） | 公开方法签名与默认参数不变；**唯一的数值语义变更**是恢复上下文 `retryCount`（3→2、不可重试时 1→0），由 `changes/CR-20261125-019.md` 显式决策并由 FR-023 要求兼容说明 + 断言更新；删除 `GXRetryListener.clearCache()` 属内部诊断方法（仅测试引用），在手册"升级必查"中列明 |
 | III. 统一响应与统一异常 | PASS | 不新增对外响应；取消语义沿用既有 `GXBusinessException` 包装约定，不引入新的异常传播形状 |
 | IV. 显式配置与双配置源 | PASS（含已知偏差） | 本计划**不新增任何配置键**（FR-018 显式否决外部化），因此不触发 `@ConfigurationProperties` 与元数据要求；`maple.framework.retry.log.level` 沿用既有系统属性通道，偏差已登记在 `contracts/observability-contract.md` §4 |
 | V. 空值安全与上下文纪律 | PASS | 异步路径改用 `GXMdcThreadUtils.supplyAsync`（复用既有包装能力）；新增 API 在 `@NullUnmarked` 包内对可能为空的参数/返回值补 `@Nullable`；上下文属性仍由 `ConcurrentHashMap` 承载，跨线程只读快照 |
