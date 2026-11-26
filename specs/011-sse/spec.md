@@ -217,7 +217,7 @@
 - **FR-008**: 消息顺序语义 MUST 给出唯一定性：在"首投失败 + 异步重试"和"分片发送"两种场景下，同一客户端是否保序；若不保序 MUST 列为发现并要求修复或显式写入契约（对应 F-02）。
 - **FR-009**: 既有测试 MUST 全部执行并记录结果（当前基线：10 执行 / 0 失败）；MUST NOT 通过删除或跳过用例来"通过"；覆盖缺口 MUST 单列为发现（对应 F-14）。
 - **FR-010**: 对外契约（`AGENTS.md`、开发手册、公开方法签名、默认常量、事件字段格式）MUST 与实现逐条对照，不一致处 MUST 单列为发现；审查阶段 MUST NOT 修改生产代码。
-- **FR-011**: 审查报告 MUST 独立成文（`audit-report.md`），`spec.md` 只保留摘要与引用，两者在交付时 MUST 相互一致。
+- **FR-011**（已废止 2026-11-26）：原要求"审查报告 MUST 独立成文（`audit-report.md`）"。报告类产物不再作为交付物，审查结论摘要保留在 `spec.md`。
 - **FR-012**: 每条发现 MUST 给出"能在旧代码上失败、在新代码上通过"的回归测试设计（输入、断言点、期望差异），且该测试 MUST 无需外部中间件即可运行。
 - **FR-013**: 空值语义 MUST 按 JSpecify 收敛：可空返回（`getSseEmitterByClientId`）、可空入参（`sendHeartbeat` / `closeConnections` / `clientId` / `data`）MUST 显式标注 `@Nullable` 或改为不允许为空，并 MUST 与 NullAway 构建检查一致；`buildEvent` 的 `data` 为空 MUST 有明确契约（拒绝并记录 / 使用空负载），不得以 NPE 形式逃逸到调用方（对应 F-07、F-13）。
 - **FR-014**: 任何"从缓存移除连接"的路径 MUST 保证连接被关闭（`complete` / `completeWithError`）且幂等；异常 MUST NOT 中断后续清理；该性质 MUST 有专门回归用例（对应 F-01、F-06）。

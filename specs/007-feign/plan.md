@@ -6,7 +6,7 @@
 
 ## Summary
 
-本次交付分两层：**审查结论**（独立报告 `audit-report.md`，覆盖 15 个生产文件、5 个既有测试类与进程内 HTTP 真实往返）与**修复设计**（按 spec 的 12 项澄清结论，把 6 个高危、6 个中危、4 个低危发现落成"测试先行"的改造方案）。
+本次交付分两层：**审查结论**（结论摘要写入 `spec.md`，覆盖 15 个生产文件、5 个既有测试类与进程内 HTTP 真实往返）与**修复设计**（按 spec 的 12 项澄清结论，把 6 个高危、6 个中危、4 个低危发现落成"测试先行"的改造方案）。
 
 技术路线：不改公开方法签名与既有配置键语义（宪法 II）。核心改造集中在五处：
 
@@ -68,9 +68,8 @@ specs/007-feign-module-audit/
 ├── data-model.md        # Phase 1：审查产物模型与契约数据结构
 ├── quickstart.md        # Phase 1：端到端验证指南
 ├── contracts/           # Phase 1：对外契约
-├── checklists/
-│   └── requirements.md  # 规格质量清单
-└── audit-report.md      # 实施阶段产出：独立审查报告（本命令不创建）
+└── checklists/
+    └── requirements.md  # 规格质量清单
 ```
 
 ### Source Code (repository root)
@@ -133,7 +132,7 @@ leaf-base-feign/AGENTS.md                                      # 对齐：错误
 
 ## 实施顺序（供 /speckit.tasks 使用）
 
-1. **基线固化**（无生产改动）：跑 `mvn -pl leaf-base-feign test` 记录 25/0 基线；产出 `audit-report.md` 骨架与证据索引（E-01 ~ E-22）。
+1. **基线固化**（无生产改动）：跑 `mvn -pl leaf-base-feign test` 记录 25/0 基线；在 `spec.md` 保留证据索引（E-01 ~ E-22）。
 2. **装配与配置（F-06 / F-12 / FR-018）**：四个环境模板改键 + `additional-spring-configuration-metadata.json` + `AGENTS.md`/手册对齐；用例断言"旧键不生效、新键生效"。
 3. **请求头与上下文（F-07 / F-08 / F-10 / FR-004）**：公共头收敛、`User-Agent` 不覆盖、appName/os 缓存、traceId 回写与恢复；补头矩阵用例。
 4. **token 与切面（F-01 / F-02 / F-03 / F-09 / FR-017）**：新增 `auth-token.enabled`；补 `GXFeignAuthTokenAspectTest` 6 类场景；`@within` 命中实测。

@@ -63,8 +63,7 @@ specs/012-webclient-module-audit/
 │   └── spi-contract.md
 ├── checklists/
 │   └── requirements.md  # 已完成
-├── tasks.md             # Phase 2 输出（/speckit.tasks 生成，含 Phase 8.5 复审补充）
-└── audit-report.md      # 实现期交付（T001 建骨架 / T006–T009 填正文与矩阵）
+└── tasks.md             # Phase 2 输出（/speckit.tasks 生成，含 Phase 8.5 复审补充）
 ```
 
 ### Source Code (repository root)

@@ -81,7 +81,6 @@ specs/011-sse-module-audit/
 │   ├── sse-service-contract.md      # 服务面契约（方法、空值、销毁、指标、兼容声明）
 │   ├── sse-delivery-contract.md     # 投递语义契约（顺序、重试、丢弃、关闭、事件线格式）
 │   └── sse-observability-contract.md# 指标名、日志事件与级别、禁止事项
-├── audit-report.md                  # 实施期产出：审查报告（与 spec 摘要互引，FR-011）
 └── checklists/requirements.md       # 规格质量清单（16/16 通过）
 ```
 

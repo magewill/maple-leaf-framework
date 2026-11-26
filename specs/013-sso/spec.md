@@ -252,7 +252,7 @@
 - **FR-011**: 性能结论 MUST 给出可复算口径：每请求 MD5/RC4/JSON/`getBean`/日志次数、`InetAddress` 触发点、插件循环次数；MUST NOT 以绝对吞吐或时延数值作为通过门槛（对应 F-25、F-26、F-27）。
 - **FR-012**: 既有测试 MUST 全部执行并记录结果（当前基线：40 执行 / 0 失败）；MUST NOT 通过删除或跳过用例来"通过"；覆盖缺口 MUST 单列为发现（对应 F-35）。
 - **FR-013**: 对外契约（`AGENTS.md`、开发手册第 394–499 与 722–757 行、公开方法签名、配置键、默认值、事件字段）MUST 与实现逐条对照，不一致处 MUST 单列为发现；审查阶段 MUST NOT 修改生产代码（对应 F-32、F-33）。
-- **FR-014**: 审查报告 MUST 独立成文（`audit-report.md`），`spec.md` 只保留摘要与引用，两者在交付时 MUST 相互一致。
+- **FR-014**（已废止 2026-11-26）：原要求"审查报告 MUST 独立成文（`audit-report.md`）"。报告类产物不再作为交付物，审查结论摘要保留在 `spec.md`。
 - **FR-015**: 每条发现 MUST 给出"能在旧代码上失败、在新代码上通过"的回归测试设计（输入、断言点、期望差异），且该测试 MUST 无需外部中间件即可运行。
 - **FR-016**: 空值语义 MUST 按 JSpecify 收敛：可空返回（`parser` 失败路径、`getUserAgent`、resolver、`getSSOTokenFromCookie`）与可空入参（`kickLogin`、`verification` 的 `captcha`）MUST 显式标注 `@Nullable` 或改为不允许为空，并 MUST 与 NullAway 构建检查一致（对应 F-34）。
 - **FR-017**: 用户身份注入（`@GXLoginUserAnnotation`）失败语义 MUST 唯一：要么抛业务异常，要么明确返回空对象并在文档声明；返回 `null` 给非空参数 MUST 被视为缺陷（对应 F-31）。

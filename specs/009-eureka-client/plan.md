@@ -6,7 +6,7 @@
 
 ## Summary
 
-把 13 条审查发现（高 5 / 中 5 / 低 3）与 6 条既定契约（P-01 ~ P-06）落成"可实测、可回归、可迁移"的交付：**审查报告（`audit-report.md`）+ 装配开关 + 默认配置示例化 + 测试改造 + 契约文档收敛**。
+把 13 条审查发现（高 5 / 中 5 / 低 3）与 6 条既定契约（P-01 ~ P-06）落成"可实测、可回归、可迁移"的交付：**审查结论（写入 `spec.md`）+ 装配开关 + 默认配置示例化 + 测试改造 + 契约文档收敛**。
 
 技术路径（Phase 0 已实测确认）：
 
@@ -74,7 +74,6 @@ specs/009-eureka-client-module-audit/
 │   ├── assembly-contract.md      # 装配契约（开关真值表、Bean、日志）
 │   ├── configuration-contract.md # 配置键契约（新增/移除/示例/迁移）
 │   └── dependency-contract.md    # 依赖契约（版本来源、exclusion 规则）
-├── audit-report.md               # 实施期产出：审查报告（与 spec 摘要互引）
 └── checklists/requirements.md    # 规格质量清单（已通过）
 ```
 

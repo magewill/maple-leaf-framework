@@ -6,7 +6,7 @@
 
 ## Summary
 
-本次交付分两层：**审查结论**（独立报告 `audit-report.md`，覆盖 4 个生产交付物、1 个测试类的 2 个用例、单机/集群启动语义实测、依赖树核对）与**修复设计**（按 spec 的 12 项澄清结论，把 5 个高危、6 个中危、3 个低危发现落成"测试先行"的改造方案）。
+本次交付分两层：**审查结论**（结论摘要写入 `spec.md`，覆盖 4 个生产交付物、1 个测试类的 2 个用例、单机/集群启动语义实测、依赖树核对）与**修复设计**（按 spec 的 12 项澄清结论，把 5 个高危、6 个中危、3 个低危发现落成"测试先行"的改造方案）。
 
 技术路线：不改 `AGENTS.md` 登记的单机基线（`register-with-eureka=false`、`fetch-registry=false`），核心改造集中在六处：
 
@@ -71,9 +71,8 @@ specs/008-eureka-server-module-audit/
 ├── data-model.md        # Phase 1：审查产物模型与配置模型
 ├── quickstart.md        # Phase 1：端到端验证指南
 ├── contracts/           # Phase 1：装配 / 配置 / 依赖契约
-├── checklists/
-│   └── requirements.md  # 规格质量清单
-└── audit-report.md      # 实施阶段产出：独立审查报告（本命令不创建）
+└── checklists/
+    └── requirements.md  # 规格质量清单
 ```
 
 ### Source Code (repository root)
@@ -136,14 +135,14 @@ README.md                                  # 模块表：补充"需显式开启"
 
 ## 实施顺序（供 /speckit.tasks 使用）
 
-1. **基线固化**（无生产改动）：跑 `mvn -pl leaf-base-eureka-server test` 记录 2/0 基线；保存 `dependency:tree` 快照；产出 `audit-report.md` 骨架与证据索引（E-01 ~ E-17）。
+1. **基线固化**（无生产改动）：跑 `mvn -pl leaf-base-eureka-server test` 记录 2/0 基线；保存 `dependency:tree` 快照；在 `spec.md` 保留证据索引（E-01 ~ E-17）。
 2. **启动语义实测（F-02 / F-03 / F-09）**：单机与集群两种形态各启动一次，记录 5 个配置键 × 2 形态的应取值/实际取值，产出集群对等复制结论。
 3. **依赖治理（F-04 / F-06 / F-07 / F-08）**：先保存 `dependency:tree` 快照作为比对基线，再按 D-06~D-09 精简 `pom.xml`；`diff` 仅允许 `spring-boot-devtools` 消失（其余坐标为直接声明→传递引入的结构变化）。
 4. **装配收敛（F-01 / FR-016 / SC-011）**：加开关与 Web 类型条件、加启用日志、补 `additional-spring-configuration-metadata.json`；补条件装配矩阵用例（开关 false/true × SERVLET 契约 × 类缺失）。
 5. **配置分家（F-05 / F-09）**：删除 `application.yml`，新增 `examples/eureka-server-standalone.yml` 与 `eureka-server-peer.yml`；补资源契约用例（classpath 根无 `application.yml`；示例键值正确）。
 6. **真实启动验证（FR-004 / SC-003 / SC-004）**：`GXEurekaServerSpringBootTest` 以随机端口启动注册中心，注册一个实例并查询 `/eureka/apps`；记录启动耗时与常驻线程数。
 7. **门面与文档（F-11 / FR-015）**：`leaf-framework/pom.xml` 移出本模块；新增模块手册（含迁移章节与 quickstart 步骤）；修正 `AGENTS.md` 编号与测试现状；更新 `README.md`。
-8. **报告收口（FR-012 / FR-013）**：`audit-report.md` 与 `spec.md` 摘要一致性校验；逐条回填"旧失败/新通过"回归证据；标注 D-12 的验证残余风险。
+8. **结论收口（FR-012 / FR-013）**：`spec.md` 摘要逐条自校验；逐条回填"旧失败/新通过"回归证据；标注 D-12 的验证残余风险。
 
 ## Complexity Tracking
 

@@ -6,7 +6,7 @@
 
 ## Summary
 
-把 21 条审查发现（高 5 / 中 11 / 低 5）与 5 条既定契约（P-01 ~ P-05）落成"可实测、可回归、可迁移"的交付：**审查报告（`audit-report.md`）+ 上下文与计数语义修复 + 可选超时/抖动 + 缓存与异步健壮性 + 监听器可观测性修复 + 测试补强 + 文档重写**。
+把 21 条审查发现（高 5 / 中 11 / 低 5）与 5 条既定契约（P-01 ~ P-05）落成"可实测、可回归、可迁移"的交付：**审查结论（写入 `spec.md`）+ 上下文与计数语义修复 + 可选超时/抖动 + 缓存与异步健壮性 + 监听器可观测性修复 + 测试补强 + 文档重写**。
 
 技术路径（Phase 0 已逐条确认，详见 [research.md](./research.md)）：
 
@@ -78,7 +78,6 @@ specs/010-retry-module-audit/
 │   ├── retry-api-contract.md     # 公开 API 增量与语义（上下文、重试次数、取消、选项）
 │   ├── retry-policy-contract.md  # 策略契约（默认异常集、include/exclude 匹配、退避与缓存键）
 │   └── observability-contract.md # 日志事件表、级别开关、禁止事项
-├── audit-report.md               # 实施期产出：审查报告（与 spec 摘要互引，FR-011）
 └── checklists/requirements.md    # 规格质量清单（16/16 通过）
 ```
 

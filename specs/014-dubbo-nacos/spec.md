@@ -199,7 +199,7 @@
 - **FR-011**: 性能结论 MUST 给出可复算口径：每请求 `getEnvironmentValue` 次数、INFO 日志条数、attachment 双读次数、ThreadLocal 读次数、`getBean`/反射次数；MUST NOT 以绝对吞吐或时延数值作为通过门槛（对应 F-10、F-11）。
 - **FR-012**: 既有测试 MUST 全部执行并记录结果（当前基线：31 执行 / 0 失败）；MUST NOT 通过删除或跳过用例来"通过"；覆盖缺口 MUST 单列为发现（对应 F-16）。
 - **FR-013**: 对外契约（`AGENTS.md`、SPI 扩展名、配置键、`serialize.allowlist`、缺失的开发手册）MUST 与实现逐条对照，不一致处 MUST 单列为发现；审查阶段 MUST NOT 修改生产代码（对应 F-12、F-13、F-14）。
-- **FR-014**: 审查报告 MUST 独立成文（`audit-report.md`），`spec.md` 只保留摘要与引用，两者在交付时 MUST 相互一致。
+- **FR-014**（已废止 2026-11-26）：原要求"审查报告 MUST 独立成文（`audit-report.md`）"。报告类产物不再作为交付物，审查结论摘要保留在 `spec.md`。
 - **FR-015**: 每条发现 MUST 给出"能在旧代码上失败、在新代码上通过"的回归测试设计（输入、断言点、期望差异），且该测试 MUST 无需外部中间件即可运行。
 - **FR-016**: 空值语义 MUST 按 JSpecify 收敛：可空返回（`getAttachment`/`getInvocationAttachment`/`getEnvironmentValue`/`getGenericClassType`/`getApplicationContext`）与可空入参 MUST 显式标注 `@Nullable` 或改为不允许为空，并 MUST 与 NullAway 构建检查一致（对应 F-15）。
 - **FR-017**: 新增/修改日志 MUST 使用 SLF4J 门面（`@Slf4j` 或 `LoggerFactory`），MUST NOT 引入或保留 `@Log4j2` 直接依赖（对应 F-14）；全部日志文案 MUST 为 ASCII。

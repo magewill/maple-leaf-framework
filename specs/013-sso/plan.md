@@ -84,7 +84,6 @@ specs/013-sso-module-audit/
 │   ├── sso-auth-contract.md         # 登录态与 Token 契约（签发/过期/校验/登出/踢人/降级/返回值）
 │   ├── sso-authorization-contract.md# 权限判定优先级链、白名单、拦截链顺序、未登录响应
 │   └── sso-config-observability-contract.md # 配置键表、生效时机、指标与日志事件、兼容声明
-├── audit-report.md                  # 实施期产出：审查报告（与 spec 摘要互引，FR-014）
 └── checklists/requirements.md       # 规格质量清单（16/16 通过）
 ```
 

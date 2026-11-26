@@ -6,7 +6,7 @@ enabled: true
 
 # 规格文档维护规则
 
-**规则版本**: 1.2.0 | **更新**: 2026-11-25
+**规则版本**: 1.2.1 | **更新**: 2026-11-26
 **详细模板/自检**: [PLAYBOOK.md](./PLAYBOOK.md)（按需读取）
 
 ## 核心约束
@@ -24,7 +24,7 @@ enabled: true
 - `history/README.md` 只做索引；`history/tasks-YYYY-MM-DD.md` 主任务表固定 `| 任务 | 完成日期 | 结论 / 证据 |`，原始记录可用独立主题表。
 - `/speckit.token-budget.compact` 只处理稳定产物，跳过 `changes/` 与 `history/`；禁止生成 `changes/**/*.full.md` 或 `history/**/*.full.md`。
 - 日常跳过 `**/*.full.md` 与 `history/tasks-*.md` 正文；允许读取 `history/README.md` 索引。
-- `/speckit.archive.run` 已安装时归档 `changes/`、归档时排除 `*.full.md`；未安装时按手动归档流程执行。
+- `/speckit.archive.run` 已安装时归档 `changes/`、归档时排除 `*.full.md`；未安装（当前仓库即此状态）时按 `PLAYBOOK.md` §5 手动归档：产物为 `changes/` 内聚合 CR，`history/` 只读不改。
 - 详细模板、清理清单、history 表结构、自检命令与边界案例见 `PLAYBOOK.md`，按需读取。
 
 修改本规则后必须新建会话才会生效。
