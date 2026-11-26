@@ -2,14 +2,12 @@ package cn.maple.core.framework.convert;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.convert.Convert;
-import cn.hutool.core.map.reference.WeakKeyConcurrentMap;
 import cn.hutool.core.util.ReflectUtil;
 import cn.hutool.core.util.TypeUtil;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.util.GXCommonUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.cglib.beans.BeanCopier;
 import org.springframework.cglib.core.Converter;
 import org.jspecify.annotations.Nullable;
@@ -18,34 +16,63 @@ import java.lang.reflect.*;
 import java.time.temporal.Temporal;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
+@Slf4j
 public class GXCGLibDataConvert implements Converter {
-    private static final Logger LOG = LoggerFactory.getLogger(GXCGLibDataConvert.class);
+    /**
+     * 转换器缓存：以目标类型为 {@link ClassValue} 槽位。
+     *
+     * <p>不能用弱键 Map：缓存值（本类 → {@link ClassMetadata} → {@link Field}）会经
+     * {@link Field#getDeclaringClass()} 强引用回键本身，弱键因此永远等不到回收。
+     * 改用 {@link ClassValue} 后条目生命周期由目标类绑定，类卸载时一并释放。</p>
+     */
+    private static final ClassValue<GXCGLibDataConvert> CONVERTER_CACHE = new ClassValue<>() {
+        @Override
+        protected GXCGLibDataConvert computeValue(Class<?> type) {
+            return new GXCGLibDataConvert(type);
+        }
+    };
 
-    private static final Map<Class<?>, GXCGLibDataConvert> CONVERTER_CACHE = new WeakKeyConcurrentMap<>(new ConcurrentHashMap<>(1024));
-    private static final Map<Class<?>, ClassMetadata> CLASS_METADATA_CACHE = new WeakKeyConcurrentMap<>(new ConcurrentHashMap<>(1024));
-    private static final Map<BeanCopierCacheKey, BeanCopier> BEAN_COPIER_CACHE = new WeakKeyConcurrentMap<>(new ConcurrentHashMap<>(2048));
+    /** 字段元数据缓存：原因同 {@link #CONVERTER_CACHE}，值里的 {@link Field} 反向强引用目标类。 */
+    private static final ClassValue<ClassMetadata> CLASS_METADATA_CACHE = new ClassValue<>() {
+        @Override
+        protected ClassMetadata computeValue(Class<?> type) {
+            return buildClassMetadata(type);
+        }
+    };
+
+    /**
+     * {@link BeanCopier} 缓存：以源类型为 {@link ClassValue} 槽位、目标类型为槽内强引用键。
+     *
+     * <p>槽内键必须强引用：{@code BeanCopier.create} 会生成字节码，重复生成会持续推高 metaspace。
+     * 同一类型对只生成一次，条目随源类型卸载释放。</p>
+     */
+    private static final ClassValue<ConcurrentMap<Class<?>, BeanCopier>> BEAN_COPIER_CACHE = new ClassValue<>() {
+        @Override
+        protected ConcurrentMap<Class<?>, BeanCopier> computeValue(Class<?> type) {
+            return new ConcurrentHashMap<>(8);
+        }
+    };
+
     private static final Map<String, String> SETTER_PROPERTY_CACHE = new ConcurrentHashMap<>(256);
 
     private final ClassMetadata classMetadata;
 
     private GXCGLibDataConvert(Class<?> targetClass) {
-        if (targetClass == null) {
-            throw new IllegalArgumentException("targetClass must not be null");
-        }
-        this.classMetadata = CLASS_METADATA_CACHE.computeIfAbsent(targetClass, GXCGLibDataConvert::buildClassMetadata);
+        this.classMetadata = CLASS_METADATA_CACHE.get(targetClass);
     }
 
     public static GXCGLibDataConvert getConverter(Class<?> targetClass) {
         if (targetClass == null) {
             throw new GXBusinessException("targetClass must not be null");
         }
-        return CONVERTER_CACHE.computeIfAbsent(targetClass, GXCGLibDataConvert::new);
+        return CONVERTER_CACHE.get(targetClass);
     }
 
     private static BeanCopier getBeanCopier(Class<?> sourceClass, Class<?> targetClass) {
-        return BEAN_COPIER_CACHE.computeIfAbsent(new BeanCopierCacheKey(sourceClass, targetClass),
-                k -> BeanCopier.create(sourceClass, targetClass, true));
+        return BEAN_COPIER_CACHE.get(sourceClass).computeIfAbsent(targetClass,
+                key -> BeanCopier.create(sourceClass, key, true));
     }
 
     private static ClassMetadata buildClassMetadata(Class<?> clazz) {
@@ -65,7 +92,8 @@ public class GXCGLibDataConvert implements Converter {
             }
             return new ClassMetadata(Collections.unmodifiableMap(fieldCache), Collections.unmodifiableMap(genericTypeCache));
         } catch (Exception e) {
-            LOG.warn("Build field metadata for {} failed: {}", clazz.getName(), e.getMessage());
+            // 带上堆栈：这里返回 EMPTY 后该类型的所有转换都会"字段全空"，只留一行 message 无法定位根因
+            log.warn("Build field metadata for {} failed, fallback to empty metadata", clazz.getName(), e);
             return ClassMetadata.EMPTY;
         }
     }
@@ -174,7 +202,7 @@ public class GXCGLibDataConvert implements Converter {
                 }
                 Object targetInstance = ReflectUtil.newInstanceIfPossible(targetClass);
                 if (targetInstance == null) {
-                    LOG.warn("Cannot instantiate target bean {}", targetClass.getName());
+                    log.warn("Cannot instantiate target bean {}", targetClass.getName());
                     return null;
                 }
                 getBeanCopier(sourceClass, targetClass).copy(sourceValue, targetInstance, getConverter(targetClass));
@@ -187,7 +215,7 @@ public class GXCGLibDataConvert implements Converter {
             }
             return null;
         } catch (Exception e) {
-            LOG.warn("Convert property [{}] from {} to {} failed: {} - {}",
+            log.warn("Convert property [{}] from {} to {} failed: {} - {}",
                     propertyName != null ? propertyName : "N/A",
                     sourceClass.getName(),
                     targetClass.getName(),
@@ -303,7 +331,7 @@ public class GXCGLibDataConvert implements Converter {
             }
             return Convert.convertWithCheck(targetClass, jsonObjectStr, null, false);
         } catch (Exception e) {
-            LOG.warn("Convert JSON object string to {} failed: {}", targetClass.getName(), e.getMessage());
+            log.warn("Convert JSON object string to {} failed: {}", targetClass.getName(), e.getMessage());
             return null;
         }
     }
@@ -322,7 +350,7 @@ public class GXCGLibDataConvert implements Converter {
             List<?> parsedList = JSONUtil.parseArray(jsonArrayStr);
             return convertElementsToTarget(targetClass, targetComponentClass, parsedList);
         } catch (Exception e) {
-            LOG.warn("Convert JSON array string to {} failed: {}", targetClass.getName(), e.getMessage());
+            log.warn("Convert JSON array string to {} failed: {}", targetClass.getName(), e.getMessage());
             return null;
         }
     }
@@ -493,8 +521,5 @@ public class GXCGLibDataConvert implements Converter {
 
     private record ClassMetadata(Map<String, Field> fieldCache, Map<String, Type> genericTypeCache) {
         private static final ClassMetadata EMPTY = new ClassMetadata(Collections.emptyMap(), Collections.emptyMap());
-    }
-
-    private record BeanCopierCacheKey(Class<?> sourceClass, Class<?> targetClass) {
     }
 }

@@ -33,6 +33,20 @@ import static org.mockito.Mockito.when;
 
 class GXCommonUtilsTest {
     @Test
+    void shouldDistinguishStrictAndLenientOverloadsOnSimpleTypeConversionFailure() {
+        Environment environment = mock(Environment.class);
+        when(environment.getProperty("demo.age", Integer.class)).thenThrow(new IllegalArgumentException("bad value"));
+        when(environment.getProperty("demo.age", String.class)).thenReturn("abc");
+
+        try (MockedStatic<GXSpringContextUtils> springContextUtils = Mockito.mockStatic(GXSpringContextUtils.class)) {
+            springContextUtils.when(GXSpringContextUtils::getEnvironment).thenReturn(environment);
+
+            assertThrows(GXConvertException.class, () -> GXCommonUtils.getEnvironmentValue("demo.age", Integer.class));
+            assertEquals(-1, GXCommonUtils.getEnvironmentValue("demo.age", Integer.class, -1));
+        }
+    }
+
+    @Test
     void shouldParseJsonPropertyForComplexTypeWhenDefaultValueProvided() {
         Environment environment = mock(Environment.class);
         when(environment.getProperty("demo.names", List.class)).thenReturn(null);
@@ -45,6 +59,27 @@ class GXCommonUtilsTest {
             List<?> names = GXCommonUtils.getEnvironmentValue("demo.names", List.class, List.of("fallback"));
 
             assertEquals(List.of("alpha", "beta"), names);
+        }
+    }
+
+    @Test
+    void shouldPropagateNonJacksonDeserializationFailureFromStrictOverload() {
+        Environment environment = mock(Environment.class);
+        when(environment.getProperty("demo.payload", String.class)).thenReturn("[\"alpha\"]");
+
+        // 自定义反序列化器抛出的不是 JacksonException，若内层只 catch JacksonException，
+        // 异常会漏到外层 catch，在严格模式下被静默降级成默认值
+        ObjectMapper objectMapper = mock(ObjectMapper.class);
+        Mockito.doThrow(new IllegalArgumentException("custom deserializer failed"))
+                .when(objectMapper).readValue(Mockito.anyString(), Mockito.any(Class.class));
+
+        try (MockedStatic<GXSpringContextUtils> springContextUtils = Mockito.mockStatic(GXSpringContextUtils.class)) {
+            springContextUtils.when(GXSpringContextUtils::getEnvironment).thenReturn(environment);
+            springContextUtils.when(() -> GXSpringContextUtils.getBean(ObjectMapper.class)).thenReturn(objectMapper);
+
+            assertThrows(GXConvertException.class, () -> GXCommonUtils.getEnvironmentValue("demo.payload", List.class));
+            assertEquals(List.of("fallback"),
+                    GXCommonUtils.getEnvironmentValue("demo.payload", List.class, List.of("fallback")));
         }
     }
 
@@ -267,24 +302,169 @@ class GXCommonUtilsTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void shouldClearReflectionMethodCacheWithoutBlockingHotCacheHits() throws Exception {
+    void shouldCacheReflectionMethodPerClassWithoutGlobalClear() throws Exception {
         Field cacheField = GXCommonUtils.class.getDeclaredField("METHOD_CACHE");
         cacheField.setAccessible(true);
-        Map<GXMethodCacheKeyUtils.MethodCacheKey, Method> cache =
-                (Map<GXMethodCacheKeyUtils.MethodCacheKey, Method>) cacheField.get(null);
-        cache.clear();
+        ClassValue<Map<GXMethodCacheKeyUtils.MethodCacheKey, Method>> cache =
+                (ClassValue<Map<GXMethodCacheKeyUtils.MethodCacheKey, Method>>) cacheField.get(null);
 
-        Method method = ReflectionTarget.class.getDeclaredMethod("accept", int.class);
-        for (int i = 0; i < 4097; i++) {
-            cache.put(GXMethodCacheKeyUtils.getMethodCacheKey(ReflectionTarget.class, "accept" + i, new Class<?>[]{int.class}), method);
-        }
+        Map<GXMethodCacheKeyUtils.MethodCacheKey, Method> targetCache = cache.get(ReflectionTarget.class);
+        targetCache.clear();
+        Map<GXMethodCacheKeyUtils.MethodCacheKey, Method> otherCache = cache.get(CustomTreeNode.class);
+        otherCache.clear();
 
         ReflectionTarget target = new ReflectionTarget();
 
         assertEquals("int:7", GXCommonUtils.reflectCallObjectMethod(target, "accept", 7));
-        assertTrue(cache.size() <= 1);
+        assertEquals(1, targetCache.size());
+        assertEquals(0, otherCache.size());
 
-        cache.clear();
+        assertEquals("int:8", GXCommonUtils.reflectCallObjectMethod(target, "accept", 8));
+        assertEquals(1, targetCache.size());
+        assertEquals(0, otherCache.size());
+    }
+
+    @Test
+    void shouldKeepCacheKeyImmutableWhenCallerMutatesParamTypesArray() {
+        Class<?>[] paramTypes = {Integer.class};
+        GXMethodCacheKeyUtils.MethodCacheKey key =
+                GXMethodCacheKeyUtils.getMethodCacheKey(ReflectionTarget.class, "accept", paramTypes);
+
+        paramTypes[0] = String.class;
+
+        assertArrayEquals(new Class<?>[]{Integer.class}, key.paramTypes(),
+                "构造器应克隆入参数组，调用方事后修改不得影响键");
+        assertEquals(GXMethodCacheKeyUtils.getMethodCacheKey(ReflectionTarget.class, "accept", new Class<?>[]{Integer.class}), key);
+        assertNotEquals(GXMethodCacheKeyUtils.getMethodCacheKey(ReflectionTarget.class, "accept", new Class<?>[]{String.class}), key);
+
+        Class<?>[] exposed = key.paramTypes();
+        exposed[0] = String.class;
+        assertArrayEquals(new Class<?>[]{Integer.class}, key.paramTypes(),
+                "访问器应返回克隆，外部修改返回值不得影响键");
+    }
+
+    @Test
+    void shouldClearPerClassMethodCacheWhenExceedingLimit() throws Exception {
+        Field cacheField = GXCommonUtils.class.getDeclaredField("METHOD_CACHE");
+        cacheField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        ClassValue<Map<GXMethodCacheKeyUtils.MethodCacheKey, Method>> cache =
+                (ClassValue<Map<GXMethodCacheKeyUtils.MethodCacheKey, Method>>) cacheField.get(null);
+
+        Map<GXMethodCacheKeyUtils.MethodCacheKey, Method> classCache = cache.get(ReflectionTarget.class);
+        classCache.clear();
+
+        Method probe = ReflectionTarget.class.getDeclaredMethod("accept", int.class);
+        for (int i = 0; i < 513; i++) {
+            classCache.put(GXMethodCacheKeyUtils.getMethodCacheKey(ReflectionTarget.class, "dummy" + i, new Class<?>[]{int.class}), probe);
+        }
+        assertEquals(513, classCache.size());
+
+        // 超过上限（512）后，下一次查找会先清空当前类的槽位，再写入本次结果
+        assertEquals("int:7", GXCommonUtils.reflectCallObjectMethod(new ReflectionTarget(), "accept", 7));
+
+        assertEquals(1, classCache.size(), "超限清理后应只保留本次写入的条目");
+    }
+
+    @Test
+    void shouldCallStaticMethodThroughInstance() {
+        ReflectionTarget target = new ReflectionTarget();
+
+        assertEquals("static:5", GXCommonUtils.reflectCallObjectMethod(target, "staticAccept", 5));
+    }
+
+    @Test
+    void shouldMatchVarArgsAndWideningArguments() {
+        ReflectionTarget target = new ReflectionTarget();
+
+        assertEquals("sum:6", GXCommonUtils.reflectCallObjectMethod(target, "sum", 1, 2, 3));
+        assertEquals("sum:0", GXCommonUtils.reflectCallObjectMethod(target, "sum"));
+        assertEquals("long:7", GXCommonUtils.reflectCallObjectMethod(target, "acceptLong", 7));
+    }
+
+    @Test
+    void shouldPassArrayArgumentThroughToVarArgsMethod() {
+        ReflectionTarget target = new ReflectionTarget();
+
+        assertEquals("sum:6", GXCommonUtils.reflectCallObjectMethod(target, "sum", (Object) new int[]{1, 2, 3}));
+        assertEquals("join:a-b", GXCommonUtils.reflectCallObjectMethod(target, "join", (Object) new String[]{"a", "b"}));
+    }
+
+    @Test
+    void shouldCoerceIntegerArgumentToWrapperParameter() {
+        ReflectionTarget target = new ReflectionTarget();
+
+        // Method#invoke 只对"基本类型形参"做拓宽，Long 形参收到 Integer 实参时会抛
+        // IllegalArgumentException: argument type mismatch，因此这条路径依赖调用前的实参对齐
+        assertEquals("Long:7", GXCommonUtils.reflectCallObjectMethod(target, "acceptLongWrapper", 7));
+        assertEquals("long:7", GXCommonUtils.reflectCallObjectMethod(target, "acceptLong", 7));
+    }
+
+    @Test
+    void shouldCoerceArgumentsForFixedAndVarArgsTogether() {
+        ReflectionTarget target = new ReflectionTarget();
+
+        assertEquals("total:6", GXCommonUtils.reflectCallObjectMethod(target, "prefixJoin", "total", 1, 2, 3));
+    }
+
+    @Test
+    void shouldNotMutateCallerArgumentArrayWhenCoercing() {
+        ReflectionTarget target = new ReflectionTarget();
+        Object[] params = {7};
+
+        assertEquals("Long:7", GXCommonUtils.reflectCallObjectMethod(target, "acceptLongWrapper", params));
+
+        assertInstanceOf(Integer.class, params[0], "实参对齐不得就地改写调用方传入的数组");
+    }
+
+    @Test
+    void shouldTreatSingleNullArgumentAsVarArgsArrayWithNullElement() {
+        ReflectionTarget target = new ReflectionTarget();
+
+        // javac 会把 join((String) null) 编译成 join(new String[]{null})，这里保持同样语义
+        assertEquals("join:null", GXCommonUtils.reflectCallObjectMethod(target, "join", (Object) null));
+    }
+
+    @Test
+    void shouldPropagateValidationExceptionFromVerifyHook() {
+        SourceBean source = new SourceBean();
+        source.setName("alpha");
+
+        assertThrows(GXBeanValidateException.class,
+                () -> GXCommonUtils.convertSourceToTarget(source, ValidatingBean.class, null, null));
+    }
+
+    @Test
+    void shouldPropagateBusinessExceptionFromVerifyHook() {
+        SourceBean source = new SourceBean();
+        source.setName("alpha");
+
+        GXBusinessException exception = assertThrows(GXBusinessException.class,
+                () -> GXCommonUtils.convertSourceToTarget(source, BusinessRejectingBean.class, null, null));
+
+        assertEquals("biz rejected", exception.getMessage());
+        assertEquals(400, exception.getCode());
+    }
+
+    @Test
+    void shouldReturnMutableListWhenSourceIsEmpty() {
+        List<TargetBean> result = GXCommonUtils.convertSourceListToTargetList(null, TargetBean.class);
+
+        assertTrue(result.isEmpty());
+        assertDoesNotThrow(() -> result.add(new TargetBean()));
+    }
+
+    @Test
+    void shouldBuildTreeWithoutInfiniteRecursionOnDuplicatedIds() {
+        TreeNode root = new TreeNode(1L, 0L);
+        TreeNode selfLoop = new TreeNode(1L, 1L);
+
+        List<TreeNode> roots = assertDoesNotThrow(
+                () -> GXCommonUtils.buildTree(new ArrayList<>(List.of(root, selfLoop)), 0L));
+
+        assertEquals(List.of(root), roots);
+        assertEquals(List.of(selfLoop), root.getChildren());
+        assertEquals(Collections.emptyList(), selfLoop.getChildren());
     }
 
     @Test
@@ -409,6 +589,18 @@ class GXCommonUtilsTest {
         assertNull(GXCommonUtils.convertStrToTarget("", JsonBean.class));
         assertNull(GXCommonUtils.convertStrToTarget("abc", Integer.class));
         assertNull(GXCommonUtils.convertStrToTarget("123", null));
+    }
+
+    @Test
+    void shouldPreserveCommaAndNestedBracesInMapStyleString() {
+        Map<?, ?> withQuotedComma = GXCommonUtils.convertStrToTarget("{name=\"a,b\"}", Map.class);
+        Map<?, ?> withNested = GXCommonUtils.convertStrToTarget("{data={\"x\":1}}", Map.class);
+        Map<?, ?> multiple = GXCommonUtils.convertStrToTarget("{name=alpha, age=18}", Map.class);
+
+        assertEquals("a,b", withQuotedComma.get("name"));
+        assertEquals("{\"x\":1}", withNested.get("data"));
+        assertEquals("alpha", multiple.get("name"));
+        assertEquals("18", multiple.get("age"));
     }
 
     @Test
@@ -600,6 +792,76 @@ class GXCommonUtilsTest {
         @SuppressWarnings("unused")
         public void failValidate() {
             throw new GXBeanValidateException("invalid");
+        }
+
+        @SuppressWarnings("unused")
+        public static String staticAccept(int value) {
+            return "static:" + value;
+        }
+
+        @SuppressWarnings("unused")
+        public String sum(int... values) {
+            int total = 0;
+            for (int value : values) {
+                total += value;
+            }
+            return "sum:" + total;
+        }
+
+        @SuppressWarnings("unused")
+        public String acceptLong(long value) {
+            return "long:" + value;
+        }
+
+        @SuppressWarnings("unused")
+        public String acceptLongWrapper(Long value) {
+            return "Long:" + value;
+        }
+
+        @SuppressWarnings("unused")
+        public String prefixJoin(String prefix, int... values) {
+            int total = 0;
+            for (int value : values) {
+                total += value;
+            }
+            return prefix + ":" + total;
+        }
+
+        @SuppressWarnings("unused")
+        public String join(String... values) {
+            return "join:" + String.join("-", values);
+        }
+    }
+
+    public static class BusinessRejectingBean {
+        private String name;
+
+        public void verify() {
+            throw new GXBusinessException("biz rejected", 400);
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+    }
+
+    public static class ValidatingBean {
+        private String name;
+
+        public void verify() {
+            throw new GXBeanValidateException("name is invalid", 400);
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
         }
     }
 

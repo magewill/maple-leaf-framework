@@ -5,10 +5,13 @@ import cn.maple.core.framework.util.cglib.GXCglibUtils;
 import lombok.Data;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -19,6 +22,22 @@ class GXCGLibDataConvertTest {
     void getConverterReturnsSameInstanceForClass() {
         GXCGLibDataConvert first = GXCGLibDataConvert.getConverter(TargetBean.class);
         GXCGLibDataConvert second = GXCGLibDataConvert.getConverter(TargetBean.class);
+
+        assertSame(first, second);
+    }
+
+    @Test
+    void beanCopierCacheUsesClassValueAndReusesCopierForSameTypePair() throws Exception {
+        Field cacheField = GXCGLibDataConvert.class.getDeclaredField("BEAN_COPIER_CACHE");
+        cacheField.setAccessible(true);
+        // 旧的 WeakKeyConcurrentMap 实现会在这里失败：键是每次新建的记录对象，条目随时被 GC
+        assertInstanceOf(ClassValue.class, cacheField.get(null));
+
+        Method getBeanCopier = GXCGLibDataConvert.class.getDeclaredMethod("getBeanCopier", Class.class, Class.class);
+        getBeanCopier.setAccessible(true);
+
+        Object first = getBeanCopier.invoke(null, SourceBean.class, TargetBean.class);
+        Object second = getBeanCopier.invoke(null, SourceBean.class, TargetBean.class);
 
         assertSame(first, second);
     }
@@ -376,6 +395,83 @@ class GXCGLibDataConvertTest {
     }
 
     @Test
+    void fillBeanNormalizesNonStringKeys() {
+        Map<Object, Object> source = new LinkedHashMap<>();
+        source.put(new StringBuilder("name"), 123);
+        source.put("age", "42");
+
+        SimpleBean bean = GXCglibUtils.toBean(source, SimpleBean.class);
+
+        assertEquals("123", bean.getName());
+        assertEquals(42, bean.getAge());
+    }
+
+    @Test
+    void fillBeanSkipsReadOnlyPropertyInsteadOfFailing() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("name", "alpha");
+        source.put("label", "ignored");
+
+        ReadOnlyBean bean = GXCglibUtils.toBean(source, ReadOnlyBean.class);
+
+        assertEquals("alpha", bean.getName());
+        assertEquals("fixed", bean.getLabel());
+    }
+
+    @Test
+    void fillBeanPropagatesSetterValidationFailure() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("name", "alpha");
+
+        // setter 内部校验拒绝时必须向上抛出，不能被当成"只读属性"静默跳过
+        assertThrows(IllegalArgumentException.class,
+                () -> GXCglibUtils.toBean(source, ValidatingBean.class));
+    }
+
+    @Test
+    void copyListRejectsNullTargetInstance() {
+        SourceBean source = new SourceBean();
+        source.setName("source");
+
+        assertThrows(IllegalStateException.class,
+                () -> GXCglibUtils.copyList(List.of(source), () -> null, null, null));
+    }
+
+    @Test
+    void copyListReturnsMutableListWhenSourceIsEmpty() {
+        List<TargetBean> result = GXCglibUtils.copyList(List.of(), TargetBean.class);
+
+        assertTrue(result.isEmpty());
+        assertDoesNotThrow(() -> result.add(new TargetBean()));
+    }
+
+    @Test
+    void copyListReResolvesCopierWhenSupplierReturnsDifferentSubclasses() {
+        SourceBean first = new SourceBean();
+        first.setName("first");
+        SourceBean second = new SourceBean();
+        second.setName("second");
+
+        // 工厂每次返回不同的目标子类，用于覆盖 copyList 快路径里
+        // "currentTargetClass != lastTargetClass 时重新取 copier" 的分支
+        AtomicInteger calls = new AtomicInteger();
+        Supplier<TargetBean> factory = () -> calls.getAndIncrement() % 2 == 0
+                ? new TargetBean() : new ExtendedTargetBean();
+
+        List<TargetBean> result = GXCglibUtils.copyList(
+                List.of(first, second),
+                factory,
+                GXCGLibDataConvert.getConverter(TargetBean.class)
+        );
+
+        assertEquals(2, result.size());
+        assertEquals(TargetBean.class, result.get(0).getClass());
+        assertEquals(ExtendedTargetBean.class, result.get(1).getClass());
+        assertEquals("first", result.get(0).getName());
+        assertEquals("second", result.get(1).getName());
+    }
+
+    @Test
     void copyAndFillRejectNullArguments() {
         SourceBean source = new SourceBean();
         TargetBean target = new TargetBean();
@@ -450,6 +546,12 @@ class GXCGLibDataConvertTest {
         private List<TargetItem> items;
     }
 
+    /**
+     * 与 {@link TargetBean} 属性完全一致的子类，只用于验证 {@code copyList} 在目标类型变化时重新解析 copier。
+     */
+    static class ExtendedTargetBean extends TargetBean {
+    }
+
     @Data
     static class SourceMapBean {
         private Map<String, String> scores;
@@ -495,6 +597,27 @@ class GXCGLibDataConvertTest {
     static class TargetItem {
         private String code;
         private int qty;
+    }
+
+    @Data
+    static class ReadOnlyBean {
+        private String name;
+
+        public String getLabel() {
+            return "fixed";
+        }
+    }
+
+    static class ValidatingBean {
+        private String name;
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            throw new IllegalArgumentException("name rejected by setter");
+        }
     }
 
     interface NoInstantiableType {
