@@ -40,24 +40,20 @@ class GXQueueDeclarationConcurrencyTest {
 
     private GXSendRabbitMQServiceImpl service;
 
-    private ExecutorService callers;
-
     @BeforeEach
     void setUp() {
         service = GXTestRabbitFixtures.newService(rabbitTemplate, rabbitAdmin);
-        callers = Executors.newCachedThreadPool();
     }
 
     @AfterEach
     void tearDown() {
-        callers.shutdownNow();
         service.shutdownAsyncExecutor();
     }
 
     @Test
     void shouldDeclareSameQueueOnceUnderConcurrency() throws Exception {
         doAnswer(invocation -> {
-            Thread.sleep(100L);
+            Thread.sleep(200L);
             return ((Queue) invocation.getArgument(0)).getName();
         }).when(rabbitAdmin).declareQueue(any());
 
@@ -70,7 +66,7 @@ class GXQueueDeclarationConcurrencyTest {
     @Test
     void shouldDeclareEachQueueOnceForDifferentQueues() throws Exception {
         doAnswer(invocation -> {
-            Thread.sleep(50L);
+            Thread.sleep(100L);
             return ((Queue) invocation.getArgument(0)).getName();
         }).when(rabbitAdmin).declareQueue(any());
 
@@ -140,26 +136,36 @@ class GXQueueDeclarationConcurrencyTest {
     }
 
     private List<Queue> awaitAll(List<Callable<Queue>> tasks) throws Exception {
-        CountDownLatch start = new CountDownLatch(1);
-        List<Future<Queue>> futures = new ArrayList<>();
-        for (Callable<Queue> task : tasks) {
-            futures.add(callers.submit(() -> {
-                start.await(5, TimeUnit.SECONDS);
-                return task.call();
-            }));
-        }
-        start.countDown();
+        // 固定大小线程池 + 双重闩：先让全部线程就位，再同时放行，
+        // 避免 cachedThreadPool 懒创建线程把「并发窗口」拉长到首个声明已完成之后（高负载下会偶发重复声明）。
+        ExecutorService callers = Executors.newFixedThreadPool(tasks.size());
+        try {
+            CountDownLatch ready = new CountDownLatch(tasks.size());
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<Queue>> futures = new ArrayList<>();
+            for (Callable<Queue> task : tasks) {
+                futures.add(callers.submit(() -> {
+                    ready.countDown();
+                    start.await(5, TimeUnit.SECONDS);
+                    return task.call();
+                }));
+            }
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
 
-        List<Queue> results = new ArrayList<>();
-        for (Future<Queue> future : futures) {
-            try {
-                results.add(future.get(10, TimeUnit.SECONDS));
-            } catch (ExecutionException e) {
-                if (!(e.getCause() instanceof AmqpException) && !(e.getCause() instanceof GXRabbitMQOperationException)) {
-                    throw e;
+            List<Queue> results = new ArrayList<>();
+            for (Future<Queue> future : futures) {
+                try {
+                    results.add(future.get(10, TimeUnit.SECONDS));
+                } catch (ExecutionException e) {
+                    if (!(e.getCause() instanceof AmqpException) && !(e.getCause() instanceof GXRabbitMQOperationException)) {
+                        throw e;
+                    }
                 }
             }
+            return results;
+        } finally {
+            callers.shutdownNow();
         }
-        return results;
     }
 }

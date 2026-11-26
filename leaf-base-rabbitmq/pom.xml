@@ -25,6 +25,12 @@
             <artifactId>leaf-base-nacos</artifactId>
             <version>${project.parent.version}</version>
         </dependency>
+        <!--
+            Spring Boot 4.0 起 spring-boot-starter-amqp 只带 AMQP 1.0 客户端（spring-boot-amqp -> spring-amqp-client），
+            经典 AMQP 0-9-1 支持（RabbitTemplate / CachingConnectionFactory / RabbitAutoConfiguration / RabbitProperties）
+            拆到独立模块 spring-boot-rabbitmq（3.4.x 的 starter 仍直接依赖 spring-rabbit）。
+            本模块全部基于经典 API，因此排除新客户端并显式引入经典模块。
+        -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-amqp</artifactId>
@@ -37,7 +43,15 @@
                     <groupId>com.squareup.okio</groupId>
                     <artifactId>okio-jvm</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-amqp</artifactId>
+                </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-rabbitmq</artifactId>
         </dependency>
         <dependency>
             <groupId>tools.jackson.core</groupId>

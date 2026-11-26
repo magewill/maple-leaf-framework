@@ -3,7 +3,7 @@ package cn.maple.rabbitmq.properties;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
-import org.springframework.boot.amqp.autoconfigure.RabbitProperties;
+import org.springframework.boot.rabbitmq.autoconfigure.RabbitProperties;
 
 /**
  * RabbitMQ 配置基类，业务代码只依赖本类型，不依赖 local/nacos 具体变体。
