@@ -147,9 +147,9 @@
 
 ## R-10 审查报告的存放与命名
 
-**Decision**: ``，由实现阶段产出，结构与校验规则见 [contracts/review-report-schema.md](./contracts/review-report-schema.md)。
+**Decision**（已废止 2026-11-26）：报告类产物不再作为交付物，审查结论写入 `spec.md` 结论摘要，不再单独成文。
 
-**Rationale**: 澄清 5 要求独立成文；放在特性目录可与 spec/plan 同版本演进，避免污染 `docs/`（`docs/` 只放稳定的模块手册）。
+**Rationale**: 原澄清 5 要求独立成文；2026-11-26 起报告产物废弃，结论并入 `spec.md`，避免污染 `docs/`（`docs/` 只放稳定的模块手册）的目标不变。
 
 **Alternatives considered**: 并入 `docs/leaf-base-seata开发手册.md`（审查过程性证据不属于用户手册）；只在 `spec.md`（信息密度过高，SC-006 难达成）。
 

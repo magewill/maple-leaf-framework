@@ -88,7 +88,7 @@ mvn -o -pl leaf-base-dubbo-nacos test "-Dtest=GXDubboFilterChainEndToEndTest"
 ## 6. 修复后验收清单
 
 1. `mvn -o -pl leaf-base-dubbo-nacos clean test` 全绿，用例数只增不减（当前基线 **13 个测试类 / 74 条用例**）。
-2. 每个修复项都有"旧代码失败"的用例证据（FR-021），并在 `audit-report.md` 记录。
+2. 每个修复项都有"旧代码失败"的用例证据（FR-021），并在 `spec.md` 结论摘要记录。
 3. `mvn -o -pl leaf-base-dubbo-nacos clean install -DskipTests` 通过（ErrorProne + NullAway 零错误）。
 4. `Select-String -Path "leaf-base-dubbo-nacos\src\main\java" -Pattern "@Log4j2"` 无输出。
 5. `docs/leaf-base-dubbo-nacos开发手册.md` 存在且包含：SPI 扩展名、TraceId 优先级表、异常分类矩阵、**强制装配配置**、`serialize.allowlist` 说明、不支持范围。

@@ -2,17 +2,17 @@
 
 **Feature**: `004-redisson-module-audit` | **Date**: 2026-10-22
 
-本文件定义审查交付物的结构、字段与判定规则。所有实体最终落在 `review-report.md` 与 `checklists/` 中，本文件只规定结构与约束。
+本文件定义审查交付物的结构、字段与判定规则。所有实体最终落在 `spec.md` 结论摘要与 `checklists/` 中，本文件只规定结构与约束。
 
 ## 实体一览
 
 | 实体 | 用途 | 落点 |
 | --- | --- | --- |
-| Finding（审查发现） | 单条结论的最小单元 | `review-report.md` 主体 |
-| Evidence（证据） | 支撑 Finding 的可核对事实 | `review-report.md` 附录 |
-| 链路可靠性矩阵 | 五条消息链路的投递语义与失败归属 | `review-report.md` §可靠性 |
-| 并发与生命周期矩阵 | 组件 × 并发度 × 停止路径 × 泄漏风险 | `review-report.md` §并发 |
-| 性能口径 | 三条路径的往返次数与上限 | `review-report.md` §性能 |
+| Finding（审查发现） | 单条结论的最小单元 | `spec.md` 结论摘要 |
+| Evidence（证据） | 支撑 Finding 的可核对事实 | `spec.md` 结论摘要（证据表） |
+| 链路可靠性矩阵 | 五条消息链路的投递语义与失败归属 | `spec.md` 结论摘要（可靠性矩阵） |
+| 并发与生命周期矩阵 | 组件 × 并发度 × 停止路径 × 泄漏风险 | `spec.md` 结论摘要（并发矩阵） |
+| 性能口径 | 三条路径的往返次数与上限 | `spec.md` 结论摘要（性能口径） |
 | 覆盖率台账 | 51 个生产文件的审查与测试可达性 | `checklists/coverage-ledger.md` |
 
 ## 1. Finding
@@ -40,7 +40,7 @@
 draft ──(补齐 location/evidenceRefs)──> verified
 verified ──(定 dimension/severity/fixBatch)──> graded
 graded ──(repro 可执行或用例存在)──> reproduced
-reproduced ──(进入 review-report.md 且与 spec 摘要一致)──> delivered
+reproduced ──(并入 spec.md 结论摘要)──> delivered
 ```
 
 **校验规则**：
@@ -59,7 +59,7 @@ reproduced ──(进入 review-report.md 且与 spec 摘要一致)──> deliv
 | `excerpt` | string | 是 | ≤ 2 行关键语句或语义摘要，不得整段复制 |
 | `usedBy` | string[] | 是 | 引用该证据的 `F-NN` 列表 |
 
-**不变量**：`E-NN` 编号在 `spec.md` 与 `review-report.md` 中必须一致；新增证据只在报告附录追加，不改动 `spec.md` 已有编号的语义。
+**不变量**：`E-NN` 编号在 `spec.md` 中必须唯一且稳定；新增证据只追加，不改动已有编号的语义。
 
 ## 3. 链路可靠性矩阵
 
@@ -85,7 +85,7 @@ reproduced ──(进入 review-report.md 且与 spec 摘要一致)──> deliv
 
 **不变量**：矩阵中每个"泄漏风险 ≠ 低"的单元必须有对应 Finding；每条停止路径必须注明"是否回收在途消息"。
 
-**释放路径展开**：除上表的"停止路径"外，判定 MUST 覆盖四条路径——重复注册、启动失败、容器关闭、Redis 关闭中；展开后的逐格结论见 `review-report.md` §5.1（20 格中 16 格达标、4 格不达标，分别对应 F-08 与 F-14）。
+**释放路径展开**：除上表的"停止路径"外，判定 MUST 覆盖四条路径——重复注册、启动失败、容器关闭、Redis 关闭中；展开后的逐格结论见 `spec.md` 结论摘要（20 格中 16 格达标、4 格不达标，分别对应 F-08 与 F-14）。
 
 ## 5. 性能口径
 

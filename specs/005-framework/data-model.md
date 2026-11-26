@@ -2,7 +2,7 @@
 
 **Feature**: `005-framework-module-audit` | **Date**: 2026-10-22
 
-本文件定义审查交付物的**结构语义**（字段、取值域、约束、状态流转），不定义实现类。所有结构以 Markdown 表格/条目形式落在 `review-report.md` 与 `coverage-ledger.md` 中；`contracts/` 下的两份契约给出校验规则。
+本文件定义审查交付物的**结构语义**（字段、取值域、约束、状态流转），不定义实现类。所有结构以 Markdown 表格/条目形式落在 `spec.md` 结论摘要与 `coverage-ledger.md` 中。
 
 ---
 
@@ -14,7 +14,7 @@
 | --- | --- | --- | --- |
 | `id` | string | 是 | `F-NN`，两位数字；一经发布不可重排（research D11） |
 | `title` | string | 是 | 一句话结论，须含"现象 + 影响"，禁止只写"存在问题" |
-| `severity` | enum | 是 | `HIGH` / `MEDIUM` / `LOW`，定义见 `contracts/review-report-schema.md` |
+| `severity` | enum | 是 | `HIGH` / `MEDIUM` / `LOW`，定义见 `spec.md` 结论摘要 |
 | `dimensions` | enum[] | 是 | `STABILITY` / `CORRECTNESS` / `THREAD_SAFETY` / `PERFORMANCE` / `SECURITY_BOUNDARY`，至少 1 项 |
 | `location` | string | 是 | `相对路径:起行-止行`，路径相对 `src/main/java/cn/maple/core/framework` 或 `src/main/resources` |
 | `trigger` | string | 是 | 触发条件（输入形态 / 运行形态 / 时序），须可构造 |
@@ -38,7 +38,7 @@ DRAFT ──复核──> REVIEWED ──定级──> CLASSIFIED ──复现�
 - **DRAFT → REVIEWED**：位置与触发条件被第二人按行号核对通过。
 - **REVIEWED → CLASSIFIED**：`severity` + `verdict` + `compatibilityImpact` 三项已定。
 - **CLASSIFIED → REPRODUCED**：`reproduction` 被执行过并记录现象；或由审计用例覆盖（标注用例全名）。
-- **REPRODUCED → DELIVERED**：条目写入 `review-report.md` 且 `coverage-ledger.md` 已引用其 `id`。
+- **REPRODUCED → DELIVERED**：条目并入 `spec.md` 结论摘要且 `coverage-ledger.md` 已引用其 `id`。
 - **任一状态 → UNVERIFIED_ASSUMPTION**：无法在本环境构造；必须写明"缺少什么条件才能验证"。
 
 **不变量**：`status=DELIVERED` 的条目，其 `regressionTestDesign.expectedFlip` 必须非空；`verdict=ESTABLISHED_CONTRACT` 的条目不得出现在 SC-009 的阻断清单中。
@@ -139,7 +139,7 @@ DRAFT ──复核──> REVIEWED ──定级──> CLASSIFIED ──复现�
 **不变量（可脚本核对）**：
 
 1. 行数 = 309；每个文件恰好出现一次。
-2. `verdict=DEFECT` 的行数 + `verdict=RISK` 的行数 ≥ `review-report.md` 中 `DEFECT`/`RISK` 条目的位置去重数（不得有发现未登记）。
+2. `verdict=DEFECT` 的行数 + `verdict=RISK` 的行数 ≥ `spec.md` 结论摘要中 `DEFECT`/`RISK` 条目的位置去重数（不得有发现未登记）。
 3. `strength=CONTRACT_ONLY` 只允许出现在 research D1 列出的包中。
 4. 任何 `DEFECT` 行的 `findingRefs` 非空。
 

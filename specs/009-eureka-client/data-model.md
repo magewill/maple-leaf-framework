@@ -2,7 +2,7 @@
 
 **Feature**: `009-eureka-client-module-audit` | **Date**: 2026-10-22
 
-本特性无运行期数据实体；"数据"是被审查对象的结构化结论。以下 8 个模型同时约束 `audit-report.md`（实施期产出）与研究/验收过程的填写完整性。
+本特性无运行期数据实体；"数据"是被审查对象的结构化结论。以下 8 个模型同时约束 `spec.md` 结论摘要与研究/验收过程的填写完整性。
 
 ## 1. Finding（审查发现）
 
@@ -109,7 +109,6 @@
 
 | 路径 | 归属阶段 | 对应 FR |
 | --- | --- | --- |
-| `audit-report.md` | 实施 | FR-002 / FR-003 / FR-016 / FR-020 |
 | `leaf-base-eureka-client/src/main/java/cn/maple/eureka/client/config/GXEurekaClientConfig.java` | 实施 | FR-005 / FR-007 |
 | `.../config/GXEurekaClientDefaultsPostProcessor.java` | 实施 | FR-005 |
 | `.../resources/META-INF/spring.factories` | 实施 | FR-005 |

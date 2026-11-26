@@ -14,8 +14,8 @@ mvn -o -pl leaf-base-sso test
 
 - 修复前期望：`Tests run: 40, Failures: 0, Errors: 0, Skipped: 0` / `BUILD SUCCESS`；
 - 修复后期望：`Tests run: 123, Failures: 0, Errors: 0, Skipped: 0`（40 → 123，只增不减）。
-  偶发 `ClassFormatError: Method refreshActiveTokens ... illegal modifiers: 0x8` 系 IDE 增量编译产物所致，用 `mvn -o -pl leaf-base-sso clean test` 全量重建即可（见 `audit-report.md` §7.5）。
-  该数字的唯一权威来源是 `audit-report.md` §验证记录；`tasks.md` 中各收敛轮次记录的是**当时值**（95 / 103），随批次递增，不得用于判定回归（T096）。
+  偶发 `ClassFormatError: Method refreshActiveTokens ... illegal modifiers: 0x8` 系 IDE 增量编译产物所致，用 `mvn -o -pl leaf-base-sso clean test` 全量重建即可（属已知环境问题，详见 git 历史中的原审查报告 §7.5）。
+  该数字的唯一权威来源是 `spec.md` 结论摘要与本次实测输出；`tasks.md` 中各收敛轮次记录的是**当时值**（95 / 103），随批次递增，不得用于判定回归（T096）。
 
 若数量少于对应基线，说明用例被跳过或环境不一致，先解决再继续（FR-012）。
 

@@ -119,7 +119,7 @@
 ## D-15 实施期结论回填（2026-10-27）
 
 - **D-04（载荷形态）**：数组载荷在改造前确实无法处理（`parseMessage` 返回 `status=error`）；改造后按元素逐个产出结局，`/canal/batch.json` 用例（3 元素：成功/跳过/不可重试）通过。
-- **D-08（RocketMQ 容器）**：最终采用 `@RocketMQMessageListener` + `RocketMQListener<String>`；`maxReconsumeTimes` 为注解常量（`GXCanalConstant.DEFAULT_RETRY_MAX_ATTEMPTS`=3），无法由占位符驱动，故移除 `canal.rocketmq.max-reconsume-times` 键，改为固定上限 + 文档登记（`AGENTS.md` §9.4、手册 §6.2 注）。真实 broker 连通性仍未验证（环境缺失，见 `review-report.md` §5）。
+- **D-08（RocketMQ 容器）**：最终采用 `@RocketMQMessageListener` + `RocketMQListener<String>`；`maxReconsumeTimes` 为注解常量（`GXCanalConstant.DEFAULT_RETRY_MAX_ATTEMPTS`=3），无法由占位符驱动，故移除 `canal.rocketmq.max-reconsume-times` 键，改为固定上限 + 文档登记（`AGENTS.md` §9.4、手册 §6.2 注）。真实 broker 连通性仍未验证（环境缺失，详见 git 历史中的原审查报告 §5）。
 - **D-12（`@Lazy`）**：已用 `GXCanalListenerRegistrationTest` 定案——懒加载监听器 Bean 不会实例化，端点因此从不注册（对照场景注册 0 个容器，eager 场景注册 1 个）。已移除生产监听器上的 `@Lazy` 并加断言防回归。
 - **配置键微调**：`canal.log.handler-miss-level` 在实现中落为扁平键 `canal.handler-miss-log-level`（`GXCanalProperties#handlerMissLogLevel`），避免为一个键引入第三层嵌套配置类；`data-model.md` 已同步。
 

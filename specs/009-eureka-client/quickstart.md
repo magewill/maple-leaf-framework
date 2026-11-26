@@ -17,7 +17,7 @@ mvn -o -pl leaf-base-eureka-client test
 ```
 
 **期望（当前状态，2026-10-22）**：`Tests run: 4, Failures: 1` → `GXEurekaClientConfigTest.applicationYamlContainsExpectedClientDefaults:82`，`BUILD FAILURE`。
-**判定**：若此步为绿，说明基线已变，必须先在 `audit-report.md` §1 更新基线再继续（不得直接进入修复）。
+**判定**：若此步为绿，说明基线已变，必须先在 `spec.md` 结论摘要更新基线再继续（不得直接进入修复）。
 
 ## 2. 修复后必须全绿
 

@@ -2,7 +2,7 @@
 
 **Feature**: `010-retry-module-audit` | **Date**: 2026-10-23 | **Spec**: [spec.md](./spec.md) | **Research**: [research.md](./research.md)
 
-本特性不产生运行时数据模型，需建模的是**审查产物**：发现、证据、三张语义矩阵、性能口径、修复项与回归用例。下列实体既是 `audit-report.md` 的骨架，也是 `tasks.md` 的输入。
+本特性不产生运行时数据模型，需建模的是**审查产物**：发现、证据、三张语义矩阵、性能口径、修复项与回归用例。下列实体既是 `spec.md` 结论摘要的骨架，也是 `tasks.md` 的输入。
 
 ## 1. 实体定义
 
@@ -110,7 +110,6 @@
 
 | 交付物 | 出处 | 验收 |
 | --- | --- | --- |
-| `audit-report.md` | 本计划 Phase 0+1 | SC-001/SC-002：21 条发现八要素齐备、28 条证据可定位 |
 | 生产代码修改（4 个文件 + 3 个新类型） | `plan.md` Source Code | ErrorProne/NullAway 零错误；既有签名不变 |
 | 测试（新增 3、修改 4） | `plan.md` Source Code | 全绿且含"旧失败新通过"的回归用例 |
 | `docs/leaf-base-retry开发手册.md` 重写 | D-12 | SC-008：类名/签名/依赖声明与实现 100% 一致 |

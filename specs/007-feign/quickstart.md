@@ -17,7 +17,7 @@ cd e:/project/java/maple-leaf-framework
 mvn -pl leaf-base-feign test
 ```
 
-期望：`Tests run: 25, Failures: 0, Errors: 0`，`BUILD SUCCESS`。该结果必须原样写入 `audit-report.md`（SC-008）。
+期望：`Tests run: 25, Failures: 0, Errors: 0`，`BUILD SUCCESS`。该结果必须原样写入 `spec.md` 结论摘要（SC-008）。
 
 ## 2. 头透传矩阵（FR-004 / SC-003）
 
@@ -125,7 +125,7 @@ mvn -pl leaf-base-feign test -Dtest=GXFeignHttpRoundTripTest
 mvn -pl leaf-base-feign test -Dtest=GXFeignRequestInterceptorTest#applyThroughputBaseline
 ```
 
-期望报告内容（写入 `audit-report.md`）：
+期望结论内容（写入 `spec.md` 结论摘要）：
 
 | 指标 | 期望 |
 | --- | --- |

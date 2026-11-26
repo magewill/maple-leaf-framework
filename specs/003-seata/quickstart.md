@@ -133,6 +133,6 @@ Select-String -Path .\logs\*.log -Pattern '\[Seata\]'
 
 - [ ] `mvn -pl leaf-base-datasource -am test` 通过
 - [ ] `mvn -pl leaf-base-seata -am test` 通过
-- [ ] `review-report.md` 中每条 `BLOCKER` 状态为 `FIXED`，且复现索引可执行
+- [ ] 每条 `BLOCKER` 状态为 `FIXED`，且复现索引可执行（结论见 `spec.md`）
 - [ ] `docs/leaf-base-seata开发手册.md` 与 `contracts/seata-assembly-contracts.md` 描述一致
 - [ ] 日志全部为 ASCII，无连接串/口令泄漏

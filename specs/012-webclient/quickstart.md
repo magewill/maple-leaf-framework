@@ -125,4 +125,4 @@ mvn -pl leaf-base-webclient test -Dtest=GXWebClientConfigTest
 - `mvn -pl leaf-base-webclient test`：**全绿**，用例数 **70**（从 17 单调增长，0 删除/跳过）。
 - `mvn -pl leaf-base-webclient clean install -DskipTests`：ErrorProne + NullAway 零错误。
 - `mvn -pl leaf-base-eureka-client test`：全绿（SC-007）。
-- 交付清单：`spec.md` / `plan.md` / `research.md` / `data-model.md` / `contracts/*` / `quickstart.md` / `audit-report.md` / 证据表（F-01～F-19 全量）/ 兼容说明六处（`retry-methods`、`durationMs` 口径、UA、过滤器链增量、LB 守卫默认开启、错误体 DTO）。
+- 交付清单：`spec.md` / `plan.md` / `research.md` / `data-model.md` / `contracts/*` / `quickstart.md` / 证据表（F-01～F-19 全量）/ 兼容说明六处（`retry-methods`、`durationMs` 口径、UA、过滤器链增量、LB 守卫默认开启、错误体 DTO）。

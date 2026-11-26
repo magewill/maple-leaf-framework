@@ -91,17 +91,13 @@ Select-String -Path e:\project\java\maple-leaf-framework\leaf-base-redisson\src\
 
 **预期**：51 个文件与台账行数一致；未被测试引用的类型必须在 `checklists/coverage-ledger.md` 的 `gapReason` 中给出原因，且不得停留在空值。
 
-## 6. 交付前检查（对照 contracts/review-report-schema.md §3）
+## 6. 交付前检查
 
 ```powershell
-$r="e:\project\java\maple-leaf-framework\specs\004-redisson-module-audit\review-report.md"
-(Select-String -Path $r -Pattern "^### F-\d{2}").Count          # 应等于 spec 中发现条目数（16）
-(Select-String -Path $r -Pattern "- \*\*维度\*\*:").Count        # 应等于 16
-(Select-String -Path $r -Pattern "约 [0-9]|大概|左右").Count      # 性能章节应为 0
 git status --short -- leaf-base-redisson/src/main leaf-base-redisson/pom.xml   # 应为空（L-01/L-02）
 ```
 
-**验收口径**：以上四条全部满足 + `mvn -pl leaf-base-redisson -o test` 全绿 + `review-report.md` 第 1 章与 `spec.md` 结论表一致，即认为本次审查交付可通过。
+**验收口径**：`spec.md` 结论摘要中 16 条发现的编号与级别齐备 + `mvn -pl leaf-base-redisson -o test` 全绿，即认为本次审查交付可通过。
 
 ## 7. 真实服务验证（可选，默认跳过）
 

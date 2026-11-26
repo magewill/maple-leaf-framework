@@ -183,7 +183,7 @@
 | --- | --- | --- | --- |
 | F-01 | `GXDubboFilterChainBehaviorTest#businessExceptionLosesCodeWhenBuiltInFilterActive` | 不排除内置时，consumer 收到 `RuntimeException` 且 `code` 不可读 | 按真实链顺序调用内置与自定义 `onResponse` |
 | F-01 | `GXDubboFilterChainBehaviorTest#businessExceptionPreservedWhenBuiltInFilterExcluded` | 排除后，`GXBusinessException` 的 `code/msg/data` 保真 | 同上（对照） |
-| F-02 | `GXDubboCallExceptionHandlerSpringBootTest#rpcExceptionAdviceHandlesRealMvcRequest` | 真实 `@SpringBootTest`（`GXDubboTestApp` 以 `@Import` 装配双 advice，等价性见 `audit-report.md` §6.3）下，`data.errorType` 存在（非"系统内部错误"） | Spring Boot 真实上下文 |
+| F-02 | `GXDubboCallExceptionHandlerSpringBootTest#rpcExceptionAdviceHandlesRealMvcRequest` | 真实 `@SpringBootTest`（`GXDubboTestApp` 以 `@Import` 装配双 advice，等价性见 `spec.md` 结论摘要）下，`data.errorType` 存在（非"系统内部错误"） | Spring Boot 真实上下文 |
 | F-03 | `GXDubboExceptionFilterTest#convertsDegradeAndAuthorityExceptions` | `DegradeException`/`AuthorityException` 类名 → `GXSentinelFlowException` | 单元 |
 | F-03 | `GXDubboExceptionFilterTest#doesNotMisclassifyBusinessMessageContainingFlowException` | 普通异常消息含 "FlowException" 不被转换 | 单元 |
 | F-04 | `GXDubboExceptionFilterTest#wrapsUndeclaredRuntimeWhenMethodSignatureUnresolvable` | 参数类型不匹配时仍包装为 `GXBusinessException` | 单元 |

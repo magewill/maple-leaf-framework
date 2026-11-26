@@ -95,7 +95,7 @@ mvn -pl leaf-framework dependency:tree | Select-String -Pattern "leaf-base-eurek
 | 不设开关，`--spring.main.web-application-type=reactive` | `GET /ping` = **200**；`GET /eureka/apps` = **404**；进程持续运行 | **6837 / 6712 ms**（偏差 1.8%） |
 | 设置 `--maple.framework.enable.eureka-server=true` | `GET /ping` = **200**；`GET /eureka/apps` = **404**；进程持续运行 | **6712 / 6701 ms**（偏差 0.16%，与缺省同量级） |
 
-结论：WebFlux 应用在两种开关状态下均正常启动，且都不装配注册中心（`@ConditionalOnWebApplication(SERVLET)` 生效，客户端由 `GXEurekaServerClientDefaultsPostProcessor` 默认禁用）；两行启动耗时与开关无关（注册中心未装配，无增量）。证据见 `audit-report.md` §5、§9 与 E-20。
+结论：WebFlux 应用在两种开关状态下均正常启动，且都不装配注册中心（`@ConditionalOnWebApplication(SERVLET)` 生效，客户端由 `GXEurekaServerClientDefaultsPostProcessor` 默认禁用）；两行启动耗时与开关无关（注册中心未装配，无增量）。证据见 `spec.md` 结论摘要与 E-20。
 
 **复现步骤**（无需修改本仓库依赖）：
 
@@ -161,4 +161,4 @@ Select-String -Path docs/leaf-base-eureka-server开发手册.md -Pattern "maple.
 | `mvn -pl leaf-base-eureka-server package` | 成功，jar 内无 `application.yml`、含 2 个示例与元数据 |
 | 依赖断言 | 契约 §3 的 5 条断言全部满足（无 devtools、保留 `jersey-apache-connector:3.1.12`、无 apache5 坐标、`httpclient:4.5.14` 传递引入、starter 由 BOM 管理） |
 | `mvn -pl leaf-framework dependency:tree` | 不含本模块 |
-| 报告一致性 | `audit-report.md` 的 F 编号、级别与 `spec.md` 完全对应 |
+| 结论一致性 | `spec.md` 的 F 编号、级别与结论摘要完全对应 |

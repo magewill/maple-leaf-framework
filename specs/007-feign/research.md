@@ -85,7 +85,7 @@
 - **Alternatives considered**：
   - 直接加 `@target(...)` 让接口注解命中：未经实测扩张匹配面，可能让不该拦截的 Bean 被拦截。
 - **Impact**：仅新增测试，生产代码最多调整缓存键（D-09）。
-- **Verification**：6 个用例全部通过；实测结论回写 `audit-report.md` 与 `contracts/auth-spi-contract.md`。
+- **Verification**：6 个用例全部通过；实测结论回写 `spec.md` 结论摘要与 `contracts/auth-spi-contract.md`。
 
 ## D-09 方法签名缓存收敛
 

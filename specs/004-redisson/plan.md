@@ -8,7 +8,7 @@
 
 本次交付是**审查产物**，不改生产代码。三件事，顺序不可颠倒：
 
-1. **结论独立成文**：把 13 条证据（E-01～E-13）与 16 条发现（F-01～F-16）写入 `review-report.md`，每条附维度、级别、位置、触发条件、影响、证据、复现方式与回归测试设计，满足 SC-001/SC-002/SC-007。
+1. **结论独立成文**：把 13 条证据（E-01～E-13）与 16 条发现（F-01～F-16）写入 `spec.md` 结论摘要，每条附维度、级别、位置、触发条件、影响、证据、复现方式与回归测试设计，满足 SC-001/SC-002/SC-007。
 2. **用依赖侧源码把"读代码推测"升级为"可核对事实"**：从本地仓库 `redisson-4.7.0-sources.jar` 核对 `RedissonReliableTopic`、`RedissonBlockingQueue`、`RedissonDelayedQueue`、`QueueTransferService` 的实际语义，修正三处容易误判的结论（详见 Phase 0）。
 3. **建立不依赖真实 Redis 的审计验证基线**：沿用既有测试风格（JUnit 5 + Mockito + 反射），为高危发现各补一条"特征化用例（characterization test）"，锁住当前行为；修复落地时这些用例的断言必须翻转，因此它们同时充当"修复验收开关"。
 
@@ -69,9 +69,7 @@ specs/004-redisson-module-audit/
 ├── data-model.md        # Phase 1：Finding / 证据 / 审查矩阵 / 性能口径 / 覆盖率台账
 ├── quickstart.md        # Phase 1：可执行验证指南（命令 + 预期输出）
 ├── contracts/
-│   ├── review-report-schema.md       # 审查报告条目结构、级别定义、证据等级、校验规则
 │   └── audit-coverage-contract.md    # 覆盖矩阵、链路可靠性判定口径、性能口径、缺陷 vs 契约判定
-├── review-report.md     # 实现阶段交付：逐条 Finding + 证据 + 复现命令
 └── tasks.md             # Phase 2（/speckit.tasks 生成，本命令不创建）
 ```
 
@@ -118,7 +116,6 @@ leaf-base-redisson/
 ## Phase 1: Design Summary
 
 - **data-model.md**：六个实体——Finding、Evidence、链路可靠性矩阵、并发与生命周期矩阵、性能口径、覆盖率台账；含 Finding 状态机（初稿 → 已复核 → 已定级 → 可复现 → 已交付）与"缺陷/风险/既定契约/未验证假设"的判定规则。
-- **contracts/review-report-schema.md**：每条 Finding 的必填字段（编号、维度、级别、位置、触发条件、影响、证据、复现方式、回归测试设计、修复建议、契约影响），以及"可复现"的判定标准与证据等级要求。
 - **contracts/audit-coverage-contract.md**：覆盖矩阵（51 文件 × 4 判定）、五条链路的可靠性定性规则、三条性能路径的计数口径、缺陷与既定契约的分界（以"是否被既有测试锁定 + 是否与文档承诺冲突"双条件判定）。
 - **quickstart.md**：模块级测试命令（含离线与单类执行）、六类高风险发现的复现步骤与预期现象、性能口径复算步骤、覆盖率台账核对方式。
 

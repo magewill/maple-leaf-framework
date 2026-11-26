@@ -72,9 +72,8 @@ specs/016-rabbitmq-module-audit/
 │   ├── config-source-contract.md     # config-source 开关、Nacos 拉取、日志与优先级
 │   ├── listener-contract.md          # 消费失败分层处置、计数、启停
 │   └── lifecycle-contract.md         # 调度器/执行器所有权、关闭、Bean 暴露开关
-├── checklists/
-│   └── requirements.md  # 规格质量清单（已通过）
-└── review-report.md     # 实施阶段产出：独立审查报告（本命令不创建）
+└── checklists/
+    └── requirements.md  # 规格质量清单（已通过）
 ```
 
 ### Source Code (repository root)
@@ -164,7 +163,7 @@ leaf-base-rabbitmq/
 6. **消费链路（F-04、FR-008）**：拒绝策略 + 计数 + 死代码清理 + `@ConditionalOnProperty` 启停。
 7. **生命周期（F-10/F-11/F-13）**：调度器重写与关闭、执行器拒绝策略与关闭、Bean 暴露开关。
 8. **文档与能力边界（F-16、F-22、FR-032/FR-033）**：更新 `AGENTS.md`、开发手册、能力不支持清单。
-9. **验证收口**：全量 3 次、并发、集成（有环境）、性能口径、ASCII 扫描，产出 `review-report.md` 与用例统计。
+9. **验证收口**：全量 3 次、并发、集成（有环境）、性能口径、ASCII 扫描，产出用例统计与结论摘要。
 
 ## Risks & Mitigations
 

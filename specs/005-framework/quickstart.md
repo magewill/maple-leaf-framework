@@ -56,7 +56,7 @@ foreach($x in $r){
 mvn -o -pl leaf-base-framework test -Dtest='GX*AuditTest'
 ```
 
-**预期**：8 个审计用例类全部通过——它们断言的是**当前行为**（含缺陷行为），因此绿色即"现状成立"。若某个审计用例失败，说明现状已变化（可能已被他人修复），需按 [contracts/review-report-schema.md](./contracts/review-report-schema.md) §6 的 `REVISED` 流程更新报告。
+**预期**：8 个审计用例类全部通过——它们断言的是**当前行为**（含缺陷行为），因此绿色即"现状成立"。若某个审计用例失败，说明现状已变化（可能已被他人修复），需在 `spec.md` 结论摘要中更新该条判定，并按变更流程登记 CR。
 
 单类执行示例：
 
@@ -106,21 +106,7 @@ $dir = 'specs/005-framework-module-audit'
 
 # 6.1 台账行数必须为 309（去掉表头与分隔行）
 (Select-String -Path "$dir/coverage-ledger.md" -Pattern '^\| `[^`]+\.java`').Count
-
-# 6.2 证据/发现编号齐全
-(Select-String -Path "$dir/review-report.md" -Pattern '^### F-\d{2}').Count   # 期望 ≥ 21
-(Select-String -Path "$dir/review-report.md" -Pattern '^\| `E-\d{2}`').Count   # 期望 ≥ 22
-
-# 6.3 六条性能口径齐全
-foreach ($p in 'XSS_REWRITE','BODY_CACHE','RATE_LIMIT','CONCURRENT_TOOLS','EVENT_DISPATCH','REFLECTION_COPY') {
-  if (-not (Select-String -Path "$dir/review-report.md" -Pattern $p -Quiet)) { "MISSING $p" }
-}
-
-# 6.4 报告与规格编号一致（F-01…F-21 全部出现）
-1..21 | ForEach-Object { $id = 'F-{0:d2}' -f $_; if (-not (Select-String -Path "$dir/review-report.md" -Pattern $id -Quiet)) { "MISSING $id" } }
 ```
-
-`contracts/review-report-schema.md` §8 的 C-01…C-06 是这组核对的完整版，`/speckit.tasks` 会把它落成可执行检查。
 
 ---
 

@@ -40,7 +40,7 @@ mvn -o -B -pl leaf-base-rabbitmq test
 | `GXSendRabbitMQServiceImplTest#callerPropertiesMutated` | F-06 | 发送后调用方 `MessageProperties.getContentType()` 非空 |
 | `GXDefaultRabbitMQQueueListenerTest#emptyMessageIsSwallowed` | F-04 | 空消息不抛异常（被 ack） |
 
-失败输出必须贴入 `review-report.md`，作为"旧代码失败"证据。
+失败输出必须贴入 `spec.md` 结论摘要，作为"旧代码失败"证据。
 
 ## 3. 修复后全量验证
 
@@ -92,7 +92,7 @@ mvn -o -B -pl leaf-base-rabbitmq test "-Dgroups=integration" "-Dtest=GXRabbitMQR
 - 声明 → 绑定 → 发送 → `queueExists` → `purgeQueue` → `deleteQueue` 全链路通过
 - `createTemporaryQueue` 声明的队列可由第二个连接消费
 - 关闭 `mandatory` 时消息被丢弃；开启时 `GXReturnsCallback` 被调用
-- 结果（含样本量）写入 `review-report.md`
+- 结果（含样本量）写入 `spec.md` 结论摘要
 
 ## 7. 性能口径复现
 
@@ -132,4 +132,4 @@ mvn -o -B -pl leaf-base-rabbitmq test
 - [ ] 连续 3 次全量执行结果一致
 - [ ] 日志 ASCII 扫描无输出
 - [ ] `AGENTS.md` / 手册与实现一致，能力边界已登记
-- [ ] 未验证项与手工命令写入 `review-report.md`
+- [ ] 未验证项与手工命令写入 `spec.md` 结论摘要

@@ -66,5 +66,5 @@
 若 `GXEurekaClientDefaultsPostProcessor` 在任一 Web 类型下引发上下文失败：
 
 1. 回滚该 PostProcessor，保留 `@ConditionalOnProperty`（开关退化为"仅关闭本模块配置类"）；
-2. 在 `audit-report.md` 登记为未解决项，写明失败上下文、异常文本与影响面；
+2. 在 `spec.md` 结论摘要登记为未解决项，写明失败上下文、异常文本与影响面；
 3. MUST NOT 通过删除开关或放宽测试来"修复"。
