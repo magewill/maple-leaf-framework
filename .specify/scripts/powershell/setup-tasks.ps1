@@ -34,14 +34,14 @@ if (-not $paths) {
 
 if (-not (Test-Path -LiteralPath $paths.IMPL_PLAN -PathType Leaf)) {
     [Console]::Error.WriteLine("ERROR: plan.md not found in $($paths.FEATURE_DIR)")
-    $planCommand = '/speckit-plan'
+    $planCommand = '/speckit.plan'
     [Console]::Error.WriteLine("Run $planCommand first to create the implementation plan.")
     exit 1
 }
 
 if (-not (Test-Path -LiteralPath $paths.FEATURE_SPEC -PathType Leaf)) {
     [Console]::Error.WriteLine("ERROR: spec.md not found in $($paths.FEATURE_DIR)")
-    $specifyCommand = '/speckit-specify'
+    $specifyCommand = '/speckit.specify'
     [Console]::Error.WriteLine("Run $specifyCommand first to create the feature structure.")
     exit 1
 }

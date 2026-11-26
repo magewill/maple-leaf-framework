@@ -1,5 +1,5 @@
 {
-  "version": "1.4.4",
+  "version": "1.4.5",
   "integration_state_schema": 1,
   "installed_integrations": [
     "codebuddy",
@@ -15,6 +15,6 @@
       "invoke_separator": "-"
     }
   },
-  "integration": "qodercli",
-  "default_integration": "qodercli"
+  "integration": "codebuddy",
+  "default_integration": "codebuddy"
 }

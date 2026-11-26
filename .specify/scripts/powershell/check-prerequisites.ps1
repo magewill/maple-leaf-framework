@@ -96,21 +96,21 @@ if ($PathsOnly) {
 # Validate required directories and files
 if (-not (Test-Path -LiteralPath $paths.FEATURE_DIR -PathType Container)) {
     [Console]::Error.WriteLine("ERROR: Feature directory not found: $($paths.FEATURE_DIR)")
-    $specifyCommand = '/speckit-specify'
+    $specifyCommand = '/speckit.specify'
     [Console]::Error.WriteLine("Run $specifyCommand first to create the feature structure.")
     exit 1
 }
 
 if (-not (Test-Path -LiteralPath $paths.IMPL_PLAN -PathType Leaf)) {
     [Console]::Error.WriteLine("ERROR: plan.md not found in $($paths.FEATURE_DIR)")
-    $planCommand = '/speckit-plan'
+    $planCommand = '/speckit.plan'
     [Console]::Error.WriteLine("Run $planCommand first to create the implementation plan.")
     exit 1
 }
 
 if ((Get-Item -LiteralPath $paths.IMPL_PLAN).Length -eq 0) {
     [Console]::Error.WriteLine("ERROR: plan.md is empty in $($paths.FEATURE_DIR)")
-    $planCommand = '/speckit-plan'
+    $planCommand = '/speckit.plan'
     [Console]::Error.WriteLine(
         "Populate it, or remove the empty file and rerun $planCommand with a valid plan template."
     )
@@ -120,7 +120,7 @@ if ((Get-Item -LiteralPath $paths.IMPL_PLAN).Length -eq 0) {
 # Check for spec.md if required
 if ($RequireSpec -and -not (Test-Path -LiteralPath $paths.FEATURE_SPEC -PathType Leaf)) {
     [Console]::Error.WriteLine("ERROR: spec.md not found in $($paths.FEATURE_DIR)")
-    $specifyCommand = '/speckit-specify'
+    $specifyCommand = '/speckit.specify'
     [Console]::Error.WriteLine("Run $specifyCommand first to create the feature specification.")
     exit 1
 }
@@ -128,7 +128,7 @@ if ($RequireSpec -and -not (Test-Path -LiteralPath $paths.FEATURE_SPEC -PathType
 # Check for tasks.md if required
 if ($RequireTasks -and -not (Test-Path -LiteralPath $paths.TASKS -PathType Leaf)) {
     [Console]::Error.WriteLine("ERROR: tasks.md not found in $($paths.FEATURE_DIR)")
-    $tasksCommand = '/speckit-tasks'
+    $tasksCommand = '/speckit.tasks'
     [Console]::Error.WriteLine("Run $tasksCommand first to create the task list.")
     exit 1
 }

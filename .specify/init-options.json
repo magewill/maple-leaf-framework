@@ -1,10 +1,9 @@
 {
-  "ai": "qodercli",
-  "ai_skills": true,
+  "ai": "codebuddy",
   "allow_symlinks": false,
   "feature_numbering": "sequential",
   "here": true,
-  "integration": "qodercli",
+  "integration": "codebuddy",
   "script": "ps",
-  "speckit_version": "1.4.4"
+  "speckit_version": "1.4.5"
 }
