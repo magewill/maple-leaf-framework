@@ -68,8 +68,7 @@ specs/006-rocketmq-module-audit/
 ├── quickstart.md        # Phase 1：端到端验证指南
 ├── contracts/           # Phase 1：对外契约（发送 / 配置来源 / CDC 与异步失败扩展点）
 ├── checklists/
-│   └── requirements.md  # 规格质量清单
-└── review-report.md     # 实施阶段产出：独立审查报告（本命令不创建）
+    └── requirements.md  # 规格质量清单
 ```
 
 ### Source Code (repository root)

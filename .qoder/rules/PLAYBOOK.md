@@ -182,5 +182,4 @@ rg --files -g "*.full.md"                                      -> 0
 - 需求变更必须在合并/发布里程碑并入 `spec.md`，并在 INDEX 标 `applied`；纯 bugfix 不修改 `spec.md`。
 - 已完成任务不得回填到 `tasks.md`；需要追溯时写 history。
 - `plan.md` 只在方案或架构实质变化时更新；执行记录和验证结论不进 `plan.md`。
-- `audit-report.md` / `review-report.md` 保留审查证据，但执行日志与验证结论仍写入 history。
 - 规则修改后必须新建会话才会生效。
