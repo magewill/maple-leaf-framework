@@ -434,7 +434,7 @@ public class UserServiceImpl extends GXMyBatisBaseServiceImpl<UserMapper, UserEn
 | `saveBatchListener(Dict data)` | 批量保存 | 批次实体列表 |
 | `batchChangeListener(Dict data)` | 批量新增或更新（默认转调 `saveBatchListener`） | 批次实体列表 |
 
-载荷键：`entityData`、`updateFieldData`、`conditionFieldData`、`keyValuePairs`、`keyOperatorPairs`、`rawWhereSql`、`rawConditionSql`、`conditionLossless`、`degradeReasons`、`batchEntities`、`snapshotDegraded`、`snapshotScanTruncated`；另有 `operation`（仅更新、物理删除、批量三类事件写入被拦截的写方法名，其余事件不含该键）。字段口径以 `specs/001-mybatis-listener-audit/contracts/event-payload.md` 为准。
+载荷键：`entityData`、`updateFieldData`、`conditionFieldData`、`keyValuePairs`、`keyOperatorPairs`、`rawWhereSql`、`rawConditionSql`、`conditionLossless`、`degradeReasons`、`batchEntities`、`snapshotDegraded`、`snapshotScanTruncated`；另有 `operation`（仅更新、物理删除、批量三类事件写入被拦截的写方法名，其余事件不含该键）。字段口径以 `../specs/001-datasource` 为准。
 
 ```java
 @Component

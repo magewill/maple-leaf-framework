@@ -93,7 +93,7 @@ Get-ChildItem .\eureka-client-example\examples
 
 或直接从源码目录复制：`leaf-base-eureka-client/src/main/resources/examples/`。
 
-**覆盖顺序**（由高到低，实测结论见 `specs/009-eureka-client-module-audit/audit-report.md` §5）：
+**覆盖顺序**（由高到低，实测结论见 `../specs/009-eureka-client` §5）：
 
 1. 命令行参数（`--eureka.client.service-url.defaultZone=...`）
 2. 环境变量（本手册示例使用 `EUREKA_DEFAULT_ZONE` / `EUREKA_REGISTRY_URLS`）
@@ -148,4 +148,4 @@ mvn -o -pl leaf-base-eureka-client clean install -DskipTests
 mvn -o -pl leaf-base-eureka-client dependency:tree "-Dverbose=true"
 ```
 
-相关契约与审查证据：`specs/009-eureka-client-module-audit/`（`spec.md`、`contracts/`、`audit-report.md`）。
+相关契约与审查证据：`../specs/009-eureka-client`（`spec.md`、`contracts/`、`audit-report.md`）。

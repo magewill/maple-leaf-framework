@@ -48,7 +48,7 @@
 
 1. 开关为 `false` 时，模块只能写入 `eureka.client.enabled=false`（最低优先级、应用显式值优先），**不得**写入其它 `eureka.*` 键。
 2. 开关为 `true` 时，模块**不得**写入任何 `eureka.*` 键，尤其不得提供 `register-with-eureka` 与 `service-url.defaultZone`。
-3. 禁止在 `src/main/resources/` 根新增 `application.yml`：它与宿主同名配置位置冲突，最终生效值取决于类路径顺序（见 `specs/009-eureka-client-module-audit/audit-report.md` §5 实测）。
+3. 禁止在 `src/main/resources/` 根新增 `application.yml`：它与宿主同名配置位置冲突，最终生效值取决于类路径顺序（见 `../specs/009-eureka-client` §5 实测）。
 4. 日志通过 `DeferredLogFactory` 输出（环境后处理早于日志系统初始化），内容保持纯 ASCII，且每个上下文只输出一次。
 
 ## 3. 功能基线

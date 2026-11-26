@@ -33,7 +33,7 @@
 
 ### 当前实现边界（2026-10-22 审查登记）
 
-以下为审查确认的现状。新增代码不得假设相反的行为；修复落地后必须同步本节，并在 `specs/005-framework-module-audit/review-report.md` 记录。
+以下为审查确认的现状。新增代码不得假设相反的行为；修复落地后必须同步本节，并在 `../specs/005-framework` 记录。
 
 1. `@Async` 使用 `GXAsyncConfig#getAsyncExecutor` 返回的 `SimpleAsyncTaskExecutor`（虚拟线程），**未接入** `GXMdcWrapper*` 或 `TaskDecorator`，MDC/TraceId 不会自动传播。
 2. `GXBaseRequestLoggingFilter` 在请求结束时只恢复 `X-B3-TraceId` 一个键，其它 MDC 键不会清理；业务代码自行写入 MDC 时必须在自己的 `finally` 中清理。

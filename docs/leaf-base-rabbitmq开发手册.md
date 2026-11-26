@@ -239,4 +239,4 @@ mvn -o -B -pl leaf-base-rabbitmq test -Dgroups=integration
 基线：125 个用例（120 执行 + 5 集成跳过），连续 3 次结果一致（2026-10-25）。
 
 ---
-本文档与实现保持一致；行为变更必须同步更新本文件、`AGENTS.md` 与 `specs/016-rabbitmq-module-audit/contracts/`。
+本文档与实现保持一致；行为变更必须同步更新本文件、`AGENTS.md` 与 `../specs/016-rabbitmq`。

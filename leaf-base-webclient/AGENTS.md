@@ -63,7 +63,7 @@
 13. 在确保原有功能正确性的条件下进行完善；修改已经存在的逻辑时，不得改变现有逻辑的正确性、异常语义和兼容行为。
 14. 严格遵循测试驱动最佳实践：先明确期望行为和回归用例，再实现或调整代码，最后通过测试验证行为没有回退。
 15. 修改 `GXWebClientService` 默认方法时，必须评估对现有实现类覆盖行为、环境配置键、异常语义、token 兼容性和上下游调用方的影响。
-16. 修改 `GXWebClientConfig` 时，过滤器顺序以 `specs/012-webclient-module-audit/contracts/filter-chain-contract.md` 的当前链为准（`requestFilter` → `retryFilter`（指标/日志/SPI/逐尝试时间戳）→ `errorResponseHandleFilter` → `lbGuardFilter` → LB 过滤器）；顺序或组成变更必须同步该契约与本规则。同时保持错误转换语义、连接池参数、超时策略与编解码配置的可预期性，避免无意改变默认运行行为。
+16. 修改 `GXWebClientConfig` 时，过滤器顺序以 `../specs/012-webclient` 的当前链为准（`requestFilter` → `retryFilter`（指标/日志/SPI/逐尝试时间戳）→ `errorResponseHandleFilter` → `lbGuardFilter` → LB 过滤器）；顺序或组成变更必须同步该契约与本规则。同时保持错误转换语义、连接池参数、超时策略与编解码配置的可预期性，避免无意改变默认运行行为。
 17. 修改 `GXWebClientAuthTokenAspect` 时，必须保持方法级注解优先于类级注解的解析语义，并兼顾 AOP 代理类、目标类和无 `GXWebClientService` Bean 场景下的错误处理。
 18. 修改 `GXWebClientExceptionHandler` 时，必须明确返回码、返回文案和异常日志策略是否发生变化，避免静默改变上层接口契约。
 19. 新增公共配置、默认请求头、异常映射规则或安全相关行为前，必须先确认它是否应作为模块级默认行为，而不是某个业务方私有需求。

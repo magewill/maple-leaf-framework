@@ -147,4 +147,4 @@ jar tf leaf-base-eureka-server/target/leaf-base-eureka-server-4.3.0-SNAPSHOT.jar
 ## 8. 相关文档
 
 - 模块开发约定：[`leaf-base-eureka-server/AGENTS.md`](../leaf-base-eureka-server/AGENTS.md)
-- 本次审查与修复计划：[`specs/008-eureka-server-module-audit/`](../specs/008-eureka-server-module-audit/)
+- 本次审查与修复计划：[`../specs/008-eureka-server`](../specs/008-eureka-server/)

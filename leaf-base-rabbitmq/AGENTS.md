@@ -59,7 +59,7 @@
 8. `DefaultClassMapper.setTrustedPackages` 必须包含 `cn.hutool.core.lang`（`"cn.hutool.core"` 不覆盖子包）。
 9. 监听器禁止"捕获异常后正常返回"：不可重试抛 `AmqpRejectAndDontRequeueException`，可重试原样抛出。
 10. 线程池/调度器必须有 `@PreDestroy` 或容器销毁路径；异步执行器必须使用 `GXMdcWrapperThreadPoolExecutor`（自动传播 MDC），禁止手工拷贝 MDC 或把任务丢给裸 `Thread`；禁止在调度线程上阻塞等待子任务。
-11. 修改消息头、失败语义、临时队列语义或配置键时，必须同步更新本文件、`docs/leaf-base-rabbitmq开发手册.md` 与 `specs/016-rabbitmq-module-audit/contracts/`。
+11. 修改消息头、失败语义、临时队列语义或配置键时，必须同步更新本文件、`docs/leaf-base-rabbitmq开发手册.md` 与 `../specs/016-rabbitmq`。
 12. `leaf-base-retry` 与 `jackson-datatype-jsr353` 已移除，不得重新引入；`GXRecoveryCallback` 仅在调用方为模板设置 `RetryTemplate` 时触发。
 
 ## 4. 配置键

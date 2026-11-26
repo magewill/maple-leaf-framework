@@ -1,7 +1,7 @@
 ﻿# leaf-base-webclient 开发手册
 
 > 适用版本：4.3.0-SNAPSHOT（JDK 21 / Spring Boot 4.1.x / Spring Framework 7.x / Spring Cloud 2025.1.x）
-> 契约基线：`specs/012-webclient-module-audit/contracts/`（bean / config / filter-chain / error-mapping / spi）
+> 契约基线：`../specs/012-webclient`（bean / config / filter-chain / error-mapping / spi）
 
 ## 1. 能力概览
 
