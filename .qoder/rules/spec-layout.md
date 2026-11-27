@@ -13,7 +13,7 @@ description: 规格文档采用稳定基线 + 增量变更 + 历史归档；新�
 - `spec.md` / `plan.md` / `tasks.md` 是稳定文档，只承载当前意图，不承载流水账。
 - `research.md`、`data-model.md`、`contracts/`、`quickstart.md` 是稳定设计产物；仅在决策或方案实质变化时原地更新。
 - 每个 `specs/<feature>/` 必须存在 `changes/INDEX.md` 与 `history/README.md`；`/speckit.specify` 后立即创建；缺失不得进入下一阶段。
-- 新任务 / bugfix / clarification 先建 `changes/CR-YYYYMMDD-NNN.md` 并在 `changes/INDEX.md` 登记；编号在仓库内全局递增；不得直接写入 `spec.md`、`plan.md`、`tasks.md`。
+- 新任务 / bugfix / clarification 先建 `changes/CR-YYYYMMDD-HHMMSS.md` 并在 `changes/INDEX.md` 登记；编号在仓库内全局递增；不得直接写入 `spec.md`、`plan.md`、`tasks.md`。
 - CR 类型：`bugfix` / `task` / `clarification` / `converge`；状态：`proposed` / `in-progress` / `applied` / `rejected`。CR 至少包含类型、状态、影响、背景、变更前后、验收标准、代码/测试落点。
 - 常规变更一事件一 CR；历史归档可按 feature + 类型聚合，但标题须标“归档”、影响列全范围、正文保留原始块、INDEX 只登记一行。
 - 纯 bugfix 或不改变需求的变更只保留 CR，不修改 `spec.md`；改变需求的变更在合并/发布里程碑并入 `spec.md` 并标 `applied`。
