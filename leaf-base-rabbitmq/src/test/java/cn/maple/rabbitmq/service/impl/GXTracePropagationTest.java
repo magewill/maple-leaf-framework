@@ -3,6 +3,9 @@ package cn.maple.rabbitmq.service.impl;
 import cn.hutool.core.lang.Dict;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import cn.maple.rabbitmq.dto.inner.GXRabbitMQMessageReqDto;
+import cn.maple.rabbitmq.support.GXAmqpManagementClient;
+import cn.maple.rabbitmq.support.GXAmqpMessagePublisher;
+import cn.maple.rabbitmq.support.GXSendOutcome;
 import cn.maple.rabbitmq.support.GXTestRabbitFixtures;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,13 +16,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.MDC;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
-import org.springframework.amqp.rabbit.connection.CorrelationData;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -27,17 +28,17 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
 
 @ExtendWith(MockitoExtension.class)
 class GXTracePropagationTest {
     @Mock
-    private RabbitTemplate rabbitTemplate;
+    private GXAmqpMessagePublisher publisher;
 
     @Mock
-    private RabbitAdmin rabbitAdmin;
+    private GXAmqpManagementClient managementClient;
 
     private GXSendRabbitMQServiceImpl service;
 
@@ -45,11 +46,11 @@ class GXTracePropagationTest {
 
     @BeforeEach
     void setUp() {
-        service = GXTestRabbitFixtures.newService(rabbitTemplate, rabbitAdmin);
+        service = GXTestRabbitFixtures.newService(publisher, managementClient);
         doAnswer(invocation -> {
-            captured.add(invocation.getArgument(2));
-            return null;
-        }).when(rabbitTemplate).convertAndSend(anyString(), anyString(), any(Object.class), nullable(CorrelationData.class));
+            captured.add(invocation.getArgument(1));
+            return CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED);
+        }).when(publisher).send(anyString(), any(Message.class), anyLong());
     }
 
     @AfterEach

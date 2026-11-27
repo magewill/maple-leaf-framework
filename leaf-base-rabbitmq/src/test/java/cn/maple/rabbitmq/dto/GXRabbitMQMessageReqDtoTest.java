@@ -1,10 +1,12 @@
 package cn.maple.rabbitmq.dto;
 
 import cn.hutool.core.lang.Dict;
+import cn.maple.rabbitmq.dto.inner.GXCorrelationData;
 import cn.maple.rabbitmq.dto.inner.GXRabbitMQMessageReqDto;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.MessageProperties;
-import org.springframework.amqp.rabbit.connection.CorrelationData;
+
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -12,7 +14,7 @@ class GXRabbitMQMessageReqDtoTest {
     @Test
     @SuppressWarnings("deprecation")
     void shouldBuildWithAllFields() {
-        CorrelationData correlationData = new CorrelationData("id-1");
+        GXCorrelationData correlationData = new GXCorrelationData("id-1", "payload");
         GXRabbitMQMessageReqDto dto = GXRabbitMQMessageReqDto.builder()
                 .exchange("order.exchange")
                 .routingKey("order.created")
@@ -59,5 +61,17 @@ class GXRabbitMQMessageReqDtoTest {
         assertThat(dto.getRoutingKey()).isEqualTo("r");
         assertThat(dto.getData()).isNull();
         assertThat(dto.getCorrelationData()).isNull();
+    }
+
+    @Test
+    void shouldExposeSettlementResult() {
+        GXCorrelationData correlationData = new GXCorrelationData("id-1");
+
+        assertThat(correlationData.await(Duration.ofMillis(10))).isFalse();
+
+        correlationData.settlement().complete(true);
+
+        assertThat(correlationData.await(Duration.ofMillis(10))).isTrue();
+        assertThat(correlationData.getId()).isEqualTo("id-1");
     }
 }

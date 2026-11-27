@@ -1,6 +1,6 @@
 # 契约：发送与资源管理 API（GXSendRabbitMQService）
 
-**Feature**: `016-rabbitmq-module-audit` | **Date**: 2026-10-25 | **Spec**: [../spec.md](../spec.md)
+**Feature**: `016-rabbitmq-module-audit` | **Date**: 2026-10-25（2026-11-27 随 AMQP 1.0 迁移更新） | **Spec**: [../spec.md](../spec.md)
 
 方法签名不变。下表"失败"列是修复后的**唯一**表达方式；同一方法不再混用 `null`/`false`/异常。
 
@@ -8,16 +8,18 @@
 
 | 方法 | 返回 | 成功 | 失败 | 空值契约 |
 | --- | --- | --- | --- | --- |
-| `sendNormalMessage(GXRabbitMQMessageReqDto)` | `Object`（保持 `null`，不承诺消息 ID） | 已提交到 `RabbitTemplate`（不等于 Broker 确认） | 参数非法 → `GXBusinessException`；连接/协议错误 → `AmqpException`（保留原类型） | DTO/`exchange`/`routingKey`/`data`/`messageProperties` 必须非空；不修改调用方 `MessageProperties` |
+| `sendNormalMessage(GXRabbitMQMessageReqDto)` | `Object`（保持 `null`，不承诺消息 ID） | 已写出到 AMQP 1.0 链路（不等于 Broker 确认）；结算结果走 confirm/returns/recovery 回调，并完成 `GXCorrelationData.settlement()` | 参数非法 → `GXBusinessException`；写出阶段失败 → `AmqpException`（保留原类型，同时完成结算并回调） | DTO/`exchange`/`routingKey`/`data`/`messageProperties` 必须非空；不修改调用方 `MessageProperties` |
+| `sendNormalMessageAwait(dto, timeout)` | `boolean` | `true` = Broker 返回 `accepted` | 参数非法 → `GXBusinessException`；写出/结算失败 → `GXRabbitMQOperationException`（cause 保留原始异常） | 同上 |
+| `sendRawMessage(exchange, routingKey, payload, props, correlation)` | `Object`（`null`） | 原始载荷按 UTF-8 写出，不重新序列化 | 同上 | `payload`/`props` 非空 |
 | `createQueue(name, durable, exclusive, autoDelete, args)` | `Queue` | Broker 声明成功，返回的属性与实际声明一致 | `GXBusinessException`（参数）或 `GXRabbitMQOperationException`（Broker 冲突/失败） | 参数非空；`args` 可为 `null` |
 | `createDurableQueue(name)` | `Queue` | 同上（`durable=true, exclusive=false, autoDelete=false`） | 同上 | 同上 |
-| `createTemporaryQueue(name)` | `Queue` | `durable=false, exclusive=false, autoDelete=true` 声明成功 | 同上 | 同上；**排他队列不在支持范围** |
+| `createTemporaryQueue(name)` | `Queue` | `durable=true, exclusive=false, autoDelete=true` 声明成功（RabbitMQ 4.x 默认禁止非持久化非排他队列） | 同上 | 同上；**排他队列不在支持范围** |
 | `deleteQueue(name)` | `boolean` | `true`=已删除；`false`=Broker 明确不存在 | `GXRabbitMQOperationException`（传输/权限） | 参数非空 |
-| `queueExists(name)` | `boolean` | 以 `RabbitAdmin.getQueueProperties` 为准 | `GXRabbitMQOperationException`（传输失败，不再返回 `false` 掩盖） | 参数非空 |
+| `queueExists(name)` | `boolean` | 以 Management API `GET /api/queues/{vhost}/{name}` 为准（404 = 不存在） | `GXRabbitMQOperationException`（传输失败，不再返回 `false` 掩盖） | 参数非空 |
 | `purgeQueue(name)` | `boolean` | `true`=已清空；**不会返回 `false`**（队列不存在由 Broker 返回 404，包装为异常） | `GXRabbitMQOperationException` | 参数非空 |
 | `createExchange(exchange)` | `boolean` | `true`=声明成功或已存在且属性一致（幂等） | `GXRabbitMQOperationException`（传输失败或"已存在但类型不同"的 `PRECONDITION_FAILED`） | 参数非空；`getName()` 非空白；**不会返回 `false`**（保留返回类型仅为签名兼容） |
 | `bindQueueToExchange(q, ex, rk)` | `boolean` | `true`=绑定成功或已存在（幂等） | `GXRabbitMQOperationException` | 三个参数非空/非空白；**不会返回 `false`** |
-| `unbindQueueFromExchange(q, ex, rk)` | `boolean` | `true`=解绑完成（`removeBinding` 幂等，**不返回 `false`**） | `GXRabbitMQOperationException` | 同上 |
+| `unbindQueueFromExchange(q, ex, rk)` | `boolean` | `true`=解绑完成；`false`=绑定不存在 | `GXRabbitMQOperationException` | 同上 |
 | `setupMessageChannel(...)` | `boolean` | `true`=交换机+队列+绑定全部成功；**不会返回 `false`** | `GXRabbitMQOperationException`（`detail` 含已完成步骤与失败步骤） | `exchange`/`routingKey`/`queueName` 非空 |
 | `setupDurableMessageChannel(...)` | `boolean` | 同上（持久化参数） | 同上 | 同上 |
 | `setupMessageChannelAsync(...)` | `CompletableFuture<Boolean>` | 成功 `true` | `failedFuture(GXRabbitMQOperationException)`；参数非法同步抛 `GXBusinessException`；线程池拒绝 → `failedFuture` | 同上 |

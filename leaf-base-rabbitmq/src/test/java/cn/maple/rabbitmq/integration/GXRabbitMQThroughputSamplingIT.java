@@ -3,17 +3,17 @@ package cn.maple.rabbitmq.integration;
 import cn.hutool.core.lang.Dict;
 import cn.maple.rabbitmq.dto.inner.GXRabbitMQMessageReqDto;
 import cn.maple.rabbitmq.service.impl.GXSendRabbitMQServiceImpl;
-import cn.maple.rabbitmq.support.GXTestRabbitFixtures;
+import cn.maple.rabbitmq.support.GXAmqpManagementClient;
+import cn.maple.rabbitmq.support.GXAmqpMessagePublisher;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.amqp.client.SingleAmqpConnectionFactory;
 import org.springframework.amqp.core.MessageProperties;
-import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -37,28 +37,26 @@ class GXRabbitMQThroughputSamplingIT {
 
     private static final int MESSAGES_PER_THREAD = 50;
 
-    private static CachingConnectionFactory connectionFactory;
+    private static SingleAmqpConnectionFactory connectionFactory;
+
+    private static GXAmqpMessagePublisher publisher;
+
+    private static GXAmqpManagementClient managementClient;
 
     private static GXSendRabbitMQServiceImpl service;
 
-    private static RabbitAdmin rabbitAdmin;
-
     @BeforeAll
     static void setUp() {
-        String host = System.getenv("RABBITMQ_HOST");
-        int port = Integer.parseInt(envOrDefault("RABBITMQ_PORT", "5672"));
-        connectionFactory = new CachingConnectionFactory(host, port);
-        connectionFactory.setUsername(envOrDefault("RABBITMQ_USERNAME", "guest"));
-        connectionFactory.setPassword(envOrDefault("RABBITMQ_PASSWORD", "guest"));
-        connectionFactory.setVirtualHost(envOrDefault("RABBITMQ_VHOST", "/"));
-        rabbitAdmin = new RabbitAdmin(connectionFactory);
-        service = GXTestRabbitFixtures.newService(rabbitTemplate(), rabbitAdmin);
+        connectionFactory = GXIntegrationSupport.connectionFactory();
+        managementClient = GXIntegrationSupport.managementClient();
+        publisher = new GXAmqpMessagePublisher(connectionFactory);
+        service = GXIntegrationSupport.service(publisher, managementClient);
     }
 
     @AfterAll
     static void tearDown() {
-        if (service != null) {
-            service.shutdownAsyncExecutor();
+        if (publisher != null) {
+            publisher.close();
         }
         if (connectionFactory != null) {
             connectionFactory.destroy();
@@ -69,14 +67,14 @@ class GXRabbitMQThroughputSamplingIT {
     void shouldSampleSequentialSendLatency() {
         String queueName = "maple.it.perf." + UUID.randomUUID();
         try {
-            service.createQueue(queueName, false, false, true, null);
+            service.createQueue(queueName, true, false, true, null);
             long[] samples = new long[SEQUENTIAL_SAMPLES];
             for (int index = 0; index < SEQUENTIAL_SAMPLES; index++) {
                 long start = System.nanoTime();
-                sendOnce(queueName, index);
+                assertThat(sendOnce(queueName, index)).isTrue();
                 samples[index] = System.nanoTime() - start;
             }
-            report("sequential", samples, System.nanoTime());
+            report("sequential", samples);
         } finally {
             service.deleteQueue(queueName);
         }
@@ -87,7 +85,7 @@ class GXRabbitMQThroughputSamplingIT {
         String queueName = "maple.it.perf.concurrent." + UUID.randomUUID();
         ExecutorService workers = Executors.newFixedThreadPool(CONCURRENT_THREADS);
         try {
-            service.createQueue(queueName, false, false, true, null);
+            service.createQueue(queueName, true, false, true, null);
             long start = System.nanoTime();
             List<Future<?>> futures = new ArrayList<>();
             for (int threadIndex = 0; threadIndex < CONCURRENT_THREADS; threadIndex++) {
@@ -99,7 +97,7 @@ class GXRabbitMQThroughputSamplingIT {
                 }));
             }
             for (Future<?> future : futures) {
-                future.get(60, TimeUnit.SECONDS);
+                future.get(120, TimeUnit.SECONDS);
             }
             long elapsedNanos = System.nanoTime() - start;
             double throughput = (CONCURRENT_THREADS * MESSAGES_PER_THREAD) / (elapsedNanos / 1_000_000_000.0d);
@@ -113,7 +111,7 @@ class GXRabbitMQThroughputSamplingIT {
         }
     }
 
-    private static void report(String label, long[] samples, long ignored) {
+    private static void report(String label, long[] samples) {
         long[] sorted = Arrays.copyOf(samples, samples.length);
         Arrays.sort(sorted);
         long total = 0L;
@@ -128,21 +126,12 @@ class GXRabbitMQThroughputSamplingIT {
                 TimeUnit.NANOSECONDS.toMicros(sorted[sorted.length - 1]));
     }
 
-    private static void sendOnce(String queueName, int sequence) {
-        service.sendNormalMessage(GXRabbitMQMessageReqDto.builder()
+    private static boolean sendOnce(String queueName, int sequence) {
+        return service.sendNormalMessageAwait(GXRabbitMQMessageReqDto.builder()
                 .exchange("")
                 .routingKey(queueName)
                 .data(Dict.create().set("sequence", sequence))
                 .messageProperties(new MessageProperties())
-                .build());
-    }
-
-    private static RabbitTemplate rabbitTemplate() {
-        return new RabbitTemplate(connectionFactory);
-    }
-
-    private static String envOrDefault(String name, String defaultValue) {
-        String value = System.getenv(name);
-        return value == null || value.isBlank() ? defaultValue : value;
+                .build(), Duration.ofSeconds(5));
     }
 }

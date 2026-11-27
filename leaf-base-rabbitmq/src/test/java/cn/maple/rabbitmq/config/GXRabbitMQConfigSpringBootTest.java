@@ -3,29 +3,33 @@ package cn.maple.rabbitmq.config;
 import cn.maple.rabbitmq.GXRabbitMQTestApplication;
 import cn.maple.rabbitmq.listener.impl.GXDefaultRabbitMQQueueListenerImpl;
 import cn.maple.rabbitmq.properties.GXRabbitMQProperties;
+import cn.maple.rabbitmq.support.GXAmqpManagementClient;
+import cn.maple.rabbitmq.support.GXAmqpMessagePublisher;
 import org.junit.jupiter.api.Test;
-import org.springframework.amqp.rabbit.AsyncRabbitTemplate;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitMessagingTemplate;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.client.AmqpClient;
+import org.springframework.amqp.client.AmqpConnectionFactory;
+import org.springframework.amqp.client.config.MethodAmqpMessageListenerContainerFactory;
 import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
+import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.amqp.autoconfigure.AmqpConnectionDetails;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
-import org.springframework.scheduling.TaskScheduler;
 import org.springframework.test.util.ReflectionTestUtils;
-
-import java.time.Instant;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * AMQP 1.0 装配验证：不连接 Broker，只校验 Bean 图与关键参数。
+ */
 @SpringBootTest(classes = GXRabbitMQTestApplication.class,
         properties = {
                 "spring.rabbitmq.host=localhost",
                 "spring.rabbitmq.port=5672",
-                "spring.rabbitmq.listener.simple.auto-startup=false",
+                "spring.rabbitmq.virtual-host=/maple",
+                "spring.rabbitmq.username=guest",
+                "spring.rabbitmq.password=guest",
+                "spring.amqp.listener.auto-startup=false",
                 "spring.cloud.nacos.discovery.enabled=false",
                 "spring.cloud.nacos.config.enabled=false",
                 "spring.cloud.service-registry.auto-registration.enabled=false",
@@ -41,56 +45,40 @@ class GXRabbitMQConfigSpringBootTest {
     private GXRabbitMQProperties rabbitProperties;
 
     @Test
-    void shouldExposeCoreBeans() {
-        assertThat(context.getBean(RabbitTemplate.class)).isNotNull();
-        assertThat(context.getBean(RabbitAdmin.class)).isNotNull();
-        assertThat(context.getBean(AsyncRabbitTemplate.class)).isNotNull();
-        assertThat(context.getBean(RabbitMessagingTemplate.class)).isNotNull();
+    void shouldExposeAmqp10Beans() {
+        assertThat(context.getBean(AmqpConnectionFactory.class)).isNotNull();
+        assertThat(context.getBean(AmqpClient.class)).isNotNull();
+        assertThat(context.getBean(GXAmqpMessagePublisher.class)).isNotNull();
+        assertThat(context.getBean(GXAmqpManagementClient.class)).isNotNull();
+        assertThat(context.getBean(MethodAmqpMessageListenerContainerFactory.class)).isNotNull();
     }
 
     @Test
     void shouldUseJacksonConverter() {
-        assertThat(context.getBean(RabbitTemplate.class).getMessageConverter())
-                .isInstanceOf(JacksonJsonMessageConverter.class);
+        assertThat(context.getBean(MessageConverter.class)).isInstanceOf(JacksonJsonMessageConverter.class);
     }
 
     @Test
-    void shouldInstallAllCallbacks() {
-        RabbitTemplate rabbitTemplate = context.getBean(RabbitTemplate.class);
+    void shouldDisableAutoAcceptOnListenerContainerFactory() {
+        MethodAmqpMessageListenerContainerFactory factory =
+                context.getBean(MethodAmqpMessageListenerContainerFactory.class);
 
-        assertThat(ReflectionTestUtils.getField(rabbitTemplate, "confirmCallback")).isNotNull();
-        assertThat(ReflectionTestUtils.getField(rabbitTemplate, "returnsCallback")).isNotNull();
-        assertThat(ReflectionTestUtils.getField(rabbitTemplate, "recoveryCallback")).isNotNull();
+        assertThat(ReflectionTestUtils.getField(factory, "autoAccept")).isEqualTo(false);
     }
 
     @Test
-    void shouldExposeSchedulerByDefault() {
-        assertThat(context.containsBean("rabbitTaskScheduler")).isTrue();
-        assertThat(context.getBean("rabbitTaskScheduler", TaskScheduler.class)).isNotNull();
+    void shouldResolveLegacyConnectionDetails() {
+        AmqpConnectionDetails details = context.getBean(AmqpConnectionDetails.class);
+
+        assertThat(details.getAddress().host()).isEqualTo("localhost");
+        assertThat(details.getAddress().port()).isEqualTo(5672);
+        assertThat(details.getUsername()).isEqualTo("guest");
+        assertThat(details.getPassword()).isEqualTo("guest");
     }
 
     @Test
-    void shouldRunScheduledTasksConcurrently() throws Exception {
-        TaskScheduler scheduler = context.getBean("rabbitTaskScheduler", TaskScheduler.class);
-        int taskCount = 4;
-        CountDownLatch latch = new CountDownLatch(taskCount);
-        long start = System.nanoTime();
-
-        for (int index = 0; index < taskCount; index++) {
-            scheduler.schedule(() -> {
-                try {
-                    Thread.sleep(200L);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                } finally {
-                    latch.countDown();
-                }
-            }, Instant.now());
-        }
-
-        assertThat(latch.await(5, TimeUnit.SECONDS)).isTrue();
-        long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-        assertThat(elapsedMillis).isLessThan(700L);
+    void shouldPreferSpringAmqpPrefixWhenPresent() {
+        assertThat(context.getBean(AmqpConnectionDetails.class).getAddress().host()).isEqualTo("localhost");
     }
 
     @Test
@@ -107,6 +95,14 @@ class GXRabbitMQConfigSpringBootTest {
     void shouldBindSpringRabbitProperties() {
         assertThat(rabbitProperties.getHost()).isEqualTo("localhost");
         assertThat(rabbitProperties.getPort()).isEqualTo(5672);
+        assertThat(rabbitProperties.getVirtualHost()).isEqualTo("/maple");
         assertThat(rabbitProperties.getDefaultQueueName()).isEqualTo("test.default.queue");
+    }
+
+    @Test
+    void shouldNotExposeClassicBeans() {
+        assertThat(context.containsBean("rabbitTemplate")).isFalse();
+        assertThat(context.containsBean("rabbitAdmin")).isFalse();
+        assertThat(context.containsBean("asyncRabbitTemplate")).isFalse();
     }
 }

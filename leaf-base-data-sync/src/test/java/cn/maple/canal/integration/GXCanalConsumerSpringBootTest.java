@@ -16,9 +16,9 @@ import cn.maple.canal.service.impl.rabbit.GXCanalRabbitMQFailureHandler;
 import cn.maple.canal.service.impl.rocketmq.GXCanalRocketMQFailureHandler;
 import cn.maple.canal.service.support.GXCanalHandlerResolver;
 import cn.maple.canal.service.support.GXCanalLogThrottle;
+import cn.maple.rabbitmq.service.GXSendRabbitMQService;
+import org.mockito.Mockito;
 import org.junit.jupiter.api.Test;
-import org.springframework.amqp.core.Exchange;
-import org.springframework.amqp.core.Queue;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -49,7 +49,7 @@ class GXCanalConsumerSpringBootTest {
             assertThat(context).hasNotFailed();
             assertThat(context).hasSingleBean(GXCanalRabbitMQListener.class);
             assertThat(context.getBeanNamesForType(GXCanalRocketMQListener.class)).isEmpty();
-            assertThat(context.getBeanNamesForType(Queue.class)).isNotEmpty();
+            assertThat(context).hasSingleBean(GXCanalConfig.CanalRabbitTopology.class);
 
             AtomicInteger handled = handlerCounter(context.getBean(CountingHandler.class));
             context.getBean(GXCanalRabbitMQListener.class).listener(PAYLOAD, "trace-it", null);
@@ -67,8 +67,7 @@ class GXCanalConsumerSpringBootTest {
             assertThat(context).hasNotFailed();
             assertThat(context).hasSingleBean(GXCanalRocketMQListener.class);
             assertThat(context.getBeanNamesForType(GXCanalRabbitMQListener.class)).isEmpty();
-            assertEquals(0, context.getBeanNamesForType(Queue.class).length);
-            assertEquals(0, context.getBeanNamesForType(Exchange.class).length);
+            assertEquals(0, context.getBeanNamesForType(GXCanalConfig.CanalRabbitTopology.class).length);
 
             AtomicInteger handled = handlerCounter(context.getBean(CountingHandler.class));
             context.getBean(GXCanalRocketMQListener.class).onMessage(PAYLOAD);
@@ -106,6 +105,11 @@ class GXCanalConsumerSpringBootTest {
             GXCanalConsumeStatistics.class, GXCanalLogThrottle.class, GXCanalRabbitMQFailureHandler.class,
             GXCanalRocketMQFailureHandler.class, GXCanalRabbitMQListener.class, GXCanalRocketMQListener.class})
     static class ScanConfig {
+        @Bean
+        GXSendRabbitMQService sendRabbitMQService() {
+            return Mockito.mock(GXSendRabbitMQService.class);
+        }
+
         @Bean("demoSysUserService")
         CountingHandler demoSysUserService() {
             return new CountingHandler();

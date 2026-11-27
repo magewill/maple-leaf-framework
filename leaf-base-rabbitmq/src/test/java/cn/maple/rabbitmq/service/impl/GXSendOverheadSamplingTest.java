@@ -1,5 +1,8 @@
 package cn.maple.rabbitmq.service.impl;
 
+import cn.maple.rabbitmq.support.GXAmqpManagementClient;
+import cn.maple.rabbitmq.support.GXAmqpMessagePublisher;
+import cn.maple.rabbitmq.support.GXSendOutcome;
 import cn.maple.rabbitmq.support.GXTestRabbitFixtures;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -8,13 +11,17 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.MDC;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.core.Message;
 
 import java.util.Arrays;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 
 /**
  * 无 Broker 的发送耗时采样（SC-006）：500 条样本，输出 avg/p50/p95/max。
@@ -26,16 +33,18 @@ class GXSendOverheadSamplingTest {
     private static final int SAMPLE_COUNT = 500;
 
     @Mock
-    private RabbitTemplate rabbitTemplate;
+    private GXAmqpMessagePublisher publisher;
 
     @Mock
-    private RabbitAdmin rabbitAdmin;
+    private GXAmqpManagementClient managementClient;
 
     private GXSendRabbitMQServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = GXTestRabbitFixtures.newService(rabbitTemplate, rabbitAdmin);
+        service = GXTestRabbitFixtures.newService(publisher, managementClient);
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED));
         MDC.put("X-B3-TraceId", "sampling-trace");
     }
 

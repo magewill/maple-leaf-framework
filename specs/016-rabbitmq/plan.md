@@ -17,6 +17,24 @@
 
 测试是本计划的验收核心：模块从 0 用例提升到 ≥60 用例，覆盖 13 个公开方法、4 个装配/配置/监听类型、16×100 并发、32 线程同队列声明、Spring 上下文装配，并以环境变量门控的真实 Broker 集成用例补端到端证据。
 
+### 协议迁移（2026-11-27，CR-20261127-055）
+
+上述四处改造完成后，模块于 2026-11-27 从经典 AMQP 0-9-1 迁移到 **AMQP 1.0**（Spring Boot 4.2 官方支持）：
+
+* 依赖：`spring-boot-rabbitmq` → `spring-boot-starter-amqp`（`spring-amqp-client` + ProtonJ2）；
+  `RabbitTemplate`/`RabbitAdmin`/`AsyncRabbitTemplate`/`RabbitMessagingTemplate`/`rabbitTaskScheduler` 移除。
+* 发送：`GXAmqpMessagePublisher` 走 v2 地址（`/exchanges/...`、`/queues/...`），
+  `accepted`/`rejected`/`released` 映射到 confirm/returns/recovery 回调。
+* 拓扑：协议无声明能力，改由 `GXAmqpManagementClient` 调用 RabbitMQ Management HTTP API。
+* 消费：`@RabbitListener` → `@AmqpListener(addresses="/queues/<queue>")`，容器 `autoAccept=false`，
+  监听器显式 `ACCEPT/REJECT/REQUEUE`。
+* 配置：`GXRabbitMQProperties` 不再继承 `RabbitProperties`；`spring.amqp.*` 优先、`spring.rabbitmq.*` 回退；
+  vhost 经 `ConnectionOptionsCustomizer` 注入 open 帧。
+* 验收：158 用例（148 执行 + 10 集成）对真实 RabbitMQ 4.4.1 全绿；顺序发送 p95 ≈ 1.4 ms、
+  8 线程并发 ≈ 3100 msg/s。
+
+详细变更、验收标准与跨模块影响见 [CR-20261127-055](./changes/CR-20261127-055.md)。
+
 ## Technical Context
 
 **Language/Version**: Java 21（`maven.compiler.release=21`）；构建启用 ErrorProne 2.50.0 + NullAway 0.13.4（`AnnotatedPackages=cn.maple`、`JSpecifyMode=true`）

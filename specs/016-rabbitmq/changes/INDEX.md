@@ -7,3 +7,4 @@
 | CR-20261125-034 | task | applied | `tasks.md#T001` ~ `T069` | 016-rabbitmq-module-audit 执行记录与实施期新增修复归档 | 2026-11-25 |
 | CR-20261126-051 | task | applied | `plan.md`；`quickstart.md` | 016-rabbitmq-module-audit 清理报告引用 | 2026-11-26 |
 | CR-20261126-054 | bugfix | applied | 无 spec 变更；`pom.xml`；`properties/GXRabbitMQProperties.java`；`config/GXRabbitMQConfig.java`；`service/impl/GXQueueDeclarationConcurrencyTest.java` | 适配 Spring Boot 4.2 的 AMQP 模块拆分，恢复 leaf-base-rabbitmq 编译并稳定并发用例 | 2026-11-26 |
+| CR-20261127-055 | task | applied | `leaf-base-rabbitmq` 全部代码与测试；`pom.xml`；`AGENTS.md`；`docs/leaf-base-rabbitmq开发手册.md` | leaf-base-rabbitmq 迁移到 AMQP 1.0 协议（Spring Boot 4.2 + ProtonJ2 + 管理 API 拓扑） | 2026-11-27 |

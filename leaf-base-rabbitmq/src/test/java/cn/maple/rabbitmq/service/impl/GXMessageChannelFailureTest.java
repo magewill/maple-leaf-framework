@@ -3,6 +3,9 @@ package cn.maple.rabbitmq.service.impl;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.rabbitmq.exception.GXRabbitMQOperationException;
 import cn.maple.rabbitmq.exception.GXRabbitMQOperationException.Operation;
+import cn.maple.rabbitmq.support.GXAmqpManagementClient;
+import cn.maple.rabbitmq.support.GXAmqpManagementException;
+import cn.maple.rabbitmq.support.GXAmqpMessagePublisher;
 import cn.maple.rabbitmq.support.GXTestRabbitFixtures;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -10,10 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.core.DirectExchange;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -23,17 +23,21 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class GXMessageChannelFailureTest {
     @Mock
-    private RabbitTemplate rabbitTemplate;
+    private GXAmqpMessagePublisher publisher;
 
     @Mock
-    private RabbitAdmin rabbitAdmin;
+    private GXAmqpManagementClient managementClient;
 
     private GXSendRabbitMQServiceImpl service;
 
@@ -41,7 +45,7 @@ class GXMessageChannelFailureTest {
 
     @BeforeEach
     void setUp() {
-        service = GXTestRabbitFixtures.newService(rabbitTemplate, rabbitAdmin);
+        service = GXTestRabbitFixtures.newService(publisher, managementClient);
     }
 
     @AfterEach
@@ -51,7 +55,8 @@ class GXMessageChannelFailureTest {
 
     @Test
     void shouldReportCompletedExchangeWhenQueueFails() {
-        doThrow(new AmqpException("PRECONDITION_FAILED")).when(rabbitAdmin).declareQueue(any());
+        doThrow(new GXAmqpManagementException("PRECONDITION_FAILED", 400))
+                .when(managementClient).declareQueue(anyString(), anyBoolean(), anyBoolean(), anyMap());
 
         assertThatThrownBy(() -> service.setupMessageChannel("order.queue", true, false, false, null, exchange, "key"))
                 .isInstanceOf(GXRabbitMQOperationException.class)
@@ -65,7 +70,8 @@ class GXMessageChannelFailureTest {
 
     @Test
     void shouldReportNoCompletedStepWhenExchangeFails() {
-        doThrow(new AmqpException("channel closed")).when(rabbitAdmin).declareExchange(any());
+        doThrow(new GXAmqpManagementException("channel closed", 500))
+                .when(managementClient).declareExchange(any());
 
         assertThatThrownBy(() -> service.setupMessageChannel("order.queue", true, false, false, null, exchange, "key"))
                 .isInstanceOf(GXRabbitMQOperationException.class)
@@ -78,8 +84,8 @@ class GXMessageChannelFailureTest {
 
     @Test
     void shouldReportTwoCompletedStepsWhenBindingFails() {
-        when(rabbitAdmin.declareQueue(any())).thenReturn("order.queue");
-        doThrow(new AmqpException("no route")).when(rabbitAdmin).declareBinding(any());
+        doThrow(new GXAmqpManagementException("no route", 404))
+                .when(managementClient).bindQueue(anyString(), anyString(), anyString());
 
         assertThatThrownBy(() -> service.setupMessageChannel("order.queue", true, false, false, null, exchange, "key"))
                 .isInstanceOf(GXRabbitMQOperationException.class)
@@ -93,7 +99,8 @@ class GXMessageChannelFailureTest {
 
     @Test
     void shouldReturnFailedFutureWhenAsyncSetupFails() {
-        doThrow(new AmqpException("boom")).when(rabbitAdmin).declareQueue(any());
+        doThrow(new GXAmqpManagementException("boom", 500))
+                .when(managementClient).declareQueue(anyString(), anyBoolean(), anyBoolean(), anyMap());
 
         CompletableFuture<Boolean> future = service.setupMessageChannelAsync(
                 "order.queue", true, false, false, null, exchange, "key");
@@ -112,14 +119,14 @@ class GXMessageChannelFailureTest {
 
     @Test
     void shouldReturnFailedFutureWhenExecutorRejects() throws Exception {
-        GXSendRabbitMQServiceImpl saturated = GXTestRabbitFixtures.newService(rabbitTemplate, rabbitAdmin, 1, 1, 0);
+        GXSendRabbitMQServiceImpl saturated = GXTestRabbitFixtures.newService(publisher, managementClient, 1, 1, 0);
         CountDownLatch started = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         doAnswer(invocation -> {
             started.countDown();
             release.await(5, TimeUnit.SECONDS);
             return null;
-        }).when(rabbitAdmin).declareExchange(any());
+        }).when(managementClient).declareExchange(any());
 
         CompletableFuture<Boolean> first = saturated.setupMessageChannelAsync(
                 "order.queue", true, false, false, null, exchange, "key");
@@ -138,11 +145,9 @@ class GXMessageChannelFailureTest {
 
     @Test
     void shouldDeclareQueueEvenWhenExchangeAlreadyDeclared() {
-        when(rabbitAdmin.declareQueue(any())).thenReturn("order.queue");
-
         service.setupMessageChannel("order.queue", true, false, false, null, exchange, "key");
         service.setupMessageChannel("order.queue", true, false, false, null, exchange, "key");
 
-        org.mockito.Mockito.verify(rabbitAdmin, org.mockito.Mockito.times(2)).declareQueue(any());
+        verify(managementClient, times(2)).declareQueue(anyString(), anyBoolean(), anyBoolean(), anyMap());
     }
 }

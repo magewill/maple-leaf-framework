@@ -7,10 +7,37 @@
       "description": "RabbitMQ config source. local: load rabbit.yml from classpath or ./config/<profile>/; nacos: pull rabbit.yml from Nacos at startup when server-addr is configured."
     },
     {
-      "name": "maple.framework.rabbitmq.scheduler.expose",
+      "name": "maple.framework.rabbitmq.confirm-timeout",
+      "type": "java.lang.Long",
+      "defaultValue": 5000,
+      "description": "Milliseconds to wait for the AMQP 1.0 delivery outcome on the asynchronous send path."
+    },
+    {
+      "name": "maple.framework.rabbitmq.management.enabled",
       "type": "java.lang.Boolean",
       "defaultValue": true,
-      "description": "Whether to expose the rabbitTaskScheduler as a TaskScheduler bean. Set false to keep the Spring Boot default task scheduler."
+      "description": "Enable the RabbitMQ Management HTTP API used for queue/exchange/binding operations. AMQP 1.0 has no in-protocol topology declaration."
+    },
+    {
+      "name": "maple.framework.rabbitmq.management.url",
+      "type": "java.lang.String",
+      "defaultValue": "http://<spring.amqp.host>:15672",
+      "description": "Base URL of the RabbitMQ Management API."
+    },
+    {
+      "name": "maple.framework.rabbitmq.management.username",
+      "type": "java.lang.String",
+      "description": "Username for the Management API; falls back to the AMQP connection username."
+    },
+    {
+      "name": "maple.framework.rabbitmq.management.password",
+      "type": "java.lang.String",
+      "description": "Password for the Management API; falls back to the AMQP connection password."
+    },
+    {
+      "name": "maple.framework.rabbitmq.management.virtual-host",
+      "type": "java.lang.String",
+      "description": "Virtual host used by the Management API; falls back to spring.rabbitmq.virtual-host."
     },
     {
       "name": "maple.framework.rabbitmq.thread-pool.core-size",
@@ -41,6 +68,17 @@
       "type": "java.lang.String",
       "defaultValue": "maple.default.queue",
       "description": "Queue name consumed by the default listener; overrides spring.rabbitmq.default-queue-name."
+    },
+    {
+      "name": "spring.rabbitmq.addresses",
+      "type": "java.lang.String",
+      "description": "Legacy comma separated host:port list; the first entry is used as the AMQP 1.0 endpoint and takes precedence over host/port."
+    },
+    {
+      "name": "spring.rabbitmq.virtual-host",
+      "type": "java.lang.String",
+      "defaultValue": "/",
+      "description": "Virtual host applied to the AMQP 1.0 open frame; spring.amqp.virtual-host takes precedence when set."
     }
   ]
 }

@@ -1,258 +1,232 @@
 package cn.maple.rabbitmq.config;
 
-import cn.hutool.core.util.ObjectUtil;
-import cn.maple.core.framework.util.GXSpringContextUtils;
-import cn.maple.rabbitmq.callback.GXConfirmCallback;
-import cn.maple.rabbitmq.callback.GXRecoveryCallback;
-import cn.maple.rabbitmq.callback.GXReturnsCallback;
+import cn.maple.rabbitmq.listener.impl.GXAmqpListenerErrorHandler;
 import cn.maple.rabbitmq.properties.GXRabbitMQProperties;
+import cn.maple.rabbitmq.support.GXAmqpManagementClient;
+import cn.maple.rabbitmq.support.GXAmqpMessagePublisher;
 import cn.maple.rabbitmq.support.GXRabbitMQJsonSupport;
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.amqp.rabbit.AsyncRabbitTemplate;
-import org.springframework.amqp.rabbit.annotation.EnableRabbit;
-import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
-import org.springframework.amqp.rabbit.connection.ConnectionFactory;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitMessagingTemplate;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.apache.qpid.protonj2.client.ConnectionOptions;
+import org.jspecify.annotations.Nullable;
+import org.springframework.amqp.client.AmqpConnectionFactory;
+import org.springframework.amqp.client.config.AmqpDefaultConfiguration;
+import org.springframework.amqp.client.config.EnableAmqp;
+import org.springframework.amqp.client.config.MethodAmqpMessageListenerContainerFactory;
 import org.springframework.amqp.support.converter.DefaultClassMapper;
 import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
+import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.amqp.autoconfigure.AmqpConnectionDetails;
+import org.springframework.boot.amqp.autoconfigure.AmqpConnectionDetails.Address;
+import org.springframework.boot.amqp.autoconfigure.AmqpMessageListenerContainerFactoryConfigurer;
+import org.springframework.boot.amqp.autoconfigure.ConnectionOptionsCustomizer;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.rabbitmq.autoconfigure.RabbitProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.convert.support.DefaultConversionService;
 import org.springframework.core.env.Environment;
-import org.springframework.messaging.converter.GenericMessageConverter;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
-import tools.jackson.databind.json.JsonMapper;
+import org.springframework.util.StringUtils;
+
+import java.util.concurrent.TimeUnit;
 
 /**
- * RabbitMQ 核心装配。
+ * RabbitMQ 核心装配（AMQP 1.0）。
  *
- * <p>调度器统一由 {@link #rabbitTaskScheduler()} 提供：默认以 {@code TaskScheduler} Bean 暴露（保持历史行为），
- * 可通过 {@code maple.framework.rabbitmq.scheduler.expose=false} 关闭暴露，改由本类内部持有并随上下文关闭。</p>
+ * <p>连接工厂、{@code AmqpClient} 与监听容器工厂由 Spring Boot 4.2 的
+ * {@code AmqpAutoConfiguration} 提供，本类只补齐 Maple Leaf 的约定：</p>
+ * <ul>
+ *   <li>{@link AmqpConnectionDetails}：优先 {@code spring.amqp.*}，回退到历史前缀
+ *       {@code spring.rabbitmq.*}，使既有 {@code rabbit.yml} 继续生效；</li>
+ *   <li>{@link ConnectionOptionsCustomizer}：补上 Boot 未暴露的 vhost（AMQP 1.0 通过
+ *       open 帧 hostname 传递）与重连参数；</li>
+ *   <li>{@link GXAmqpMessagePublisher}：带结算结果的消息发布器；</li>
+ *   <li>{@link GXAmqpManagementClient}：拓扑管理（Management HTTP API）；</li>
+ *   <li>{@link MethodAmqpMessageListenerContainerFactory}：关闭自动 accept，
+ *       由监听器显式 accept/reject/requeue。</li>
+ * </ul>
  */
 @Configuration(proxyBeanMethods = false)
-@Slf4j
-@ConditionalOnClass(name = {"org.springframework.amqp.rabbit.connection.ConnectionFactory"})
-@EnableRabbit
+@EnableAmqp
+@ConditionalOnClass(name = {"org.springframework.amqp.client.AmqpConnectionFactory",
+        "org.springframework.amqp.client.config.EnableAmqp"})
 public class GXRabbitMQConfig {
-    private static final int SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS = 30;
+    private static final long RECONNECT_DELAY_MILLIS = 1000L;
 
-    private final ConnectionFactory connectionFactory;
+    private static final long MAX_RECONNECT_DELAY_MILLIS = 30_000L;
 
-    private final GXRabbitMQProperties rabbitProperties;
+    private static final int DEFAULT_AMQP_PORT = 5672;
 
-    private final Environment environment;
+    private static final String MANAGEMENT_URL_PROPERTY = "maple.framework.rabbitmq.management.url";
 
-    @Value("${maple.framework.rabbitmq.scheduler.expose:true}")
-    private boolean exposeScheduler;
+    private static final String MANAGEMENT_USERNAME_PROPERTY = "maple.framework.rabbitmq.management.username";
 
-    private volatile ThreadPoolTaskScheduler internalScheduler;
+    private static final String MANAGEMENT_PASSWORD_PROPERTY = "maple.framework.rabbitmq.management.password";
 
-    public GXRabbitMQConfig(ConnectionFactory connectionFactory, GXRabbitMQProperties rabbitProperties,
-                            Environment environment) {
-        this.connectionFactory = connectionFactory;
-        this.rabbitProperties = rabbitProperties;
-        this.environment = environment;
-    }
+    private static final String MANAGEMENT_VHOST_PROPERTY = "maple.framework.rabbitmq.management.virtual-host";
 
-    @PostConstruct
-    public void applyConnectionFactoryProperties() {
-        if (!(connectionFactory instanceof CachingConnectionFactory cachingConnectionFactory) || rabbitProperties == null) {
-            return;
-        }
-
-        if (rabbitProperties.getCacheMode() != null) {
-            cachingConnectionFactory.setCacheMode(rabbitProperties.getCacheMode());
-        }
-        if (rabbitProperties.getChannelCacheSize() != null) {
-            cachingConnectionFactory.setChannelCacheSize(rabbitProperties.getChannelCacheSize());
-        }
-        if (rabbitProperties.getConnectionLimit() != null) {
-            cachingConnectionFactory.setConnectionLimit(rabbitProperties.getConnectionLimit());
-        }
-        if (rabbitProperties.getChannelCheckoutTimeout() != null) {
-            cachingConnectionFactory.setChannelCheckoutTimeout(rabbitProperties.getChannelCheckoutTimeout());
-        }
-
-        log.info("RabbitMQ connection factory tuned: propertiesBean={}, configSource={}, profile={}, cacheMode={}, channelCacheSize={}, connectionLimit={}, channelCheckoutTimeout={}",
-                rabbitProperties.getClass().getSimpleName(),
-                environment.getProperty("maple.framework.rabbitmq.config-source", "nacos"),
-                environment.getProperty("spring.profiles.active", "default"),
-                cachingConnectionFactory.getCacheMode(),
-                rabbitProperties.getChannelCacheSize(),
-                rabbitProperties.getConnectionLimit(),
-                rabbitProperties.getChannelCheckoutTimeout());
-    }
-
+    /**
+     * 连接细节：{@code spring.amqp.*} 显式配置优先，否则使用 {@code spring.rabbitmq.*}。
+     */
     @Bean
-    public RabbitTemplate rabbitTemplate() {
-        final RabbitTemplate rabbitTemplate = new RabbitTemplate();
-        rabbitTemplate.setConnectionFactory(connectionFactory);
-        applyTemplateProperties(rabbitTemplate);
+    @ConditionalOnMissingBean
+    public AmqpConnectionDetails gxAmqpConnectionDetails(GXRabbitMQProperties properties, Environment environment) {
+        Address address = resolveAddress(properties, environment);
+        String username = firstText(environment.getProperty("spring.amqp.username"), properties.getUsername(), null);
+        String password = firstText(environment.getProperty("spring.amqp.password"), properties.getPassword(), null);
+        return new GXAmqpConnectionDetails(address, username, password);
+    }
 
-        DefaultClassMapper defaultClassMapper = new DefaultClassMapper();
-        defaultClassMapper.setTrustedPackages("cn.hutool.core.lang", "cn.hutool.core", "cn.maple");
+    /**
+     * 解析连接端点：{@code spring.amqp.host/port} → {@code spring.rabbitmq.addresses} 的首个地址 →
+     * {@code spring.rabbitmq.host/port}。
+     *
+     * <p>历史 {@code rabbit.yml} 使用 {@code addresses: host1:5672,host2:5672}，迁移后必须继续生效，
+     * 否则会静默回落到 {@code localhost}。</p>
+     */
+    private static Address resolveAddress(GXRabbitMQProperties properties, Environment environment) {
+        String amqpHost = environment.getProperty("spring.amqp.host");
+        if (StringUtils.hasText(amqpHost)) {
+            return new Address(amqpHost, environment.getProperty("spring.amqp.port", Integer.class, properties.getPort()));
+        }
+        Address firstFromAddresses = parseFirstAddress(properties.getAddresses());
+        if (firstFromAddresses != null) {
+            return firstFromAddresses;
+        }
+        return new Address(properties.getHost(), properties.getPort());
+    }
 
-        JsonMapper jsonMapper = GXRabbitMQJsonSupport.jsonMapper();
-        JacksonJsonMessageConverter jacksonJsonMessageConverter = new JacksonJsonMessageConverter(jsonMapper);
-        jacksonJsonMessageConverter.setClassMapper(defaultClassMapper);
-        rabbitTemplate.setMessageConverter(jacksonJsonMessageConverter);
-
-        rabbitTemplate.setReturnsCallback(returned -> {
-            try {
-                GXReturnsCallback returnsCallback = GXSpringContextUtils.getBean(GXReturnsCallback.class);
-                if (ObjectUtil.isNotNull(returnsCallback)) {
-                    returnsCallback.returnedMessage(returned);
-                } else {
-                    log.warn("RabbitMQ message returned: exchange={}, routingKey={}, replyCode={}, replyText={}, bodyLength={}",
-                            returned.getExchange(), returned.getRoutingKey(),
-                            returned.getReplyCode(), returned.getReplyText(),
-                            returned.getMessage().getBody().length);
-                }
-            } catch (Exception e) {
-                log.error("RabbitMQ returns callback failed: {}", e.getClass().getName(), e);
-            }
-        });
-
-        rabbitTemplate.setConfirmCallback((correlationData, ack, cause) -> {
-            try {
-                GXConfirmCallback confirmCallback = GXSpringContextUtils.getBean(GXConfirmCallback.class);
-                if (ObjectUtil.isNotNull(confirmCallback)) {
-                    confirmCallback.confirm(correlationData, ack, cause);
-                } else if (!ack) {
-                    log.warn("RabbitMQ message not acknowledged by exchange: correlationData={}, cause={}",
-                            correlationData, cause);
-                }
-            } catch (Exception e) {
-                log.error("RabbitMQ confirm callback failed: {}", e.getClass().getName(), e);
-            }
-        });
-
-        rabbitTemplate.setRecoveryCallback(throwable -> {
-            try {
-                GXRecoveryCallback recoveryCallback = GXSpringContextUtils.getBean(GXRecoveryCallback.class);
-                if (ObjectUtil.isNotNull(recoveryCallback)) {
-                    return recoveryCallback.recover(throwable);
-                } else {
-                    log.error("RabbitMQ send retry exhausted: errorType={}, error={}",
-                            throwable.getClass().getName(), throwable.getMessage());
-                }
-            } catch (Exception e) {
-                log.error("RabbitMQ recovery callback failed: {}", e.getClass().getName(), e);
-            }
+    private static @Nullable Address parseFirstAddress(@Nullable String addresses) {
+        if (!StringUtils.hasText(addresses)) {
             return null;
-        });
+        }
+        String first = addresses.split(",")[0].trim();
+        int separator = first.lastIndexOf(':');
+        if (separator <= 0) {
+            return new Address(first, DEFAULT_AMQP_PORT);
+        }
+        try {
+            return new Address(first.substring(0, separator), Integer.parseInt(first.substring(separator + 1)));
+        } catch (NumberFormatException e) {
+            return new Address(first, DEFAULT_AMQP_PORT);
+        }
+    }
 
-        return rabbitTemplate;
+    /**
+     * 补齐 vhost 与重连参数。Boot 的 {@code AmqpProperties} 不包含虚拟主机，
+     * 而 RabbitMQ 会用 open 帧的 hostname 字段选择 vhost，缺失时连接会落到错误的虚拟主机。
+     */
+    @Bean
+    public ConnectionOptionsCustomizer gxAmqpConnectionOptionsCustomizer(GXRabbitMQProperties properties,
+                                                                        Environment environment) {
+        String virtualHost = firstText(environment.getProperty("spring.amqp.virtual-host"),
+                environment.getProperty("spring.rabbitmq.virtual-host"), properties.getVirtualHost(), "/");
+        return connectionOptions -> configureConnectionOptions(connectionOptions, virtualHost);
     }
 
     @Bean
-    public RabbitAdmin rabbitAdmin() {
-        return new RabbitAdmin(connectionFactory);
+    @ConditionalOnMissingBean(MessageConverter.class)
+    public JacksonJsonMessageConverter jacksonJsonMessageConverter() {
+        DefaultClassMapper classMapper = new DefaultClassMapper();
+        classMapper.setTrustedPackages("cn.hutool.core.lang", "cn.hutool.core", "cn.maple");
+        JacksonJsonMessageConverter converter =
+                new JacksonJsonMessageConverter(GXRabbitMQJsonSupport.jsonMapper());
+        converter.setClassMapper(classMapper);
+        return converter;
     }
 
-    private void applyTemplateProperties(RabbitTemplate rabbitTemplate) {
-        if (rabbitProperties == null || rabbitProperties.getTemplate() == null) {
-            return;
-        }
-
-        RabbitProperties.Template template = rabbitProperties.getTemplate();
-        if (template.getMandatory() != null) {
-            rabbitTemplate.setMandatory(template.getMandatory());
-        }
-        if (template.getReceiveTimeout() != null) {
-            rabbitTemplate.setReceiveTimeout(template.getReceiveTimeout().toMillis());
-        }
-        if (template.getReplyTimeout() != null) {
-            rabbitTemplate.setReplyTimeout(template.getReplyTimeout().toMillis());
-        }
-        if (template.getExchange() != null) {
-            rabbitTemplate.setExchange(template.getExchange());
-        }
-        if (template.getRoutingKey() != null) {
-            rabbitTemplate.setRoutingKey(template.getRoutingKey());
-        }
-        if (template.getDefaultReceiveQueue() != null) {
-            rabbitTemplate.setDefaultReceiveQueue(template.getDefaultReceiveQueue());
-        }
-        rabbitTemplate.setObservationEnabled(template.isObservationEnabled());
+    @Bean(destroyMethod = "close")
+    @ConditionalOnMissingBean
+    public GXAmqpMessagePublisher gxAmqpMessagePublisher(AmqpConnectionFactory connectionFactory) {
+        return new GXAmqpMessagePublisher(connectionFactory);
     }
 
+    /**
+     * 拓扑管理客户端。关闭 {@code maple.framework.rabbitmq.management.enabled} 时不存在该 Bean，
+     * 拓扑方法会以明确的异常失败，发送与消费不受影响。
+     */
     @Bean
-    @ConditionalOnProperty(name = "maple.framework.rabbitmq.scheduler.expose", havingValue = "true", matchIfMissing = true)
-    public ThreadPoolTaskScheduler rabbitTaskScheduler() {
-        return createScheduler();
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "maple.framework.rabbitmq.management", name = "enabled",
+            havingValue = "true", matchIfMissing = true)
+    public GXAmqpManagementClient gxAmqpManagementClient(GXRabbitMQProperties properties, Environment environment) {
+        Address address = resolveAddress(properties, environment);
+        String url = firstText(environment.getProperty(MANAGEMENT_URL_PROPERTY),
+                "http://" + address.host() + ":15672");
+        String username = firstText(environment.getProperty(MANAGEMENT_USERNAME_PROPERTY),
+                environment.getProperty("spring.amqp.username"), properties.getUsername(), null);
+        String password = firstText(environment.getProperty(MANAGEMENT_PASSWORD_PROPERTY),
+                environment.getProperty("spring.amqp.password"), properties.getPassword(), null);
+        String virtualHost = firstText(environment.getProperty(MANAGEMENT_VHOST_PROPERTY),
+                environment.getProperty("spring.amqp.virtual-host"),
+                environment.getProperty("spring.rabbitmq.virtual-host"), properties.getVirtualHost(), "/");
+        return new GXAmqpManagementClient(url, virtualHost, username, password,
+                GXRabbitMQJsonSupport.jsonMapper());
     }
 
+    /**
+     * 覆盖 Boot 默认的监听容器工厂：关闭 autoAccept，让监听器显式决定 accept/reject/requeue，
+     * 避免"先 ack 后处理"导致失败消息丢失。
+     */
+    @Bean(name = AmqpDefaultConfiguration.DEFAULT_AMQP_LISTENER_CONTAINER_FACTORY_BEAN_NAME)
+    @ConditionalOnMissingBean(name = AmqpDefaultConfiguration.DEFAULT_AMQP_LISTENER_CONTAINER_FACTORY_BEAN_NAME)
+    public MethodAmqpMessageListenerContainerFactory amqpListenerContainerFactory(
+            AmqpConnectionFactory connectionFactory,
+            @Qualifier("amqpMessageListenerContainerFactoryConfigurer")
+            ObjectProvider<AmqpMessageListenerContainerFactoryConfigurer> configurerProvider) {
+        MethodAmqpMessageListenerContainerFactory factory =
+                new MethodAmqpMessageListenerContainerFactory(connectionFactory);
+        configurerProvider.ifAvailable(configurer -> configurer.configure(factory));
+        factory.setAutoAccept(false);
+        return factory;
+    }
+
+    /**
+     * 毒消息处理器：消息体无法转换时直接 reject，避免监听器方法还没执行就被无限重投。
+     * Boot 的容器工厂配置器会自动应用唯一的一个 {@code AmqpListenerErrorHandler} Bean。
+     */
     @Bean
-    public AsyncRabbitTemplate asyncRabbitTemplate(RabbitTemplate rabbitTemplate,
-                                                   @Qualifier("rabbitTaskScheduler") ObjectProvider<ThreadPoolTaskScheduler> schedulerProvider) {
-        AsyncRabbitTemplate asyncTemplate = new AsyncRabbitTemplate(rabbitTemplate);
-        asyncTemplate.setTaskScheduler(schedulerProvider.getIfAvailable(this::getOrCreateInternalScheduler));
-        return asyncTemplate;
+    @ConditionalOnMissingBean
+    public GXAmqpListenerErrorHandler gxAmqpListenerErrorHandler() {
+        return new GXAmqpListenerErrorHandler();
     }
 
-    @Bean
-    public RabbitMessagingTemplate rabbitMessagingTemplate(RabbitTemplate rabbitTemplate) {
-        RabbitMessagingTemplate messagingTemplate = new RabbitMessagingTemplate();
-        messagingTemplate.setRabbitTemplate(rabbitTemplate);
-        messagingTemplate.setMessageConverter(new GenericMessageConverter(new DefaultConversionService()));
-        return messagingTemplate;
+    private static void configureConnectionOptions(ConnectionOptions connectionOptions, String virtualHost) {
+        connectionOptions.virtualHost(virtualHost);
+        connectionOptions.reconnectOptions()
+                .reconnectEnabled(true)
+                .reconnectDelay((int) RECONNECT_DELAY_MILLIS)
+                .maxReconnectDelay((int) MAX_RECONNECT_DELAY_MILLIS)
+                .useReconnectBackOff(true)
+                .reconnectBackOffMultiplier(2.0d);
+        connectionOptions.requestTimeout(TimeUnit.SECONDS.toMillis(10));
     }
 
-    private ThreadPoolTaskScheduler getOrCreateInternalScheduler() {
-        ThreadPoolTaskScheduler scheduler = this.internalScheduler;
-        if (scheduler == null) {
-            synchronized (this) {
-                scheduler = this.internalScheduler;
-                if (scheduler == null) {
-                    scheduler = createScheduler();
-                    this.internalScheduler = scheduler;
-                }
+    private static @Nullable String firstText(@Nullable String... candidates) {
+        for (String candidate : candidates) {
+            if (StringUtils.hasText(candidate)) {
+                return candidate;
             }
         }
-        return scheduler;
+        return null;
     }
 
-    private ThreadPoolTaskScheduler createScheduler() {
-        int processors = Runtime.getRuntime().availableProcessors();
-        int poolSize = Math.max(2, processors);
-        boolean virtualThreads = Runtime.version().feature() >= 21;
+    private record GXAmqpConnectionDetails(Address address, @Nullable String username,
+                                           @Nullable String password) implements AmqpConnectionDetails {
 
-        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
-        scheduler.setPoolSize(poolSize);
-        scheduler.setThreadNamePrefix("maple-rabbit-scheduler-");
-        scheduler.setVirtualThreads(virtualThreads);
-        scheduler.setRemoveOnCancelPolicy(true);
-        scheduler.setErrorHandler(throwable ->
-                log.error("RabbitMQ scheduler task failed: {}", throwable.getClass().getName(), throwable));
-        scheduler.setDaemon(false);
-        scheduler.setWaitForTasksToCompleteOnShutdown(true);
-        scheduler.setAwaitTerminationSeconds(SCHEDULER_SHUTDOWN_TIMEOUT_SECONDS);
-        scheduler.setExecuteExistingDelayedTasksAfterShutdownPolicy(true);
-        scheduler.initialize();
-
-        log.info("RabbitMQ task scheduler initialized: poolSize={}, virtualThreads={}", poolSize, virtualThreads);
-        return scheduler;
-    }
-
-    @PreDestroy
-    public void shutdownInternalScheduler() {
-        ThreadPoolTaskScheduler scheduler = this.internalScheduler;
-        if (scheduler == null) {
-            return;
+        @Override
+        public Address getAddress() {
+            return address;
         }
-        scheduler.shutdown();
-        this.internalScheduler = null;
-        log.info("RabbitMQ internal task scheduler stopped: exposed={}", exposeScheduler);
+
+        @Override
+        public @Nullable String getUsername() {
+            return username;
+        }
+
+        @Override
+        public @Nullable String getPassword() {
+            return password;
+        }
     }
 }

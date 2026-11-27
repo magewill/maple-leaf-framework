@@ -6,14 +6,12 @@ import cn.maple.canal.exception.GXCanalMessageRejectedException;
 import cn.maple.canal.metrics.GXCanalConsumeStatistics;
 import cn.maple.canal.properties.GXCanalProperties;
 import cn.maple.canal.service.support.GXCanalLogThrottle;
+import cn.maple.rabbitmq.service.GXSendRabbitMQService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
-import org.springframework.amqp.core.Message;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.core.MessageProperties;
 import org.springframework.beans.factory.ObjectProvider;
-
-import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -27,25 +25,58 @@ class GXCanalRabbitMQFailureHandlerTest {
 
     private final GXCanalConsumeStatistics statistics = new GXCanalConsumeStatistics();
 
-    private final RabbitTemplate rabbitTemplate = Mockito.mock(RabbitTemplate.class);
+    private final GXSendRabbitMQService sendRabbitMQService = Mockito.mock(GXSendRabbitMQService.class);
 
     private final GXCanalRabbitMQFailureHandler handler = new GXCanalRabbitMQFailureHandler(
-            canalProperties, statistics, providerReturning(rabbitTemplate), new GXCanalLogThrottle());
+            canalProperties, statistics, providerReturning(sendRabbitMQService), new GXCanalLogThrottle());
 
     @Test
     void shouldRepublishRetryableMessageWithIncrementedHeader() {
+        Mockito.doAnswer(invocation -> {
+            cn.maple.rabbitmq.dto.inner.GXCorrelationData correlationData = invocation.getArgument(4);
+            correlationData.settlement().complete(true);
+            return null;
+        }).when(sendRabbitMQService).sendRawMessage(Mockito.anyString(), Mockito.anyString(),
+                Mockito.anyString(), Mockito.any(MessageProperties.class), Mockito.any());
+
         handler.handle(retryableFailure(), PAYLOAD, 0, TRACE_ID);
 
-        ArgumentCaptor<Message> captor = ArgumentCaptor.forClass(Message.class);
-        Mockito.verify(rabbitTemplate).send(Mockito.eq(canalProperties.getExchangeName()),
-                Mockito.eq(canalProperties.getRoutingKey()), captor.capture());
-        Message republished = captor.getValue();
-        Object retryHeader = republished.getMessageProperties().getHeader(GXCanalConstant.HEADER_RETRY_COUNT);
-        Object traceHeader = republished.getMessageProperties().getHeader(GXCanalConstant.HEADER_TRACE_ID);
-        assertEquals(Integer.valueOf(1), retryHeader);
-        assertEquals(TRACE_ID, traceHeader);
-        assertEquals(PAYLOAD, new String(republished.getBody(), StandardCharsets.UTF_8));
+        ArgumentCaptor<MessageProperties> captor = ArgumentCaptor.forClass(MessageProperties.class);
+        Mockito.verify(sendRabbitMQService).sendRawMessage(Mockito.eq(canalProperties.getExchangeName()),
+                Mockito.eq(canalProperties.getRoutingKey()), Mockito.eq(PAYLOAD), captor.capture(),
+                Mockito.any(cn.maple.rabbitmq.dto.inner.GXCorrelationData.class));
+        MessageProperties republished = captor.getValue();
+        assertEquals(Integer.valueOf(1), republished.getHeader(GXCanalConstant.HEADER_RETRY_COUNT));
+        assertEquals(TRACE_ID, republished.getHeader(GXCanalConstant.HEADER_TRACE_ID));
         assertEquals(0, statistics.deadLetterCount(), "a retried message is not dead lettered");
+    }
+
+    @Test
+    void shouldRejectWhenRepublishIsNotAccepted() {
+        Mockito.doAnswer(invocation -> {
+            cn.maple.rabbitmq.dto.inner.GXCorrelationData correlationData = invocation.getArgument(4);
+            correlationData.settlement().complete(false);
+            return null;
+        }).when(sendRabbitMQService).sendRawMessage(Mockito.anyString(), Mockito.anyString(),
+                Mockito.anyString(), Mockito.any(MessageProperties.class), Mockito.any());
+
+        GXCanalMessageRejectedException exception = assertThrows(GXCanalMessageRejectedException.class,
+                () -> handler.handle(retryableFailure(), PAYLOAD, 0, TRACE_ID));
+
+        assertEquals("Canal message republish not accepted, rejected to dead letter queue: handler exploded",
+                exception.getMessage());
+        assertEquals(1, statistics.deadLetterCount());
+    }
+
+    @Test
+    void shouldRejectWhenRepublishThrows() {
+        Mockito.doThrow(new org.springframework.amqp.AmqpException("broker down"))
+                .when(sendRabbitMQService).sendRawMessage(Mockito.anyString(), Mockito.anyString(),
+                        Mockito.anyString(), Mockito.any(MessageProperties.class), Mockito.any());
+
+        assertThrows(GXCanalMessageRejectedException.class,
+                () -> handler.handle(retryableFailure(), PAYLOAD, 0, TRACE_ID));
+        assertEquals(1, statistics.deadLetterCount());
     }
 
     @Test
@@ -55,30 +86,30 @@ class GXCanalRabbitMQFailureHandlerTest {
 
         assertEquals("Canal message rejected: handler exploded", exception.getMessage());
         assertEquals(1, statistics.deadLetterCount());
-        Mockito.verifyNoInteractions(rabbitTemplate);
+        Mockito.verifyNoInteractions(sendRabbitMQService);
     }
 
     @Test
     void shouldRejectNonRetryableMessageImmediately() {
         GXCanalConsumeStatistics localStatistics = new GXCanalConsumeStatistics();
         GXCanalRabbitMQFailureHandler localHandler = new GXCanalRabbitMQFailureHandler(
-                canalProperties, localStatistics, providerReturning(rabbitTemplate), new GXCanalLogThrottle());
+                canalProperties, localStatistics, providerReturning(sendRabbitMQService), new GXCanalLogThrottle());
         GXCanalParseResultInnerDto failure = GXCanalParseResultInnerDto.nonRetryableFailure("bad payload", 0);
 
         assertThrows(GXCanalMessageRejectedException.class, () -> localHandler.handle(failure, PAYLOAD, 0, TRACE_ID));
 
         assertEquals(1, localStatistics.deadLetterCount(),
                 "the listener owns outcome counters, the handler owns dead letters");
-        Mockito.verifyNoInteractions(rabbitTemplate);
+        Mockito.verifyNoInteractions(sendRabbitMQService);
     }
 
     @Test
-    void shouldRejectWhenRabbitTemplateIsUnavailable() {
-        GXCanalRabbitMQFailureHandler withoutTemplate = new GXCanalRabbitMQFailureHandler(
+    void shouldRejectWhenSendServiceIsUnavailable() {
+        GXCanalRabbitMQFailureHandler withoutService = new GXCanalRabbitMQFailureHandler(
                 canalProperties, statistics, providerReturning(null), new GXCanalLogThrottle());
 
         assertThrows(GXCanalMessageRejectedException.class,
-                () -> withoutTemplate.handle(retryableFailure(), PAYLOAD, 0, TRACE_ID));
+                () -> withoutService.handle(retryableFailure(), PAYLOAD, 0, TRACE_ID));
         assertEquals(1, statistics.deadLetterCount());
     }
 
@@ -87,9 +118,9 @@ class GXCanalRabbitMQFailureHandlerTest {
     }
 
     @SuppressWarnings("unchecked")
-    private ObjectProvider<RabbitTemplate> providerReturning(RabbitTemplate template) {
-        ObjectProvider<RabbitTemplate> provider = Mockito.mock(ObjectProvider.class);
-        Mockito.when(provider.getIfAvailable()).thenReturn(template);
+    private ObjectProvider<GXSendRabbitMQService> providerReturning(GXSendRabbitMQService service) {
+        ObjectProvider<GXSendRabbitMQService> provider = Mockito.mock(ObjectProvider.class);
+        Mockito.when(provider.getIfAvailable()).thenReturn(service);
         return provider;
     }
 }

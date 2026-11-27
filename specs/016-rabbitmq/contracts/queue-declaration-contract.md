@@ -1,11 +1,11 @@
 # 契约：队列与绑定声明
 
-**Feature**: `016-rabbitmq-module-audit` | **Date**: 2026-10-25
+**Feature**: `016-rabbitmq-module-audit` | **Date**: 2026-10-25（2026-11-27 随 AMQP 1.0 迁移更新）
 
 ## 核心规则
 
 1. **每次声明都触达 Broker**：`createQueue` 不再有"永久缓存命中即返回"的快路径；同队列并发调用由**单飞**合并为 1 次 Broker 声明。
-2. **缓存不是事实来源**：`queueExists` 一律 `rabbitAdmin.getQueueProperties`；返回 `null`/空即不存在。
+2. **缓存不是事实来源**：`queueExists` 一律调用 Management API `GET /api/queues/{vhost}/{name}`；404 即不存在。
 3. **无全局锁**：删除 `queueOperationLock`；同队列通过单飞互斥，不同队列完全并行。
 4. **删除顺序**：`deleteQueue` 先删 Broker，成功后才更新本地可观测状态（本版本无缓存，仅日志）。
 5. **失败必须可定位**：`GXRabbitMQOperationException#operation` 标识步骤，`detail` 携带 `completedSteps` 与 `failedStep`。
@@ -14,7 +14,7 @@
 
 ```text
 caller A ─┐
-caller B ─┼─ computeIfAbsent(key) ──> IN_FLIGHT future ──> declareQueue(1 次 RPC)
+caller B ─┼─ computeIfAbsent(key) ──> IN_FLIGHT future ──> PUT /api/queues (1 次 RPC)
 caller C ─┘                                   │
                                     ok: 所有调用方得到同一 Queue
                                     fail: 所有调用方得到同一异常，条目移除
@@ -28,11 +28,11 @@ caller C ─┘                                   │
 
 | 项 | 旧 | 新 |
 | --- | --- | --- |
-| `durable` | `false` | `false` |
+| `durable` | `false` | `true`（RabbitMQ 4.x 默认禁止非持久化非排他队列） |
 | `exclusive` | `true` | `false` |
 | `autoDelete` | `true` | `true` |
 | 可被其他连接消费 | 否（不可用） | 是 |
-| 排他队列 | 声称支持 | **不支持**，登记在 `AGENTS.md` 能力边界 |
+| 排他队列 | 声称支持 | **不支持**（Management API 无法创建排他队列），登记在 `AGENTS.md` 能力边界 |
 
 ## 通道创建
 

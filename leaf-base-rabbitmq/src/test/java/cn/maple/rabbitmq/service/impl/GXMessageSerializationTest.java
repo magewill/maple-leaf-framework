@@ -3,7 +3,10 @@ package cn.maple.rabbitmq.service.impl;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.lang.Dict;
 import cn.hutool.json.JSONUtil;
+import cn.maple.rabbitmq.support.GXAmqpManagementClient;
+import cn.maple.rabbitmq.support.GXAmqpMessagePublisher;
 import cn.maple.rabbitmq.support.GXRabbitMQJsonSupport;
+import cn.maple.rabbitmq.support.GXSendOutcome;
 import cn.maple.rabbitmq.support.GXTestRabbitFixtures;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,37 +17,41 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
-import org.springframework.amqp.rabbit.connection.CorrelationData;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * 锁定出站 wire format 与消费端兼容性。
  *
  * <p>出站仍使用 Hutool：{@code java.util.Date}/{@code LocalDateTime} 写毫秒时间戳，
- * 与修复前完全一致；消费端 {@code JacksonJsonMessageConverter} 必须能读取该格式。</p>
+ * 与迁移前完全一致；消费端 {@code JacksonJsonMessageConverter} 必须能读取该格式。
+ * AMQP 1.0 把这些 header 写入消息 application properties，消费端由
+ * {@code ProtonUtils.fromProtonMessage} 还原为同名 header。</p>
  */
 @ExtendWith(MockitoExtension.class)
 class GXMessageSerializationTest {
     @Mock
-    private RabbitTemplate rabbitTemplate;
+    private GXAmqpMessagePublisher publisher;
 
     @Mock
-    private RabbitAdmin rabbitAdmin;
+    private GXAmqpManagementClient managementClient;
 
     private GXSendRabbitMQServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = GXTestRabbitFixtures.newService(rabbitTemplate, rabbitAdmin);
+        service = GXTestRabbitFixtures.newService(publisher, managementClient);
+        org.mockito.Mockito.lenient().when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED));
     }
 
     @AfterEach
@@ -124,7 +131,7 @@ class GXMessageSerializationTest {
 
     private Message captureSentMessage() {
         ArgumentCaptor<Message> captor = ArgumentCaptor.forClass(Message.class);
-        verify(rabbitTemplate).convertAndSend(anyString(), anyString(), captor.capture(), nullable(CorrelationData.class));
+        verify(publisher).send(anyString(), captor.capture(), anyLong());
         return captor.getValue();
     }
 }

@@ -1,6 +1,10 @@
 package cn.maple.rabbitmq.service.impl;
 
 import cn.maple.core.framework.exception.GXBusinessException;
+import cn.maple.rabbitmq.exception.GXRabbitMQOperationException;
+import cn.maple.rabbitmq.support.GXAmqpManagementClient;
+import cn.maple.rabbitmq.support.GXAmqpManagementException;
+import cn.maple.rabbitmq.support.GXAmqpMessagePublisher;
 import cn.maple.rabbitmq.support.GXTestRabbitFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,14 +12,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-
-import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -26,47 +28,44 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class GXQueueDeclarationSemanticsTest {
     @Mock
-    private RabbitTemplate rabbitTemplate;
+    private GXAmqpMessagePublisher publisher;
 
     @Mock
-    private RabbitAdmin rabbitAdmin;
+    private GXAmqpManagementClient managementClient;
 
     private GXSendRabbitMQServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = GXTestRabbitFixtures.newService(rabbitTemplate, rabbitAdmin);
+        service = GXTestRabbitFixtures.newService(publisher, managementClient);
     }
 
     @Test
     void shouldReportMissingAfterBrokerSideDeletion() {
-        Properties properties = new Properties();
-        properties.setProperty("QUEUE_NAME", "order.queue");
-        when(rabbitAdmin.getQueueProperties("order.queue")).thenReturn(properties, (Properties) null);
+        when(managementClient.queueExists("order.queue")).thenReturn(true, false);
 
         assertThat(service.queueExists("order.queue")).isTrue();
         assertThat(service.queueExists("order.queue")).isFalse();
-        verify(rabbitAdmin, times(2)).getQueueProperties("order.queue");
+        verify(managementClient, times(2)).queueExists("order.queue");
     }
 
     @Test
     void shouldDeclareAgainAfterBrokerSideDeletion() {
-        when(rabbitAdmin.declareQueue(any())).thenReturn("order.queue");
-
         service.createQueue("order.queue", true, false, false, null);
-        when(rabbitAdmin.getQueueProperties("order.queue")).thenReturn(null);
+        when(managementClient.queueExists("order.queue")).thenReturn(false);
         assertThat(service.queueExists("order.queue")).isFalse();
         service.createQueue("order.queue", true, false, false, null);
 
-        verify(rabbitAdmin, times(2)).declareQueue(any());
+        verify(managementClient, times(2)).declareQueue(anyString(), anyBoolean(), anyBoolean(), anyMap());
     }
 
     @Test
     void shouldNotReportSuccessWhenDeleteFails() {
-        when(rabbitAdmin.deleteQueue("order.queue")).thenThrow(new org.springframework.amqp.AmqpException("closed"));
+        when(managementClient.deleteQueue("order.queue"))
+                .thenThrow(new GXAmqpManagementException("closed", 500));
 
         assertThatThrownBy(() -> service.deleteQueue("order.queue"))
-                .isInstanceOf(cn.maple.rabbitmq.exception.GXRabbitMQOperationException.class);
+                .isInstanceOf(GXRabbitMQOperationException.class);
     }
 
     @Test
@@ -77,8 +76,6 @@ class GXQueueDeclarationSemanticsTest {
 
     @Test
     void shouldReturnDeclaredQueueInstance() {
-        when(rabbitAdmin.declareQueue(any())).thenReturn("order.queue");
-
         Queue queue = service.createQueue("order.queue", true, false, false, null);
 
         assertThat(queue.getName()).isEqualTo("order.queue");

@@ -3,11 +3,7 @@ package cn.maple.canal.integration;
 import cn.maple.canal.service.GXProcessCanalDataService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-import org.springframework.amqp.rabbit.annotation.EnableRabbit;
-import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
-import org.springframework.amqp.rabbit.connection.ConnectionFactory;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import cn.maple.rabbitmq.properties.GXRabbitMQProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -31,15 +27,10 @@ class GXCanalRealBrokerBootstrapTest {
         Class<?> configType = GXCanalRabbitRealBrokerTest.BrokerConfig.class;
 
         assertConfiguration(configType);
-        assertTrue(configType.isAnnotationPresent(EnableRabbit.class),
-                "the RabbitMQ scenario needs @EnableRabbit to register the listener endpoint");
         assertGuardPresent(GXCanalRabbitRealBrokerTest.class, "RABBITMQ_HOST");
 
         Map<String, Class<?>> expectedBeans = new LinkedHashMap<>();
-        expectedBeans.put("connectionFactory", ConnectionFactory.class);
-        expectedBeans.put("rabbitTemplate", RabbitTemplate.class);
-        expectedBeans.put("rabbitAdmin", RabbitAdmin.class);
-        expectedBeans.put("rabbitListenerContainerFactory", SimpleRabbitListenerContainerFactory.class);
+        expectedBeans.put("gxRabbitMQProperties", GXRabbitMQProperties.class);
         expectedBeans.put("demoSysUserService", GXProcessCanalDataService.class);
         assertBeanMethods(configType, expectedBeans);
     }

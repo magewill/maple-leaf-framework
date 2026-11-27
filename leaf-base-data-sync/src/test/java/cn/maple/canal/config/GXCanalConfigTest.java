@@ -1,104 +1,106 @@
 package cn.maple.canal.config;
 
 import cn.maple.canal.properties.GXCanalProperties;
+import cn.maple.rabbitmq.service.GXSendRabbitMQService;
 import org.junit.jupiter.api.Test;
-import org.springframework.amqp.core.Binding;
-import org.springframework.amqp.core.DirectExchange;
-import org.springframework.amqp.core.Exchange;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
+import org.springframework.amqp.core.AbstractExchange;
 import org.springframework.amqp.core.FanoutExchange;
-import org.springframework.amqp.core.Queue;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * AMQP 1.0 has no in-protocol topology declaration, so the configuration must drive the declarations
+ * through {@link GXSendRabbitMQService}.
+ */
 class GXCanalConfigTest {
+    private final GXSendRabbitMQService sendRabbitMQService = Mockito.mock(GXSendRabbitMQService.class);
+
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withUserConfiguration(GXCanalConfig.class, Config.class);
+            .withUserConfiguration(GXCanalConfig.class)
+            .withBean(GXCanalProperties.class, GXCanalProperties::new)
+            .withBean(GXSendRabbitMQService.class, () -> sendRabbitMQService);
 
     @Test
-    void shouldCreateDurableExchangeWithoutAutoDelete() {
+    void shouldDeclareFanoutExchangeQueueAndBinding() {
         contextRunner.run(context -> {
-            FanoutExchange exchange = context.getBean("fanoutExchange", FanoutExchange.class);
+            GXCanalConfig.CanalRabbitTopology topology =
+                    context.getBean(GXCanalConfig.CanalRabbitTopology.class);
 
-            assertEquals("exchange.fanout.canal", exchange.getName());
-            assertTrue(exchange.isDurable());
-            assertFalse(exchange.isAutoDelete());
-        });
-    }
+            assertEquals("canalQueue", topology.queue());
+            assertEquals("exchange.fanout.canal", topology.exchange());
+            assertEquals("canal.example.exchange.routingkey", topology.routingKey());
 
-    @Test
-    void shouldCreateQueueAndBindingFromProperties() {
-        contextRunner.run(context -> {
-            Queue queue = context.getBean("canalQueue", Queue.class);
-            Binding binding = context.getBean("binding", Binding.class);
-
-            assertEquals("canalQueue", queue.getName());
-            assertTrue(queue.isDurable());
-            assertEquals("exchange.fanout.canal", binding.getExchange());
-            assertEquals("canal.example.exchange.routingkey", binding.getRoutingKey());
+            ArgumentCaptor<AbstractExchange> exchangeCaptor = ArgumentCaptor.forClass(AbstractExchange.class);
+            Mockito.verify(sendRabbitMQService).setupMessageChannel(
+                    Mockito.eq("canalQueue"), Mockito.eq(true), Mockito.eq(false), Mockito.eq(false),
+                    Mockito.anyMap(), exchangeCaptor.capture(),
+                    Mockito.eq("canal.example.exchange.routingkey"));
+            assertTrue(exchangeCaptor.getValue() instanceof FanoutExchange);
+            assertEquals("exchange.fanout.canal", exchangeCaptor.getValue().getName());
+            assertTrue(exchangeCaptor.getValue().isDurable());
+            assertFalse(exchangeCaptor.getValue().isAutoDelete());
         });
     }
 
     @Test
     void shouldDeclareDeadLetterQueueWithMatchingArguments() {
         contextRunner.run(context -> {
-            Queue queue = context.getBean("canalQueue", Queue.class);
-            Queue deadLetterQueue = context.getBean("canalDeadLetterQueue", Queue.class);
-            DirectExchange deadLetterExchange = context.getBean("canalDeadLetterExchange", DirectExchange.class);
-            Binding deadLetterBinding = context.getBean("canalDeadLetterBinding", Binding.class);
+            ArgumentCaptor<Map<String, Object>> argsCaptor = ArgumentCaptor.forClass(Map.class);
+            Mockito.verify(sendRabbitMQService).setupMessageChannel(
+                    Mockito.eq("canalQueue"), Mockito.eq(true), Mockito.eq(false), Mockito.eq(false),
+                    argsCaptor.capture(), Mockito.any(AbstractExchange.class), Mockito.anyString());
 
-            assertEquals("canal.dlq", deadLetterQueue.getName());
-            assertTrue(deadLetterQueue.isDurable());
-            assertTrue(deadLetterExchange.isDurable());
-            assertEquals("canal.dlx", deadLetterExchange.getName());
-            assertEquals("canal.dlq", deadLetterBinding.getDestination());
-            assertEquals("canal.dead", queue.getArguments().get("x-dead-letter-routing-key").toString());
+            Map<String, Object> arguments = argsCaptor.getValue();
+            assertEquals("canal.dlx", arguments.get("x-dead-letter-exchange"));
+            assertEquals("canal.dead", arguments.get("x-dead-letter-routing-key"));
+
+            Mockito.verify(sendRabbitMQService).createDurableQueue("canal.dlq");
+            Mockito.verify(sendRabbitMQService).bindQueueToExchange("canal.dlq", "canal.dlx", "canal.dead");
         });
     }
 
     @Test
     void shouldNotDeclareInfrastructureWhenConsumerDisabled() {
         contextRunner.withPropertyValues("canal.consumer-enabled=false").run(context -> {
-            assertEquals(0, context.getBeanNamesForType(Queue.class).length);
-            assertEquals(0, context.getBeanNamesForType(Exchange.class).length);
-            assertEquals(0, context.getBeanNamesForType(Binding.class).length);
+            assertEquals(0, context.getBeanNamesForType(GXCanalConfig.CanalRabbitTopology.class).length);
+            Mockito.verifyNoInteractions(sendRabbitMQService);
         });
     }
 
     @Test
     void shouldNotDeclareInfrastructureWhenRocketMqSelected() {
         contextRunner.withPropertyValues("canal.mq-type=rocketmq").run(context -> {
-            assertEquals(0, context.getBeanNamesForType(Queue.class).length);
-            assertEquals(0, context.getBeanNamesForType(Exchange.class).length);
+            assertEquals(0, context.getBeanNamesForType(GXCanalConfig.CanalRabbitTopology.class).length);
+            Mockito.verifyNoInteractions(sendRabbitMQService);
         });
     }
 
     @Test
-    void shouldYieldToDownstreamQueueBean() {
-        contextRunner.withUserConfiguration(CustomQueueConfig.class).run(context -> {
-            assertNotNull(context.getBean("customCanalQueue", Queue.class));
-            assertEquals("custom-queue", context.getBean("customCanalQueue", Queue.class).getName());
+    void shouldAllowDownstreamTopologyBean() {
+        contextRunner.withUserConfiguration(CustomTopologyConfig.class).run(context -> {
+            assertNotNull(context.getBean("customCanalRabbitTopology", GXCanalConfig.CanalRabbitTopology.class));
+            assertEquals("custom-queue",
+                    context.getBean("customCanalRabbitTopology", GXCanalConfig.CanalRabbitTopology.class).queue());
+            assertNotNull(context.getBean("canalRabbitTopology", GXCanalConfig.CanalRabbitTopology.class));
         });
     }
 
     @Configuration
-    static class Config {
+    static class CustomTopologyConfig {
         @Bean
-        GXCanalProperties canalProperties() {
-            return new GXCanalProperties();
-        }
-    }
-
-    @Configuration
-    static class CustomQueueConfig {
-        @Bean
-        Queue customCanalQueue() {
-            return new Queue("custom-queue");
+        GXCanalConfig.CanalRabbitTopology customCanalRabbitTopology() {
+            return new GXCanalConfig.CanalRabbitTopology("custom-queue", "custom-exchange", "custom-key",
+                    "custom.dlx", "custom.dlq");
         }
     }
 }

@@ -26,10 +26,10 @@
 
 `leaf-base-data-sync` 是 Maple Leaf Framework 中承接 Canal 数据同步能力的基础模块，当前主要负责：
 
-1. 消息接入：`canal.mq-type` 在 RabbitMQ（默认）与 RocketMQ 之间互斥选择；RabbitMQ 由本模块声明交换机、队列、绑定与死信队列，RocketMQ 经可选依赖 `leaf-base-rocketmq` 接入并由 `rocketmq-spring` 提供消费容器。
-2. 消费：`GXCanalRabbitMQListener`（`@RabbitListener`）与 `GXCanalRocketMQListener`（`RocketMQListener<String>`）都委派同一个解析链路；两者必须保持 eager，不得加 `@Lazy`。
+1. 消息接入：`canal.mq-type` 在 RabbitMQ（默认）与 RocketMQ 之间互斥选择；RabbitMQ 走 AMQP 1.0：拓扑由本模块在上下文启动时通过 `GXSendRabbitMQService`（Management HTTP API）声明交换机、队列、绑定与死信队列，RocketMQ 经可选依赖 `leaf-base-rocketmq` 接入并由 `rocketmq-spring` 提供消费容器。
+2. 消费：`GXCanalRabbitMQListener`（`@AmqpListener`，地址 `/queues/<queue>`，显式 `ACCEPT/REJECT/REQUEUE`）与 `GXCanalRocketMQListener`（`RocketMQListener<String>`）都委派同一个解析链路；两者必须保持 eager，不得加 `@Lazy`。
 3. 解析与分发：`GXCanalMessageParseServiceImpl#parse` 单次解析载荷（支持单个 JSON 对象与 JSON 数组），DDL 事件跳过，其余按 `database + table` 定位处理 Bean 并按 `INSERT`/`UPDATE`/`DELETE` 分发。
-4. 结局判定：每条事件落到 `成功 / 跳过 / 可重试失败 / 不可重试失败` 之一，由 `GXCanalFailureHandler` 决定重投或死信；处理器异常不得被吞掉——单个对象载荷上抛，数组载荷按元素转为可重试失败（见 §9 红线 1/10）。
+4. 结局判定：每条事件落到 `成功 / 跳过 / 可重试失败 / 不可重试失败` 之一，由 `GXCanalFailureHandler` 决定重投或死信；重投必须等到结算结果（未 accepted 时原消息拒绝进死信，禁止发后不管）；处理器异常不得被吞掉——单个对象载荷上抛，数组载荷按元素转为可重试失败（见 §9 红线 1/10）。
 5. 扩展点：`GXProcessCanalDataService` 面向业务，命名约定为 `database_table_Service` 驼峰 Bean 名，未命中回退 `defaultProcessCanalDataService`。
 6. 配置：`canal.*` 统一由标准 `@ConfigurationProperties` 绑定；配置来源由 `canal.config-source=local|nacos` 显式选择，缺省保持既有类路径探测行为。
 7. 可观测：`GXCanalConsumeStatistics` 提供线程安全计数，有 `MeterRegistry` 时暴露 `canal.consumer.*` Gauge。
@@ -38,7 +38,7 @@
 
 ## 2. 目录职责
 
-1. `config`：`GXCanalPropertiesConfig`（配置源互斥装配）、`GXCanalConfig`（RabbitMQ 交换/队列/绑定/死信 + 容量日志）、`GXCanalRocketMQConfig`（必填项校验）、`GXCanalRocketMQDependencyConfig`（缺依赖 fail-fast）。
+1. `config`：`GXCanalPropertiesConfig`（配置源互斥装配）、`GXCanalConfig`（RabbitMQ 拓扑声明：交换/队列/绑定/死信 + 容量日志；自定义拓扑请关闭 `canal.consumer-enabled` 而非覆盖同名 Bean）、`GXCanalRocketMQConfig`（必填项校验）、`GXCanalRocketMQDependencyConfig`（缺依赖 fail-fast）。
 2. `constant`：默认值、消息头名、操作名、结局相关常量（`GXCanalConstant`）。
 3. `dto`：`GXCanalDataDto` 事件载体；`dto/inner` 存放结构化解析结果 `GXCanalParseResultInnerDto`。
 4. `enums`：`GXCanalOutcomeEnums`（四类结局）、`GXCanalMqTypeEnums`（中间件类型）。
@@ -94,7 +94,7 @@
 
 1. 涉及改动的点，都要检查测试用例是否完整。如果覆盖不足、失效或缺失，必须先补齐再提交。
 2. 测试用例要覆盖全面，至少覆盖成功路径、失败路径、异常路径、空值路径和边界条件。
-3. 如果功能需要在 Spring Boot 应用运行后才能测试，例如 Bean 装配、条件注解、配置绑定、`@RabbitListener` 注册或上下文查找
+3. 如果功能需要在 Spring Boot 应用运行后才能测试，例如 Bean 装配、条件注解、配置绑定、`@AmqpListener` 注册或上下文查找
    Bean 行为，测试用例必须模拟真实 Spring Boot 应用启动后的场景，使用 `@SpringBootTest` 或同等级别的集成测试。
 4. `GXCanalMessageParseServiceImpl` 相关改动至少要覆盖：
     - 空消息。
@@ -116,7 +116,7 @@
 ## 7. 变更前检查清单
 
 1. 是否只修改了 `leaf-base-data-sync` 当前模块？
-2. 是否影响 RabbitMQ 队列、交换机、路由键、并发消费者或监听绑定关系？
+2. 是否影响 RabbitMQ 队列、交换机、路由键、并发消费者或 AMQP 1.0 地址（`/queues/<queue>`）？
 3. 是否影响本地配置与 Nacos 配置之间的选择逻辑？
 4. 是否影响 `database_table_Service` 到 Camel Case Bean 名称的解析规则？
 5. 是否影响默认兜底处理器 `defaultProcessCanalDataService` 的回退行为？
@@ -156,7 +156,7 @@
 | --- | --- | --- |
 | 顺序消费 / 分区有序 | 与既有 `concurrency=10` 无序语义对齐，顺序保证需业务侧配合 | 按表维度拆分消费组，同一表只用单一消费者 |
 | 事务消息 | 数据同步链路无事务边界，Canal 自身保证 binlog 顺序 | 业务侧幂等 + 唯一键约束 |
-| 批量确认（batch ack） | 逐条判定结局是"不丢消息"的前提 | 调大 `spring.rabbitmq.listener.simple.prefetch` / RocketMQ 注解 `consumeThreadMax` |
+| 批量确认（batch ack） | 逐条判定结局是"不丢消息"的前提 | 调大 `spring.amqp.listener.initial-credits` / RocketMQ 注解 `consumeThreadMax` |
 | 跨 MQ 双跑 | 重复消费与幂等责任超出模块职责 | 部署级切换 `canal.mq-type` + 重启 |
 | 跨库 routing 过滤（fanout → topic） | 会改变既有交换机类型与下游绑定语义 | 下游各自建队列；RocketMQ 侧用 `canal.rocketmq.tag` 过滤 |
 | 运行期刷新装配期键 | 队列/交换机/主题/并发在容器启动时固定 | 改配置后重启（启动日志会提示） |

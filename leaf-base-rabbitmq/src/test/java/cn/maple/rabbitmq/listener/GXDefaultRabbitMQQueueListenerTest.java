@@ -8,6 +8,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.AmqpRejectAndDontRequeueException;
+import org.springframework.amqp.core.AmqpAcknowledgment;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 
@@ -15,6 +16,8 @@ import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -22,6 +25,9 @@ import static org.mockito.Mockito.when;
 class GXDefaultRabbitMQQueueListenerTest {
     @Mock
     private GXRabbitMQListenerStatistics statistics;
+
+    @Mock
+    private AmqpAcknowledgment acknowledgment;
 
     private GXDefaultRabbitMQQueueListenerImpl listener;
 
@@ -76,20 +82,44 @@ class GXDefaultRabbitMQQueueListenerTest {
     }
 
     @Test
-    void shouldRethrowUnexpectedFailureAndCountIt() {
+    void shouldRethrowUnexpectedFailure() {
         Message message = org.mockito.Mockito.mock(Message.class);
         when(message.getBody()).thenThrow(new IllegalStateException("broken"));
 
         assertThatThrownBy(() -> listener.process(message))
                 .isInstanceOf(IllegalStateException.class);
-        verify(statistics).failed(org.mockito.ArgumentMatchers.any(IllegalStateException.class));
-        verify(statistics, org.mockito.Mockito.never()).processed();
+        verify(statistics, never()).processed();
     }
 
     @Test
     void shouldRejectNullMessage() {
         assertThatThrownBy(() -> listener.process(null))
                 .isInstanceOf(AmqpRejectAndDontRequeueException.class);
+    }
+
+    @Test
+    void shouldAcceptSettledMessageOnSuccess() {
+        listener.onMessage(message("{\"orderId\":1}"), acknowledgment);
+
+        verify(acknowledgment).acknowledge(AmqpAcknowledgment.Status.ACCEPT);
+    }
+
+    @Test
+    void shouldRejectPoisonMessage() {
+        listener.onMessage(message("{\"a\":}"), acknowledgment);
+
+        verify(acknowledgment).acknowledge(AmqpAcknowledgment.Status.REJECT);
+    }
+
+    @Test
+    void shouldRequeueOnUnexpectedFailure() {
+        Message message = org.mockito.Mockito.mock(Message.class);
+        when(message.getBody()).thenThrow(new IllegalStateException("broken"));
+
+        listener.onMessage(message, acknowledgment);
+
+        verify(acknowledgment).acknowledge(AmqpAcknowledgment.Status.REQUEUE);
+        verify(statistics).failed(any(IllegalStateException.class));
     }
 
     private static Message message(String body) {

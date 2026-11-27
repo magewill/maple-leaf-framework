@@ -10,7 +10,6 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import org.jspecify.annotations.Nullable;
 import org.springframework.amqp.core.MessageProperties;
-import org.springframework.amqp.rabbit.connection.CorrelationData;
 
 /**
  * 消息发送请求。
@@ -18,6 +17,10 @@ import org.springframework.amqp.rabbit.connection.CorrelationData;
  * <p>{@link #messageProperties} 由调用方提供，发送时会做深拷贝后再写入追踪头，
  * 因此发送后调用方对象保持原样；{@link #tag} 仅为历史兼容保留，发送侧不再写入
  * {@code consumerTag}（该属性属于消费侧）。</p>
+ *
+ * <p>{@code exchange} + {@code routingKey} 会被翻译为 AMQP 1.0 地址：
+ * 交换机为空时使用 {@code /queues/<routingKey>}，否则使用
+ * {@code /exchanges/<exchange>/<routingKey>}。</p>
  */
 @Data
 @Builder
@@ -39,7 +42,7 @@ public class GXRabbitMQMessageReqDto extends GXBaseReqDto {
     private String tag;
 
     @Nullable
-    private transient CorrelationData correlationData;
+    private transient GXCorrelationData correlationData;
 
     private MessageProperties messageProperties;
 }

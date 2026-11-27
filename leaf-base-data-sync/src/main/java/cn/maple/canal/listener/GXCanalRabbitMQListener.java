@@ -9,33 +9,42 @@ import cn.maple.canal.service.support.GXCanalFailureHandler;
 import cn.maple.canal.service.support.GXCanalLogThrottle;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.amqp.core.ExchangeTypes;
-import org.springframework.amqp.rabbit.annotation.Exchange;
-import org.springframework.amqp.rabbit.annotation.Queue;
-import org.springframework.amqp.rabbit.annotation.QueueBinding;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.amqp.AmqpRejectAndDontRequeueException;
+import org.springframework.amqp.client.annotation.AmqpListener;
+import org.springframework.amqp.core.AmqpAcknowledgment;
+import org.springframework.amqp.core.Message;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * Canal message consumer for RabbitMQ.
+ * Canal message consumer for RabbitMQ (AMQP 1.0).
  *
  * <p>The bean must stay eager: a lazy listener bean is never instantiated, so its
- * {@code @RabbitListener} endpoint would never be registered.</p>
+ * {@code @AmqpListener} endpoint would never be registered.</p>
+ *
+ * <p>The container runs with {@code autoAccept=false}, so this listener settles every delivery:
+ * success → {@code ACCEPT}; a rejected payload ({@code GXCanalMessageRejectedException} or
+ * {@link AmqpRejectAndDontRequeueException}) → {@code REJECT} so the dead letter exchange routes it
+ * to the dead letter queue; any other failure → {@code REQUEUE}.</p>
  *
  * <p>Every parsed event is classified before the message is acknowledged. Handler failures are
  * retried a bounded number of times through {@link GXCanalFailureHandler}; permanent failures are
- * rejected so the dead letter exchange routes them to the dead letter queue.</p>
+ * rejected.</p>
  */
 @Slf4j
 @Component
 @ConditionalOnProperty(prefix = "canal", name = "mq-type", havingValue = "rabbitmq", matchIfMissing = true)
 @ConditionalOnBooleanProperty(prefix = "canal", name = "consumer-enabled", havingValue = true, matchIfMissing = true)
 public class GXCanalRabbitMQListener {
+    private static final String ADDRESS_PLACEHOLDER = "/queues/${canal.canal-queue-name:canalQueue}";
+
+    private static final String CONCURRENCY_PLACEHOLDER = "${canal.concurrency-count:10}";
+
     private final GXCanalMessageParseService canalMessageParseService;
 
     private final GXCanalFailureHandler canalFailureHandler;
@@ -54,11 +63,26 @@ public class GXCanalRabbitMQListener {
         this.logThrottle = logThrottle;
     }
 
-    @RabbitListener(bindings = {@QueueBinding(
-            value = @Queue(value = "${canal.canal-queue-name:canalQueue}", durable = "true"),
-            exchange = @Exchange(value = "${canal.exchange-name:exchange.fanout.canal}", type = ExchangeTypes.FANOUT),
-            key = "${canal.routing-key:canal.example.exchange.routingkey}")},
-            concurrency = "${canal.concurrency-count:10}")
+    @AmqpListener(addresses = ADDRESS_PLACEHOLDER, concurrency = CONCURRENCY_PLACEHOLDER)
+    public void onMessage(Message message, AmqpAcknowledgment acknowledgment) {
+        String payload = new String(message.getBody(), StandardCharsets.UTF_8);
+        String traceId = header(message, GXCanalConstant.HEADER_TRACE_ID);
+        Integer retryCount = intHeader(message, GXCanalConstant.HEADER_RETRY_COUNT);
+        AmqpAcknowledgment.Status status;
+        try {
+            listener(payload, traceId, retryCount);
+            status = AmqpAcknowledgment.Status.ACCEPT;
+        } catch (AmqpRejectAndDontRequeueException e) {
+            logThrottle.warn("rabbit-reject", "Canal message rejected: error={}", e.getMessage());
+            status = AmqpAcknowledgment.Status.REJECT;
+        } catch (RuntimeException e) {
+            logThrottle.error("rabbit-requeue", "Canal message requeued: error={}", e.getMessage());
+            status = AmqpAcknowledgment.Status.REQUEUE;
+        }
+        // 结算放在 try 之外：结算失败属于传输问题，不能被当成业务失败再触发一次 REQUEUE。
+        acknowledgment.acknowledge(status);
+    }
+
     public void listener(String payload,
                          @Header(name = GXCanalConstant.HEADER_TRACE_ID, required = false) String traceId,
                          @Header(name = GXCanalConstant.HEADER_RETRY_COUNT, required = false) Integer retryCount) {
@@ -124,5 +148,25 @@ public class GXCanalRabbitMQListener {
 
     private String describe(RuntimeException exception) {
         return exception.getClass().getSimpleName() + ": " + exception.getMessage();
+    }
+
+    private static String header(Message message, String name) {
+        Object value = message.getMessageProperties().getHeader(name);
+        return value == null ? null : value.toString();
+    }
+
+    private static Integer intHeader(Message message, String name) {
+        Object value = message.getMessageProperties().getHeader(name);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text && CharSequenceUtil.isNotBlank(text)) {
+            try {
+                return Integer.valueOf(text);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
     }
 }

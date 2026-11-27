@@ -7,7 +7,6 @@ import cn.maple.canal.metrics.GXCanalConsumeStatistics;
 import cn.maple.canal.properties.local.GXLocalCanalProperties;
 import cn.maple.canal.properties.nacos.GXNacosCanalProperties;
 import org.junit.jupiter.api.Test;
-import org.springframework.amqp.core.Queue;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -133,15 +132,17 @@ class GXCanalPropertiesBindingTest {
         new ApplicationContextRunner()
                 .withUserConfiguration(GXCanalPropertiesConfig.class, BindingSupport.class,
                         GXCanalConfig.class, StatisticsConfig.class)
+                .withBean(cn.maple.rabbitmq.service.GXSendRabbitMQService.class,
+                        () -> org.mockito.Mockito.mock(cn.maple.rabbitmq.service.GXSendRabbitMQService.class))
                 .withPropertyValues("canal.config-source=local", "canal.canal-queue-name=queue-a")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
-                    assertEquals("queue-a", context.getBean("canalQueue", Queue.class).getName());
+                    assertEquals("queue-a", context.getBean(GXCanalConfig.CanalRabbitTopology.class).queue());
 
                     MutablePropertySources sources = context.getEnvironment().getPropertySources();
                     sources.addFirst(new MapPropertySource("refresh", Map.of("canal.canal-queue-name", "queue-b")));
 
-                    assertEquals("queue-a", context.getBean("canalQueue", Queue.class).getName(),
+                    assertEquals("queue-a", context.getBean(GXCanalConfig.CanalRabbitTopology.class).queue(),
                             "an assembly-time key must not be applied without a restart");
                 });
     }

@@ -30,14 +30,20 @@
 
 ### 2.2. RabbitMQ 配置 (`GXCanalConfig`)
 
-`GXCanalConfig` 类负责自动配置与 Canal 数据同步相关的 RabbitMQ 组件。它会根据 `GXCanalProperties` 中的配置信息，在 Spring 容器中创建并注册以下 Bean：
+`GXCanalConfig` 负责声明与 Canal 数据同步相关的 RabbitMQ 拓扑。AMQP 1.0 协议没有拓扑声明能力，
+因此它在一个 Bean 工厂方法（`canalRabbitTopology`）里通过 `GXSendRabbitMQService` 调用
+RabbitMQ Management HTTP API 完成声明——放在 Bean 创建期可保证监听容器启动前拓扑已就绪：
 
-*   **FanoutExchange**: 创建一个持久化的扇出交换机，用于广播 Canal 捕获的数据变更消息。
-*   **Queue**: 创建一个持久化的队列，用于存储待处理的 Canal 数据变更消息；队列带死信参数（`x-dead-letter-exchange` / `x-dead-letter-routing-key`）。
-*   **Binding**: 创建队列与交换机之间的绑定关系，使用配置的路由键。
-*   **canalDeadLetterExchange / canalDeadLetterQueue / canalDeadLetterBinding**: 死信直连交换机与死信队列，默认名称 `canal.dlx` / `canal.dlq`。
+*   **FanoutExchange**：持久化扇出交换机，广播 Canal 捕获的数据变更消息。
+*   **Queue**：持久化队列，带死信参数（`x-dead-letter-exchange` / `x-dead-letter-routing-key`）。
+*   **Binding**：队列与交换机之间的绑定，使用配置的路由键。
+*   **死信直连交换机与死信队列**：默认 `canal.dlx` / `canal.dlq`，绑定键 `canal.dead`。
 
-该配置类保证消息被拒绝时进入死信队列而不是被丢弃；`canal.consumer-enabled=false` 或 `canal.mq-type=rocketmq` 时上述 Bean 全部不声明。所有 Bean 均标注 `@ConditionalOnMissingBean`，下游可自行覆盖。
+声明结果以 `CanalRabbitTopology` 记录（queue / exchange / routingKey / deadLetterExchange / deadLetterQueue）。
+`canal.consumer-enabled=false` 或 `canal.mq-type=rocketmq` 时不做任何声明。
+
+需要自定义拓扑时不要声明同名 Bean（Bean 覆盖默认关闭，会抛 `BeanDefinitionOverrideException`），
+而是用 `canal.consumer-enabled=false` 关掉本模块的声明后自行创建，或直接调整 `canal.*` 配置项。
 
 ### 2.3. 常量 (`GXCanalConstant`)
 
@@ -70,12 +76,16 @@
 
 ### 2.5. 消息监听器 (`GXCanalRabbitMQListener`)
 
-`GXCanalRabbitMQListener` 类是 RabbitMQ 消息的消费者。它使用 `@RabbitListener` 注解监听在 `GXCanalConfig` 中配置的队列。
+`GXCanalRabbitMQListener` 是 RabbitMQ 消息的消费者。它使用
+`@AmqpListener(addresses = "/queues/${canal.canal-queue-name:canalQueue}", concurrency = "${canal.concurrency-count:10}")`
+监听 `GXCanalConfig` 声明的队列（RabbitMQ 只接受 AMQP 1.0 v2 地址，裸队列名会被拒绝）。
 
-*   **配置来源**: 队列名、交换机名、路由键与并发数通过属性占位符从 `Environment` 解析（`${canal.canal-queue-name:canalQueue}` 等）。这些属于**装配期配置**，运行期修改需重启才生效。
-*   **监听器必须保持 eager**: 该类不得加 `@Lazy`。懒加载的监听器 Bean 不会被实例化，`@RabbitListener` 端点因此不会被注册（模块内已有回归用例锁定该行为）。
+*   **配置来源**: 队列名、交换机名、路由键与并发数通过属性占位符从 `Environment` 解析。这些属于**装配期配置**，运行期修改需重启才生效。
+*   **监听器必须保持 eager**: 该类不得加 `@Lazy`。懒加载的监听器 Bean 不会被实例化，`@AmqpListener` 端点因此不会被注册（模块内已有回归用例锁定该行为）。
+*   **显式结算**: 容器以 `autoAccept=false` 运行，`onMessage(Message, AmqpAcknowledgment)` 负责结算——成功 `ACCEPT`、拒绝进死信 `REJECT`、其他异常 `REQUEUE`。
+*   **转换失败**: 消息体无法被 `JacksonJsonMessageConverter` 解析时，监听器方法不会执行，由 `GXAmqpListenerErrorHandler` 直接 reject 进死信，不会无限重投。
 *   **消息处理**: 监听到消息后调用 `GXCanalMessageParseService#parse`，按事件逐个判定结局，再决定 ack / 有界重投 / 拒绝进死信。
-*   **异常处理**: 处理器抛出的异常不再被吞掉；`GXCanalFailureHandler` 负责传输级动作（重投或死信）。
+*   **异常处理**: 处理器抛出的异常不再被吞掉；`GXCanalFailureHandler` 负责传输级动作（重投或死信）。重投走 `sendRawMessage` 并等待结算，只有 Broker 返回 `accepted` 才确认原消息；重投失败（同步异常、rejected/released、结算超时）时原消息改为 `REJECT`，进入死信队列等待回放。
 
 ### 2.6. 消息解析服务
 
@@ -250,7 +260,7 @@ canal:
 *   **幂等性处理**: 消息队列本身存在重复投递的可能（至少一次语义）。设计数据处理逻辑时必须保证幂等，重复处理同一消息不得产生副作用。
 *   **异常处理与重试**: 框架已负责结局判定与有界重投，业务处理器**不要**自行吞异常或自行重试；处理器抛出异常即表示「可重试失败」，返回 `null` 表示「不可重试失败」。
 *   **事务管理**: 如果数据处理逻辑涉及到数据库操作或其他事务性资源，确保在适当的事务边界内执行，以保证数据一致性。
-*   **性能调优**: RabbitMQ 侧由 `canal.concurrency-count` 与 `spring.rabbitmq.listener.simple.prefetch` 共同决定在途上限（`并发数 × prefetch`）；RocketMQ 侧消费线程数由 `@RocketMQMessageListener` 注解常量固定为 20（不可配置，见 §6.2 注）。两种 MQ 的启动日志都会打印实际容量。
+*   **性能调优**: RabbitMQ 侧由 `canal.concurrency-count` 与 `spring.amqp.listener.initial-credits` 共同决定在途上限（`并发数 × credits`）；RocketMQ 侧消费线程数由 `@RocketMQMessageListener` 注解常量固定为 20（不可配置，见 §6.2 注）。两种 MQ 的启动日志都会打印实际容量。
 *   **日志记录**: 框架日志为 ASCII，并携带 `traceId`、`database`、`table`、`batchIndex`；自定义处理逻辑也应保持可检索。
 *   **Canal 服务端配置**: 务必确保 Canal 服务端的 `instance.properties` 中关于 MQ 的配置（如 `canal.mq.topic`, `canal.mq.exchange` 等）与 `leaf-base-data-sync` 模块的配置（`exchangeName`, `routingKey`；RocketMQ 侧为 `canal.rocketmq.topic`）匹配。
 *   **安全性**: 原始 SQL (`GXCanalDataDto.sql`) 字段可能包含敏感信息，在记录或使用时需谨慎。
@@ -267,7 +277,7 @@ canal:
   consumer-enabled: true     # false 时完全不装配消费侧
 ```
 
-*   **RabbitMQ（默认）**：声明 `exchange.fanout.canal`、`canalQueue`、绑定与死信队列 `canal.dlx`/`canal.dlq`，使用 `@RabbitListener` 消费。
+*   **RabbitMQ（默认）**：通过 `GXSendRabbitMQService` 声明 `exchange.fanout.canal`、`canalQueue`、绑定与死信队列 `canal.dlx`/`canal.dlq`，使用 `@AmqpListener` 消费（AMQP 1.0）。
 *   **RocketMQ**：需由下游显式引入 `cn.maple.framework:leaf-base-rocketmq`（本模块以 `optional` 依赖声明，避免仅用 RabbitMQ 的应用被迫引入 RocketMQ 客户端）；随后配置：
 
 ```yaml
@@ -329,7 +339,7 @@ rocketmq:
 | --- | --- | --- |
 | 顺序消费 / 分区有序 | 与既有 `concurrency=10` 无序语义对齐 | 按表维度拆分消费组，同一表只用单一消费者 |
 | 事务消息 | 数据同步链路无事务边界 | 业务侧幂等 + 唯一键约束 |
-| 批量确认 | 逐条判定结局是不丢消息的前提 | RabbitMQ 调大 `spring.rabbitmq.listener.simple.prefetch`；RocketMQ 注解 `consumeThreadMax` 为固定值 |
+| 批量确认 | 逐条判定结局是不丢消息的前提 | RabbitMQ 调大 `spring.amqp.listener.initial-credits`；RocketMQ 注解 `consumeThreadMax` 为固定值 |
 | 跨 MQ 双跑 | 重复消费与幂等责任超出模块职责 | 部署级切换 |
 | 跨库 routing 过滤 | 会改变既有 fanout 交换机语义 | 下游各自建队列；RocketMQ 用 tag 过滤 |
 | 运行期刷新装配期键 | 队列/交换机/主题/并发在容器启动时固定 | 改配置后重启 |

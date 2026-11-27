@@ -1,6 +1,9 @@
 package cn.maple.rabbitmq.service.impl;
 
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
+import cn.maple.rabbitmq.support.GXAmqpManagementClient;
+import cn.maple.rabbitmq.support.GXAmqpMessagePublisher;
+import cn.maple.rabbitmq.support.GXSendOutcome;
 import cn.maple.rabbitmq.support.GXTestRabbitFixtures;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
@@ -17,17 +20,19 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.MDC;
 import org.springframework.amqp.core.DirectExchange;
+import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.QueueBuilder;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 /**
@@ -36,10 +41,10 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class GXSendOverheadTest {
     @Mock
-    private RabbitTemplate rabbitTemplate;
+    private GXAmqpMessagePublisher publisher;
 
     @Mock
-    private RabbitAdmin rabbitAdmin;
+    private GXAmqpManagementClient managementClient;
 
     private GXSendRabbitMQServiceImpl service;
 
@@ -53,7 +58,9 @@ class GXSendOverheadTest {
 
     @BeforeEach
     void setUp() {
-        service = GXTestRabbitFixtures.newService(rabbitTemplate, rabbitAdmin);
+        service = GXTestRabbitFixtures.newService(publisher, managementClient);
+        org.mockito.Mockito.lenient().when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED));
         serviceLogger = (Logger) LogManager.getLogger(GXSendRabbitMQServiceImpl.class);
         previousLevel = serviceLogger.getLevel();
         serviceLogger.setLevel(Level.DEBUG);
@@ -87,8 +94,6 @@ class GXSendOverheadTest {
 
     @Test
     void shouldNotLogInfoOnQueueDeclaration() {
-        when(rabbitAdmin.declareQueue(any(Queue.class))).thenReturn("order.queue");
-
         service.createQueue("order.queue", true, false, false, null);
 
         assertThat(events).noneMatch(event -> event.getLevel().isMoreSpecificThan(Level.INFO));
@@ -96,8 +101,6 @@ class GXSendOverheadTest {
 
     @Test
     void shouldNotLogInfoOnChannelSetup() {
-        when(rabbitAdmin.declareQueue(any(Queue.class))).thenReturn("order.queue");
-
         service.setupMessageChannel("order.queue", true, false, false, null,
                 new DirectExchange("order.exchange"), "key");
 
@@ -115,7 +118,6 @@ class GXSendOverheadTest {
 
     @Test
     void shouldStillSupportBuilderBasedQueueArguments() {
-        when(rabbitAdmin.declareQueue(any(Queue.class))).thenReturn("order.queue");
         Queue queue = QueueBuilder.durable("order.queue").build();
 
         assertThat(queue.isDurable()).isTrue();

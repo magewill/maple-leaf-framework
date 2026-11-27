@@ -1,6 +1,9 @@
 package cn.maple.rabbitmq.service.impl;
 
 import cn.maple.rabbitmq.exception.GXRabbitMQOperationException;
+import cn.maple.rabbitmq.support.GXAmqpManagementClient;
+import cn.maple.rabbitmq.support.GXAmqpManagementException;
+import cn.maple.rabbitmq.support.GXAmqpMessagePublisher;
 import cn.maple.rabbitmq.support.GXTestRabbitFixtures;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -8,10 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,7 +25,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -33,16 +35,16 @@ import static org.mockito.Mockito.verify;
 @ExtendWith(MockitoExtension.class)
 class GXQueueDeclarationConcurrencyTest {
     @Mock
-    private RabbitTemplate rabbitTemplate;
+    private GXAmqpMessagePublisher publisher;
 
     @Mock
-    private RabbitAdmin rabbitAdmin;
+    private GXAmqpManagementClient managementClient;
 
     private GXSendRabbitMQServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = GXTestRabbitFixtures.newService(rabbitTemplate, rabbitAdmin);
+        service = GXTestRabbitFixtures.newService(publisher, managementClient);
     }
 
     @AfterEach
@@ -54,21 +56,21 @@ class GXQueueDeclarationConcurrencyTest {
     void shouldDeclareSameQueueOnceUnderConcurrency() throws Exception {
         doAnswer(invocation -> {
             Thread.sleep(200L);
-            return ((Queue) invocation.getArgument(0)).getName();
-        }).when(rabbitAdmin).declareQueue(any());
+            return null;
+        }).when(managementClient).declareQueue(anyString(), anyBoolean(), anyBoolean(), anyMap());
 
         List<Queue> results = runConcurrently(32, () -> service.createQueue("order.queue", true, false, false, null));
 
         assertThat(results).hasSize(32).allSatisfy(queue -> assertThat(queue.getName()).isEqualTo("order.queue"));
-        verify(rabbitAdmin, times(1)).declareQueue(any());
+        verify(managementClient, times(1)).declareQueue(anyString(), anyBoolean(), anyBoolean(), anyMap());
     }
 
     @Test
     void shouldDeclareEachQueueOnceForDifferentQueues() throws Exception {
         doAnswer(invocation -> {
             Thread.sleep(100L);
-            return ((Queue) invocation.getArgument(0)).getName();
-        }).when(rabbitAdmin).declareQueue(any());
+            return null;
+        }).when(managementClient).declareQueue(anyString(), anyBoolean(), anyBoolean(), anyMap());
 
         List<Callable<Queue>> tasks = new ArrayList<>();
         for (int queueIndex = 0; queueIndex < 10; queueIndex++) {
@@ -80,15 +82,15 @@ class GXQueueDeclarationConcurrencyTest {
 
         awaitAll(tasks);
 
-        verify(rabbitAdmin, times(10)).declareQueue(any());
+        verify(managementClient, times(10)).declareQueue(anyString(), anyBoolean(), anyBoolean(), anyMap());
     }
 
     @Test
     void shouldNotSerializeDifferentQueues() throws Exception {
         doAnswer(invocation -> {
             Thread.sleep(200L);
-            return ((Queue) invocation.getArgument(0)).getName();
-        }).when(rabbitAdmin).declareQueue(any());
+            return null;
+        }).when(managementClient).declareQueue(anyString(), anyBoolean(), anyBoolean(), anyMap());
 
         long start = System.nanoTime();
         List<Callable<Queue>> tasks = new ArrayList<>();
@@ -106,8 +108,8 @@ class GXQueueDeclarationConcurrencyTest {
     void shouldPropagateFailureToAllConcurrentCallers() throws Exception {
         doAnswer(invocation -> {
             Thread.sleep(100L);
-            throw new AmqpException("PRECONDITION_FAILED");
-        }).when(rabbitAdmin).declareQueue(any());
+            throw new GXAmqpManagementException("PRECONDITION_FAILED", 400);
+        }).when(managementClient).declareQueue(anyString(), anyBoolean(), anyBoolean(), anyMap());
 
         AtomicInteger wrappedFailures = new AtomicInteger();
         List<Callable<Queue>> tasks = new ArrayList<>();
@@ -158,7 +160,8 @@ class GXQueueDeclarationConcurrencyTest {
                 try {
                     results.add(future.get(10, TimeUnit.SECONDS));
                 } catch (ExecutionException e) {
-                    if (!(e.getCause() instanceof AmqpException) && !(e.getCause() instanceof GXRabbitMQOperationException)) {
+                    if (!(e.getCause() instanceof GXAmqpManagementException)
+                            && !(e.getCause() instanceof GXRabbitMQOperationException)) {
                         throw e;
                     }
                 }

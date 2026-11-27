@@ -1,6 +1,8 @@
 # AGENTS.md - leaf-base-rabbitmq
 
-本文档用于指导 `leaf-base-rabbitmq` 模块的后续迭代开发。修改本模块时，优先保持 RabbitMQ 配置装配、消息发送语义、动态声明资源能力和对外服务契约的兼容性，避免做与当前职责无关的重构。
+本文档用于指导 `leaf-base-rabbitmq` 模块的后续迭代开发。模块已于 2026-11-27 从经典 AMQP 0-9-1 迁移到
+**AMQP 1.0**（Spring Boot 4.2 + `spring-amqp-client` + Qpid ProtonJ2），修改本模块时优先保持发送语义、
+拓扑契约与对外服务契约的兼容性，不要重新引入经典协议 API。
 
 ## 通用硬性规则
 
@@ -23,11 +25,14 @@
 
 ## 1. 模块定位
 
-`leaf-base-rabbitmq` 是 Maple Leaf Framework 的 RabbitMQ 基础能力模块，当前负责：
+`leaf-base-rabbitmq` 是 Maple Leaf Framework 的 RabbitMQ 基础能力模块（AMQP 1.0），当前负责：
 
-1. 基于 Spring AMQP 自动装配 `RabbitTemplate`、`AsyncRabbitTemplate`、`RabbitAdmin`、`RabbitMessagingTemplate` 与 `ThreadPoolTaskScheduler`。
-2. 统一承载 RabbitMQ 配置绑定（`spring.rabbitmq` 前缀），支持本地 `rabbit.yml` 与 Nacos `rabbit.yml` 两种来源，由 `maple.framework.rabbitmq.config-source` 互斥选择。
-3. 提供 `GXSendRabbitMQService`：普通消息发送、动态声明队列/交换机/绑定、一站式消息通道创建（同步/异步）。
+1. 基于 Spring Boot 4.2 AMQP 1.0 自动装配补齐 Maple Leaf 约定：连接细节、vhost、消息转换器、
+   发送器、拓扑管理客户端、监听容器工厂。
+2. 统一承载 RabbitMQ 配置绑定（`spring.rabbitmq` 前缀，`spring.amqp.*` 优先），支持本地
+   `rabbit.yml` 与 Nacos `rabbit.yml` 两种来源，由 `maple.framework.rabbitmq.config-source` 互斥选择。
+3. 提供 `GXSendRabbitMQService`：普通消息发送（异步结算 / 同步等待）、动态声明队列/交换机/绑定、
+   一站式消息通道创建（同步/异步）。
 4. 提供发送回调扩展点：`GXConfirmCallback`、`GXReturnsCallback`、`GXRecoveryCallback`。
 5. 提供默认监听实现 `GXDefaultRabbitMQQueueListenerImpl` 与监听契约 `GXRabbitMQQueueListener`。
 6. 在发送链路补充 `X-Trace-Id`、`X-Timestamp`、`X-Source-Service` 与 `messageId`。
@@ -36,74 +41,112 @@
 
 ## 2. 目录职责
 
-1. `config`：Bean 装配、转换器、回调、调度器与连接工厂参数应用。
-2. `service` / `service/impl`：发送、声明、通道创建、追踪与异步执行器。
+1. `config`：`GXRabbitMQConfig`——连接细节、vhost 定制、转换器、发布器、拓扑客户端、容器工厂。
+2. `service` / `service/impl`：发送、声明、通道创建、结算分发、异步执行器。
 3. `properties`：配置基类、`local`/`nacos` 变体、启动期 Nacos 拉取的 `EnvironmentPostProcessor`。
 4. `exception`：`GXRabbitMQOperationException`，携带操作类型、资源名与已完成步骤。
-5. `callback`：确认、退回、重试恢复扩展点。
-6. `listener` / `listener/impl`：监听契约、默认实现与计数器。
-7. `dto/inner`：消息发送请求 DTO。
-8. `support`：共享 `JsonMapper` 与类型头常量。
+5. `callback`：确认、退回、重试恢复扩展点；`GXReturnedMessage` 为退回描述。
+6. `listener` / `listener/impl`：监听契约、默认实现（`@AmqpListener` + 显式 ack）、计数器与
+   `GXAmqpListenerErrorHandler`（消息体转换失败直接 reject）。
+7. `dto/inner`：消息发送请求 DTO 与 `GXCorrelationData`。
+8. `support`：`GXAmqpAddress`（v2 地址编码）、`GXAmqpMessagePublisher`（发送 + 结算）、
+   `GXAmqpManagementClient`（Management HTTP API）、`GXSendOutcome`、`GXAmqpManagementException`、
+   `GXRabbitMQJsonSupport`。
 9. `src/main/resources/META-INF`：`additional-spring-configuration-metadata.json`、`spring.factories`。
-10. `src/test`：125 个用例（120 执行 + 5 集成跳过），覆盖单元 / 上下文 / 并发；集成用例默认参与构建，无 Broker 时以 `Skipped` 呈现，`-Dgroups=integration` 单独执行。
+10. `src/test`：158 个用例（148 单元/上下文 + 10 集成）；集成用例需要 `RABBITMQ_HOST`，缺失时 `Skipped`。
 
 ## 3. 强制开发规则
 
-1. 所有日志文案必须 ASCII；错误码/关键字保持稳定（`RABBITMQ_LISTENER_REJECTED`、`RABBITMQ_LISTENER_FAILED`）。
+1. 所有日志文案必须 ASCII；错误码/关键字保持稳定（`RABBITMQ_LISTENER_REJECTED`、`RABBITMQ_LISTENER_REQUEUE`）。
+   毒消息（消息体无法转换）由 `GXAmqpListenerErrorHandler` 以 `RABBITMQ_LISTENER_REJECTED reason=unconvertible` 记录。
 2. 参数非法抛 `GXBusinessException`；Broker 操作失败抛 `GXRabbitMQOperationException`。禁止用 `null`/`false` 表达需要排障的失败。
-3. `createQueue` 每次必须触达 Broker，同队列并发由单飞收敛；**禁止恢复"永久队列缓存"**（无法感知 Broker 侧删除）。
-4. 不再声明排他队列；`createTemporaryQueue` 语义为 `durable=false, exclusive=false, autoDelete=true`。
-5. 发送前必须用 `MessagePropertiesBuilder.fromClonedProperties` 做快照，禁止改写调用方 `MessageProperties`，禁止写 `consumerTag`。
-6. `X-Trace-Id` 必须优先复用 MDC 中的 traceId，缺失才生成；禁止逐条查询 `Environment`。
-7. 出站载荷继续使用 Hutool 序列化（`Date`/`LocalDateTime` 为毫秒时间戳），改变即视为破坏 wire format；`JacksonJsonMessageConverter` 只负责类型化转换。
-8. `DefaultClassMapper.setTrustedPackages` 必须包含 `cn.hutool.core.lang`（`"cn.hutool.core"` 不覆盖子包）。
-9. 监听器禁止"捕获异常后正常返回"：不可重试抛 `AmqpRejectAndDontRequeueException`，可重试原样抛出。
-10. 线程池/调度器必须有 `@PreDestroy` 或容器销毁路径；异步执行器必须使用 `GXMdcWrapperThreadPoolExecutor`（自动传播 MDC），禁止手工拷贝 MDC 或把任务丢给裸 `Thread`；禁止在调度线程上阻塞等待子任务。
-11. 修改消息头、失败语义、临时队列语义或配置键时，必须同步更新本文件、`docs/leaf-base-rabbitmq开发手册.md` 与 `../specs/016-rabbitmq`。
-12. `leaf-base-retry` 与 `jackson-datatype-jsr353` 已移除，不得重新引入；`GXRecoveryCallback` 仅在调用方为模板设置 `RetryTemplate` 时触发。
+3. **禁止重新引入经典协议 API**：`RabbitTemplate`、`RabbitAdmin`、`CachingConnectionFactory`、
+   `@RabbitListener`、`CorrelationData`、`spring-boot-rabbitmq`、`spring-rabbit`。
+4. 发布地址必须走 `GXAmqpAddress`：默认交换机 → `/queues/<routingKey>`，命名交换机 →
+   `/exchanges/<exchange>/<routingKey>`；消费源地址必须写成 `/queues/<queue>`，裸队列名会被
+   RabbitMQ 以 `amqp_address_v1_not_permitted` 拒绝。
+5. 拓扑只能通过 `GXAmqpManagementClient`（Management HTTP API）：AMQP 1.0 协议没有
+   `queue.declare`/`exchange.declare`/`queue.bind`；不要假设 `createQueue` 会隐式声明。
+6. `createQueue` 每次必须触达 Broker，同队列并发由单飞收敛；**禁止恢复"永久队列缓存"**。
+7. 排他队列不支持：`createQueue(..., exclusive=true)` 必须抛 `GXBusinessException`；
+   `createTemporaryQueue` 语义为 `durable=true, exclusive=false, autoDelete=true`
+   （RabbitMQ 4.x 默认禁止非持久化非排他队列）。
+8. 发送前必须用 `MessagePropertiesBuilder.fromClonedProperties` 做快照，禁止改写调用方
+   `MessageProperties`，禁止写 `consumerTag`。
+9. `X-Trace-Id` 必须优先复用 MDC 中的 traceId，缺失才生成；禁止逐条查询 `Environment`。
+10. 出站载荷继续使用 Hutool 序列化（`Date`/`LocalDateTime` 为毫秒时间戳），改变即视为破坏 wire format；
+    `JacksonJsonMessageConverter` 只负责类型化转换；header 通过 AMQP 1.0 application properties 传输。
+11. `DefaultClassMapper.setTrustedPackages` 必须包含 `cn.hutool.core.lang`（`"cn.hutool.core"` 不覆盖子包）。
+12. 监听器禁止"捕获异常后正常返回"：容器以 `autoAccept=false` 运行，监听器必须显式结算——
+    成功 `ACCEPT`、`AmqpRejectAndDontRequeueException` → `REJECT`、其他异常 → `REQUEUE`。
+13. 监听器 Bean 必须保持饿汉初始化；`@Lazy` 会导致 `@AmqpListener` 端点永不注册。
+14. 消息体无法转换（`MessageConversionException`）必须由 `GXAmqpListenerErrorHandler` 结算为 `REJECT`，
+    禁止让容器 release 后无限重投；该处理器是唯一 Bean，Boot 的容器工厂配置器会自动应用。
+15. 线程池/调度器必须有 `@PreDestroy` 或容器销毁路径；异步执行器必须使用
+    `GXMdcWrapperThreadPoolExecutor`（自动传播 MDC），禁止手工拷贝 MDC 或把任务丢给裸 `Thread`。
+16. 修改消息头、失败语义、临时队列语义或配置键时，必须同步更新本文件、
+    `docs/leaf-base-rabbitmq开发手册.md` 与 `../specs/016-rabbitmq`。
+17. `leaf-base-retry` 与 `jackson-datatype-jsr353` 已移除，不得重新引入；`GXRecoveryCallback`
+    在结算失败（连接中断、链路关闭、结算超时）时触发。
 
 ## 4. 配置键
 
 | 键 | 默认值 | 说明 |
 | --- | --- | --- |
-| `spring.rabbitmq.*` | Boot 默认 | 连接/监听/模板，绑定到 `GXRabbitMQProperties` |
+| `spring.amqp.host/port/username/password` | Boot 默认 | AMQP 1.0 原生前缀，显式配置时优先 |
+| `spring.rabbitmq.host/port/username/password` | `localhost` / `5672` | 历史前缀，作为回退来源 |
+| `spring.rabbitmq.addresses` | 无 | 历史写法 `host1:5672,host2:5672`，取第一个作为连接端点（优先于 host/port） |
+| `spring.rabbitmq.virtual-host` | `/` | vhost，经 `ConnectionOptionsCustomizer` 注入 open 帧 |
+| `spring.amqp.listener.*` | Boot 默认 | 并发、credits、receive-timeout、graceful-shutdown |
 | `maple.framework.rabbitmq.config-source` | `nacos` | `local` / `nacos` 互斥 |
-| `maple.framework.rabbitmq.scheduler.expose` | `true` | 是否把 `rabbitTaskScheduler` 暴露为 `TaskScheduler` Bean |
+| `maple.framework.rabbitmq.confirm-timeout` | `5000` | 异步发送等待结算的毫秒数（由 `@Value` 读取，**不**在 `spring.rabbitmq` 绑定类里） |
+| `maple.framework.rabbitmq.management.enabled` | `true` | 关闭后拓扑方法抛异常，发送与消费不受影响 |
+| `maple.framework.rabbitmq.management.url` | `http://<host>:15672` | Management API 基地址 |
+| `maple.framework.rabbitmq.management.username/password` | 回退连接凭据 | 管理 API 凭据 |
+| `maple.framework.rabbitmq.management.virtual-host` | 回退连接 vhost | 管理 API vhost |
 | `maple.framework.rabbitmq.thread-pool.core-size` | CPU | 异步声明执行器核心线程 |
 | `maple.framework.rabbitmq.thread-pool.max-size` | CPU×2 | 仅队列满时生效；`queue-capacity<=0` 时立即生效 |
 | `maple.framework.rabbitmq.thread-pool.queue-capacity` | `1000` | `<=0` 使用 `SynchronousQueue` |
 | `maple.framework.mq.rabbitmq.enable` | `false` | 默认监听器启停 |
 | `maple.framework.mq.rabbitmq.default-queue-name` | `maple.default.queue` | 监听队列名（最高优先级） |
 
-## 5. 能力边界（宪法附加约束 §9）
+已移除：`maple.framework.rabbitmq.scheduler.expose`（经典 `AsyncRabbitTemplate` 调度器随之删除）、
+`spring.rabbitmq.connection-limit` / `channel-cache-size` / `cache-mode` / `channel-checkout-timeout`
+（经典连接工厂概念，AMQP 1.0 无对应语义）。
+
+## 5. 能力边界
 
 | 能力 | 状态 | 替代方案 |
 | --- | --- | --- |
-| 排他队列声明 | 不支持 | 调用方自行持有连接并用 `QueueBuilder` 声明 |
+| 排他队列声明 | 不支持 | 调用方自行持有连接并用 `openReceiver`/`openSender` 声明 |
+| 拓扑管理 | 依赖 Management API | 关闭 `management.enabled` 后改用部署期声明（IaC / rabbitmqadmin） |
 | 批量发送 | 不支持 | 调用方循环发送；吞吐不足时在业务侧合并消息体 |
-| 延迟/优先级/TTL | 未封装 | 通过 `MessageProperties` 或 `arguments` 自行设置 |
-| 死信治理 | 未封装 | 部署方在 Broker 侧配置 DLX，并依赖监听器拒绝语义 |
-| 消费端重试策略 | 交给容器 | 通过 `spring.rabbitmq.listener.simple.retry.*` 配置 |
+| 延迟/优先级/TTL | 未封装 | 通过 `MessageProperties` 自行设置（TTL 映射为 AMQP 1.0 `timeToLive`） |
+| 死信治理 | 未封装 | 部署方在 Broker 侧配置 DLX，并依赖监听器 `REJECT` 语义 |
+| 消费端重试策略 | 交给调用方 | 监听器内重投或 `REQUEUE`；容器按 `recovery-backoff` 重建链路 |
 | 消息大小前置校验 | 未实现 | 由调用方控制载荷大小，Broker 侧限制兜底 |
 | 指标暴露 | 仅监听计数 | 通过 `MeterRegistry` 采集 `rabbitmq.listener.messages.*` |
 | Nacos 动态刷新 | 不支持 | 重启生效；需要热更新时改用 `spring.config.import` |
-| 独立关闭监听基础设施 | 不支持 | `@EnableRabbit` 是监听能力入口，随 `GXRabbitMQConfig` 一并生效；需要完全禁用时不要引入本模块或排除该配置类 |
+| 独立关闭监听基础设施 | 不支持 | `@EnableAmqp` 随 `GXRabbitMQConfig` 一并生效；需要完全禁用时不要引入本模块 |
 
 ## 6. 测试要求
 
 1. 模块级命令：`mvn -o -B -pl leaf-base-rabbitmq test`（包含 `*IT`，无 Broker 环境时集成用例显示为 `Skipped`）。
-2. 真实 Broker：设置 `RABBITMQ_HOST`/`RABBITMQ_PORT`/`RABBITMQ_USERNAME`/`RABBITMQ_PASSWORD`/`RABBITMQ_VHOST` 后执行 `mvn -o -B -pl leaf-base-rabbitmq test -Dgroups=integration`；凭据不得入库。
-3. 当前基线：125 个用例（120 执行 + 5 集成跳过），连续 3 次执行结果一致（2026-10-25）。
+2. 真实 Broker：设置 `RABBITMQ_HOST`/`RABBITMQ_PORT`/`RABBITMQ_USERNAME`/`RABBITMQ_PASSWORD`/`RABBITMQ_VHOST`/`RABBITMQ_MANAGEMENT_PORT` 后执行同一条命令；凭据不得入库。
+3. 当前基线：158 个用例（148 执行 + 10 集成），真实 RabbitMQ 4.4.1 全绿（2026-11-27）。
 4. 新增/修改能力必须覆盖：成功、失败、异常、空值/边界、并发、Spring 上下文装配。
-5. 关键并发基线：16 线程 × 20 条发送不串扰；32 线程同队列声明只声明 1 次；10 队列并发不相互阻塞。
-6. 性能口径：发送成功路径 0 条 info 日志；每消息固定开销 ≤4 项；调度器并发度 >1。
+5. 关键并发基线：16 线程 × 100 条发送不串扰；32 线程同队列声明只声明 1 次；10 队列并发不相互阻塞。
+6. 性能口径（本机 → 局域网 Broker）：顺序发送 p95 ≈ 1.4 ms；8 线程并发 ≈ 3100 msg/s；
+   发送成功路径 0 条 info 日志。
+7. 集成用例注意：`autoDelete=true` 队列在最后一个消费者断开后会被删除，需要多次收消息的场景使用
+   `autoDelete=false`。
 
 ## 7. 变更前检查清单
 
 1. 是否影响 `GXSendRabbitMQService` 的方法契约、失败语义或返回语义。
-2. 是否影响 `GXRabbitMQConfig` 中模板、管理器、调度器或转换器的装配结果。
+2. 是否影响 `GXRabbitMQConfig` 中连接细节、vhost、转换器、发布器、容器工厂的装配结果。
 3. 是否影响 `config-source` 的选择逻辑与启动日志。
-4. 是否影响默认监听器的启停条件、队列名来源或拒绝语义。
+4. 是否影响默认监听器的启停条件、地址、ack 语义。
 5. 是否影响 `GXConfirmCallback`、`GXReturnsCallback`、`GXRecoveryCallback` 的接入方式。
 6. 是否影响追踪头、消息 ID、编码、内容类型或 wire format。
 7. 是否引入非 ASCII 日志或直接 `System.out`。
@@ -114,5 +157,5 @@
 
 1. 涉及发送语义、配置来源、监听器启停条件、回调行为的提交，必须写清行为变化与兼容性影响。
 2. 涉及日志调整的提交，提交前确认新增和修改后的日志全部为 ASCII。
-3. 涉及并发、线程池、调度器的提交，写明新增或更新的测试与样本规模。
+3. 涉及并发、线程池、拓扑声明的提交，写明新增或更新的测试与样本规模。
 4. 无法补齐的测试必须在提交说明中明确风险、缺口与后续计划。

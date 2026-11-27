@@ -5,6 +5,9 @@ import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import cn.maple.rabbitmq.dto.inner.GXRabbitMQMessageReqDto;
 import cn.maple.rabbitmq.exception.GXRabbitMQOperationException;
 import cn.maple.rabbitmq.exception.GXRabbitMQOperationException.Operation;
+import cn.maple.rabbitmq.support.GXAmqpManagementClient;
+import cn.maple.rabbitmq.support.GXAmqpMessagePublisher;
+import cn.maple.rabbitmq.support.GXSendOutcome;
 import cn.maple.rabbitmq.support.GXTestRabbitFixtures;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,24 +16,23 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.slf4j.MDC;
 import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.core.DirectExchange;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.rabbit.connection.CorrelationData;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
-import java.util.Properties;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -40,27 +42,28 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class GXSendRabbitMQServiceImplTest {
     @Mock
-    private RabbitTemplate rabbitTemplate;
+    private GXAmqpMessagePublisher publisher;
 
     @Mock
-    private RabbitAdmin rabbitAdmin;
+    private GXAmqpManagementClient managementClient;
 
     private GXSendRabbitMQServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = GXTestRabbitFixtures.newService(rabbitTemplate, rabbitAdmin);
+        service = GXTestRabbitFixtures.newService(publisher, managementClient);
     }
 
     @AfterEach
     void tearDown() {
-        MDC.clear();
         service.shutdownAsyncExecutor();
     }
 
     @Test
     void shouldDispatchMessageWithTracingHeaders() {
         GXTraceIdContextUtils.putTraceId("trace-abc");
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED));
 
         service.sendNormalMessage(GXTestRabbitFixtures.newMessageRequest());
 
@@ -78,6 +81,9 @@ class GXSendRabbitMQServiceImplTest {
 
     @Test
     void shouldGenerateTraceIdWhenContextMissing() {
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED));
+
         service.sendNormalMessage(GXTestRabbitFixtures.newMessageRequest());
 
         String traceId = (String) captureSentMessage().getMessageProperties().getHeader("X-Trace-Id");
@@ -86,6 +92,8 @@ class GXSendRabbitMQServiceImplTest {
 
     @Test
     void shouldKeepCallerProvidedMessageId() {
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED));
         GXRabbitMQMessageReqDto request = GXTestRabbitFixtures.newMessageRequest();
         request.getMessageProperties().setMessageId("caller-id");
 
@@ -111,13 +119,26 @@ class GXSendRabbitMQServiceImplTest {
     }
 
     @Test
-    void shouldAllowDefaultExchange() {
+    void shouldMapDefaultExchangeToQueueAddress() {
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED));
         GXRabbitMQMessageReqDto request = GXTestRabbitFixtures.newMessageRequest();
         request.setExchange("");
+        request.setRoutingKey("order.queue");
 
         service.sendNormalMessage(request);
 
-        verify(rabbitTemplate).convertAndSend(eq(""), eq("test.key"), any(Message.class), nullable(CorrelationData.class));
+        verify(publisher).send(eq("/queues/order.queue"), any(Message.class), anyLong());
+    }
+
+    @Test
+    void shouldMapNamedExchangeToExchangeAddress() {
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED));
+
+        service.sendNormalMessage(GXTestRabbitFixtures.newMessageRequest());
+
+        verify(publisher).send(eq("/exchanges/test.exchange/test.key"), any(Message.class), anyLong());
     }
 
     @Test
@@ -149,9 +170,9 @@ class GXSendRabbitMQServiceImplTest {
     }
 
     @Test
-    void shouldPropagateAmqpExceptionFromTemplate() {
-        doThrow(new AmqpException("broker down")).when(rabbitTemplate)
-                .convertAndSend(anyString(), anyString(), any(Object.class), nullable(CorrelationData.class));
+    void shouldPropagateAmqpExceptionFromPublisher() {
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenThrow(new AmqpException("broker down"));
 
         assertThatThrownBy(() -> service.sendNormalMessage(GXTestRabbitFixtures.newMessageRequest()))
                 .isInstanceOf(AmqpException.class)
@@ -161,6 +182,8 @@ class GXSendRabbitMQServiceImplTest {
     @Test
     @SuppressWarnings("deprecation")
     void shouldNotWriteConsumerTagFromLegacyTagField() {
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED));
         GXRabbitMQMessageReqDto request = GXTestRabbitFixtures.newMessageRequest();
         request.setTag("legacy-tag");
 
@@ -171,58 +194,47 @@ class GXSendRabbitMQServiceImplTest {
 
     @Test
     void shouldDeclareQueueOnEveryCall() {
-        when(rabbitAdmin.declareQueue(any())).thenReturn("order.queue");
-
         service.createQueue("order.queue", true, false, false, null);
         service.createQueue("order.queue", true, false, false, null);
 
-        verify(rabbitAdmin, times(2)).declareQueue(any());
+        verify(managementClient, times(2)).declareQueue(eq("order.queue"), eq(true), eq(false), anyMap());
     }
 
     @Test
     void shouldDeclareAgainWhenAttributesDiffer() {
-        when(rabbitAdmin.declareQueue(any())).thenReturn("order.queue");
-
         service.createQueue("order.queue", true, false, false, null);
         service.createQueue("order.queue", false, false, true, null);
 
-        ArgumentCaptor<Queue> captor = ArgumentCaptor.forClass(Queue.class);
-        verify(rabbitAdmin, times(2)).declareQueue(captor.capture());
-        assertThat(captor.getAllValues().get(0).isDurable()).isTrue();
-        assertThat(captor.getAllValues().get(1).isDurable()).isFalse();
-        assertThat(captor.getAllValues().get(1).isAutoDelete()).isTrue();
+        verify(managementClient).declareQueue("order.queue", true, false, Map.of());
+        verify(managementClient).declareQueue("order.queue", false, true, Map.of());
     }
 
     @Test
-    void shouldWrapQueueDeclarationFailure() {
-        doThrow(new AmqpException("PRECONDITION_FAILED")).when(rabbitAdmin).declareQueue(any());
-
-        assertThatThrownBy(() -> service.createQueue("order.queue", true, false, false, null))
-                .isInstanceOf(GXRabbitMQOperationException.class)
-                .satisfies(e -> assertThat(((GXRabbitMQOperationException) e).getOperation())
-                        .isEqualTo(Operation.DECLARE_QUEUE));
+    void shouldRejectExclusiveQueue() {
+        assertThatThrownBy(() -> service.createQueue("order.queue", true, true, false, null))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("不支持排他队列");
+        verifyNoInteractions(managementClient);
     }
 
     @Test
     void shouldDeclareDurableQueueWithExpectedFlags() {
-        when(rabbitAdmin.declareQueue(any())).thenReturn("order.queue");
-
         Queue queue = service.createDurableQueue("order.queue");
 
         assertThat(queue.isDurable()).isTrue();
         assertThat(queue.isExclusive()).isFalse();
         assertThat(queue.isAutoDelete()).isFalse();
+        verify(managementClient).declareQueue("order.queue", true, false, Map.of());
     }
 
     @Test
-    void shouldDeclareTemporaryQueueAsNonExclusiveAndAutoDelete() {
-        when(rabbitAdmin.declareQueue(any())).thenReturn("temp.queue");
-
+    void shouldDeclareTemporaryQueueAsDurableNonExclusiveAutoDelete() {
         Queue queue = service.createTemporaryQueue("temp.queue");
 
-        assertThat(queue.isDurable()).isFalse();
+        assertThat(queue.isDurable()).isTrue();
         assertThat(queue.isExclusive()).isFalse();
         assertThat(queue.isAutoDelete()).isTrue();
+        verify(managementClient).declareQueue("temp.queue", true, true, Map.of());
     }
 
     @Test
@@ -250,21 +262,22 @@ class GXSendRabbitMQServiceImplTest {
 
     @Test
     void shouldReturnTrueWhenQueueDeleted() {
-        when(rabbitAdmin.deleteQueue("order.queue")).thenReturn(true);
+        when(managementClient.deleteQueue("order.queue")).thenReturn(true);
 
         assertThat(service.deleteQueue("order.queue")).isTrue();
     }
 
     @Test
     void shouldReturnFalseWhenQueueAbsentOnDelete() {
-        when(rabbitAdmin.deleteQueue("order.queue")).thenReturn(false);
+        when(managementClient.deleteQueue("order.queue")).thenReturn(false);
 
         assertThat(service.deleteQueue("order.queue")).isFalse();
     }
 
     @Test
     void shouldThrowWhenDeleteFails() {
-        doThrow(new AmqpException("channel closed")).when(rabbitAdmin).deleteQueue("order.queue");
+        when(managementClient.deleteQueue("order.queue"))
+                .thenThrow(new cn.maple.rabbitmq.support.GXAmqpManagementException("boom", 500));
 
         assertThatThrownBy(() -> service.deleteQueue("order.queue"))
                 .isInstanceOf(GXRabbitMQOperationException.class)
@@ -274,23 +287,22 @@ class GXSendRabbitMQServiceImplTest {
 
     @Test
     void shouldReportQueueExistsFromBroker() {
-        Properties properties = new Properties();
-        properties.setProperty("QUEUE_NAME", "order.queue");
-        when(rabbitAdmin.getQueueProperties("order.queue")).thenReturn(properties);
+        when(managementClient.queueExists("order.queue")).thenReturn(true);
 
         assertThat(service.queueExists("order.queue")).isTrue();
     }
 
     @Test
-    void shouldReportQueueMissingWhenBrokerReturnsNull() {
-        when(rabbitAdmin.getQueueProperties("order.queue")).thenReturn(null);
+    void shouldReportQueueMissingWhenBrokerReturnsNotFound() {
+        when(managementClient.queueExists("order.queue")).thenReturn(false);
 
         assertThat(service.queueExists("order.queue")).isFalse();
     }
 
     @Test
     void shouldThrowWhenQueuePropertyQueryFails() {
-        doThrow(new AmqpException("connect refused")).when(rabbitAdmin).getQueueProperties("order.queue");
+        when(managementClient.queueExists("order.queue"))
+                .thenThrow(new cn.maple.rabbitmq.support.GXAmqpManagementException("connect refused", 0));
 
         assertThatThrownBy(() -> service.queueExists("order.queue"))
                 .isInstanceOf(GXRabbitMQOperationException.class)
@@ -306,7 +318,7 @@ class GXSendRabbitMQServiceImplTest {
         assertThatThrownBy(() -> service.createQueue("order.queue", true, false, false, arguments))
                 .isInstanceOf(GXBusinessException.class)
                 .hasMessageContaining("队列参数值不能为null");
-        verifyNoInteractions(rabbitAdmin);
+        verifyNoInteractions(managementClient);
     }
 
     @Test
@@ -317,19 +329,27 @@ class GXSendRabbitMQServiceImplTest {
         assertThatThrownBy(() -> service.createQueue("order.queue", true, false, false, arguments))
                 .isInstanceOf(GXBusinessException.class)
                 .hasMessageContaining("队列参数名不能为空");
-        verifyNoInteractions(rabbitAdmin);
+        verifyNoInteractions(managementClient);
+    }
+
+    @Test
+    void shouldPassQueueArgumentsToBroker() {
+        service.createQueue("order.queue", true, false, false, Map.of("x-message-ttl", 1000));
+
+        verify(managementClient).declareQueue("order.queue", true, false, Map.of("x-message-ttl", 1000));
     }
 
     @Test
     void shouldPurgeQueue() {
-        when(rabbitAdmin.purgeQueue("order.queue")).thenReturn(3);
-
         assertThat(service.purgeQueue("order.queue")).isTrue();
+
+        verify(managementClient).purgeQueue("order.queue");
     }
 
     @Test
     void shouldThrowWhenPurgeFails() {
-        doThrow(new AmqpException("not found")).when(rabbitAdmin).purgeQueue("order.queue");
+        doThrow(new cn.maple.rabbitmq.support.GXAmqpManagementException("not found", 404))
+                .when(managementClient).purgeQueue("order.queue");
 
         assertThatThrownBy(() -> service.purgeQueue("order.queue"))
                 .isInstanceOf(GXRabbitMQOperationException.class)
@@ -341,12 +361,13 @@ class GXSendRabbitMQServiceImplTest {
     void shouldDeclareExchange() {
         assertThat(service.createExchange(new DirectExchange("order.exchange"))).isTrue();
 
-        verify(rabbitAdmin).declareExchange(any());
+        verify(managementClient).declareExchange(any());
     }
 
     @Test
     void shouldThrowWhenExchangeDeclarationFails() {
-        doThrow(new AmqpException("PRECONDITION_FAILED")).when(rabbitAdmin).declareExchange(any());
+        doThrow(new cn.maple.rabbitmq.support.GXAmqpManagementException("PRECONDITION_FAILED", 400))
+                .when(managementClient).declareExchange(any());
 
         assertThatThrownBy(() -> service.createExchange(new DirectExchange("order.exchange")))
                 .isInstanceOf(GXRabbitMQOperationException.class)
@@ -358,56 +379,60 @@ class GXSendRabbitMQServiceImplTest {
     void shouldBindQueue() {
         assertThat(service.bindQueueToExchange("order.queue", "order.exchange", "order.created")).isTrue();
 
-        verify(rabbitAdmin).declareBinding(any());
+        verify(managementClient).bindQueue("order.queue", "order.exchange", "order.created");
     }
 
     @Test
     void shouldThrowWhenBindingFails() {
-        doThrow(new AmqpException("no exchange")).when(rabbitAdmin).declareBinding(any());
+        doThrow(new cn.maple.rabbitmq.support.GXAmqpManagementException("no exchange", 404))
+                .when(managementClient).bindQueue(anyString(), anyString(), anyString());
 
         assertThatThrownBy(() -> service.bindQueueToExchange("order.queue", "order.exchange", "order.created"))
-                .isInstanceOf(GXRabbitMQOperationException.class);
+                .isInstanceOf(GXRabbitMQOperationException.class)
+                .satisfies(e -> assertThat(((GXRabbitMQOperationException) e).getOperation())
+                        .isEqualTo(Operation.BIND));
     }
 
     @Test
     void shouldUnbindQueue() {
-        assertThat(service.unbindQueueFromExchange("order.queue", "order.exchange", "order.created")).isTrue();
+        when(managementClient.unbindQueue("order.queue", "order.exchange", "order.created")).thenReturn(true);
 
-        verify(rabbitAdmin).removeBinding(any());
+        assertThat(service.unbindQueueFromExchange("order.queue", "order.exchange", "order.created")).isTrue();
     }
 
     @Test
-    void shouldThrowWhenUnbindFails() {
-        doThrow(new AmqpException("channel closed")).when(rabbitAdmin).removeBinding(any());
+    void shouldReturnFalseWhenUnbindTargetAbsent() {
+        when(managementClient.unbindQueue("order.queue", "order.exchange", "order.created")).thenReturn(false);
 
-        assertThatThrownBy(() -> service.unbindQueueFromExchange("order.queue", "order.exchange", "order.created"))
-                .isInstanceOf(GXRabbitMQOperationException.class);
+        assertThat(service.unbindQueueFromExchange("order.queue", "order.exchange", "order.created")).isFalse();
     }
 
     @Test
     void shouldSetUpMessageChannel() {
-        when(rabbitAdmin.declareQueue(any())).thenReturn("order.queue");
-
         boolean created = service.setupMessageChannel("order.queue", true, false, false, null,
                 new DirectExchange("order.exchange"), "order.created");
 
         assertThat(created).isTrue();
-        verify(rabbitAdmin).declareExchange(any());
-        verify(rabbitAdmin).declareQueue(any());
-        verify(rabbitAdmin).declareBinding(any());
+        verify(managementClient).declareExchange(any());
+        verify(managementClient).declareQueue(eq("order.queue"), eq(true), eq(false), anyMap());
+        verify(managementClient).bindQueue("order.queue", "order.exchange", "order.created");
     }
 
     @Test
-    void shouldSetUpDurableMessageChannel() {
-        when(rabbitAdmin.declareQueue(any())).thenReturn("order.queue");
+    void shouldReportCompletedStepsWhenBindingFails() {
+        doThrow(new cn.maple.rabbitmq.support.GXAmqpManagementException("boom", 500))
+                .when(managementClient).bindQueue(anyString(), anyString(), anyString());
 
-        boolean created = service.setupDurableMessageChannel("order.queue",
-                new DirectExchange("order.exchange"), "order.created");
-
-        assertThat(created).isTrue();
-        ArgumentCaptor<Queue> captor = ArgumentCaptor.forClass(Queue.class);
-        verify(rabbitAdmin).declareQueue(captor.capture());
-        assertThat(captor.getValue().isDurable()).isTrue();
+        assertThatThrownBy(() -> service.setupDurableMessageChannel("order.queue",
+                new DirectExchange("order.exchange"), "order.created"))
+                .isInstanceOf(GXRabbitMQOperationException.class)
+                .satisfies(e -> {
+                    GXRabbitMQOperationException ex = (GXRabbitMQOperationException) e;
+                    assertThat(ex.getDetail().get("completedSteps").toString())
+                            .contains("DECLARE_EXCHANGE")
+                            .contains("DECLARE_QUEUE");
+                    assertThat(ex.getDetail().get("failedStep")).isEqualTo("BIND");
+                });
     }
 
     @Test
@@ -416,9 +441,152 @@ class GXSendRabbitMQServiceImplTest {
                 .isInstanceOf(GXBusinessException.class);
     }
 
+    @Test
+    void shouldFailTopologyWhenManagementClientMissing() {
+        GXSendRabbitMQServiceImpl noManagement = GXTestRabbitFixtures.newService(publisher, null);
+        try {
+            assertThatThrownBy(() -> noManagement.createQueue("order.queue", true, false, false, null))
+                    .isInstanceOf(GXRabbitMQOperationException.class)
+                    .hasMessageContaining("Management API");
+        } finally {
+            noManagement.shutdownAsyncExecutor();
+        }
+    }
+
+    @Test
+    void shouldReturnSettlementFromAwaitPath() {
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED));
+
+        assertThat(service.sendNormalMessageAwait(GXTestRabbitFixtures.newMessageRequest(),
+                java.time.Duration.ofSeconds(1))).isTrue();
+    }
+
+    @Test
+    void shouldReturnFalseWhenAwaitPathIsReleased() {
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.RELEASED));
+
+        assertThat(service.sendNormalMessageAwait(GXTestRabbitFixtures.newMessageRequest(),
+                java.time.Duration.ofSeconds(1))).isFalse();
+    }
+
+    @Test
+    void shouldCompleteSettlementWithTrueOnAccepted() {
+        cn.maple.rabbitmq.dto.inner.GXCorrelationData correlationData =
+                new cn.maple.rabbitmq.dto.inner.GXCorrelationData("id-accepted");
+        GXRabbitMQMessageReqDto request = GXTestRabbitFixtures.newMessageRequest();
+        request.setCorrelationData(correlationData);
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED));
+
+        service.sendNormalMessage(request);
+
+        assertThat(correlationData.settlement()).isCompletedWithValue(true);
+    }
+
+    @Test
+    void shouldCompleteSettlementWithFalseOnReleased() {
+        cn.maple.rabbitmq.dto.inner.GXCorrelationData correlationData =
+                new cn.maple.rabbitmq.dto.inner.GXCorrelationData("id-released");
+        GXRabbitMQMessageReqDto request = GXTestRabbitFixtures.newMessageRequest();
+        request.setCorrelationData(correlationData);
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.RELEASED));
+
+        service.sendNormalMessage(request);
+
+        assertThat(correlationData.settlement()).isCompletedWithValue(false);
+    }
+
+    @Test
+    void shouldCompleteSettlementWithFalseWhenSettlementFails() {
+        cn.maple.rabbitmq.dto.inner.GXCorrelationData correlationData =
+                new cn.maple.rabbitmq.dto.inner.GXCorrelationData("id-failed");
+        GXRabbitMQMessageReqDto request = GXTestRabbitFixtures.newMessageRequest();
+        request.setCorrelationData(correlationData);
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.failedFuture(new org.springframework.amqp.AmqpException("closed")));
+
+        service.sendNormalMessage(request);
+
+        assertThat(correlationData.settlement()).isCompletedWithValue(false);
+    }
+
+    @Test
+    void shouldSendRawPayloadWithoutReserialization() {
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.ACCEPTED));
+        MessageProperties properties = new MessageProperties();
+        String initialContentType = properties.getContentType();
+
+        service.sendRawMessage("test.exchange", "test.key", "{\"raw\":true}", properties, null);
+
+        Message sent = captureSentMessage();
+        assertThat(new String(sent.getBody())).isEqualTo("{\"raw\":true}");
+        // 原始载荷可能是数组或非 Dict 结构，不能写死 __TypeId__，否则消费端转换必然失败。
+        assertThat((Object) sent.getMessageProperties().getHeader("__TypeId__")).isNull();
+        assertThat((Object) sent.getMessageProperties().getHeader("X-Trace-Id")).isNotNull();
+        assertThat(properties.getContentType()).isEqualTo(initialContentType);
+    }
+
+    @Test
+    void shouldCompleteSettlementWhenPublisherThrowsSynchronously() {
+        cn.maple.rabbitmq.dto.inner.GXCorrelationData correlationData =
+                new cn.maple.rabbitmq.dto.inner.GXCorrelationData("id-sync-failure");
+        GXRabbitMQMessageReqDto request = GXTestRabbitFixtures.newMessageRequest();
+        request.setCorrelationData(correlationData);
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenThrow(new AmqpException("connection refused"));
+
+        assertThatThrownBy(() -> service.sendNormalMessage(request))
+                .isInstanceOf(AmqpException.class);
+
+        assertThat(correlationData.settlement()).isCompletedWithValue(false);
+    }
+
+    @Test
+    void shouldCompleteSettlementWithFalseOnUnknownOutcome() {
+        cn.maple.rabbitmq.dto.inner.GXCorrelationData correlationData =
+                new cn.maple.rabbitmq.dto.inner.GXCorrelationData("id-unknown");
+        GXRabbitMQMessageReqDto request = GXTestRabbitFixtures.newMessageRequest();
+        request.setCorrelationData(correlationData);
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenReturn(CompletableFuture.completedFuture(GXSendOutcome.UNKNOWN));
+
+        service.sendNormalMessage(request);
+
+        assertThat(correlationData.settlement()).isCompletedWithValue(false);
+    }
+
+    @Test
+    void shouldWrapSynchronousSendFailureOnAwaitPath() {
+        when(publisher.send(anyString(), any(Message.class), anyLong()))
+                .thenThrow(new AmqpException("connection refused"));
+
+        assertThatThrownBy(() -> service.sendNormalMessageAwait(GXTestRabbitFixtures.newMessageRequest(),
+                java.time.Duration.ofSeconds(1)))
+                .isInstanceOf(GXRabbitMQOperationException.class)
+                .hasCauseInstanceOf(AmqpException.class);
+    }
+
+    @Test
+    void shouldRejectNonPositiveAwaitTimeout() {
+        GXRabbitMQMessageReqDto request = GXTestRabbitFixtures.newMessageRequest();
+
+        assertThatThrownBy(() -> service.sendNormalMessageAwait(request, null))
+                .isInstanceOf(GXBusinessException.class)
+                .hasMessageContaining("超时时间必须为正数");
+        assertThatThrownBy(() -> service.sendNormalMessageAwait(request, java.time.Duration.ZERO))
+                .isInstanceOf(GXBusinessException.class);
+        assertThatThrownBy(() -> service.sendNormalMessageAwait(request, java.time.Duration.ofSeconds(-1)))
+                .isInstanceOf(GXBusinessException.class);
+        verifyNoInteractions(publisher);
+    }
+
     private Message captureSentMessage() {
         ArgumentCaptor<Message> captor = ArgumentCaptor.forClass(Message.class);
-        verify(rabbitTemplate).convertAndSend(eq("test.exchange"), eq("test.key"), captor.capture(), nullable(CorrelationData.class));
+        verify(publisher).send(anyString(), captor.capture(), anyLong());
         return captor.getValue();
     }
 }

@@ -1,10 +1,9 @@
 package cn.maple.rabbitmq.callback;
 
-import org.springframework.amqp.core.ReturnedMessage;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-
+/**
+ * 不可路由消息回调，等价于经典协议的 {@code basic.return}。
+ */
 @FunctionalInterface
-public interface GXReturnsCallback extends RabbitTemplate.ReturnsCallback {
-    @Override
-    void returnedMessage(ReturnedMessage returned);
+public interface GXReturnsCallback {
+    void returnedMessage(GXReturnedMessage returned);
 }

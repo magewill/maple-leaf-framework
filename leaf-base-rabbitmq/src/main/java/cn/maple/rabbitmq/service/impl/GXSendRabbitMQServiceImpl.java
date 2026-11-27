@@ -5,35 +5,44 @@ import cn.hutool.core.lang.Dict;
 import cn.hutool.json.JSONUtil;
 import cn.maple.core.framework.exception.GXBusinessException;
 import cn.maple.core.framework.service.impl.GXBusinessServiceImpl;
+import cn.maple.core.framework.util.GXSpringContextUtils;
 import cn.maple.core.framework.util.GXTraceIdContextUtils;
 import cn.maple.core.framework.wrapper.mdc.GXMdcWrapperThreadPoolExecutor;
+import cn.maple.rabbitmq.callback.GXConfirmCallback;
+import cn.maple.rabbitmq.callback.GXRecoveryCallback;
+import cn.maple.rabbitmq.callback.GXReturnedMessage;
+import cn.maple.rabbitmq.callback.GXReturnsCallback;
+import cn.maple.rabbitmq.dto.inner.GXCorrelationData;
 import cn.maple.rabbitmq.dto.inner.GXRabbitMQMessageReqDto;
 import cn.maple.rabbitmq.exception.GXRabbitMQOperationException;
 import cn.maple.rabbitmq.exception.GXRabbitMQOperationException.Operation;
 import cn.maple.rabbitmq.service.GXSendRabbitMQService;
+import cn.maple.rabbitmq.support.GXAmqpAddress;
+import cn.maple.rabbitmq.support.GXAmqpManagementClient;
+import cn.maple.rabbitmq.support.GXAmqpManagementException;
+import cn.maple.rabbitmq.support.GXAmqpMessagePublisher;
 import cn.maple.rabbitmq.support.GXRabbitMQJsonSupport;
+import cn.maple.rabbitmq.support.GXSendOutcome;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.core.AbstractExchange;
-import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.MessagePropertiesBuilder;
 import org.springframework.amqp.core.Queue;
-import org.springframework.amqp.rabbit.core.RabbitAdmin;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -46,14 +55,16 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
- * RabbitMQ 发送与资源管理实现。
+ * RabbitMQ 发送与资源管理实现（AMQP 1.0）。
  *
  * <p>关键语义：</p>
  * <ul>
- *   <li>每次创建队列都触达 Broker，同队列并发声明通过单飞（single-flight）收敛为一次；</li>
+ *   <li>发送使用 AMQP 1.0 v2 地址：默认交换机映射为 {@code /queues/<routingKey>}，
+ *       其余映射为 {@code /exchanges/<exchange>/<routingKey>}；</li>
+ *   <li>结算结果（accepted/released/rejected）驱动 confirm/returns/recovery 回调；</li>
+ *   <li>拓扑操作通过 Management HTTP API 触达 Broker，同队列并发声明通过单飞收敛为一次；</li>
  *   <li>发送前对调用方 {@link MessageProperties} 做深拷贝，发送链路不再改写调用方对象；</li>
- *   <li>参数非法抛 {@link GXBusinessException}，Broker 操作失败抛 {@link GXRabbitMQOperationException}，
- *       不再用 {@code null}/{@code false} 掩盖失败。</li>
+ *   <li>参数非法抛 {@link GXBusinessException}，Broker 操作失败抛 {@link GXRabbitMQOperationException}。</li>
  * </ul>
  */
 @Service
@@ -62,6 +73,8 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
     private static final int MAX_RESOURCE_NAME_LENGTH = 255;
 
     private static final long ASYNC_SHUTDOWN_TIMEOUT_SECONDS = 30L;
+
+    private static final long SETTLEMENT_GRACE_MILLIS = 1_000L;
 
     private static final String TRACE_ID_HEADER = "X-Trace-Id";
 
@@ -75,9 +88,12 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
 
     private static final String STEP_BIND = "BIND";
 
-    private final RabbitTemplate rabbitTemplate;
+    private final GXAmqpMessagePublisher publisher;
 
-    private final RabbitAdmin rabbitAdmin;
+    private final @Nullable GXAmqpManagementClient managementClient;
+
+    @Value("${maple.framework.rabbitmq.confirm-timeout:5000}")
+    private long confirmTimeoutMillis = 5000L;
 
     private final Map<String, CompletableFuture<Queue>> inFlightDeclarations = new ConcurrentHashMap<>();
 
@@ -95,52 +111,100 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
 
     private volatile ExecutorService rabbitMqAsyncExecutor;
 
-    public GXSendRabbitMQServiceImpl(RabbitTemplate rabbitTemplate, RabbitAdmin rabbitAdmin) {
-        this.rabbitTemplate = rabbitTemplate;
-        this.rabbitAdmin = rabbitAdmin;
+    public GXSendRabbitMQServiceImpl(GXAmqpMessagePublisher publisher,
+                                     @Nullable GXAmqpManagementClient managementClient) {
+        this.publisher = publisher;
+        this.managementClient = managementClient;
     }
 
     @Override
     public Object sendNormalMessage(GXRabbitMQMessageReqDto messageReqDto) {
-        if (messageReqDto == null) {
-            throw new GXBusinessException("消息请求DTO不能为null");
-        }
-        if (messageReqDto.getExchange() == null) {
+        Message message = buildMessage(messageReqDto);
+        return dispatch(messageReqDto, message);
+    }
+
+    @Override
+    public Object sendRawMessage(String exchange, String routingKey, String payload,
+                                 MessageProperties messageProperties, @Nullable GXCorrelationData correlationData) {
+        if (exchange == null) {
             throw new GXBusinessException("交换机名称不能为null（默认交换机请传空字符串）");
         }
-        requireText(messageReqDto.getRoutingKey(), "路由键不能为空");
-        if (messageReqDto.getData() == null) {
+        requireText(routingKey, "路由键不能为空");
+        if (payload == null) {
             throw new GXBusinessException("消息内容不能为null");
         }
-        if (messageReqDto.getMessageProperties() == null) {
+        if (messageProperties == null) {
             throw new GXBusinessException("消息属性不能为null");
         }
-
-        Dict data = messageReqDto.getData();
-        String exchange = messageReqDto.getExchange();
-        String routingKey = messageReqDto.getRoutingKey();
         String traceId = resolveTraceId();
+        // 原始载荷可能是数组或非 Dict 结构，不能写入 __TypeId__=Dict，否则消费端转换必然失败。
+        Message message = new Message(payload.getBytes(StandardCharsets.UTF_8),
+                snapshotProperties(messageProperties, traceId, false));
+        GXRabbitMQMessageReqDto carrier = new GXRabbitMQMessageReqDto();
+        carrier.setExchange(exchange);
+        carrier.setRoutingKey(routingKey);
+        carrier.setCorrelationData(correlationData);
+        return dispatch(carrier, message);
+    }
 
-        MessageProperties snapshot = snapshotProperties(messageReqDto.getMessageProperties(), traceId);
-        Message message = new Message(JSONUtil.toJsonStr(data).getBytes(StandardCharsets.UTF_8), snapshot);
-
+    private Object dispatch(GXRabbitMQMessageReqDto carrier, Message message) {
+        String address = GXAmqpAddress.forPublish(carrier.getExchange(), carrier.getRoutingKey());
         try {
-            rabbitTemplate.convertAndSend(exchange, routingKey, message, messageReqDto.getCorrelationData());
-            log.debug("RabbitMQ message dispatched: exchange={}, routingKey={}, traceId={}, bodyLength={}",
-                    exchange, routingKey, traceId, message.getBody().length);
+            publisher.send(address, message, confirmTimeoutMillis)
+                    .whenComplete((outcome, error) ->
+                            dispatchOutcome(carrier, address, message, outcome, error));
+            log.debug("RabbitMQ message dispatched: address={}, traceId={}, bodyLength={}",
+                    address, message.getMessageProperties().getHeader(TRACE_ID_HEADER), message.getBody().length);
         } catch (AmqpException e) {
-            log.error("RabbitMQ send failed: exchange={}, routingKey={}, errorType={}, error={}",
-                    exchange, routingKey, e.getClass().getName(), e.getMessage());
+            // 写出阶段失败：没有结算 Future，必须在此完成结算并回调，否则等待方永远拿不到结果。
+            dispatchOutcome(carrier, address, message, null, e);
             throw e;
         }
         return null;
     }
 
     @Override
-    public Queue createQueue(String queueName, boolean durable, boolean exclusive, boolean autoDelete, Map<String, Object> arguments) {
+    public boolean sendNormalMessageAwait(GXRabbitMQMessageReqDto messageReqDto, Duration timeout) {
+        if (timeout == null || timeout.isNegative() || timeout.isZero()) {
+            throw new GXBusinessException("等待结算的超时时间必须为正数");
+        }
+        Message message = buildMessage(messageReqDto);
+        String address = GXAmqpAddress.forPublish(messageReqDto.getExchange(), messageReqDto.getRoutingKey());
+        try {
+            GXSendOutcome outcome = publisher.send(address, message, timeout.toMillis())
+                    .get(timeout.toMillis() + SETTLEMENT_GRACE_MILLIS, TimeUnit.MILLISECONDS);
+            dispatchOutcome(messageReqDto, address, message, outcome, null);
+            return outcome == GXSendOutcome.ACCEPTED;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            GXRabbitMQOperationException failure =
+                    new GXRabbitMQOperationException(Operation.SEND, address, "等待发送结算被中断", e);
+            dispatchOutcome(messageReqDto, address, message, null, failure);
+            throw failure;
+        } catch (java.util.concurrent.TimeoutException e) {
+            GXRabbitMQOperationException failure =
+                    new GXRabbitMQOperationException(Operation.SEND, address, "等待发送结算超时", e);
+            dispatchOutcome(messageReqDto, address, message, null, failure);
+            throw failure;
+        } catch (java.util.concurrent.ExecutionException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            dispatchOutcome(messageReqDto, address, message, null, cause);
+            throw new GXRabbitMQOperationException(Operation.SEND, address, "发送结算失败", cause);
+        } catch (AmqpException e) {
+            dispatchOutcome(messageReqDto, address, message, null, e);
+            throw new GXRabbitMQOperationException(Operation.SEND, address, "发送失败", e);
+        }
+    }
+
+    @Override
+    public Queue createQueue(String queueName, boolean durable, boolean exclusive, boolean autoDelete,
+                             @Nullable Map<String, Object> arguments) {
         validateResourceName(queueName, "队列名称");
+        if (exclusive) {
+            throw new GXBusinessException("AMQP 1.0 不支持排他队列声明，请改用 autoDelete 或由调用方持有连接自行声明");
+        }
         Map<String, Object> immutableArguments = copyArguments(arguments);
-        Queue queue = new Queue(queueName, durable, exclusive, autoDelete, immutableArguments);
+        Queue queue = new Queue(queueName, durable, false, autoDelete, immutableArguments);
         String key = queueName + "#" + fingerprint(durable, exclusive, autoDelete, immutableArguments);
         return declareOnce(key, queue);
     }
@@ -151,30 +215,33 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
     }
 
     /**
-     * 声明非持久化、自动删除队列。
+     * 声明自动删除队列。
      *
-     * <p>注意：排他队列绑定声明连接，共享 {@code RabbitAdmin} 声明后其他连接无法消费，
-     * 因此本方法不声明排他队列，调用方若需要严格排他语义应自行持有连接声明。</p>
+     * <p>语义为 {@code durable=true, exclusive=false, autoDelete=true}：队列在最后一个消费者
+     * 断开后由 Broker 删除。RabbitMQ 4.x 默认禁止"非持久化 + 非排他"队列
+     * （{@code deprecated_features.permit.transient_nonexcl_queues} 未开启时声明返回 400），
+     * 因此这里声明为持久化；排他队列无法通过管理 API 创建，调用方若需要严格排他语义
+     * 应自行持有连接声明。</p>
      */
     @Override
     public Queue createTemporaryQueue(String queueName) {
-        return createQueue(queueName, false, false, true, null);
+        return createQueue(queueName, true, false, true, null);
     }
 
     @Override
     public boolean deleteQueue(String queueName) {
         validateResourceName(queueName, "队列名称");
         try {
-            boolean deleted = rabbitAdmin.deleteQueue(queueName);
+            boolean deleted = requireManagementClient(Operation.DELETE_QUEUE, queueName).deleteQueue(queueName);
             if (deleted) {
                 log.debug("RabbitMQ queue deleted: name={}", queueName);
             } else {
                 log.warn("RabbitMQ queue not found while deleting: name={}", queueName);
             }
             return deleted;
-        } catch (AmqpException e) {
-            log.error("RabbitMQ queue delete failed: name={}, errorType={}, error={}",
-                    queueName, e.getClass().getName(), e.getMessage());
+        } catch (GXAmqpManagementException e) {
+            log.error("RabbitMQ queue delete failed: name={}, status={}, error={}",
+                    queueName, e.getStatusCode(), e.getMessage());
             throw new GXRabbitMQOperationException(Operation.DELETE_QUEUE, queueName, "删除队列失败", e);
         }
     }
@@ -183,11 +250,10 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
     public boolean queueExists(String queueName) {
         validateResourceName(queueName, "队列名称");
         try {
-            Properties properties = rabbitAdmin.getQueueProperties(queueName);
-            return properties != null && !properties.isEmpty();
-        } catch (AmqpException e) {
-            log.error("RabbitMQ queue property query failed: name={}, errorType={}, error={}",
-                    queueName, e.getClass().getName(), e.getMessage());
+            return requireManagementClient(Operation.QUERY_QUEUE, queueName).queueExists(queueName);
+        } catch (GXAmqpManagementException e) {
+            log.error("RabbitMQ queue property query failed: name={}, status={}, error={}",
+                    queueName, e.getStatusCode(), e.getMessage());
             throw new GXRabbitMQOperationException(Operation.QUERY_QUEUE, queueName, "查询队列状态失败", e);
         }
     }
@@ -196,12 +262,12 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
     public boolean purgeQueue(String queueName) {
         validateResourceName(queueName, "队列名称");
         try {
-            int purged = rabbitAdmin.purgeQueue(queueName);
-            log.debug("RabbitMQ queue purged: name={}, purged={}", queueName, purged);
+            requireManagementClient(Operation.PURGE_QUEUE, queueName).purgeQueue(queueName);
+            log.debug("RabbitMQ queue purged: name={}", queueName);
             return true;
-        } catch (AmqpException e) {
-            log.error("RabbitMQ queue purge failed: name={}, errorType={}, error={}",
-                    queueName, e.getClass().getName(), e.getMessage());
+        } catch (GXAmqpManagementException e) {
+            log.error("RabbitMQ queue purge failed: name={}, status={}, error={}",
+                    queueName, e.getStatusCode(), e.getMessage());
             throw new GXRabbitMQOperationException(Operation.PURGE_QUEUE, queueName, "清空队列失败", e);
         }
     }
@@ -210,12 +276,12 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
     public boolean createExchange(AbstractExchange exchange) {
         validateExchange(exchange);
         try {
-            rabbitAdmin.declareExchange(exchange);
+            requireManagementClient(Operation.DECLARE_EXCHANGE, exchange.getName()).declareExchange(exchange);
             log.debug("RabbitMQ exchange declared: name={}, type={}", exchange.getName(), exchange.getType());
             return true;
-        } catch (AmqpException e) {
-            log.error("RabbitMQ exchange declaration failed: name={}, type={}, errorType={}, error={}",
-                    exchange.getName(), exchange.getType(), e.getClass().getName(), e.getMessage());
+        } catch (GXAmqpManagementException e) {
+            log.error("RabbitMQ exchange declaration failed: name={}, type={}, status={}, error={}",
+                    exchange.getName(), exchange.getType(), e.getStatusCode(), e.getMessage());
             throw new GXRabbitMQOperationException(Operation.DECLARE_EXCHANGE, exchange.getName(), "交换机声明失败", e);
         }
     }
@@ -226,14 +292,14 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
         validateResourceName(exchangeName, "交换机名称");
         requireText(routingKey, "路由键不能为空");
         try {
-            Binding binding = new Binding(queueName, Binding.DestinationType.QUEUE, exchangeName, routingKey, null);
-            rabbitAdmin.declareBinding(binding);
+            requireManagementClient(Operation.BIND, queueName)
+                    .bindQueue(queueName, exchangeName, routingKey);
             log.debug("RabbitMQ binding declared: queue={}, exchange={}, routingKey={}",
                     queueName, exchangeName, routingKey);
             return true;
-        } catch (AmqpException e) {
-            log.error("RabbitMQ binding failed: queue={}, exchange={}, routingKey={}, errorType={}, error={}",
-                    queueName, exchangeName, routingKey, e.getClass().getName(), e.getMessage());
+        } catch (GXAmqpManagementException e) {
+            log.error("RabbitMQ binding failed: queue={}, exchange={}, routingKey={}, status={}, error={}",
+                    queueName, exchangeName, routingKey, e.getStatusCode(), e.getMessage());
             throw new GXRabbitMQOperationException(Operation.BIND, queueName, "绑定队列失败", e);
         }
     }
@@ -244,14 +310,19 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
         validateResourceName(exchangeName, "交换机名称");
         requireText(routingKey, "路由键不能为空");
         try {
-            Binding binding = new Binding(queueName, Binding.DestinationType.QUEUE, exchangeName, routingKey, null);
-            rabbitAdmin.removeBinding(binding);
-            log.debug("RabbitMQ binding removed: queue={}, exchange={}, routingKey={}",
-                    queueName, exchangeName, routingKey);
-            return true;
-        } catch (AmqpException e) {
-            log.error("RabbitMQ unbind failed: queue={}, exchange={}, routingKey={}, errorType={}, error={}",
-                    queueName, exchangeName, routingKey, e.getClass().getName(), e.getMessage());
+            boolean removed = requireManagementClient(Operation.UNBIND, queueName)
+                    .unbindQueue(queueName, exchangeName, routingKey);
+            if (removed) {
+                log.debug("RabbitMQ binding removed: queue={}, exchange={}, routingKey={}",
+                        queueName, exchangeName, routingKey);
+            } else {
+                log.warn("RabbitMQ binding not found while unbinding: queue={}, exchange={}, routingKey={}",
+                        queueName, exchangeName, routingKey);
+            }
+            return removed;
+        } catch (GXAmqpManagementException e) {
+            log.error("RabbitMQ unbind failed: queue={}, exchange={}, routingKey={}, status={}, error={}",
+                    queueName, exchangeName, routingKey, e.getStatusCode(), e.getMessage());
             throw new GXRabbitMQOperationException(Operation.UNBIND, queueName, "解除绑定失败", e);
         }
     }
@@ -329,7 +400,116 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
         }
     }
 
-    private MessageProperties snapshotProperties(MessageProperties source, String traceId) {
+    private Message buildMessage(GXRabbitMQMessageReqDto messageReqDto) {
+        if (messageReqDto == null) {
+            throw new GXBusinessException("消息请求DTO不能为null");
+        }
+        if (messageReqDto.getExchange() == null) {
+            throw new GXBusinessException("交换机名称不能为null（默认交换机请传空字符串）");
+        }
+        requireText(messageReqDto.getRoutingKey(), "路由键不能为空");
+        if (messageReqDto.getData() == null) {
+            throw new GXBusinessException("消息内容不能为null");
+        }
+        if (messageReqDto.getMessageProperties() == null) {
+            throw new GXBusinessException("消息属性不能为null");
+        }
+        Dict data = messageReqDto.getData();
+        String traceId = resolveTraceId();
+        MessageProperties snapshot = snapshotProperties(messageReqDto.getMessageProperties(), traceId, true);
+        return new Message(JSONUtil.toJsonStr(data).getBytes(StandardCharsets.UTF_8), snapshot);
+    }
+
+    private void dispatchOutcome(GXRabbitMQMessageReqDto request, String address, Message message,
+                                 @Nullable GXSendOutcome outcome, @Nullable Throwable error) {
+        GXCorrelationData correlationData = request.getCorrelationData();
+        if (error != null) {
+            log.error("RabbitMQ send failed: address={}, errorType={}, error={}",
+                    address, error.getClass().getName(), error.getMessage());
+            completeSettlement(correlationData, false);
+            notifyConfirm(correlationData, false, describe(error));
+            notifyRecovery(error);
+            return;
+        }
+        if (outcome == GXSendOutcome.ACCEPTED) {
+            completeSettlement(correlationData, true);
+            notifyConfirm(correlationData, true, null);
+            return;
+        }
+        completeSettlement(correlationData, false);
+        if (outcome == GXSendOutcome.RELEASED) {
+            log.warn("RabbitMQ message not routed: address={}, exchange={}, routingKey={}",
+                    address, request.getExchange(), request.getRoutingKey());
+            notifyReturned(new GXReturnedMessage(request.getExchange(), request.getRoutingKey(), address, message));
+            notifyConfirm(correlationData, false, "released: unroutable");
+            return;
+        }
+        if (outcome == GXSendOutcome.REJECTED) {
+            log.warn("RabbitMQ message rejected: address={}", address);
+            notifyConfirm(correlationData, false, "rejected");
+            return;
+        }
+        // MODIFIED / UNKNOWN / null：Broker 没有给出可判定的结算结果（常见于结算超时）。
+        log.warn("RabbitMQ send settlement unknown: address={}, outcome={}", address, outcome);
+        notifyConfirm(correlationData, false, "settlement unknown: " + outcome);
+        notifyRecovery(new IllegalStateException("RabbitMQ settlement outcome: " + outcome));
+    }
+
+    private void completeSettlement(@Nullable GXCorrelationData correlationData, boolean accepted) {
+        if (correlationData != null) {
+            correlationData.settlement().complete(accepted);
+        }
+    }
+
+    private void notifyConfirm(@Nullable GXCorrelationData correlationData, boolean ack, @Nullable String cause) {
+        try {
+            GXConfirmCallback confirmCallback = GXSpringContextUtils.getBean(GXConfirmCallback.class);
+            if (confirmCallback != null) {
+                confirmCallback.confirm(correlationData, ack, cause);
+            } else if (!ack) {
+                log.warn("RabbitMQ message not acknowledged: correlationData={}, cause={}", correlationData, cause);
+            }
+        } catch (Exception e) {
+            log.error("RabbitMQ confirm callback failed: {}", e.getClass().getName(), e);
+        }
+    }
+
+    private void notifyReturned(GXReturnedMessage returned) {
+        try {
+            GXReturnsCallback returnsCallback = GXSpringContextUtils.getBean(GXReturnsCallback.class);
+            if (returnsCallback != null) {
+                returnsCallback.returnedMessage(returned);
+            }
+        } catch (Exception e) {
+            log.error("RabbitMQ returns callback failed: {}", e.getClass().getName(), e);
+        }
+    }
+
+    private void notifyRecovery(Throwable throwable) {
+        try {
+            GXRecoveryCallback recoveryCallback = GXSpringContextUtils.getBean(GXRecoveryCallback.class);
+            if (recoveryCallback != null) {
+                recoveryCallback.recover(throwable);
+            }
+        } catch (Exception e) {
+            log.error("RabbitMQ recovery callback failed: {}", e.getClass().getName(), e);
+        }
+    }
+
+    private static String describe(Throwable throwable) {
+        String message = throwable.getMessage();
+        return message == null ? throwable.getClass().getName() : message;
+    }
+
+    private GXAmqpManagementClient requireManagementClient(Operation operation, String resource) {
+        if (managementClient == null) {
+            throw new GXRabbitMQOperationException(operation, resource,
+                    "AMQP 1.0 拓扑操作依赖 RabbitMQ Management API，请设置 maple.framework.rabbitmq.management.enabled=true");
+        }
+        return managementClient;
+    }
+
+    private MessageProperties snapshotProperties(MessageProperties source, String traceId, boolean dictTypeId) {
         MessageProperties snapshot;
         try {
             snapshot = MessagePropertiesBuilder.fromClonedProperties(source).build();
@@ -342,7 +522,9 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
         snapshot.setTimestamp(DateUtil.date());
         snapshot.setHeader(TIMESTAMP_HEADER, System.currentTimeMillis());
         snapshot.setHeader(SOURCE_SERVICE_HEADER, StringUtils.hasText(applicationName) ? applicationName : "unknown");
-        snapshot.setHeader(GXRabbitMQJsonSupport.TYPE_ID_HEADER, GXRabbitMQJsonSupport.DICT_TYPE_ID);
+        if (dictTypeId) {
+            snapshot.setHeader(GXRabbitMQJsonSupport.TYPE_ID_HEADER, GXRabbitMQJsonSupport.DICT_TYPE_ID);
+        }
         if (snapshot.getMessageId() == null) {
             snapshot.setMessageId(traceId);
         }
@@ -381,13 +563,14 @@ public class GXSendRabbitMQServiceImpl extends GXBusinessServiceImpl implements 
 
     private Queue declareQueueInternal(Queue queue) {
         try {
-            rabbitAdmin.declareQueue(queue);
-            log.debug("RabbitMQ queue declared: name={}, durable={}, exclusive={}, autoDelete={}",
-                    queue.getName(), queue.isDurable(), queue.isExclusive(), queue.isAutoDelete());
+            requireManagementClient(Operation.DECLARE_QUEUE, queue.getName())
+                    .declareQueue(queue.getName(), queue.isDurable(), queue.isAutoDelete(), queue.getArguments());
+            log.debug("RabbitMQ queue declared: name={}, durable={}, autoDelete={}",
+                    queue.getName(), queue.isDurable(), queue.isAutoDelete());
             return queue;
-        } catch (AmqpException e) {
-            log.error("RabbitMQ queue declaration failed: name={}, durable={}, exclusive={}, errorType={}, error={}",
-                    queue.getName(), queue.isDurable(), queue.isExclusive(), e.getClass().getName(), e.getMessage());
+        } catch (GXAmqpManagementException e) {
+            log.error("RabbitMQ queue declaration failed: name={}, durable={}, status={}, error={}",
+                    queue.getName(), queue.isDurable(), e.getStatusCode(), e.getMessage());
             throw new GXRabbitMQOperationException(Operation.DECLARE_QUEUE, queue.getName(), "队列声明失败", e);
         }
     }
